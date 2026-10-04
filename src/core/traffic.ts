@@ -310,7 +310,10 @@ export function computeTraffic(input: TrafficInput): TrafficPicture {
 		const primary = [...views].sort((x, y) => SEVERITY_RANK[y.severity] - SEVERITY_RANK[x.severity] || x.level - y.level)[0];
 		const level = primary.level;
 		const severity = primary.severity;
-		const levels = [...new Set(views.map((v) => v.level))].sort() as CongestionLevel[];
+		const levelSet = new Set<CongestionLevel>(views.map((v) => v.level));
+		// A write against airspace whose contract is changing is both structural and contract congestion.
+		if (views.some((v) => (v.mode === "contract" || v.otherMode === "contract") && v.control !== "caution")) levelSet.add(3);
+		const levels = [...levelSet].sort() as CongestionLevel[];
 
 		const control: Control = views.some((v) => v.control === "exclusive")
 			? "exclusive"
@@ -372,7 +375,7 @@ export function computeTraffic(input: TrafficInput): TrafficPicture {
 						resource: r,
 						waitingOn: row.winner,
 						congestionKey: key,
-						reason: `${row.winner} has right-of-way: ${row.because[0]}`,
+						reason: `${row.winner} has right-of-way (${row.rule.replace(/-/g, " ")})`,
 					});
 				}
 				planSteps.push(`${row.winner} receives full clearance on ${focus.map(name).join(", ")}.`);

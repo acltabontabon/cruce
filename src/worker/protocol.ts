@@ -1,6 +1,6 @@
-import { clearanceBrief } from "../core/controller.ts";
 import { resourceLabel } from "../core/airspace.ts";
-import type { ProtocolRequest } from "./api-types.ts";
+import { clearanceBrief } from "../core/controller.ts";
+import type { ProtocolRequest } from "../shared/api.ts";
 import { flightRef } from "./project-git.ts";
 import type { Tower } from "./tower.ts";
 
@@ -50,7 +50,9 @@ export async function handleProtocol(tower: Tower, flightId: string, req: Protoc
 				matchesClaim: out.matchesClaim,
 				summary: out.gate.summary,
 				outside: out.gate.outside.map((o) => ({ path: o.path, resource: resourceLabel(o.resource, tower.state.index), reason: o.reason })),
-				next: out.approved ? "validate, then request landing" : "file a Flight Plan amendment (op: request) or revert the changes outside clearance",
+				next: out.approved
+					? "validate, then request landing"
+					: "file a Flight Plan amendment (op: request) or revert the changes outside clearance",
 			};
 		}
 		case "validate":

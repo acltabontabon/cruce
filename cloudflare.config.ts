@@ -24,7 +24,9 @@ export default defineConfig(({ mode }) => {
 			},
 			env: {
 				CONTROL_TOWER: bindings.durableObject({ worker: "cruce", exportName: "ControlTower" }),
-				...(offline ? { GIT_BACKEND: bindings.text("local") } : { ARTIFACTS: bindings.artifacts({ namespace: "cruce-dev", dev: { remote: true } }) }),
+				...(offline
+					? { GIT_BACKEND: bindings.text("local") }
+					: { ARTIFACTS: bindings.artifacts({ namespace: "cruce-dev", dev: { remote: true } }) }),
 				ARTIFACTS_NAMESPACE: bindings.text("cruce-dev"),
 				CF_ACCOUNT_ID: bindings.text("YOUR_32_CHARACTER_ACCOUNT_ID"),
 				EVENTS_QUEUE_ID: bindings.text("YOUR_QUEUE_ID"),

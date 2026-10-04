@@ -10,9 +10,23 @@
 	"linter": {
 		"rules": {
 			"recommended": true,
-			"style": { "noNonNullAssertion": "off" },
-			"suspicious": { "noControlCharactersInRegex": "off" }
+			"style": {
+				"noNonNullAssertion": "off",
+				"noDescendingSpecificity": "off"
+			},
+			"suspicious": {
+				"noControlCharactersInRegex": "off"
+			},
+			"complexity": {
+				"noImportantStyles": "off"
+			}
 		}
 	},
-	"assist": { "actions": { "source": { "organizeImports": "on" } } }
+	"assist": {
+		"actions": {
+			"source": {
+				"organizeImports": "on"
+			}
+		}
+	}
 }

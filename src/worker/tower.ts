@@ -103,16 +103,26 @@ export class Tower {
 		if (this.ready) return;
 		this.store.put("gitClock", 0);
 		const seed = seedFiles();
-		const { head, remote } = await this.git.ensureCanonical(seed, this.author(), `Cruce ${this.project.mode} project: ${this.project.name}`);
+		const { head, remote } = await this.git.ensureCanonical(
+			seed,
+			this.author(),
+			`Cruce ${this.project.mode} project: ${this.project.name}`,
+		);
 		const files = await this.git.filesAt(head);
 		const index = buildIndex(files, head);
 		const state = initialState({ ...this.project, remote }, index, head, this.now(), this.firstFlight);
 		this.store.put("state", state);
 		this.mutate((c) =>
-			c.note("project.ready", this.git.backend === "artifacts" ? "artifacts" : "git", `Canonical ${this.project.repo} @ ${head.slice(0, 7)}`, undefined, [
-				this.git.backend === "artifacts" ? `Artifacts ${this.git.namespace}/${this.project.repo}` : "local Git backend (offline)",
-				`indexed ${index.files.length} files in ${index.modules.length} modules (${index.indexer})`,
-			]),
+			c.note(
+				"project.ready",
+				this.git.backend === "artifacts" ? "artifacts" : "git",
+				`Canonical ${this.project.repo} @ ${head.slice(0, 7)}`,
+				undefined,
+				[
+					this.git.backend === "artifacts" ? `Artifacts ${this.git.namespace}/${this.project.repo}` : "local Git backend (offline)",
+					`indexed ${index.files.length} files in ${index.modules.length} modules (${index.indexer})`,
+				],
+			),
 		);
 	}
 
@@ -125,9 +135,13 @@ export class Tower {
 			c.attachArtifact(flightId, artifact);
 			c.setPhase(flightId, "discovery");
 		});
-		await this.hooks.onFlightRepo?.(this.flight(flightId)).catch((e) =>
-			this.mutate((c) => c.note("artifacts.event", "artifacts", `Event subscription for ${artifact.repo} not created`, flightId, [String(e)])),
-		);
+		await this.hooks
+			.onFlightRepo?.(this.flight(flightId))
+			.catch((e) =>
+				this.mutate((c) =>
+					c.note("artifacts.event", "artifacts", `Event subscription for ${artifact.repo} not created`, flightId, [String(e)]),
+				),
+			);
 	}
 
 	/**
@@ -138,7 +152,12 @@ export class Tower {
 		const f = this.flight(flightId);
 		const parent = sub.parent ?? (await this.git.resolve(flightRef(flightId)));
 		if (!parent) throw new Error(`${flightId} has no workspace`);
-		const staged = await this.git.stageCommit(flightId, { parent, files: sub.files, message: sub.message, author: sub.author ?? this.flightAuthor(f) });
+		const staged = await this.git.stageCommit(flightId, {
+			parent,
+			files: sub.files,
+			message: sub.message,
+			author: sub.author ?? this.flightAuthor(f),
+		});
 		const canonicalConfig = (await this.git.filesAt(CANONICAL, (p) => p === "cruce.json"))["cruce.json"];
 		const baseIndex = buildIndex({ ...staged.base, ...(canonicalConfig ? { "cruce.json": canonicalConfig } : {}) }, parent);
 		const gate = this.mutate((c) => c.requestPublish(flightId, staged.oid, staged.files, sub.message, baseIndex));
@@ -163,7 +182,10 @@ export class Tower {
 		});
 		this.mutate((c) => {
 			c.recordPush(flightId, staged.oid, "gate");
-			if (matchesClaim === false) c.note("push.received", "git", `${flightId}: rebuilt commit differs from the agent's local id`, flightId, ["the agent should reset to Cruce's commit"]);
+			if (matchesClaim === false)
+				c.note("push.received", "git", `${flightId}: rebuilt commit differs from the agent's local id`, flightId, [
+					"the agent should reset to Cruce's commit",
+				]);
 		});
 		return { approved: true, commit: staged.oid, gate, matchesClaim };
 	}
@@ -212,7 +234,9 @@ export class Tower {
 				coordination: this.state.log
 					.filter(
 						(e) =>
-							["clearance", "plan.amended", "publish.rejected", "flight.stale", "lease.yielded", "override", "baseline.refreshed"].includes(e.type) &&
+							["clearance", "plan.amended", "publish.rejected", "flight.stale", "lease.yielded", "override", "baseline.refreshed"].includes(
+								e.type,
+							) &&
 							(e.flightId === flightId || e.title.includes(flightId)),
 					)
 					.slice(-12)
@@ -252,7 +276,13 @@ export class Tower {
 			return false;
 		}
 		const head = this.state.canonical.head;
-		this.mutate((c) => c.refreshBaseline(flightId, outcome.oid as string, `merged canonical ${head.slice(0, 7)} into ${this.flight(flightId).artifact?.repo}`));
+		this.mutate((c) =>
+			c.refreshBaseline(
+				flightId,
+				outcome.oid as string,
+				`merged canonical ${head.slice(0, 7)} into ${this.flight(flightId).artifact?.repo}`,
+			),
+		);
 		return true;
 	}
 
@@ -260,7 +290,11 @@ export class Tower {
 	async reset(): Promise<void> {
 		const flights = this.ready ? this.state.flights : [];
 		this.store.put("gitClock", 0);
-		const head = await this.git.resetToSeed(seedFiles(), this.author(), flights.map((f) => f.id));
+		const head = await this.git.resetToSeed(
+			seedFiles(),
+			this.author(),
+			flights.map((f) => f.id),
+		);
 		for (const f of flights) if (f.artifact) await this.hooks.onFlightRepoRemoved?.(f.artifact.repo).catch(() => undefined);
 		this.store.delete("state");
 		const files = await this.git.filesAt(head);

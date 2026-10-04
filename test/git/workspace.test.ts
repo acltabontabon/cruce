@@ -23,7 +23,13 @@ describe("git workspace (isomorphic-git, bare, in the control plane)", () => {
 	it("computes diffs with base line ranges", async () => {
 		const { ws, seed } = await seeded();
 		await ws.setRef("refs/heads/flights/F-022", seed);
-		const head = await ws.commit({ ref: "refs/heads/flights/F-022", parent: seed, files: overlayFiles("f022-jwt-migration"), message: "jwt", author: author(1) });
+		const head = await ws.commit({
+			ref: "refs/heads/flights/F-022",
+			parent: seed,
+			files: overlayFiles("f022-jwt-migration"),
+			message: "jwt",
+			author: author(1),
+		});
 		const { files, base } = await ws.changes(seed, head);
 		expect(files.map((f) => f.path)).toEqual([
 			"src/auth/auth-service.ts",
@@ -42,9 +48,27 @@ describe("git workspace (isomorphic-git, bare, in the control plane)", () => {
 		const branch = (id: string) => `refs/heads/flights/${id}`;
 		for (const id of ["F-021", "F-022", "F-023"]) await ws.setRef(branch(id), seed);
 
-		const c22 = await ws.commit({ ref: branch("F-022"), parent: seed, files: overlayFiles("f022-jwt-migration"), message: "jwt", author: author(1) });
-		const c23 = await ws.commit({ ref: branch("F-023"), parent: seed, files: overlayFiles("f023-session-cleanup"), message: "sessions", author: author(2) });
-		const c21 = await ws.commit({ ref: branch("F-021"), parent: seed, files: overlayFiles("f021-rotation-1"), message: "rotation 1", author: author(3) });
+		const c22 = await ws.commit({
+			ref: branch("F-022"),
+			parent: seed,
+			files: overlayFiles("f022-jwt-migration"),
+			message: "jwt",
+			author: author(1),
+		});
+		const c23 = await ws.commit({
+			ref: branch("F-023"),
+			parent: seed,
+			files: overlayFiles("f023-session-cleanup"),
+			message: "sessions",
+			author: author(2),
+		});
+		const c21 = await ws.commit({
+			ref: branch("F-021"),
+			parent: seed,
+			files: overlayFiles("f021-rotation-1"),
+			message: "rotation 1",
+			author: author(3),
+		});
 
 		const pre = await ws.merge({ ours: "refs/heads/main", theirs: c22, message: "x", author: author(4), dryRun: true });
 		expect(pre).toMatchObject({ clean: true, mergeBase: seed });
@@ -63,7 +87,13 @@ describe("git workspace (isomorphic-git, bare, in the control plane)", () => {
 		expect(merged["src/auth/auth-service.ts"]).toContain("result.valid ? result.claims : null");
 		expect(merged["src/auth/auth-service.ts"]).toContain("revokeFamily(record.family ?? record.token)");
 
-		const c21b = await ws.commit({ ref: branch("F-021"), parent: refreshed.oid as string, files: overlayFiles("f021-rotation-2"), message: "rotation 2", author: author(8) });
+		const c21b = await ws.commit({
+			ref: branch("F-021"),
+			parent: refreshed.oid as string,
+			files: overlayFiles("f021-rotation-2"),
+			message: "rotation 2",
+			author: author(8),
+		});
 		const step2 = await ws.changes(refreshed.oid as string, c21b);
 		expect(step2.files.map((f) => f.path)).toEqual(["src/auth/auth-service.ts", "test/auth-service.test.ts"]);
 
@@ -80,8 +110,20 @@ describe("git workspace (isomorphic-git, bare, in the control plane)", () => {
 		const { ws, seed } = await seeded();
 		const path = "src/auth/token-validator.ts";
 		const original = seedFiles()[path];
-		const a = await ws.commit({ ref: "refs/heads/a", parent: seed, files: { [path]: original.replace("Claims | null", "Claims | undefined") }, message: "a", author: author(1) });
-		await ws.commit({ ref: "refs/heads/main", parent: seed, files: { [path]: original.replace("Claims | null", "Claims | false") }, message: "b", author: author(2) });
+		const a = await ws.commit({
+			ref: "refs/heads/a",
+			parent: seed,
+			files: { [path]: original.replace("Claims | null", "Claims | undefined") },
+			message: "a",
+			author: author(1),
+		});
+		await ws.commit({
+			ref: "refs/heads/main",
+			parent: seed,
+			files: { [path]: original.replace("Claims | null", "Claims | false") },
+			message: "b",
+			author: author(2),
+		});
 		const before = await ws.resolve("refs/heads/main");
 		const result = await ws.merge({ ours: "refs/heads/main", theirs: a, message: "m", author: author(3) });
 		expect(result).toMatchObject({ clean: false, conflicts: [path] });

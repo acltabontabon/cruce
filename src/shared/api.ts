@@ -1,9 +1,20 @@
 import { z } from "zod";
 import type { ControllerState, TowerEvent } from "../core/controller.ts";
 import { FlightPlanInput, PlanResource, Priority } from "../core/domain.ts";
-import type { DemoStatus } from "./demo-director.ts";
 
 /** Wire types shared by the Worker, the Durable Object, the UI, and external agent runners. */
+
+export interface DemoStatus {
+	next: number;
+	total: number;
+	running: boolean;
+	speed: number;
+	nextAt?: number;
+	lastLabel?: string;
+	nextLabel?: string;
+	error?: string;
+	finished: boolean;
+}
 
 export interface ProjectMeta {
 	id: string;
@@ -15,8 +26,22 @@ export interface ProjectMeta {
 }
 
 export const PROJECTS: ProjectMeta[] = [
-	{ id: "demo", name: "auth-service", repo: "auth-service", mode: "demo", description: "Deterministic demo: three scripted agents", firstFlight: 21 },
-	{ id: "live", name: "auth-service · live", repo: "auth-service-live", mode: "live", description: "Real coding agents in Cloudflare Sandboxes", firstFlight: 31 },
+	{
+		id: "demo",
+		name: "auth-service",
+		repo: "auth-service",
+		mode: "demo",
+		description: "Deterministic demo: three scripted agents",
+		firstFlight: 21,
+	},
+	{
+		id: "live",
+		name: "auth-service · live",
+		repo: "auth-service-live",
+		mode: "live",
+		description: "Real coding agents in Cloudflare Sandboxes",
+		firstFlight: 31,
+	},
 ];
 
 export interface GitInfo {
@@ -78,7 +103,10 @@ export const ProtocolRequest = z.discriminatedUnion("op", [
 		message: z.string().min(1).max(2000),
 		files: z.record(z.string().max(400), z.string().max(1_000_000).nullable()),
 		author: z.object({ name: z.string().max(100), email: z.string().max(200), timestamp: z.number().int() }).optional(),
-		claimedCommit: z.string().regex(/^[0-9a-f]{40}$/).optional(),
+		claimedCommit: z
+			.string()
+			.regex(/^[0-9a-f]{40}$/)
+			.optional(),
 	}),
 	z.object({ op: z.literal("validate"), commit: z.string(), passed: z.boolean(), summary: z.string().max(400) }),
 	z.object({ op: z.literal("land") }),

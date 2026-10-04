@@ -27,7 +27,11 @@ export class MemoryFs {
 		writeFile: async (path: string, data: string | Uint8Array) => {
 			const p = norm(path);
 			await this.promises.mkdir(parent(p), { recursive: true });
-			this.entries.set(p, { kind: "file", data: typeof data === "string" ? encoder.encode(data) : new Uint8Array(data), mtime: Date.now() });
+			this.entries.set(p, {
+				kind: "file",
+				data: typeof data === "string" ? encoder.encode(data) : new Uint8Array(data),
+				mtime: Date.now(),
+			});
 		},
 		unlink: async (path: string) => {
 			if (this.get(path).kind !== "file") throw new FsError("EISDIR", path);

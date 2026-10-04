@@ -316,7 +316,14 @@ export class GitWorkspace {
 	}
 
 	async deleteRemote(input: { url: string; token: string; remoteRef: string }) {
-		await git.push({ ...this.base, http, url: input.url, remoteRef: input.remoteRef, delete: true, headers: { Authorization: `Bearer ${input.token}` } });
+		await git.push({
+			...this.base,
+			http,
+			url: input.url,
+			remoteRef: input.remoteRef,
+			delete: true,
+			headers: { Authorization: `Bearer ${input.token}` },
+		});
 	}
 
 	private async peel(ref: string): Promise<string> {

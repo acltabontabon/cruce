@@ -27,7 +27,8 @@ export class EventSubscriptions {
 			body: body ? JSON.stringify(body) : undefined,
 		});
 		const json = (await res.json()) as { success: boolean; result: T; errors?: { message: string }[] };
-		if (!res.ok || !json.success) throw new Error(`event subscription ${method} failed: ${json.errors?.map((e) => e.message).join("; ") ?? res.status}`);
+		if (!res.ok || !json.success)
+			throw new Error(`event subscription ${method} failed: ${json.errors?.map((e) => e.message).join("; ") ?? res.status}`);
 		return json.result;
 	}
 

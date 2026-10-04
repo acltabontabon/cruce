@@ -2,7 +2,15 @@ import { DurableObject } from "cloudflare:workers";
 import { resolveResource, resourceLabel } from "../core/airspace.ts";
 import type { ControllerState, TowerEvent } from "../core/controller.ts";
 import { TERMINAL_PHASES } from "../core/domain.ts";
-import { type DemoCommand, type HumanCommand, PROJECTS, type ProjectMeta, type ProtocolRequest, type ServerMessage, type Snapshot } from "./api-types.ts";
+import {
+	type DemoCommand,
+	type HumanCommand,
+	PROJECTS,
+	type ProjectMeta,
+	type ProtocolRequest,
+	type ServerMessage,
+	type Snapshot,
+} from "../shared/api.ts";
 import { ArtifactsHost } from "./artifacts-host.ts";
 import { type DemoStatus, delayFor, initialDemoStatus, runNextStep } from "./demo-director.ts";
 import { type ArtifactsEvent, EventSubscriptions } from "./event-subscriptions.ts";
@@ -36,7 +44,9 @@ export class ControlTower extends DurableObject<TowerEnv> {
 
 	constructor(ctx: DurableObjectState, env: TowerEnv) {
 		super(ctx, env);
-		ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY, at INTEGER NOT NULL, type TEXT NOT NULL, flight TEXT, body TEXT NOT NULL)`);
+		ctx.storage.sql.exec(
+			`CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY, at INTEGER NOT NULL, type TEXT NOT NULL, flight TEXT, body TEXT NOT NULL)`,
+		);
 		ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL)`);
 	}
 
@@ -80,7 +90,12 @@ export class ControlTower extends DurableObject<TowerEnv> {
 	private subscriptions(): EventSubscriptions | undefined {
 		const { CF_ACCOUNT_ID, EVENTS_QUEUE_ID, CF_EVENTS_API_TOKEN, ARTIFACTS } = this.env;
 		if (!ARTIFACTS || !CF_ACCOUNT_ID || !EVENTS_QUEUE_ID || !CF_EVENTS_API_TOKEN) return undefined;
-		return new EventSubscriptions({ accountId: CF_ACCOUNT_ID, queueId: EVENTS_QUEUE_ID, apiToken: CF_EVENTS_API_TOKEN, namespace: this.env.ARTIFACTS_NAMESPACE });
+		return new EventSubscriptions({
+			accountId: CF_ACCOUNT_ID,
+			queueId: EVENTS_QUEUE_ID,
+			apiToken: CF_EVENTS_API_TOKEN,
+			namespace: this.env.ARTIFACTS_NAMESPACE,
+		});
 	}
 
 	private store(): TowerStore {
@@ -92,7 +107,14 @@ export class ControlTower extends DurableObject<TowerEnv> {
 			delete: (key) => void kv.delete(key),
 			appendEvents: (events: TowerEvent[]) => {
 				for (const e of events) {
-					sql.exec(`INSERT OR REPLACE INTO events (seq, at, type, flight, body) VALUES (?, ?, ?, ?, ?)`, e.seq, e.at, e.type, e.flightId ?? null, JSON.stringify(e));
+					sql.exec(
+						`INSERT OR REPLACE INTO events (seq, at, type, flight, body) VALUES (?, ?, ?, ?, ?)`,
+						e.seq,
+						e.at,
+						e.type,
+						e.flightId ?? null,
+						JSON.stringify(e),
+					);
 				}
 			},
 		};
@@ -248,7 +270,12 @@ export class ControlTower extends DurableObject<TowerEnv> {
 				]);
 				if (flight && evt.payload.after && evt.payload.ref === "refs/heads/main") c.recordPush(flight.id, evt.payload.after, "event");
 			} else {
-				c.note("artifacts.event", "artifacts", `Artifacts ${kind} · ${repo}${evt.payload.scope ? ` (${evt.payload.scope})` : ""}`, flight?.id);
+				c.note(
+					"artifacts.event",
+					"artifacts",
+					`Artifacts ${kind} · ${repo}${evt.payload.scope ? ` (${evt.payload.scope})` : ""}`,
+					flight?.id,
+				);
 			}
 		});
 	}
@@ -306,7 +333,8 @@ export class ControlTower extends DurableObject<TowerEnv> {
 		const demo = this.demoStatus();
 		const candidates: number[] = [];
 		if (demo?.running && demo.nextAt) candidates.push(demo.nextAt);
-		if (this.meta?.mode === "live" && this.tower?.state.flights.some((f) => !TERMINAL_PHASES.has(f.phase))) candidates.push(Date.now() + LIVE_TICK_MS);
+		if (this.meta?.mode === "live" && this.tower?.state.flights.some((f) => !TERMINAL_PHASES.has(f.phase)))
+			candidates.push(Date.now() + LIVE_TICK_MS);
 		if (candidates.length) await this.ctx.storage.setAlarm(Math.min(...candidates));
 		else await this.ctx.storage.deleteAlarm();
 	}

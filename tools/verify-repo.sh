@@ -38,5 +38,5 @@ if [ -f package.json ] && grep -q '"test"' package.json; then
 	echo "== tests on the cloned repository"
 	node --test "test/**/*.test.ts" 2>&1 | grep -E "^ℹ (tests|pass|fail)"
 fi
-if [ -n "$TOKEN_ID" ]; then cf artifacts namespaces tokens revoke "$NS" --body "{\"id\":\"$TOKEN_ID\",\"repo\":\"$REPO\"}" >/dev/null 2>&1 || true; fi
+if [ -n "$TOKEN_ID" ]; then cf artifacts namespaces tokens revoke "$TOKEN_ID" --namespace "$NS" >/dev/null 2>&1 && echo "read token revoked" || echo "(token expires on its own in 2 minutes)"; fi
 unset TOKEN

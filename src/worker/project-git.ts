@@ -1,6 +1,6 @@
 import type { ArtifactRef } from "../core/domain.ts";
 import type { ArtifactsHost } from "./artifacts-host.ts";
-import { type GitAuthor, GitWorkspace, type MergeOutcome, NOTES_REF } from "./git/workspace.ts";
+import { type GitAuthor, type GitWorkspace, type MergeOutcome, NOTES_REF } from "./git/workspace.ts";
 
 /**
  * Git for one Cruce project.
@@ -203,7 +203,12 @@ export class ProjectGit {
 	/** Bring a Flight onto the new canonical baseline (merge canonical into the Flight repo). */
 	refreshFlight(flightId: string, author: GitAuthor): Promise<MergeOutcome> {
 		return this.run(async () => {
-			const outcome = await this.ws.merge({ ours: flightRef(flightId), theirs: CANONICAL, message: `Refresh ${flightId} onto canonical`, author });
+			const outcome = await this.ws.merge({
+				ours: flightRef(flightId),
+				theirs: CANONICAL,
+				message: `Refresh ${flightId} onto canonical`,
+				author,
+			});
 			if (outcome.clean && this.host) {
 				const name = this.flightRepoName(flightId);
 				await this.host.withToken(name, "write", async (token) => {

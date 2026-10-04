@@ -23,6 +23,7 @@ import {
 	computeTraffic,
 	type FlightClearance,
 	isActive,
+	mentionsResource,
 	planAccesses,
 	type SemanticFinding,
 	type TrafficPicture,
@@ -494,29 +495,31 @@ export class Controller {
 		for (const other of this.s.flights) {
 			if (other.id === flightId || !isActive(other)) continue;
 			const mine = planAccesses(other.plan, this.s.index);
-			const reasons: string[] = [];
+			// Ranked: contract changes first, then planned modifications, then declared dependencies.
+			// Import-derived reads only matter when a contract changed under them.
+			const ranked: { rank: number; text: string }[] = [];
 			for (const c of changed) {
 				for (const a of mine) {
 					if (!isAncestorOrEqual(c.resource, a.resource, this.s.index) && !isAncestorOrEqual(a.resource, c.resource, this.s.index))
 						continue;
+					if (a.origin === "derived" && c.mode !== "contract") continue;
 					const what = resourceLabel(c.resource, this.s.index);
 					if (c.mode === "contract")
-						reasons.push(`${what} contract changed (${a.mode === "read" ? "you depend on it" : "you planned to modify it"})`);
-					else if (a.mode !== "read") reasons.push(`${what} was modified by ${flightId}; your planned change must be re-based`);
-					else reasons.push(`${what} was modified by ${flightId}`);
+						ranked.push({
+							rank: 0,
+							text: `${what} contract changed (${a.mode === "read" ? "you depend on it" : "you planned to modify it"})`,
+						});
+					else if (a.mode !== "read")
+						ranked.push({ rank: 1, text: `${what} was modified by ${flightId}; your planned change must be re-based` });
+					else ranked.push({ rank: 2, text: `${what} was modified by ${flightId}` });
 				}
 			}
 			for (const assumption of other.plan.assumptions) {
-				if (
-					changed.some(
-						(c) =>
-							c.mode === "contract" &&
-							assumption.toLowerCase().includes(resourceLabel(c.resource, this.s.index).split(".")[0].toLowerCase().slice(0, 5)),
-					)
-				) {
-					reasons.push(`assumption no longer holds: “${assumption}”`);
+				if (changed.some((c) => c.mode === "contract" && mentionsResource(assumption, resourceLabel(c.resource, this.s.index)))) {
+					ranked.push({ rank: 0, text: `assumption no longer holds: “${assumption}”` });
 				}
 			}
+			const reasons = ranked.sort((a, b) => a.rank - b.rank).map((r) => r.text);
 			const unique = [...new Set(reasons)];
 			if (unique.length) {
 				other.stale = { since: this.now, byFlight: flightId, reasons: unique, newBaseline: mergeCommit };

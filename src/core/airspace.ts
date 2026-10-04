@@ -127,8 +127,18 @@ export function moduleLabel(id: string, index: AirspaceIndex): string {
 export function resourceLabel(id: string, index: AirspaceIndex): string {
 	const p = parseResourceId(id);
 	if (p.kind === "module") return moduleLabel(p.module ?? "", index);
-	if (p.kind === "file") return (p.file ?? "").split("/").pop() ?? id;
+	if (p.kind === "file") return componentName(p.file ?? "", index);
 	return p.symbol ?? id;
+}
+
+/** A file's display name: its primary type when the file is named after it (`RefreshTokenRepository`). */
+export function componentName(path: string, index: AirspaceIndex): string {
+	const base = path.split("/").pop() ?? path;
+	const file = index.files.find((f) => f.path === path);
+	const primary = file?.symbols.find(
+		(s) => !s.name.includes(".") && (s.kind === "class" || s.kind === "function") && `${kebab(s.name)}.ts` === base,
+	);
+	return primary?.name ?? base;
 }
 
 const kebab = (name: string) =>

@@ -1,4 +1,4 @@
-import { DemoCommand, HumanCommand, PROJECTS, ProtocolRequest } from "./api-types.ts";
+import { DemoCommand, HumanCommand, PROJECTS, ProtocolRequest } from "../shared/api.ts";
 import type { ControlTower } from "./control-tower.ts";
 import { isArtifactsEvent } from "./event-subscriptions.ts";
 
@@ -52,7 +52,10 @@ function requireAdmin(request: Request, env: Env) {
 	}
 }
 
-async function body<T>(request: Request, schema: { safeParse(v: unknown): { success: true; data: T } | { success: false; error: { message: string } } }): Promise<T> {
+async function body<T>(
+	request: Request,
+	schema: { safeParse(v: unknown): { success: true; data: T } | { success: false; error: { message: string } } },
+): Promise<T> {
 	const raw = await request.json().catch(() => {
 		throw new HttpError(400, "invalid JSON");
 	});
@@ -138,10 +141,11 @@ export default {
 				continue;
 			}
 			const repo = evt.source.repoName;
-			const project = [...PROJECTS].sort((a, b) => b.repo.length - a.repo.length).find((p) => repo === p.repo || repo.startsWith(`${p.repo}--`));
+			const project = [...PROJECTS]
+				.sort((a, b) => b.repo.length - a.repo.length)
+				.find((p) => repo === p.repo || repo.startsWith(`${p.repo}--`));
 			if (project) await tower(env, project.id).artifactEvent(project.id, evt);
 			msg.ack();
 		}
 	},
 } satisfies ExportedHandler<Env>;
-
