@@ -60,6 +60,20 @@ export async function handleProtocol(tower: Tower, flightId: string, req: Protoc
 			return { ok: true };
 		case "land":
 			return tower.land(flightId);
+		case "checkout": {
+			// Read-only, repo-scoped, 15-minute access for an external runner to clone or fetch.
+			if (!f.artifact) throw new Error(`${flightId} has no repository yet`);
+			return {
+				remote: f.artifact.remote,
+				readToken: await tower.git.readToken(flightId),
+				head: await tower.git.resolve(flightRef(flightId)),
+			};
+		}
+		case "refresh": {
+			const ok = await tower.refresh(flightId);
+			if (!ok) throw new Error("baseline refresh hit a Git conflict; a controller must resolve it");
+			return { head: tower.flight(flightId).baseline };
+		}
 		case "fail":
 			tower.mutate((c) => c.fail(flightId, req.reason));
 			return { ok: true, phase: f.phase };

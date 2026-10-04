@@ -23,6 +23,7 @@ export interface Contender {
 
 export type RuleName =
 	| "human-override"
+	| "deadlock-break"
 	| "priority"
 	| "published-work"
 	| "contract-owner"
@@ -38,7 +39,12 @@ export interface RightOfWay {
 	because: string[];
 }
 
-export function decideRightOfWay(a: Contender, b: Contender, pinnedWinner?: string): RightOfWay {
+export interface Pin {
+	winner: string;
+	source: "human" | "deadlock";
+}
+
+export function decideRightOfWay(a: Contender, b: Contender, pin?: Pin): RightOfWay {
 	const decide = (winner: Contender, loser: Contender, rule: RuleName, because: string[]): RightOfWay => ({
 		winner: winner.id,
 		loser: loser.id,
@@ -46,9 +52,13 @@ export function decideRightOfWay(a: Contender, b: Contender, pinnedWinner?: stri
 		because,
 	});
 
-	if (pinnedWinner === a.id || pinnedWinner === b.id) {
-		const [w, l] = pinnedWinner === a.id ? [a, b] : [b, a];
-		return decide(w, l, "human-override", [`a controller gave ${w.id} right-of-way`]);
+	if (pin && (pin.winner === a.id || pin.winner === b.id)) {
+		const [w, l] = pin.winner === a.id ? [a, b] : [b, a];
+		if (pin.source === "human") return decide(w, l, "human-override", [`a controller gave ${w.id} right-of-way`]);
+		return decide(w, l, "deadlock-break", [
+			`${w.id} and ${l.id} were each waiting on the other (traffic deadlock)`,
+			`${w.id} is the highest-priority, earliest-filed Flight in the cycle, so it goes first`,
+		]);
 	}
 
 	if (a.priority !== b.priority) {

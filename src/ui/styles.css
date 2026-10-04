@@ -1468,3 +1468,47 @@ select {
 	opacity: 0.7;
 	stroke: var(--landed);
 }
+.launch-btn {
+	width: 100%;
+	border-style: dashed;
+}
+.launch {
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+	padding: 10px;
+	border-radius: var(--r);
+	background: var(--panel);
+	border: 1px solid var(--line-2);
+}
+.launch input,
+.launch textarea {
+	font: inherit;
+	color: var(--text);
+	background: var(--bg);
+	border: 1px solid var(--line-2);
+	border-radius: 5px;
+	padding: 6px 8px;
+	resize: vertical;
+}
+.launch-row {
+	display: flex;
+	gap: 6px;
+}
+.launch-note {
+	color: var(--text-2);
+	font-size: 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+}
+.launch-note pre {
+	margin: 0;
+	padding: 8px;
+	border-radius: 5px;
+	background: var(--bg);
+	font: 10.5px / 1.5 var(--mono);
+	white-space: pre-wrap;
+	word-break: break-all;
+	user-select: all;
+}

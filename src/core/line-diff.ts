@@ -6,9 +6,9 @@ import { diffLines } from "diff";
  * before, so inserting between two members lands on the enclosing type, and inserting directly above
  * a member (e.g. its doc comment) lands on that member.
  */
-export function changedRanges(base: string, next: string): { start: number; end: number }[] {
+export function changedRanges(base: string, next: string): { start: number; end: number; insert?: boolean }[] {
 	const total = Math.max(1, base.split("\n").length);
-	const ranges: { start: number; end: number }[] = [];
+	const ranges: { start: number; end: number; insert?: boolean }[] = [];
 	let line = 1;
 	let previousRemoved = false;
 	for (const part of diffLines(base, next)) {
@@ -20,7 +20,7 @@ export function changedRanges(base: string, next: string): { start: number; end:
 			// A replacement (removed then added) is already covered by the removed range.
 			if (!previousRemoved) {
 				const at = Math.min(line, total);
-				ranges.push({ start: at, end: at });
+				ranges.push({ start: at, end: at, insert: true });
 			}
 		} else {
 			line += count;
@@ -28,10 +28,10 @@ export function changedRanges(base: string, next: string): { start: number; end:
 		previousRemoved = !!part.removed;
 	}
 	ranges.sort((a, b) => a.start - b.start);
-	const merged: { start: number; end: number }[] = [];
+	const merged: { start: number; end: number; insert?: boolean }[] = [];
 	for (const r of ranges) {
 		const last = merged.at(-1);
-		if (last && r.start <= last.end + 1) last.end = Math.max(last.end, r.end);
+		if (last && r.start <= last.end + 1 && !last.insert && !r.insert) last.end = Math.max(last.end, r.end);
 		else merged.push({ ...r });
 	}
 	return merged;

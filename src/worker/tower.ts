@@ -2,6 +2,7 @@ import { Controller, type ControllerState, initialState, type TowerEvent } from 
 import type { Flight, ProjectInfo } from "../core/domain.ts";
 import type { GateResult } from "../core/publish-gate.ts";
 import { seedFiles } from "../demo/scenario.ts";
+import { candidatePairs, type DecisionJudge } from "../intelligence/judge.ts";
 import { buildIndex } from "../intelligence/structural-index.ts";
 import type { GitAuthor } from "./git/workspace.ts";
 import { CANONICAL, flightRef, type ProjectGit, TOWER_AUTHOR } from "./project-git.ts";
@@ -24,6 +25,8 @@ export interface TowerHooks {
 	/** Called after a Flight repo is created (e.g. to subscribe to its Artifacts events). */
 	onRepo?(repo: string): Promise<void>;
 	onRepoRemoved?(repo: string): Promise<void>;
+	/** Keep background work alive (Durable Object `ctx.waitUntil`). */
+	background?(work: Promise<unknown>): void;
 }
 
 export interface Submission {
@@ -53,6 +56,7 @@ export class Tower {
 		private readonly hooks: TowerHooks,
 		private readonly now: () => number = Date.now,
 		private readonly firstFlight = 1,
+		private readonly judges: DecisionJudge[] = [],
 	) {}
 
 	// ── state ───────────────────────────────────────────────────────────
@@ -75,7 +79,21 @@ export class Tower {
 		this.store.put("state", state);
 		if (events.length) this.store.appendEvents(events);
 		this.hooks.onChange(state, events);
+		if (this.judges.length && events.some((e) => e.type === "plan.filed" || e.type === "plan.amended")) {
+			const work = this.judge();
+			this.hooks.background?.(work);
+		}
 		return out;
+	}
+
+	/** Level-4 bounded judgment over Flights sharing modules; findings are advisory inputs to traffic. */
+	async judge(): Promise<void> {
+		const pairs = candidatePairs(this.state.flights, this.state.index);
+		const findings = (await Promise.all(this.judges.map((j) => j.judge(pairs).catch(() => [])))).flat();
+		const key = (f: { flights: string[]; summary: string }) => `${[...f.flights].sort().join("|")}:${f.summary}`;
+		const before = this.state.semantic.map(key).sort().join("\n");
+		if (findings.map(key).sort().join("\n") === before) return;
+		this.mutate((c) => c.setSemantic(findings));
 	}
 
 	flight(id: string): Flight {
@@ -203,6 +221,7 @@ export class Tower {
 
 	/** Git preflight then integration into canonical. Returns whether the Flight landed. */
 	async land(flightId: string): Promise<{ landed: boolean; reason?: string }> {
+		this.mutate((c) => c.refreshTraffic());
 		const blockers = new Controller(this.state, this.now()).landingBlockers(flightId);
 		if (blockers.length) {
 			this.mutate((c) => c.note("preflight", "cruce", `${flightId} not cleared to land`, flightId, blockers));

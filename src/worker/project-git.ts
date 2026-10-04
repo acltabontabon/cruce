@@ -27,6 +27,7 @@ export const TOWER_AUTHOR = { name: "Cruce Tower", email: "tower@cruce.acltabont
 
 export class ProjectGit {
 	private queue: Promise<unknown> = Promise.resolve();
+	private readonly readTokens = new Map<string, { token: string; id: string; until: number }>();
 	private readonly remotes = new Map<string, string>();
 	readonly backend: GitBackend;
 
@@ -234,6 +235,27 @@ export class ProjectGit {
 			const entries = await this.ws.log(ref, depth);
 			return Promise.all(entries.map(async (e) => ({ ...e, note: await this.ws.readNote(e.oid) })));
 		});
+	}
+
+	/**
+	 * A read token for a Flight's repository, injected by the sandbox egress policy for clone/fetch.
+	 * Cached for most of its 15-minute life so Git traffic does not mint a token per request.
+	 */
+	async readToken(flightId: string): Promise<string> {
+		if (!this.host) throw new Error("no Artifacts backend");
+		const name = this.flightRepoName(flightId);
+		const cached = this.readTokens.get(name);
+		if (cached && cached.until > Date.now()) return cached.token;
+		const t = await this.host.mint(name, "read", 900);
+		this.readTokens.set(name, { token: t.plaintext, id: t.id, until: Date.now() + 12 * 60 * 1000 });
+		return t.plaintext;
+	}
+
+	async revokeReadToken(flightId: string) {
+		const name = this.flightRepoName(flightId);
+		const cached = this.readTokens.get(name);
+		this.readTokens.delete(name);
+		if (cached && this.host) await this.host.revokeToken(name, cached.id);
 	}
 
 	/** Remote URLs are stable; cache them so routine Git work costs no extra control-plane calls. */

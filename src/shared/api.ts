@@ -110,6 +110,8 @@ export const ProtocolRequest = z.discriminatedUnion("op", [
 	}),
 	z.object({ op: z.literal("validate"), commit: z.string(), passed: z.boolean(), summary: z.string().max(400) }),
 	z.object({ op: z.literal("land") }),
+	z.object({ op: z.literal("checkout") }),
+	z.object({ op: z.literal("refresh") }),
 	z.object({ op: z.literal("fail"), reason: z.string().max(400) }),
 ]);
 export type ProtocolRequest = z.infer<typeof ProtocolRequest>;

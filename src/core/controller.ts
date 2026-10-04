@@ -354,7 +354,15 @@ export class Controller {
 		if (f.stale) reasons.push(`baseline changed when ${f.stale.byFlight} landed; amend the Flight Plan first`);
 		const gate = evaluatePublish(c?.cleared ?? [], changes, baseIndex ?? this.s.index);
 		const approved = gate.approved && reasons.length === 0;
-		f.publishes.push({ at: this.now, commit, approved, touched: gate.touched, outside: gate.outside.map((o) => o.resource), message });
+		f.publishes.push({
+			at: this.now,
+			commit,
+			planVersion: f.plan?.planVersion,
+			approved,
+			touched: gate.touched,
+			outside: gate.outside.map((o) => o.resource),
+			message,
+		});
 		if (approved) {
 			this.emit(
 				"publish.approved",
@@ -643,6 +651,11 @@ export class Controller {
 				this.fail(f.id, "plan timeout: no Flight Plan filed after discovery");
 			}
 		}
+	}
+
+	/** Re-run traffic analysis on the current state (e.g. before landing, or after a deploy). */
+	refreshTraffic() {
+		this.recompute();
 	}
 
 	/** Record an orchestration event (Git, Artifacts, agent runtime) in the tower log. */

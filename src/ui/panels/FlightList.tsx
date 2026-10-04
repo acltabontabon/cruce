@@ -4,17 +4,19 @@ import { flightBadge, isActive, missionOf, short } from "../model.ts";
 
 interface Props {
 	state: ControllerState;
+	launch?: React.ReactNode;
 	selected: string | null;
 	onSelect(id: string): void;
 	onHover(id: string | null): void;
 }
 
-export function FlightList({ state, selected, onSelect, onHover }: Props) {
+export function FlightList({ state, selected, onSelect, onHover, launch }: Props) {
 	const active = state.flights.filter(isActive);
 	const done = state.flights.filter((f) => !isActive(f));
 	const sequencing = state.traffic.edges;
 	return (
 		<nav className="flights" aria-label="Flights">
+			{launch}
 			<Section title="Flights" count={active.length}>
 				{active.length === 0 && <div className="flights-empty">No active Flights</div>}
 				{active.map((f) => (

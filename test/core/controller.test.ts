@@ -211,3 +211,24 @@ describe("failure handling", () => {
 		expect(() => c.submitPlan(f.id, { summary: "" })).toThrow(/Invalid flight plan/);
 	});
 });
+
+describe("publish gate: declared new members", () => {
+	it("an insertion that adds a member declared in the plan is inside clearance", async () => {
+		const { evaluatePublish } = await import("../../src/core/publish-gate.ts");
+		const { changedRanges } = await import("../../src/core/line-diff.ts");
+		const path = "src/sessions/session-service.ts";
+		const before = seed[path];
+		const after = before.replace(
+			"\tend(id: string): boolean {",
+			"\tendIdle(maxIdleMs: number): number {\n\t\treturn maxIdleMs;\n\t}\n\n\tend(id: string): boolean {",
+		);
+		const changes = [{ path, status: "modified" as const, ranges: changedRanges(before, after) }];
+		const { baseIndex } = await import("../fixtures.ts");
+		const cleared = [`s:${path}#SessionService.endIdle`];
+		expect(evaluatePublish(cleared, changes, baseIndex).approved).toBe(true);
+		// Editing an existing member that was not declared is still outside clearance.
+		const edit = before.replace("return session;", "return { ...session };");
+		const edits = [{ path, status: "modified" as const, ranges: changedRanges(before, edit) }];
+		expect(evaluatePublish(cleared, edits, baseIndex).approved).toBe(false);
+	});
+});

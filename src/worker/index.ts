@@ -2,6 +2,9 @@ import { DemoCommand, HumanCommand, PROJECTS, ProtocolRequest } from "../shared/
 import type { ControlTower } from "./control-tower.ts";
 import { isArtifactsEvent } from "./event-subscriptions.ts";
 
+export { FlightSandbox } from "./agents/flight-sandbox.ts";
+export { FlightWorkflow } from "./agents/flight-workflow.ts";
+export { Outbound } from "./agents/outbound.ts";
 export { ControlTower } from "./control-tower.ts";
 
 interface Env {
@@ -95,7 +98,15 @@ async function route(request: Request, env: Env): Promise<Response> {
 	if (action === "commands" && request.method === "POST") {
 		if (project.mode === "live") requireAdmin(request, env);
 		const cmd = await body(request, HumanCommand);
-		return json(await stub.command(project.id, cmd, project.mode === "live" ? "controller" : "you"));
+		const result = (await stub.command(project.id, cmd, project.mode === "live" ? "controller" : "you")) as {
+			flightId?: string;
+			external?: boolean;
+		};
+		// An external runner receives its per-Flight protocol token once, at launch.
+		if (result?.external && result.flightId && env.CRUCE_SECRET) {
+			return json({ ...result, flightToken: await flightToken(env.CRUCE_SECRET, project.id, result.flightId) });
+		}
+		return json(result);
 	}
 
 	if (action === "history" && request.method === "GET") {

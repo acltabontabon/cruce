@@ -10,7 +10,7 @@ import {
 import { type Access, type CongestionLevel, type Control, interactions, SEVERITY_RANK, type Severity } from "./conflict-matrix.ts";
 import { DependencyGraph, type Edge } from "./dependency-graph.ts";
 import { type ClearanceStatus, type Flight, type FlightPlan, type Override, PRIORITY_RANK, TERMINAL_PHASES } from "./domain.ts";
-import { type Contender, decideRightOfWay, type RightOfWay } from "./right-of-way.ts";
+import { type Contender, decideRightOfWay, type Pin, type RightOfWay } from "./right-of-way.ts";
 
 /**
  * The clearance engine. Given every active Flight Plan, it computes the full traffic picture:
@@ -214,7 +214,12 @@ export function computeTraffic(input: TrafficInput): TrafficPicture {
 	};
 
 	// 2. Decide each pair. Deadlock breaking may re-decide pairs with a pinned winner.
-	const pinned = new Map<string, string>();
+	const pinned = new Map<string, Pin>();
+	/** Who goes first on a pair: a human `first` override, else a deadlock-break pin. */
+	const firstOf = (key: string): string | undefined => {
+		const o = overrides.get(key);
+		return o?.kind === "first" ? o.flightId : pinned.get(key)?.winner;
+	};
 	const decidePairs = () => {
 		const decisions = new Map<string, RightOfWay | undefined>();
 		for (const p of pairs) {
@@ -225,7 +230,7 @@ export function computeTraffic(input: TrafficInput): TrafficPicture {
 				decisions.set(key, undefined);
 				continue;
 			}
-			const pin = o?.kind === "first" ? o.flightId : pinned.get(key);
+			const pin: Pin | undefined = o?.kind === "first" && o.flightId ? { winner: o.flightId, source: "human" } : pinned.get(key);
 			decisions.set(key, decideRightOfWay(contender(p.a, p), contender(p.b, p), pin));
 		}
 		return decisions;
@@ -242,8 +247,7 @@ export function computeTraffic(input: TrafficInput): TrafficPicture {
 			for (const v of p.views) {
 				if (v.control !== "land-after") continue;
 				const [reader, writer] = v.mode === "contract" ? [v.other, v.flight] : [v.flight, v.other];
-				if (o?.kind === "first" && o.flightId === reader)
-					edges.push({ from: writer, to: reader, reason: `lands after ${reader} (override)` });
+				if (firstOf(key) === reader) edges.push({ from: writer, to: reader, reason: `lands after ${reader}` });
 				else edges.push({ from: reader, to: writer, reason: `lands after ${writer}` });
 			}
 		}
@@ -277,7 +281,7 @@ export function computeTraffic(input: TrafficInput): TrafficPicture {
 					x.localeCompare(y)
 				);
 			})[0];
-			for (const other of cycle) if (other !== pivot) pinned.set(pairKey(pivot, other), pivot);
+			for (const other of cycle) if (other !== pivot) pinned.set(pairKey(pivot, other), { winner: pivot, source: "deadlock" });
 			attention.push({
 				id: `deadlock:${cycle.join(",")}`,
 				kind: "deadlock",
@@ -327,33 +331,46 @@ export function computeTraffic(input: TrafficInput): TrafficPicture {
 			...new Set(controlling.map((v) => (isAncestorOrEqual(v.resource, v.otherResource, index) ? v.otherResource : v.resource))),
 		].sort();
 
-		const why: string[] = [];
 		const planSteps: string[] = [];
 		const fa = p.a;
 		const fb = p.b;
-		const name = (id: string) => `${label(id)}${parseResourceId(id).kind === "symbol" ? "()" : ""}`;
+		const name = (id: string) => {
+			const l = label(id);
+			return parseResourceId(id).kind === "symbol" && /^[a-z#]/.test(l.split(".").pop() ?? "") ? `${l}()` : l;
+		};
+		const list = (ids: string[], max = 4) => {
+			const names = [...new Set(ids.map(name))];
+			return names.length > max ? `${names.slice(0, max).join(", ")} and ${names.length - max} more` : names.join(", ");
+		};
 
-		const bothWrite = views.filter((v) => v.mode !== "read" && v.otherMode !== "read" && v.control === "exclusive");
-		if (bothWrite.length) why.push(`Both intend to modify ${[...new Set(bothWrite.map((v) => name(v.resource)))].join(", ")}.`);
-		for (const v of views) {
-			if (v.mode === "contract" && v.control !== "caution") why.push(`${v.flight} changes the contract of ${name(v.resource)}.`);
-			if (v.otherMode === "contract" && v.control !== "caution") why.push(`${v.other} changes the contract of ${name(v.otherResource)}.`);
-			if (v.control === "land-after" && (v.origin === "derived" || v.otherOrigin === "derived")) {
-				const reader = v.mode === "contract" ? v.other : v.flight;
-				const readerRes = v.mode === "contract" ? v.otherResource : v.resource;
-				why.push(`${reader}'s code imports ${label(readerRes)}, which depends on that contract.`);
-			}
-			if (v.control === "caution" && v.rule.includes("same file")) {
-				why.push(`${name(v.resource)} and ${name(v.otherResource)} share a file but are separate airspace.`);
-			}
+		// "Why they intersect", most important first and short: overlap, contracts, assumptions, imports.
+		const why: string[] = [];
+		const exclusiveViews = views.filter((v) => v.control === "exclusive");
+		if (exclusiveViews.length) why.push(`Both intend to modify ${list(byImportance(focus, index))}.`);
+		const contracts = new Map<string, Set<string>>();
+		for (const v of controlling) {
+			if (v.mode === "contract") contracts.set(v.flight, (contracts.get(v.flight) ?? new Set()).add(v.resource));
+			if (v.otherMode === "contract") contracts.set(v.other, (contracts.get(v.other) ?? new Set()).add(v.otherResource));
 		}
+		for (const [flightId, set] of contracts) why.push(`${flightId} changes the contract of ${list(byImportance([...set], index), 3)}.`);
 		for (const f of [fa, fb]) {
-			const contractRes = views
-				.filter((v) => (v.flight === f.id ? v.otherMode : v.mode) === "contract")
-				.map((v) => (v.flight === f.id ? v.otherResource : v.resource));
-			for (const assumption of f.plan.assumptions) {
-				if (contractRes.some((r) => mentionsResource(assumption, label(r)))) why.push(`${f.id} assumes: “${assumption}”.`);
-			}
+			const mentioned = f.plan.assumptions.filter((a) => focus.some((r) => mentionsResource(a, label(r)))).slice(0, 2);
+			for (const a of mentioned) why.push(`${f.id} assumes: “${a}”.`);
+		}
+		const derived = controlling.find((v) => v.control === "land-after" && (v.origin === "derived" || v.otherOrigin === "derived"));
+		if (derived) {
+			const reader = derived.mode === "contract" ? derived.other : derived.flight;
+			const readerRes = derived.mode === "contract" ? derived.otherResource : derived.resource;
+			why.push(`${reader}'s code imports ${label(readerRes)}, which depends on that contract.`);
+		}
+		const sameFile = views.filter((v) => v.control === "caution" && v.rule.includes("same file"));
+		if (sameFile.length && control === "caution") {
+			for (const v of sameFile.slice(0, 2))
+				why.push(`${name(v.resource)} and ${name(v.otherResource)} share a file but are separate airspace.`);
+		} else if (sameFile.length) {
+			why.push(
+				`${sameFile.length} more symbol pair${sameFile.length === 1 ? " shares" : "s share"} a file but ${sameFile.length === 1 ? "is" : "are"} separate airspace.`,
+			);
 		}
 
 		if (control === "exclusive" && row && o?.kind !== "allow-both") {
@@ -401,7 +418,7 @@ export function computeTraffic(input: TrafficInput): TrafficPicture {
 		for (const v of views) {
 			if (v.control === "land-after" && o?.kind !== "allow-both") {
 				const [reader, writer] = v.mode === "contract" ? [v.other, v.flight] : [v.flight, v.other];
-				const flipped = o?.kind === "first" && o.flightId === reader;
+				const flipped = firstOf(key) === reader;
 				const [r, w] = flipped ? [writer, reader] : [reader, writer];
 				if (!(landAfter.get(r) ?? []).some((x) => x.flightId === w)) {
 					pushTo(landAfter, r, { flightId: w, reason: `${w} changes a contract ${r} depends on` });
@@ -416,7 +433,7 @@ export function computeTraffic(input: TrafficInput): TrafficPicture {
 		congestions.push({
 			key,
 			flights: [fa.id, fb.id],
-			label: focus.map((r) => label(r)).join(", "),
+			label: shortLabel(byImportance(focus, index).map((r) => label(r))),
 			level,
 			levels,
 			severity,
@@ -517,6 +534,23 @@ export function computeTraffic(input: TrafficInput): TrafficPicture {
 		attention,
 		occupancy,
 	};
+}
+
+/** Members and types before whole files; source before tests. */
+function byImportance(ids: string[], index: AirspaceIndex): string[] {
+	const weight = (id: string) => {
+		const p = parseResourceId(id);
+		const file = p.file ?? "";
+		const test = /(^|\/)(test|tests)\//.test(file) || /\.test\./.test(file);
+		return (test ? 10 : 0) + (p.kind === "symbol" ? (p.symbol?.includes(".") ? 0 : 1) : p.kind === "file" ? 2 : 3);
+	};
+	void index;
+	return [...ids].sort((a, b) => weight(a) - weight(b) || a.localeCompare(b));
+}
+
+function shortLabel(labels: string[]): string {
+	const unique = [...new Set(labels)];
+	return unique.length > 2 ? `${unique.slice(0, 2).join(", ")} +${unique.length - 2}` : unique.join(", ");
 }
 
 /** A stale Flight re-plans the parts of its route that intersect what the landed Flight changed. */

@@ -4,5 +4,5 @@
 		"lib": ["es2024"],
 		"types": ["vite/client"]
 	},
-	"include": ["src/core", "src/intelligence", "src/demo", "src/worker", "cloudflare.config.ts", ".cloudflare/types", "src/shared"]
+	"include": ["src/core", "src/intelligence", "src/demo", "src/worker", ".cloudflare/types", "src/shared"]
 }

@@ -118,6 +118,7 @@ export interface StaleNotice {
 export interface PublishRecord {
 	at: number;
 	commit: string;
+	planVersion?: number;
 	approved: boolean;
 	touched: string[];
 	outside: string[];

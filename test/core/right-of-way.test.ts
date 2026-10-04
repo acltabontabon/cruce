@@ -14,8 +14,14 @@ const base = (id: string, patch: Partial<Contender> = {}): Contender => ({
 
 describe("right-of-way", () => {
 	it("a human override wins outright", () => {
-		const r = decideRightOfWay(base("A", { priority: "critical" }), base("B"), "B");
+		const r = decideRightOfWay(base("A", { priority: "critical" }), base("B"), { winner: "B", source: "human" });
 		expect(r).toMatchObject({ winner: "B", rule: "human-override" });
+	});
+
+	it("a deadlock break is labelled as such, not as a human decision", () => {
+		const r = decideRightOfWay(base("A"), base("B"), { winner: "A", source: "deadlock" });
+		expect(r).toMatchObject({ winner: "A", rule: "deadlock-break" });
+		expect(r.because.join(" ")).toContain("waiting on the other");
 	});
 
 	it("security patch (critical) beats a refactor (normal)", () => {

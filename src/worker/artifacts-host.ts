@@ -65,6 +65,16 @@ export class ArtifactsHost {
 		}
 	}
 
+	/** A token kept by Cruce (e.g. the read token the sandbox egress injects); revoke it when done. */
+	async mint(name: string, scope: "read" | "write", ttlSeconds: number) {
+		using repo = await this.binding.get(name);
+		return repo.createToken(scope, ttlSeconds);
+	}
+
+	async revokeToken(name: string, id: string) {
+		await this.revoke(name, id);
+	}
+
 	async info(name: string) {
 		using repo = await this.binding.get(name);
 		return repo.info();

@@ -114,6 +114,32 @@ describe("clearance engine", () => {
 		const { traffic, ids } = fly({ a: { plan: a }, b: { plan: b } });
 		const statuses = [traffic.clearances[ids.a].status, traffic.clearances[ids.b].status].sort();
 		expect(statuses).toEqual(["clear", "hold"]);
-		expect(traffic.deadlocks).toEqual([]);
+		// After the break, the landing graph has no cycle: the pivot lands first.
+		expect(traffic.landingOrder).not.toBeNull();
+	});
+});
+
+describe("mutual contract changes (seen with real agents)", () => {
+	it("breaks the cycle on both the hold and the landing order, and labels it a deadlock break", () => {
+		const jwt: FlightPlanInput = {
+			...JWT_MIGRATION,
+			writeSet: [...(JWT_MIGRATION.writeSet ?? []), { type: "symbol", resource: "AuthService.issueAccessToken" }],
+		};
+		const rotation: FlightPlanInput = {
+			...ROTATION_V1,
+			writeSet: [...(ROTATION_V1.writeSet ?? []), { type: "symbol", resource: "AuthService.issueAccessToken" }],
+			contractSet: [
+				{ resource: "TokenValidator.validate", change: "behavior" },
+				{ resource: "RefreshTokenRepository", change: "behavior" },
+			],
+		};
+		const { traffic, ids } = fly({ rotation: { plan: rotation }, jwt: { plan: jwt } });
+		const c = traffic.congestions.find((x) => x.flights.includes(ids.rotation) && x.flights.includes(ids.jwt));
+		expect(c?.rightOfWay?.rule).not.toBe("human-override");
+		expect(traffic.landingOrder).not.toBeNull();
+		const winner = c?.rightOfWay?.winner as string;
+		const loser = c?.rightOfWay?.loser as string;
+		expect(traffic.clearances[winner].landAfter.map((l) => l.flightId)).not.toContain(loser);
+		expect(c?.why.length).toBeLessThanOrEqual(8);
 	});
 });

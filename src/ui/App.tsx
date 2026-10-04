@@ -5,6 +5,7 @@ import { ContextPanel } from "./panels/Context.tsx";
 import { FlightList } from "./panels/FlightList.tsx";
 import { Header } from "./panels/Header.tsx";
 import { History } from "./panels/History.tsx";
+import { Launch } from "./panels/Launch.tsx";
 import { TowerLog } from "./panels/TowerLog.tsx";
 import { Radar, type Selection } from "./radar/Radar.tsx";
 import { post, useTower } from "./store.ts";
@@ -90,6 +91,11 @@ export function App() {
 								selected={selectedFlight}
 								onSelect={(id) => setSelection({ kind: "flight", id })}
 								onHover={setHover}
+								launch={
+									state.project.mode === "live" ? (
+										<Launch liveAgents={tower.liveAgents} busy={busy} onLaunch={(m) => act({ type: "launch", runtime: "sandbox", ...m })} />
+									) : undefined
+								}
 							/>
 							<main className="center">
 								<Radar state={state} selection={selection} hover={hover} onSelect={setSelection} onHover={setHover} />
