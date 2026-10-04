@@ -1,6 +1,6 @@
 # Releases
 
-Cruce's first release is drafted as **0.1.0-alpha.1**. It is not released or deployed by changing the package version alone. This is experimental software; alpha interfaces may change.
+Cruce's first alpha, **0.1.0-alpha.1**, was released on 2026-10-05. Future releases are deployed by pushing a checked release tag. This is experimental software; alpha interfaces may change.
 
 ## Versioning and changelog
 

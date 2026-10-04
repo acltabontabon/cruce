@@ -4,9 +4,9 @@ User-facing changes are recorded here. Versions follow [Semantic Versioning 2.0.
 
 ## [Unreleased]
 
-## [0.1.0-alpha.1]
+## [0.1.0-alpha.1] - 2026-10-05
 
-Draft first alpha; unreleased until `v0.1.0-alpha.1` is pushed.
+First alpha release.
 
 ### Added
 

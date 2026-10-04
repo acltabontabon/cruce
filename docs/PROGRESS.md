@@ -147,3 +147,9 @@ Short, dated entries so another agent can continue. Newest last.
 - Prepared an isolated release-setup commit and verified the GitHub production environment and Access settings. Ordinary pushes only run checks; no release tag was created.
 - Cloudflare deployment-token creation was rejected by automatic approval review; account-scoped Worker/KV/Queues write access, Account Settings read access and export to GitHub require explicit approval. Token creation did not run.
 - Isolated release snapshot passed typecheck, lint, 261 tests, offline build and the demo verifier before commit.
+
+### 2026-10-05 — first alpha released
+
+- After explicit approval, created the account-scoped GitHub release token (expires 2027-10-05) and stored its value directly in the production environment secret without logging it or writing it to disk.
+- Pushed `v0.1.0-alpha.1` at `2e855cc31cb35783f05f7c4203885270441df272` and published concise GitHub prerelease notes. Checks and deployment succeeded in Actions run `37239987345`.
+- Cloudflare version `14e9d014-f887-435b-b3e8-f0ef34df8d37` serves 100% of traffic with the matching tag and commit. Live checks confirmed console sign-in redirect (302), OAuth discovery (200) and unauthenticated MCP rejection (401). Marked the changelog as released; unrelated local work stays uncommitted.

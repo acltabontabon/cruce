@@ -45,7 +45,7 @@ Cruce:        Git → Cloudflare Artifacts → Mission → Workspace → Git rev
 
 ## Run locally
 
-Current version: **0.1.0-alpha.1** (first alpha draft). See the [changelog](CHANGELOG.md) and [release instructions](docs/releases.md). Live deployments run only for matching release tags after checks pass.
+Current version: **0.1.0-alpha.1** (first alpha). See the [changelog](CHANGELOG.md) and [release instructions](docs/releases.md). Live deployments run only for matching release tags after checks pass.
 
 ```sh
 pnpm install
