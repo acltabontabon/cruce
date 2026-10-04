@@ -12,10 +12,10 @@ import {
 	type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ControllerState } from "../../core/controller.ts";
 import { flightBadge, type Tone } from "../model.ts";
-import { buildStructure, layout, type RadarEdge, type RadarGraph, type RadarNode, signatureOf } from "./graph.ts";
+import { buildStructure, type GraphDisclosure, layout, type RadarEdge, type RadarGraph, type RadarNode, signatureOf } from "./graph.ts";
 
 export type Selection = { kind: "flight"; id: string } | { kind: "congestion"; key: string } | { kind: "resource"; id: string } | null;
 
@@ -31,12 +31,13 @@ interface NodeData extends Record<string, unknown> {
 	node: RadarNode;
 	tone?: Tone;
 	badge?: string;
-	phase?: string;
 	activity?: string;
 	dim: boolean;
 	focus: boolean;
-	conflict?: { key: string; flights: string[]; severity: string };
+	crossings: { key: string; flights: string[] }[];
 	occupants: { flightId: string; state: string }[];
+	onDisclosure(disclosure: NonNullable<RadarNode["disclosure"]>): void;
+	onCrossing(key: string): void;
 }
 
 interface EdgeData extends Record<string, unknown> {
@@ -54,35 +55,63 @@ const FlightNode = memo(({ data }: NodeProps<Node<NodeData>>) => (
 			<span className={`chip tone-${data.tone}`}>{data.badge}</span>
 		</div>
 		<div className="rn-flight-title">{data.node.sub}</div>
-		<div className="rn-flight-phase">{data.activity ?? data.phase}</div>
+		<div className="rn-flight-phase">{data.activity}</div>
 		<Handle type="source" position={Position.Right} id="route-out" className="h-hidden" />
 	</div>
 ));
 
-const ModuleNode = memo(({ data }: NodeProps<Node<NodeData>>) => (
-	<div className={`rn-module ${data.dim ? "dim" : ""} ${data.conflict ? "has-conflict" : ""}`}>
-		<Handle type="target" position={Position.Left} className="h-hidden" />
-		<div className="rn-module-label">
-			{data.node.label}
-			{data.node.sub && <span className="rn-module-sub">{data.node.sub}</span>}
-		</div>
-	</div>
-));
+function Disclosure({ data }: { data: NodeData }) {
+	const disclosure = data.node.disclosure;
+	if (!disclosure) return null;
+	const what = disclosure.kind === "module" ? "files" : "symbols";
+	return (
+		<button
+			type="button"
+			className="rn-disclosure nodrag nopan"
+			aria-expanded={disclosure.expanded}
+			aria-label={`${disclosure.expanded ? "Collapse" : "Expand"} ${what} in ${data.node.label}`}
+			onClick={(event) => {
+				event.stopPropagation();
+				data.onDisclosure(disclosure);
+			}}
+		>
+			{disclosure.expanded ? "−" : "+"} {what}
+		</button>
+	);
+}
 
-const QuietNode = memo(({ data }: NodeProps<Node<NodeData>>) => (
-	<div className="rn-quiet">
-		<Handle type="target" position={Position.Left} className="h-hidden" />
-		<span>{data.node.label}</span>
-		<span className="rn-quiet-sub">{data.node.sub}</span>
-	</div>
-));
+function Crossings({ data }: { data: NodeData }) {
+	if (!data.crossings.length) return null;
+	return (
+		<div className="rn-crossings">
+			{data.crossings.map((crossing) => (
+				<button
+					type="button"
+					key={crossing.key}
+					className="rn-crossing nodrag nopan"
+					aria-label={`Why ${crossing.flights.join(" and ")} overlap at ${data.node.label}`}
+					onClick={(event) => {
+						event.stopPropagation();
+						data.onCrossing(crossing.key);
+					}}
+				>
+					<span aria-hidden="true">●</span> Crossing · {crossing.flights.join(" / ")}
+				</button>
+			))}
+		</div>
+	);
+}
 
 function Occupants({ list }: { list: NodeData["occupants"] }) {
 	if (!list.length) return null;
 	return (
 		<span className="rn-occ">
 			{list.map((o) => (
-				<span key={o.flightId} className={`rn-occ-tag st-${o.state}`}>
+				<span
+					key={o.flightId}
+					className={`rn-occ-tag st-${o.state}`}
+					title={`${o.flightId}: ${o.state === "partial" ? "partly waiting" : o.state === "held" ? "waiting" : o.state}`}
+				>
 					{o.flightId.replace("F-", "")}
 				</span>
 			))}
@@ -90,26 +119,43 @@ function Occupants({ list }: { list: NodeData["occupants"] }) {
 	);
 }
 
+const ModuleNode = memo(({ data }: NodeProps<Node<NodeData>>) => (
+	<div className={`rn-module ${data.dim ? "dim" : ""} ${data.crossings.length ? "has-conflict" : ""}`}>
+		<Handle type="target" position={Position.Left} className="h-hidden" />
+		<div className="rn-module-label">
+			<span>{data.node.label}</span>
+			<Disclosure data={data} />
+		</div>
+		<div className="rn-module-summary">
+			<span>{data.node.sub}</span>
+			<Occupants list={data.occupants} />
+		</div>
+		<Crossings data={data} />
+	</div>
+));
+
 const ComponentNode = memo(({ data }: NodeProps<Node<NodeData>>) => (
-	<div
-		className={`rn-component ${data.dim ? "dim" : ""} ${data.focus ? "focus" : ""} ${data.conflict ? `conflict sev-${data.conflict.severity}` : ""}`}
-	>
+	<div className={`rn-component ${data.dim ? "dim" : ""} ${data.focus ? "focus" : ""} ${data.crossings.length ? "conflict" : ""}`}>
 		<Handle type="target" position={Position.Left} className="h-hidden" />
 		<div className="rn-component-head">
 			<span className="rn-component-label">{data.node.label}</span>
 			<Occupants list={data.occupants} />
 		</div>
-		{data.conflict && <div className="rn-conflict-tag">{data.conflict.flights.join(" × ")}</div>}
+		<div className="rn-component-disclosure">
+			<Disclosure data={data} />
+		</div>
+		<Crossings data={data} />
 	</div>
 ));
 
 const SymbolNode = memo(({ data }: NodeProps<Node<NodeData>>) => (
-	<div
-		className={`rn-symbol ${data.dim ? "dim" : ""} ${data.focus ? "focus" : ""} ${data.conflict ? `conflict sev-${data.conflict.severity}` : ""}`}
-	>
+	<div className={`rn-symbol ${data.dim ? "dim" : ""} ${data.focus ? "focus" : ""} ${data.crossings.length ? "conflict" : ""}`}>
 		<Handle type="target" position={Position.Left} className="h-hidden" />
-		<span className="rn-symbol-label">{data.node.label}</span>
-		<Occupants list={data.occupants} />
+		<div className="rn-symbol-head">
+			<span className="rn-symbol-label">{data.node.label}</span>
+			<Occupants list={data.occupants} />
+		</div>
+		<Crossings data={data} />
 	</div>
 ));
 
@@ -137,14 +183,15 @@ function RouteEdgeView({ id, sourceX, sourceY, targetX, targetY, data }: EdgePro
 		targetPosition: Position.Left,
 		curvature: 0.32,
 	});
+	const labelWidth = (e.label?.length ?? 0) * 5.8 + 16;
 	return (
 		<g className={`re re-${e.mode} re-${e.state} ${data.dim ? "dim" : ""} ${data.focus ? "focus" : ""}`}>
 			<BaseEdge id={id} path={path} />
-			{e.state === "held" && (
-				<g transform={`translate(${lx}, ${ly})`} className="re-hold-tag">
-					<rect x={-19} y={-9} width={38} height={18} rx={4} />
+			{e.label && (
+				<g transform={`translate(${lx}, ${ly})`} className={`re-hold-tag ${e.state === "partial" ? "re-partial-tag" : ""}`}>
+					<rect x={-labelWidth / 2} y={-10} width={labelWidth} height={20} rx={4} />
 					<text textAnchor="middle" y={4}>
-						HOLD
+						{e.label}
 					</text>
 				</g>
 			)}
@@ -152,21 +199,43 @@ function RouteEdgeView({ id, sourceX, sourceY, targetX, targetY, data }: EdgePro
 	);
 }
 
-const nodeTypes = { flight: FlightNode, module: ModuleNode, component: ComponentNode, symbol: SymbolNode, quiet: QuietNode };
+const nodeTypes = { flight: FlightNode, module: ModuleNode, component: ComponentNode, symbol: SymbolNode };
 const edgeTypes = { route: RouteEdgeView };
 
-export function Radar({ state, selection, hover, onSelect, onHover }: Props) {
-	const structure = useMemo(() => buildStructure(state), [state]);
-	const signature = useMemo(() => signatureOf(structure), [structure]);
+/** Project-keyed mount prevents disclosure and layout leaking between repositories. */
+export function Radar(props: Props) {
+	return <TrafficGraph key={props.state.project.id} {...props} />;
+}
+
+function TrafficGraph({ state, selection, hover, onSelect, onHover }: Props) {
+	const [disclosure, setDisclosure] = useState<GraphDisclosure>({ expandedModules: new Set(), expandedFiles: new Set() });
+	const structure = useMemo(() => buildStructure(state, disclosure), [state, disclosure]);
+	const signature = signatureOf(structure);
 	const [graph, setGraph] = useState<RadarGraph | null>(null);
+	const [layoutError, setLayoutError] = useState(false);
 	const flow = useRef<ReactFlowInstance<Node<NodeData>, Edge<EdgeData>> | null>(null);
 	const lastFit = useRef("");
+	const toggle = useCallback((item: NonNullable<RadarNode["disclosure"]>) => {
+		setDisclosure((current) => {
+			const key = item.kind === "module" ? "expandedModules" : "expandedFiles";
+			const next = new Set(current[key]);
+			if (next.has(item.key)) next.delete(item.key);
+			else next.add(item.key);
+			return { ...current, [key]: next };
+		});
+	}, []);
 
-	// Re-layout only when the structure changes; statuses update in place.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: signature captures structure.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: signature captures all geometry, not activity and clearance text.
 	useEffect(() => {
 		let cancelled = false;
-		layout(structure).then((g) => !cancelled && setGraph(g));
+		setLayoutError(false);
+		layout(structure)
+			.then((g) => {
+				if (!cancelled) setGraph(g);
+			})
+			.catch(() => {
+				if (!cancelled) setLayoutError(true);
+			});
 		return () => {
 			cancelled = true;
 		};
@@ -174,44 +243,35 @@ export function Radar({ state, selection, hover, onSelect, onHover }: Props) {
 
 	const focusFlight = hover ?? (selection?.kind === "flight" ? selection.id : null);
 	const focusCongestion = selection?.kind === "congestion" ? state.traffic.congestions.find((c) => c.key === selection.key) : undefined;
-
 	const { nodes, edges } = useMemo(() => {
 		if (!graph) return { nodes: [] as Node<NodeData>[], edges: [] as Edge<EdgeData>[] };
+		const freshNodes = new Map(structure.nodes.map((n) => [n.id, n]));
+		const placed = graph.nodes.filter((n) => freshNodes.has(n.id));
 		const liveEdges = structure.edges;
 		const focusFlights = new Set(focusCongestion ? focusCongestion.flights : focusFlight ? [focusFlight] : []);
 		const related = new Set<string>();
-		for (const e of liveEdges) {
-			if (!focusFlights.has(e.flightId)) continue;
-			related.add(e.source);
-			related.add(e.target);
-		}
-		const parents = new Map(graph.nodes.map((n) => [n.id, n.parent]));
+		for (const e of liveEdges)
+			if (focusFlights.has(e.flightId)) {
+				related.add(e.source);
+				related.add(e.target);
+			}
+		const parents = new Map(placed.map((n) => [n.id, n.parent]));
 		for (const id of [...related]) {
-			let p = parents.get(id);
-			while (p) {
-				related.add(p);
-				p = parents.get(p);
+			let parent = parents.get(id);
+			while (parent) {
+				related.add(parent);
+				parent = parents.get(parent);
 			}
 		}
 		const occupants = new Map<string, NodeData["occupants"]>();
-		for (const e of liveEdges) {
-			if (e.kind !== "route" || e.state === "landed") continue;
-			occupants.set(e.target, [...(occupants.get(e.target) ?? []), { flightId: e.flightId, state: e.state }]);
-		}
-		const conflicts = new Map<string, NonNullable<NodeData["conflict"]>>();
-		for (const c of state.traffic.congestions) {
-			if (c.control === "caution") continue;
-			for (const r of c.resources) {
-				const node = graph.endpoint[r] ?? structure.endpoint[r];
-				if (node) conflicts.set(node, { key: c.key, flights: c.flights, severity: c.severity });
-			}
-		}
+		for (const e of liveEdges)
+			if (e.kind === "route") occupants.set(e.target, [...(occupants.get(e.target) ?? []), { flightId: e.flightId, state: e.state }]);
 		const anyFocus = focusFlights.size > 0;
-		const nodes: Node<NodeData>[] = graph.nodes.map((n) => {
+		const nodes: Node<NodeData>[] = placed.map((positioned) => {
+			const fresh = freshNodes.get(positioned.id)!;
+			const n = { ...positioned, ...fresh, width: positioned.width, height: positioned.height };
 			const f = n.flightId ? state.flights.find((x) => x.id === n.flightId) : undefined;
-			const badge = f ? flightBadge(f, state.traffic.clearances[f.id]) : undefined;
-			const isLanded = f && ["landed", "cancelled", "failed", "lost"].includes(f.phase);
-			const plan = f?.plan ? ` · plan v${f.plan.planVersion}` : "";
+			const badge = f ? flightBadge(f, state.traffic.clearances[f.id], state) : undefined;
 			return {
 				id: n.id,
 				type: n.kind,
@@ -219,24 +279,28 @@ export function Radar({ state, selection, hover, onSelect, onHover }: Props) {
 				parentId: n.parent,
 				draggable: false,
 				selectable: true,
+				ariaLabel: f ? `${f.title}, ${badge?.label ?? ""}` : n.label,
 				style: { width: n.width, height: n.height },
 				zIndex: n.kind === "flight" ? 20 : undefined,
 				data: {
 					node: n,
 					tone: badge?.tone,
 					badge: badge?.label,
-					phase: f ? `${f.phase}${plan}` : undefined,
-					activity: f && !isLanded && f.activity ? f.activity.text : f?.landedCommit ? `landed · ${f.landedCommit.slice(0, 7)}` : undefined,
-					dim: anyFocus ? !related.has(n.id) && !(n.flightId && focusFlights.has(n.flightId)) : !!isLanded,
+					activity: f?.activity?.text ?? f?.agentRuntime,
+					dim: anyFocus && !related.has(n.id) && !(n.flightId && focusFlights.has(n.flightId)),
 					focus: anyFocus && (related.has(n.id) || (!!n.flightId && focusFlights.has(n.flightId))),
-					conflict: conflicts.get(n.id),
+					crossings: state.traffic.congestions
+						.filter((c) => n.congestionKeys.includes(c.key))
+						.map((c) => ({ key: c.key, flights: c.flights })),
 					occupants: occupants.get(n.id) ?? [],
+					onDisclosure: toggle,
+					onCrossing: (key) => onSelect({ kind: "congestion", key }),
 				},
 			};
 		});
+		const shownIds = new Set(nodes.map((n) => n.id));
 		const edges: Edge<EdgeData>[] = liveEdges
-			.filter((e) => graph.nodes.some((n) => n.id === e.source) && graph.nodes.some((n) => n.id === e.target))
-			// Read routes are context, not traffic: shown only for the Flight in focus.
+			.filter((e) => shownIds.has(e.source) && shownIds.has(e.target))
 			.filter((e) => e.state !== "read" || focusFlights.has(e.flightId))
 			.map((e) => ({
 				id: e.id,
@@ -249,40 +313,41 @@ export function Radar({ state, selection, hover, onSelect, onHover }: Props) {
 				data: { edge: e, dim: anyFocus && !focusFlights.has(e.flightId), focus: anyFocus && focusFlights.has(e.flightId) },
 			}));
 		return { nodes, edges };
-	}, [graph, structure, state, focusFlight, focusCongestion]);
+	}, [graph, structure, state, focusFlight, focusCongestion, toggle, onSelect]);
 
-	// Fit the whole airspace whenever its structure changes (bounds are known from the layout).
 	useEffect(() => {
 		if (!graph || !flow.current || lastFit.current === graph.signature) return;
 		lastFit.current = graph.signature;
-		const abs = absolutePositions(graph.nodes);
-		const xs = graph.nodes.filter((n) => !n.parent).flatMap((n) => [abs[n.id].x, abs[n.id].x + n.width]);
-		const ys = graph.nodes.filter((n) => !n.parent).flatMap((n) => [abs[n.id].y, abs[n.id].y + n.height]);
-		if (!xs.length) return;
-		const bounds = {
-			x: Math.min(...xs) - 90,
-			y: Math.min(...ys) - 20,
-			width: Math.max(...xs) - Math.min(...xs) + 110,
-			height: Math.max(...ys) - Math.min(...ys) + 70,
-		};
-		requestAnimationFrame(() => flow.current?.fitBounds(bounds, { padding: 0.06, duration: 450 }));
+		const top = graph.nodes.filter((n) => !n.parent);
+		if (!top.length) return;
+		const xs = top.flatMap((n) => [n.x, n.x + n.width]);
+		const ys = top.flatMap((n) => [n.y, n.y + n.height]);
+		requestAnimationFrame(() =>
+			flow.current?.fitBounds(
+				{
+					x: Math.min(...xs) - 100,
+					y: Math.min(...ys) - 20,
+					width: Math.max(...xs) - Math.min(...xs) + 120,
+					height: Math.max(...ys) - Math.min(...ys) + 40,
+				},
+				{ padding: 0.06, duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 180 },
+			),
+		);
 	}, [graph]);
 
 	return (
-		<div className="radar">
+		<section className="radar" aria-label="Active task routes and code areas">
 			<ReactFlow<Node<NodeData>, Edge<EdgeData>>
 				nodes={nodes}
 				edges={edges}
 				nodeTypes={nodeTypes}
 				edgeTypes={edgeTypes}
-				onInit={(i) => {
-					flow.current = i;
+				onInit={(instance) => {
+					flow.current = instance;
 				}}
 				onNodeClick={(_, n) => {
-					const d = n.data;
-					if (d.node.kind === "flight" && d.node.flightId) onSelect({ kind: "flight", id: d.node.flightId });
-					else if (d.conflict) onSelect({ kind: "congestion", key: d.conflict.key });
-					else if (d.node.resource) onSelect({ kind: "resource", id: d.node.resource });
+					if (n.data.node.flightId) onSelect({ kind: "flight", id: n.data.node.flightId });
+					else if (n.data.node.resource) onSelect({ kind: "resource", id: n.data.node.resource });
 				}}
 				onNodeMouseEnter={(_, n) => n.data.node.flightId && onHover(n.data.node.flightId)}
 				onNodeMouseLeave={() => onHover(null)}
@@ -290,32 +355,22 @@ export function Radar({ state, selection, hover, onSelect, onHover }: Props) {
 				nodesDraggable={false}
 				nodesConnectable={false}
 				proOptions={{ hideAttribution: true }}
-				minZoom={0.3}
+				minZoom={0.25}
 				maxZoom={2}
 				fitView
 			>
 				<Background gap={28} size={1} color="var(--grid)" />
 			</ReactFlow>
-			{state.flights.length === 0 && (
+			{(structure.nodes.length === 0 || layoutError) && (
 				<div className="radar-empty">
-					<div className="radar-empty-title">No traffic</div>
-					<div className="radar-empty-sub">Delegate Missions to see Flights, their routes, and where they intersect.</div>
+					<div className="radar-empty-title">{layoutError ? "Traffic map unavailable" : "No active routes"}</div>
+					<div className="radar-empty-sub">
+						{layoutError
+							? "Task details and coordination decisions remain available in Work."
+							: "Active plans appear here when agents begin work."}
+					</div>
 				</div>
 			)}
-		</div>
+		</section>
 	);
-}
-
-function absolutePositions(nodes: RadarNode[]): Record<string, { x: number; y: number }> {
-	const byId = new Map(nodes.map((n) => [n.id, n]));
-	const out: Record<string, { x: number; y: number }> = {};
-	const resolve = (n: RadarNode): { x: number; y: number } => {
-		if (out[n.id]) return out[n.id];
-		const parent = n.parent ? byId.get(n.parent) : undefined;
-		const base = parent ? resolve(parent) : { x: 0, y: 0 };
-		out[n.id] = { x: base.x + n.x, y: base.y + n.y };
-		return out[n.id];
-	};
-	for (const n of nodes) resolve(n);
-	return out;
 }

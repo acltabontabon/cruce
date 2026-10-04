@@ -15,9 +15,14 @@ their assumptions just went stale so they re-plan instead of re-working.
 > *Git coordinates code. Cruce coordinates the agents changing it.*
 > Artifacts gives every agent its own safe repository. Cruce decides how all of those agents should move together.
 
-**Live:** https://cruce.acltabontabon.workers.dev (press ▶ — the demo runs on real Cloudflare Artifacts)
+The current interface opens on **Work**: three tasks, their shared scope, and the decisions that need
+attention. **Traffic** is an optional view of active routes and code areas. A fresh demo pauses at the
+real partial-clearance moment; **Continue demo** runs the rest of the story.
 
-![radar](docs/img/radar-partial.jpg)
+![Work at the paused overlap](docs/img/work-overlap.jpg)
+
+The [hosted MVP](https://cruce.acltabontabon.workers.dev) runs on real Cloudflare Artifacts. This
+refinement is available in the checkout and has not been deployed to production.
 
 ---
 
@@ -31,13 +36,14 @@ their assumptions just went stale so they re-plan instead of re-working.
 | **Partial clearance** | Only the contested airspace is held. F-021 keeps building `RefreshTokenRepository` while `TokenValidator.validate` waits for F-022. |
 | **Publish gate** | Artifacts tokens are repo-scoped, so agents never hold a write credential. Cruce rebuilds the agent's commit, maps the *real* diff onto symbols, and only if it is inside clearance pushes it with a 60-second token that is revoked immediately. |
 | **Landing re-evaluates traffic** | Landing merges into canonical for real (three-way merge, Git notes with the coordination context). Every Flight whose route intersects what changed is marked **stale**, refreshed onto the new baseline, and asked to amend its plan. |
-| **Exception-driven** | Independent work is cleared automatically. Humans see "3 Flights · 1 congestion · 0 decisions required" and can override any decision (allow both, X first, hold, reroute, cancel) — every decision explains itself. |
+| **Exception-driven** | Independent work is cleared automatically. Humans see three familiar tasks, the automatically coordinated overlap, and a labeled attention count and can override any decision (allow both, X first, hold, reroute, cancel) — every decision explains itself. |
 
 ## Run it
 
 ### Demo mode (no credentials needed to watch; deterministic)
 
-The hosted demo: https://cruce.acltabontabon.workers.dev → **▶ Play** (or **⏭** to step).
+The local demo opens paused with three active tasks. Use **Continue demo**, or open Demo options to
+step, **Reset to overlap**, or **Replay from beginning**. Existing sessions keep their progress.
 
 Locally, without any Cloudflare account (local Git backend in Durable Object storage):
 
@@ -56,7 +62,11 @@ pnpm exec cf dev
 
 The demo replays one story with three scripted agents — JWT migration (F-022), refresh-token
 rotation (F-021), session cleanup (F-023) — but every decision comes from the controller, every
-diff passes the real publish gate, and every landing is a real merge. Commit ids are reproducible.
+diff passes the real publish gate, and every landing is a real merge. Commit ids are reproducible. Demo activity and test reports are explicitly scripted; the independent
+verifier executes the tests. Task details separate **Can continue** from **Waiting for**, identify the
+blocking task, and show real published or integrated diffs on demand.
+
+![Partial clearance in task detail](docs/img/task-partial.jpg)
 
 ### Live mode (real coding agents)
 
@@ -71,6 +81,15 @@ Two runtimes speak the same agent protocol:
   Launch several in parallel to watch real agents coordinate.
 - **Cloudflare Sandbox** — one container per Flight running Claude Code, orchestrated by a Workflow.
   Needs Docker (to build the image) and `ANTHROPIC_API_KEY`: `CRUCE_SANDBOX=on pnpm exec cf deploy …`.
+
+In Work, one prompt and **Run** launch a Sandbox task when the runtime is configured. Otherwise Cruce
+shows external-runner connection instructions. Controller access uses a masked dialog; browser
+credentials remain in memory. Automatic coordination needs no acceptance; consequential overrides
+live in the selected decision's menu.
+
+Validation applies only to the exact approved commit. Integration requires the newest approved
+publish's passing result. Reroute requests persist until acknowledged; an amendment and new clearance
+show the resulting route. Healthy waiting agents heartbeat without using execution rounds.
 
 Details: [docs/demo.md](docs/demo.md) · [docs/cloudflare-setup.md](docs/cloudflare-setup.md)
 
@@ -99,5 +118,11 @@ pnpm typecheck       # Worker, UI, and test programs
 pnpm lint            # biome
 bash demo/scripts/verify-scenario.sh   # replay the demo story with plain git + node --test
 ```
+
+The refinement was checked with typecheck, lint, Vitest, an offline build, the independent Git
+scenario, and browser flows at 1440, 1024, 768 and 390 pixels. Isolated Artifacts checks covered forks,
+pushes, clone SHA equality, notes, token revocation and queue event delivery. A real external Claude
+Code run completed plan → publish → validation → integration and passed independent clone tests.
+Sandbox execution remains unverified here: no configured Workflow/container and no Anthropic API key.
 
 "Cruce" (Spanish: *crossing*, *intersection*) is a working name. Apache-2.0.

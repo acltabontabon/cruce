@@ -89,3 +89,25 @@ Then run \`cruce status\` and stop. Do not implement yet.
 
 ${RULES}`;
 }
+
+export function reroutePrompt(m: MissionText, resources: string[], brief: string): string {
+	return `You are run ${m.flightId}, coordinated by Cruce.
+
+Task: ${m.title}
+${m.description}
+
+A developer asked you to find a route around this waiting scope:
+${resources.map((r) => `- ${r}`).join("\n")}
+
+Current plan and clearance:
+${brief}
+
+Inspect the code and find an alternative that still completes the task. Preserve all existing working-tree changes.
+Do not implement changes during this step and do not drop task requirements just to remove an overlap.
+If a safe alternative exists, write the amended plan to ${planPath(m)} and run:
+  cruce amend ${planPath(m)} --reason "developer requested a route around waiting scope"
+If no safe alternative exists, keep the plan and report why with cruce activity.
+Then stop. The runtime will acknowledge receipt; Cruce's plan and clearance show the actual outcome.
+
+${RULES}`;
+}

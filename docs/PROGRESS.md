@@ -47,3 +47,32 @@ Short, dated entries so another agent can continue. Newest last.
   released 2026-09-15) fits the interface; not integrated (no verified API access).
 - Cruce source mirrored to `cruce/cruce-platform` (Workers Builds connection is a dashboard step).
 - BLOCKED (needs the owner): Sandbox Flights need Docker running + `ANTHROPIC_API_KEY` in `.dev.vars`.
+
+### Refinement — familiar work, visible coordination
+
+- Replaced the permanent radar layout with Work and optional Traffic. Added readable task/decision
+  details, contextual overrides, typed activity, URL/Back navigation, masked in-memory controller
+  access, responsive layouts, and on-demand Git changes/history. Screenshots are in `docs/img/`.
+- Fresh demos idempotently prepare the real first seven steps and pause at partial clearance;
+  existing sessions remain intact. Continue, reset-to-overlap and complete replay preserve the story.
+- Added accepted-head/merge-base and integration/first-parent Changes API; snapshots and realtime
+  updates include controller-derived integration blockers. Obsolete sockets and reads are disposed,
+  and semantic command errors surface without discarding task input.
+- Validation attaches only to exact approved commits; only the latest approved publish can satisfy
+  integration. Test failures/timeouts retain exit status and missing tests cannot pass validation.
+  Reroute instructions persist with receipt acknowledgements and ordinary plan amendments. Healthy
+  waiting agents heartbeat without consuming rounds; alarm lifecycle, silent held-run expiry,
+  initialization races and failed launch cleanup have focused regressions.
+- Typecheck now checks Worker, UI and test projects; favicon accessibility lint fixed. Browser checks
+  cover Work → detail → decision → Traffic → diff/history, Back, repository switching, reconnects,
+  keyboard dialogs and 1440/1024/768/390 widths. A disposable protocol fixture verified launch-error
+  input retention. Full demo ended at unchanged canonical `801583e`; independent scenario passed.
+- Isolated real Artifacts verification passed fork/push/clone/notes, read-token push rejection,
+  write/read revocation and push-event queue delivery. A real external Claude Code run completed
+  plan → clearance → publish → 11 passing tests → integration; independent clone/tests/notes matched.
+  All disposable repositories, queue/subscription and test processes were cleaned up.
+- Sandbox execution remains unverified: no configured Workflow/container or Anthropic API key.
+  Production was not deployed. README, architecture and demo walkthrough updated.
+- Final verification: `pnpm typecheck`, `pnpm lint`, `pnpm test` (156 tests across 20 files),
+  `pnpm exec cf build --mode offline`, and the independent scenario verifier all pass. Remaining
+  tooling notices are Biome's existing configuration deprecation and large graph bundle warnings.

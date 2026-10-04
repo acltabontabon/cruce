@@ -1,23 +1,43 @@
-import { resourceLabel } from "../../core/airspace.ts";
-import type { ControllerState, TowerEvent } from "../../core/controller.ts";
+import { isAncestorOrEqual } from "../../core/airspace.ts";
+import type { ControllerState } from "../../core/controller.ts";
 import type { Flight } from "../../core/domain.ts";
 import type { Congestion } from "../../core/traffic.ts";
 import type { GitInfo } from "../../shared/api.ts";
-import { congestionFor, flightBadge, LEVEL_NAMES, label, missionOf, routeOf, short, timeOf } from "../model.ts";
+import { Badge, Icon } from "../components.tsx";
+import {
+	agentName,
+	attentionItems,
+	congestionFor,
+	congestionNeedsDecision,
+	decisionLabel,
+	eventText,
+	flightBadge,
+	friendlyText,
+	isActive,
+	LEVEL_NAMES,
+	label,
+	missionOf,
+	routeOf,
+	short,
+	taskName,
+	timeOf,
+} from "../model.ts";
 import type { Selection } from "../radar/Radar.tsx";
+import { Changes } from "./Changes.tsx";
 
-export type Act = (cmd: Record<string, unknown>) => void;
-
+export type Act = (cmd: Record<string, unknown>) => Promise<unknown>;
 interface Props {
 	state: ControllerState;
 	git: GitInfo | null;
+	projectId: string;
 	selection: Selection;
-	onSelect(sel: Selection): void;
-	act: Act;
+	integrationBlockers: Record<string, string[]>;
 	busy: boolean;
+	onSelect(selection: Selection): void;
+	act: Act;
 	onHistory(target: string): void;
+	onTraffic(): void;
 }
-
 export function ContextPanel(props: Props) {
 	const { state, selection } = props;
 	if (selection?.kind === "flight") {
@@ -27,582 +47,585 @@ export function ContextPanel(props: Props) {
 	if (selection?.kind === "congestion") {
 		const c = state.traffic.congestions.find((x) => x.key === selection.key);
 		if (c) return <CongestionDetail {...props} c={c} />;
+		return (
+			<div className="resolved-state">
+				<Icon name="check" size={26} />
+				<h1>This overlap has resolved</h1>
+				<p>The controller has rechecked the active plans. See task activity for the sequence of decisions.</p>
+				<button type="button" className="btn" onClick={() => props.onSelect(null)}>
+					Back to work
+				</button>
+			</div>
+		);
 	}
 	if (selection?.kind === "resource") return <ResourceDetail {...props} resource={selection.id} />;
-	return <TrafficSummary {...props} />;
-}
-
-// ── traffic summary ───────────────────────────────────────────────────
-
-function TrafficSummary({ state, onSelect, act, busy }: Props) {
-	const congestions = state.traffic.congestions;
-	const attention = [...state.traffic.attention, ...state.attention];
-	const blocking = congestions.filter((c) => c.control !== "caution");
-	const cautions = congestions.filter((c) => c.control === "caution");
-	const replanning = state.flights.filter((f) => f.stale && !["landed", "failed", "lost", "cancelled"].includes(f.phase));
 	return (
-		<aside className="ctx">
-			<div className="ctx-head">
-				<div className="eyebrow">Traffic</div>
-				<div className="ctx-title">{headline(state)}</div>
+		<div className="empty-work">
+			<h2>This run is no longer available</h2>
+			<p>The demo may have been reset.</p>
+		</div>
+	);
+}
+function FlightDetail({ state, f, projectId, integrationBlockers, onSelect, act, busy, onHistory, onTraffic }: Props & { f: Flight }) {
+	const clearance = state.traffic.clearances[f.id];
+	const badge = flightBadge(f, clearance, state);
+	const mission = missionOf(state, f);
+	const active = isActive(f);
+	const crossings = congestionFor(state, f.id);
+	const route = routeOf(f, state);
+	const latest = f.publishes.filter((p) => p.approved).at(-1);
+	const validationSkipped = latest?.tests?.summary === "no test script (validation skipped)";
+	const blockers = integrationBlockers[f.id] ?? [];
+	const events = state.log
+		.filter((e) => e.flightId === f.id && !["artifacts.event", "push.received", "flight.activity"].includes(e.type))
+		.slice(-18);
+	return (
+		<article className="task-detail">
+			<div className="detail-title-row">
+				<div>
+					<div className="page-kicker">
+						<span className="mono">{f.id}</span>
+						<span>Agent run</span>
+					</div>
+					<h1>{f.title}</h1>
+					<div className="detail-meta">
+						<Badge badge={badge} />
+						<span>{agentName(f)}</span>
+						{f.agent === "mock" && <span className="muted">Scripted demo</span>}
+						<span className="muted">Started {timeOf(f.startedAt ?? f.createdAt)}</span>
+					</div>
+				</div>
+				{active && (
+					<details className="action-menu">
+						<summary aria-label="Run actions">
+							<Icon name="more" />
+						</summary>
+						<div className="menu-content">
+							{clearance?.held.length ? (
+								<button
+									type="button"
+									disabled={busy || f.instruction?.status === "pending"}
+									onClick={() => void act({ type: "reroute", flightId: f.id }).catch(() => {})}
+								>
+									Request reroute
+								</button>
+							) : null}
+							{state.project.mode === "live" && (
+								<button
+									type="button"
+									disabled={busy || blockers.length > 0}
+									onClick={() => void act({ type: "land", flightId: f.id }).catch(() => {})}
+								>
+									Integrate changes
+								</button>
+							)}
+							<button
+								type="button"
+								className="danger"
+								disabled={busy}
+								onClick={() => void act({ type: "cancel", flightId: f.id }).catch(() => {})}
+							>
+								Cancel run
+							</button>
+						</div>
+					</details>
+				)}
 			</div>
-			{attention.length > 0 && (
-				<Block title="Needs a controller" tone="collision">
-					{attention.map((a) => (
-						<div key={a.id} className="attn">
-							<div className="attn-title">{a.title}</div>
-							<div className="attn-detail">{a.detail}</div>
-							{state.attention.some((x) => x.id === a.id) && (
-								<button type="button" className="btn small" disabled={busy} onClick={() => act({ type: "dismiss", attentionId: a.id })}>
-									Acknowledge
+			{f.failureReason && (
+				<p className="notice error">
+					<Icon name="alert" />
+					{friendlyText(f.failureReason, state)}
+				</p>
+			)}
+			{f.stale && (
+				<div className="notice">
+					<Icon name="clock" />
+					<div>
+						<strong>Updating the plan</strong>
+						<p>{taskName(state, f.stale.byFlight)} changed the baseline. Cruce requires a refreshed plan before publishing more changes.</p>
+					</div>
+				</div>
+			)}
+			{f.instruction && active && (
+				<p className="notice">
+					<Icon name="traffic" />
+					{f.instruction.status === "pending"
+						? "Reroute requested. Waiting for the agent to receive it."
+						: "The agent received the reroute request. Plan changes appear in activity."}
+				</p>
+			)}
+			<div className="detail-columns">
+				<div className="detail-main">
+					<section className="detail-section">
+						<h2>Summary</h2>
+						<p>{mission?.description ?? f.title}</p>
+						{active && f.activity && (
+							<div className="current-activity">
+								<span className="status-dot" />
+								<span>{friendlyText(f.activity.text, state)}</span>
+							</div>
+						)}
+					</section>
+					{f.plan && (
+						<section className="detail-section">
+							<div className="section-heading">
+								<h2>Plan</h2>
+								<span className="muted small">v{f.plan.planVersion}</span>
+							</div>
+							<p>{friendlyText(f.plan.intent, state)}</p>
+							{clearance && active ? (
+								<div className="clearance-columns">
+									<div>
+										<h3>
+											<Icon name="check" />
+											Can continue
+										</h3>
+										{clearance.cleared.length ? (
+											<ul className="scope-list">
+												{clearance.cleared.map((r) => (
+													<li key={r}>
+														<Icon name="check" size={13} />
+														<button type="button" className="resource-link mono" onClick={() => onSelect({ kind: "resource", id: r })}>
+															{label(r, state.index)}
+														</button>
+													</li>
+												))}
+											</ul>
+										) : (
+											<p className="muted small">{clearance.held.length ? "Work is waiting for clearance." : "Read-only scope."}</p>
+										)}
+									</div>
+									{clearance.held.length > 0 && (
+										<div className="waiting-scope">
+											<h3>
+												<Icon name="pause" />
+												Waiting for
+											</h3>
+											<ul className="scope-list">
+												{clearance.held.map((h) => (
+													<li key={h.resource}>
+														<Icon name="pause" size={13} />
+														<div>
+															<button
+																type="button"
+																className="resource-link mono"
+																onClick={() => onSelect({ kind: "resource", id: h.resource })}
+															>
+																{label(h.resource, state.index)}
+															</button>
+															<p>
+																{h.waitingOn === "replan"
+																	? "Updated plan"
+																	: h.waitingOn === "controller"
+																		? "Held by a human decision"
+																		: taskName(state, h.waitingOn)}
+															</p>
+														</div>
+													</li>
+												))}
+											</ul>
+											<span className="secondary-label">{clearance.status === "partial" ? "Partial clearance" : "Hold"}</span>
+										</div>
+									)}
+								</div>
+							) : (
+								<div className="completed-scope">
+									{route.map((group) => (
+										<div key={group.module}>
+											<h3>{group.module}</h3>
+											<p className="mono muted">
+												{group.entries
+													.filter((e) => e.mode !== "read")
+													.map((e) => e.label)
+													.join(" · ")}
+											</p>
+										</div>
+									))}
+								</div>
+							)}
+							{clearance?.landAfter.length ? (
+								<p className="integration-wait">
+									<Icon name="clock" />
+									Can work now. Integration waits for {clearance.landAfter.map((x) => taskName(state, x.flightId)).join(", ")}.
+								</p>
+							) : null}
+						</section>
+					)}
+					{crossings.length > 0 && (
+						<section className="detail-section">
+							<div className="section-heading">
+								<h2>Coordination</h2>
+								<button type="button" className="link" onClick={onTraffic}>
+									View in Traffic
+									<Icon name="arrow" size={13} />
+								</button>
+							</div>
+							{crossings.map((c) => (
+								<button type="button" className="decision-row" key={c.key} onClick={() => onSelect({ kind: "congestion", key: c.key })}>
+									<Icon name="traffic" size={20} />
+									<span>
+										<strong>{c.rightOfWay ? `${taskName(state, c.rightOfWay.winner)} goes first` : c.label || "Shared scope"}</strong>
+										<span>
+											{c.label} · {decisionLabel(c, state)}
+										</span>
+									</span>
+									<Icon name="chevron" size={15} />
+								</button>
+							))}
+						</section>
+					)}
+					<Changes projectId={projectId} flight={f} canonical={state.canonical.head} />
+					<section className="detail-section">
+						<h2>Activity</h2>
+						<ol className="timeline">
+							{events.map((e) => (
+								<li key={e.seq}>
+									<span
+										className={`timeline-dot ${["publish.rejected", "flight.stale", "flight.failed"].includes(e.type) ? "caution" : ""}`}
+									/>
+									<div>
+										<div className="timeline-title">{eventText(e, state)}</div>
+										{e.type === "plan.amended" && e.detail?.[0] && <p>{friendlyText(e.detail[0], state)}</p>}
+										<time>{timeOf(e.at)}</time>
+									</div>
+								</li>
+							))}
+						</ol>
+					</section>
+				</div>
+				<aside className="detail-aside" aria-label="Run context">
+					<section>
+						<h3>Validation</h3>
+						{latest?.tests ? (
+							<>
+								<span className={`validation-result ${validationSkipped ? "muted" : latest.tests.passed ? "add" : "remove"}`}>
+									<Icon name={validationSkipped ? "pause" : latest.tests.passed ? "check" : "alert"} />
+									{validationSkipped ? "Skipped" : latest.tests.passed ? "Passed" : "Not passed"}
+								</span>
+								<p>{latest.tests.summary}</p>
+								<span className="mono muted small">{short(latest.commit)}</span>
+							</>
+						) : (
+							<p className="muted">No validation reported yet.</p>
+						)}
+					</section>
+					<section>
+						<h3>Integration</h3>
+						{f.landedCommit ? (
+							<>
+								<span className="validation-result add">
+									<Icon name="check" />
+									Integrated into main
+								</span>
+								<p className="mono">{short(f.landedCommit)}</p>
+							</>
+						) : active ? (
+							blockers.length ? (
+								<ul className="blocker-list">
+									{blockers.map((reason) => (
+										<li key={reason}>{friendlyText(reason, state)}</li>
+									))}
+								</ul>
+							) : (
+								<p>Ready for integration.</p>
+							)
+						) : (
+							<p className="muted">Run closed.</p>
+						)}
+						<button type="button" className="link" onClick={() => onHistory(f.id)}>
+							View commit history
+							<Icon name="arrow" size={13} />
+						</button>
+					</section>
+					<details className="advanced-details">
+						<summary>Advanced details</summary>
+						<dl>
+							<dt>Run</dt>
+							<dd className="mono">{f.id}</dd>
+							<dt>Baseline</dt>
+							<dd className="mono">{short(f.baseline)}</dd>
+							<dt>Priority</dt>
+							<dd>{f.priority}</dd>
+							<dt>Runtime</dt>
+							<dd>{f.agentRuntime}</dd>
+							{f.artifact && (
+								<>
+									<dt>Artifacts repository</dt>
+									<dd className="mono">{f.artifact.repo}</dd>
+								</>
+							)}
+							{f.sandboxId && (
+								<>
+									<dt>Sandbox</dt>
+									<dd className="mono">{f.sandboxId}</dd>
+								</>
+							)}
+						</dl>
+						{route.map((g) => (
+							<div key={g.module}>
+								<h4>{g.module}</h4>
+								{g.entries.map((e) => (
+									<p key={e.resource} className="advanced-scope">
+										<span>{e.mode}</span>
+										<span className="mono">{e.label}</span>
+									</p>
+								))}
+							</div>
+						))}
+						{f.plan?.assumptions.length ? (
+							<>
+								<h4>Assumptions</h4>
+								<ul>
+									{f.plan.assumptions.map((a) => (
+										<li key={a}>{friendlyText(a, state)}</li>
+									))}
+								</ul>
+							</>
+						) : null}
+						{f.planHistory.length > 1 && (
+							<>
+								<h4>Plan amendments</h4>
+								{f.planHistory
+									.filter((p) => p.amendment)
+									.map((p) => (
+										<p key={p.planVersion}>
+											v{p.planVersion} · {friendlyText(p.amendment?.reason ?? "", state)}
+										</p>
+									))}
+							</>
+						)}
+						<h4>Leases</h4>
+						{state.leases
+							.filter((l) => l.flightId === f.id)
+							.map((l) => (
+								<p key={l.resource}>
+									<span className="mono">{label(l.resource, state.index)}</span>
+									<br />
+									Expires {timeOf(l.expiresAt)}
+								</p>
+							))}
+					</details>
+				</aside>
+			</div>
+		</article>
+	);
+}
+function CongestionDetail({ state, c, act, busy, onSelect, onTraffic }: Props & { c: Congestion }) {
+	const row = c.rightOfWay;
+	const sharedHold = c.override?.kind === "hold-both";
+	const needsDecision = congestionNeedsDecision(c, state);
+	const semanticAttention = attentionItems(state).filter((a) => a.kind === "semantic" && c.flights.every((id) => a.flights.includes(id)));
+	const evidence = semanticAttention.length ? semanticAttention.map((a) => a.detail) : (row?.because ?? c.why);
+	return (
+		<article className="decision-detail">
+			<div className="page-kicker">
+				Cruce decision<span className={`decision-source ${needsDecision ? "remove" : ""}`}>{decisionLabel(c, state)}</span>
+			</div>
+			<h1>
+				{needsDecision
+					? "These tasks need a decision"
+					: sharedHold
+						? "Shared changes are on hold"
+						: row
+							? `${taskName(state, row.winner)} goes first`
+							: "Work can continue"}
+			</h1>
+			<p className="decision-intro">
+				{needsDecision
+					? "Review the evidence below. Existing scope clearances remain in effect."
+					: sharedHold
+						? "A human decision is holding the shared scope. Each task can continue only within its remaining clearance."
+						: row
+							? "Shared changes are sequenced. Independent work can continue."
+							: friendlyText(c.why[0] ?? "Cruce is checking the overlap.", state)}
+			</p>
+			<section className="crossing-diagram" aria-label={`Shared code: ${c.label}`}>
+				<div className="crossing-tasks">
+					{c.flights.map((id) => (
+						<button type="button" key={id} onClick={() => onSelect({ kind: "flight", id })}>
+							{taskName(state, id)}
+							<span className="mono muted">{id}</span>
+						</button>
+					))}
+				</div>
+				<svg viewBox="0 0 200 104" fill="none" aria-hidden="true">
+					<path d="M0 22h35c60 0 55 60 110 60h55" stroke="var(--working)" strokeWidth="1.5" />
+					<path d="M0 82h35c20 0 32-7 47-25" stroke="var(--caution)" strokeWidth="1.5" strokeDasharray="4 4" />
+					<path d="M110 42c12-12 20-20 40-20h50" stroke="var(--caution)" strokeWidth="1.5" />
+					<circle cx="99" cy="52" r="6" fill="var(--bg)" stroke="var(--caution)" strokeWidth="2" />
+				</svg>
+				<div className="crossing-resource">
+					<Icon name="code" />
+					<span className="mono">{c.label || "Shared scope"}</span>
+				</div>
+			</section>
+			<div className="decision-content">
+				<section className="detail-section">
+					<h2>Why this decision</h2>
+					<ul className="evidence-list">
+						{evidence.map((text) => (
+							<li key={text}>{friendlyText(text, state)}</li>
+						))}
+					</ul>
+					<p className="decision-rule">
+						Source:{" "}
+						{needsDecision
+							? "Semantic check"
+							: c.override
+								? "Human override"
+								: c.level === 4 && !row
+									? "Semantic check"
+									: "Deterministic rules"}
+						{row && !needsDecision && ` · ${row.rule.replace(/-/g, " ")}`}
+					</p>
+				</section>
+				<section className="detail-section">
+					<h2>What happens now</h2>
+					{c.flights.map((id) => {
+						const f = state.flights.find((x) => x.id === id);
+						const clearance = state.traffic.clearances[id];
+						if (!f) return null;
+						return (
+							<div className="decision-outcome" key={id}>
+								<div>
+									<strong>{f.title}</strong>
+									<Badge badge={flightBadge(f, clearance, state)} />
+								</div>
+								{clearance?.cleared.length ? (
+									<p>
+										Can continue: <span className="mono">{clearance.cleared.map((r) => label(r, state.index)).join(", ")}</span>
+									</p>
+								) : null}
+								{clearance?.held.length ? (
+									<p className="waiting-text">
+										Waiting for: <span className="mono">{clearance.held.map((h) => label(h.resource, state.index)).join(", ")}</span>
+									</p>
+								) : null}
+								{clearance?.landAfter.length ? (
+									<p>Integration waits for {clearance.landAfter.map((x) => taskName(state, x.flightId)).join(", ")}.</p>
+								) : null}
+							</div>
+						);
+					})}
+				</section>
+				<div className="decision-actions">
+					<button type="button" className="btn" onClick={onTraffic}>
+						<Icon name="traffic" />
+						View in Traffic
+					</button>
+					<details className="action-menu">
+						<summary className="btn">
+							Change coordination
+							<Icon name="chevron" size={13} />
+						</summary>
+						<div className="menu-content">
+							{c.flights.map((id) => (
+								<button
+									type="button"
+									key={id}
+									disabled={busy}
+									onClick={() => void act({ type: "override", congestionKey: c.key, kind: "first", flightId: id }).catch(() => {})}
+								>
+									{taskName(state, id)} first
+								</button>
+							))}
+							<button
+								type="button"
+								disabled={busy}
+								onClick={() => void act({ type: "override", congestionKey: c.key, kind: "allow-both" }).catch(() => {})}
+							>
+								Allow both
+							</button>
+							<button
+								type="button"
+								disabled={busy}
+								onClick={() => void act({ type: "override", congestionKey: c.key, kind: "hold-both" }).catch(() => {})}
+							>
+								Hold both
+							</button>
+							{row && (
+								<button type="button" disabled={busy} onClick={() => void act({ type: "reroute", flightId: row.loser }).catch(() => {})}>
+									Request reroute for {taskName(state, row.loser)}
+								</button>
+							)}
+							{c.override && (
+								<button
+									type="button"
+									disabled={busy}
+									onClick={() => void act({ type: "clear-override", congestionKey: c.key }).catch(() => {})}
+								>
+									Restore automatic coordination
 								</button>
 							)}
 						</div>
-					))}
-				</Block>
-			)}
-			{replanning.length > 0 && (
-				<Block title="Re-planning">
-					{replanning.map((f) => (
-						<button type="button" key={f.id} className="cg-card" onClick={() => onSelect({ kind: "flight", id: f.id })}>
-							<div className="cg-card-top">
-								<span className="mono">{f.id}</span>
-								<span className="chip tone-caution">STALE</span>
-							</div>
-							<div className="cg-card-row">baseline moved when {f.stale?.byFlight} landed</div>
-							{f.stale?.reasons.slice(0, 2).map((r) => (
-								<div key={r} className="cg-card-row muted">
-									{r}
-								</div>
-							))}
-						</button>
-					))}
-				</Block>
-			)}
-			{blocking.length > 0 && (
-				<Block title="Coordinated">
-					{blocking.map((c) => (
-						<button type="button" key={c.key} className="cg-card" onClick={() => onSelect({ kind: "congestion", key: c.key })}>
-							<div className="cg-card-top">
-								<span className="mono">{c.flights.join(" × ")}</span>
-								<span className={`chip tone-${c.resolution === "auto" ? "clear" : "caution"}`}>
-									{c.resolution === "auto" ? "AUTO-COORDINATED" : "OVERRIDE"}
-								</span>
-							</div>
-							<div className="cg-card-label">{c.label}</div>
-							{c.rightOfWay && (
-								<div className="cg-card-row">
-									<span className="mono">{c.rightOfWay.winner}</span> has right-of-way ·{" "}
-									<span className="muted">{c.rightOfWay.rule.replace("-", " ")}</span>
-								</div>
-							)}
-						</button>
-					))}
-				</Block>
-			)}
-			{cautions.length > 0 && (
-				<Block title="Watching">
-					{cautions.map((c) => (
-						<button type="button" key={c.key} className="cg-card quiet" onClick={() => onSelect({ kind: "congestion", key: c.key })}>
-							<div className="cg-card-top">
-								<span className="mono">{c.flights.join(" × ")}</span>
-								<span className="chip tone-muted">CAUTION</span>
-							</div>
-							<div className="cg-card-label">{c.label || "shared area"}</div>
-						</button>
-					))}
-				</Block>
-			)}
-			{!congestions.length && !attention.length && !replanning.length && (
-				<div className="ctx-empty">
-					{state.flights.some((f) => f.plan && !["landed", "failed", "lost", "cancelled"].includes(f.phase))
-						? "All active routes are independent. Every Flight is cleared."
-						: state.flights.length && state.flights.every((f) => f.phase === "landed")
-							? "Every Flight has landed. Canonical carries all of their work."
-							: "Waiting for Flight Plans."}
+					</details>
 				</div>
-			)}
-			<ArtifactsActivity state={state} />
-			<Block title="Canonical">
-				<KV k="repository" v={state.project.repo} mono />
-				<KV k="head" v={short(state.canonical.head)} mono />
-				<KV k="landed" v={`${state.flights.filter((f) => f.phase === "landed").length} Flight(s)`} />
-				<KV k="index" v={`${state.index.files.length} files · ${state.index.modules.length} modules`} />
-			</Block>
-		</aside>
-	);
-}
-
-function headline(s: ControllerState) {
-	const blocking = s.traffic.congestions.filter((c) => c.control !== "caution").length;
-	const attention = s.attention.length + s.traffic.attention.length;
-	const active = s.flights.filter((f) => f.plan && !["landed", "failed", "lost", "cancelled"].includes(f.phase)).length;
-	const stale = s.flights.filter((f) => f.stale && !["landed", "failed", "lost", "cancelled"].includes(f.phase)).length;
-	if (attention) return `${attention} decision${attention === 1 ? "" : "s"} required`;
-	if (stale && !blocking) return `${stale} Flight${stale === 1 ? "" : "s"} re-planning on the new baseline`;
-	if (blocking) return `${blocking} congestion${blocking === 1 ? "" : "s"}, coordinated automatically`;
-	if (active) return "Clear skies";
-	if (s.flights.length && s.flights.every((f) => f.phase === "landed")) return `${s.flights.length} Flights landed`;
-	return "Idle";
-}
-
-// ── flight detail ─────────────────────────────────────────────────────
-
-function FlightDetail({ state, f, git, onSelect, act, busy, onHistory }: Props & { f: Flight }) {
-	const c = state.traffic.clearances[f.id];
-	const badge = flightBadge(f, c);
-	const mission = missionOf(state, f);
-	const route = routeOf(f, state);
-	const congestions = congestionFor(state, f.id);
-	const lastPublish = f.publishes.at(-1);
-	const preflight = [...state.log].reverse().find((e) => e.type === "preflight" && e.flightId === f.id);
-	const lastEvent = [...state.log].reverse().find((e) => e.flightId === f.id && e.type !== "flight.activity");
-	const active = !["landed", "failed", "lost", "cancelled"].includes(f.phase);
-	return (
-		<aside className="ctx">
-			<div className="ctx-head">
-				<div className="ctx-head-row">
-					<span className="mono ctx-id">{f.id}</span>
-					<span className={`chip big tone-${badge.tone}`}>{badge.label === "PARTIAL" ? "PARTIAL CLEARANCE" : badge.label}</span>
-				</div>
-				<div className="ctx-title">{f.title}</div>
-				{mission && mission.description !== f.title && <div className="ctx-desc">{mission.description}</div>}
-			</div>
-
-			{f.stale && (
-				<div className="banner tone-caution">
-					<div className="banner-title">Baseline changed — re-plan required</div>
+				<details className="decision-evidence advanced-details">
+					<summary>Decision evidence</summary>
+					<p>{c.levels.map((l) => LEVEL_NAMES[l]).join(" · ")}</p>
 					<ul>
-						{f.stale.reasons.map((r) => (
-							<li key={r}>{r}</li>
+						{c.why.map((why) => (
+							<li key={why}>{friendlyText(why, state)}</li>
 						))}
 					</ul>
-				</div>
-			)}
-
-			<div className="kv-grid">
-				<KV k="agent" v={f.agentRuntime} />
-				<KV k="phase" v={f.phase} />
-				<KV k="baseline" v={short(f.baseline)} mono />
-				<KV k="plan" v={f.plan ? `v${f.plan.planVersion}${f.plan.amendment ? " · amended" : ""}` : "not filed"} />
-				<KV
-					k="artifact"
-					v={f.artifact?.repo ?? "—"}
-					mono
-					title={f.artifact?.remote}
-					onClick={f.artifact ? () => onHistory(f.id) : undefined}
-				/>
-				<KV k="priority" v={f.priority} />
-			</div>
-
-			{f.activity && active && (
-				<Block title="Current activity">
-					<div className="activity">{f.activity.text}</div>
-				</Block>
-			)}
-
-			{f.plan && (
-				<Block title={`Route · plan v${f.plan.planVersion}`}>
-					<div className="intent">{f.plan.intent}</div>
-					{route.map((g) => (
-						<div key={g.module} className="route-group">
-							<div className="route-mod">{g.module}</div>
-							{g.entries.map((e) => (
-								<div key={e.resource} className={`route-row st-${e.state}`}>
-									<span className={`mode mode-${e.mode}`} title={e.mode}>
-										{e.mode === "contract" ? "◆" : e.mode === "write" ? "✎" : "○"}
-									</span>
-									<span className="mono">{e.label}</span>
-									{e.mode === "contract" && <span className="tag">contract</span>}
-								</div>
-							))}
-						</div>
-					))}
-					{f.plan.assumptions.length > 0 && (
-						<div className="assumptions">
-							{f.plan.assumptions.map((a) => (
-								<div key={a}>assumes: {a}</div>
-							))}
-						</div>
-					)}
-				</Block>
-			)}
-
-			{c && (
-				<Block title="Clearance">
-					{c.cleared.map((r) => (
-						<div key={r} className="cl-row ok">
-							<span className="cl-mark">✓</span>
-							<span className="mono">{label(r, state.index)}</span>
-						</div>
-					))}
-					{c.held.map((h) => (
-						<div key={h.resource} className="cl-row held">
-							<span className="cl-mark">×</span>
-							<span className="mono">{label(h.resource, state.index)}</span>
-							<span className="cl-wait">
-								{h.waitingOn === "replan" ? "re-plan" : h.waitingOn === "controller" ? "controller" : `after ${h.waitingOn}`}
-							</span>
-						</div>
-					))}
-					{c.landAfter.map((l) => (
-						<div key={l.flightId} className="cl-row seq">
-							<span className="cl-mark">↳</span>
-							<span>lands after</span>
-							<span className="mono">{l.flightId}</span>
-						</div>
-					))}
-					{!c.cleared.length && !c.held.length && <div className="muted">read-only route</div>}
-				</Block>
-			)}
-
-			{(c?.held.length ?? 0) > 0 && (
-				<Block title="Why">
-					{congestions
-						.filter((x) => x.rightOfWay?.loser === f.id)
-						.map((x) => (
-							<div key={x.key}>
-								<p className="why">
-									<span className="mono">{x.rightOfWay?.winner}</span> has right-of-way on {x.label}:
-								</p>
-								<ul className="because">
-									{x.rightOfWay?.because.map((b) => (
-										<li key={b}>{b}</li>
-									))}
-								</ul>
-							</div>
-						))}
-					{c?.held.some((h) => h.waitingOn === "replan") && <p className="why">{c.held.find((h) => h.waitingOn === "replan")?.reason}</p>}
-					{c?.held.some((h) => h.waitingOn === "controller") && <p className="why">A controller is holding this airspace.</p>}
-				</Block>
-			)}
-
-			{congestions.length > 0 && (
-				<Block title="Intersections">
-					{congestions.map((x) => (
-						<button type="button" key={x.key} className="cg-card" onClick={() => onSelect({ kind: "congestion", key: x.key })}>
-							<div className="cg-card-top">
-								<span className="mono">{x.flights.join(" × ")}</span>
-								<span className={`chip tone-${x.control === "caution" ? "muted" : x.severity === "critical" ? "collision" : "caution"}`}>
-									L{x.level} {LEVEL_NAMES[x.level]}
-								</span>
-							</div>
-							<div className="cg-card-label">{x.label}</div>
-						</button>
-					))}
-				</Block>
-			)}
-
-			{(lastPublish || preflight) && (
-				<Block title="Git">
-					{f.publishes.slice(-4).map((p) => (
-						<div key={`${p.commit}${p.at}`} className={`pub ${p.approved ? "ok" : "rej"}`}>
-							<div className="pub-top">
-								<span className="mono">{short(p.commit)}</span>
-								<span className={`chip tone-${p.approved ? "clear" : "hold"}`}>
-									{p.approved ? (p.verified ? "PUSHED" : "APPROVED") : "REJECTED"}
-								</span>
-							</div>
-							<div className="pub-msg">{p.message}</div>
-							{!p.approved && p.outside.length > 0 && (
-								<div className="pub-out">outside clearance: {p.outside.map((o) => resourceLabel(o, state.index)).join(", ")}</div>
-							)}
-							{p.tests && <div className={`pub-tests ${p.tests.passed ? "" : "fail"}`}>{p.tests.summary}</div>}
-						</div>
-					))}
-					{preflight && (
-						<div className="preflight">
-							<div className="eyebrow small">Actual Git (preflight)</div>
-							<div>{preflight.title.replace(`${f.id} `, "")}</div>
-							{preflight.detail?.map((d) => (
-								<div key={d} className="muted mono small">
-									{d}
-								</div>
-							))}
-						</div>
-					)}
-					{f.artifact && (
-						<button type="button" className="btn small ghost" onClick={() => onHistory(f.id)}>
-							{git?.backend === "artifacts" ? "Open Artifacts history" : "Open history"}
-						</button>
-					)}
-				</Block>
-			)}
-
-			{f.planHistory.length > 1 && (
-				<Block title="Plan history">
-					{f.planHistory.map((p) => (
-						<div key={p.planVersion} className="ph-row">
-							<span className="mono">v{p.planVersion}</span>
-							<span className="ph-text">
-								{p.amendment ? p.amendment.reason : "filed after discovery"}
-								{p.amendment && (p.amendment.added.length > 0 || p.amendment.removed.length > 0) && (
-									<span className="ph-diff">
-										{p.amendment.added.map((a) => (
-											<span key={a} className="add">
-												+ {a}
-											</span>
-										))}
-										{p.amendment.removed.map((a) => (
-											<span key={a} className="rem">
-												− {a}
-											</span>
-										))}
-									</span>
-								)}
-							</span>
-						</div>
-					))}
-				</Block>
-			)}
-
-			{lastEvent && (
-				<Block title="Last event">
-					<EventLine e={lastEvent} />
-				</Block>
-			)}
-
-			{active && (
-				<div className="ctx-actions">
-					{(c?.held.length ?? 0) > 0 && (
-						<button type="button" className="btn" disabled={busy} onClick={() => act({ type: "reroute", flightId: f.id })}>
-							Reroute around hold
-						</button>
-					)}
-					{state.project.mode === "live" && (
-						<button type="button" className="btn" disabled={busy} onClick={() => act({ type: "land", flightId: f.id })}>
-							Request landing
-						</button>
-					)}
-					<button type="button" className="btn danger" disabled={busy} onClick={() => act({ type: "cancel", flightId: f.id })}>
-						Cancel Flight
-					</button>
-				</div>
-			)}
-		</aside>
-	);
-}
-
-// ── congestion detail ─────────────────────────────────────────────────
-
-function CongestionDetail({ state, c, act, busy, onSelect }: Props & { c: Congestion }) {
-	const [a, b] = c.flights;
-	const fa = state.flights.find((f) => f.id === a);
-	const fb = state.flights.find((f) => f.id === b);
-	const row = c.rightOfWay;
-	const auto = c.resolution === "auto";
-	return (
-		<aside className="ctx">
-			<div className="ctx-head">
-				<div className="eyebrow">Congestion</div>
-				<div className="ctx-title mono">{c.label || "Intent overlap"}</div>
-				<div className="levels">
-					{c.levels.map((l) => (
-						<span key={l} className={`chip tone-${l === c.level ? (c.severity === "critical" ? "collision" : "caution") : "muted"}`}>
-							L{l} {LEVEL_NAMES[l]}
-						</span>
-					))}
-					<span className={`chip tone-${auto ? "clear" : "caution"}`}>{auto ? "AUTO-COORDINATED" : `OVERRIDE · ${c.override?.kind}`}</span>
-				</div>
-			</div>
-
-			<div className="pair">
-				{[fa, fb].map(
-					(f) =>
-						f && (
-							<button type="button" key={f.id} className="pair-flight" onClick={() => onSelect({ kind: "flight", id: f.id })}>
-								<span className="mono">{f.id}</span>
-								<span>{f.title}</span>
-								<span className={`chip tone-${flightBadge(f, state.traffic.clearances[f.id]).tone}`}>
-									{flightBadge(f, state.traffic.clearances[f.id]).label}
-								</span>
-							</button>
-						),
-				)}
-			</div>
-
-			<Block title="Why they intersect">
-				<ul className="because">
-					{c.why.map((w) => (
-						<li key={w}>{w}</li>
-					))}
-				</ul>
-			</Block>
-
-			{row && (
-				<Block title="Right-of-way">
-					<p className="why">
-						<span className="mono">{row.winner}</span> proceeds first ({row.rule.replace(/-/g, " ")}):
-					</p>
-					<ol className="because numbered">
-						{row.because.map((w) => (
-							<li key={w}>{w}</li>
+					<ol>
+						{c.plan.map((step) => (
+							<li key={step}>{friendlyText(step, state)}</li>
 						))}
 					</ol>
-				</Block>
-			)}
-
-			<Block title="Traffic plan">
-				<ol className="plan">
-					{c.plan.map((p) => (
-						<li key={p}>{p}</li>
-					))}
-				</ol>
-			</Block>
-
-			<div className="ctx-actions grid">
-				{auto ? (
-					<button
-						type="button"
-						className="btn primary"
-						disabled={busy}
-						onClick={() => act({ type: "override", congestionKey: c.key, kind: "accept" })}
-					>
-						Accept plan
-					</button>
-				) : (
-					<button
-						type="button"
-						className="btn primary"
-						disabled={busy}
-						onClick={() => act({ type: "clear-override", congestionKey: c.key })}
-					>
-						Undo · back to auto
-					</button>
-				)}
-				<button
-					type="button"
-					className="btn"
-					disabled={busy}
-					onClick={() => act({ type: "override", congestionKey: c.key, kind: "allow-both" })}
-				>
-					Allow both
-				</button>
-				<button
-					type="button"
-					className="btn"
-					disabled={busy}
-					onClick={() => act({ type: "override", congestionKey: c.key, kind: "first", flightId: a })}
-				>
-					{a} first
-				</button>
-				<button
-					type="button"
-					className="btn"
-					disabled={busy}
-					onClick={() => act({ type: "override", congestionKey: c.key, kind: "first", flightId: b })}
-				>
-					{b} first
-				</button>
-				<button
-					type="button"
-					className="btn"
-					disabled={busy}
-					onClick={() => act({ type: "override", congestionKey: c.key, kind: "hold-both" })}
-				>
-					Hold both
-				</button>
-				{row && (
-					<button type="button" className="btn" disabled={busy} onClick={() => act({ type: "reroute", flightId: row.loser })}>
-						Reroute {row.loser}
-					</button>
-				)}
-				{row && (
-					<button type="button" className="btn danger" disabled={busy} onClick={() => act({ type: "cancel", flightId: row.loser })}>
-						Cancel {row.loser}
-					</button>
-				)}
+					{state.semantic
+						.filter((f) => f.flights.every((id) => c.flights.includes(id)))
+						.map((f) => (
+							<p key={f.summary}>
+								{f.summary} · {f.source} · {Math.round(f.confidence * 100)}% confidence
+							</p>
+						))}
+				</details>
 			</div>
-		</aside>
+		</article>
 	);
 }
-
-// ── resource detail ───────────────────────────────────────────────────
-
 function ResourceDetail({ state, resource, onSelect }: Props & { resource: string }) {
-	const users = Object.entries(state.traffic.occupancy).filter(
-		([r]) => r === resource || r.startsWith(`${resource.replace(/^f:/, "s:")}#`),
+	const entries = Object.entries(state.traffic.occupancy).filter(
+		([r]) => isAncestorOrEqual(resource, r, state.index) || isAncestorOrEqual(r, resource, state.index),
 	);
+	const runs = [...new Set(entries.flatMap(([, occupants]) => occupants.map((o) => o.flightId)))];
+	const attention = attentionItems(state);
 	return (
-		<aside className="ctx">
-			<div className="ctx-head">
-				<div className="eyebrow">Airspace</div>
-				<div className="ctx-title mono">{label(resource, state.index)}</div>
-				<div className="ctx-desc mono">{resource.replace(/^[fsm]:/, "")}</div>
-			</div>
-			<Block title="Routing through">
-				{users.length === 0 && <div className="muted">No active routes.</div>}
-				{users.map(([r, list]) =>
-					list.map((u) => (
-						<button
-							type="button"
-							key={`${r}${u.flightId}`}
-							className="cl-row link"
-							onClick={() => onSelect({ kind: "flight", id: u.flightId })}
-						>
-							<span className="mono">{u.flightId}</span>
-							<span className={`mode mode-${u.mode}`}>{u.mode}</span>
-							<span className="mono muted">{label(r, state.index)}</span>
+		<article className="resource-detail">
+			<div className="page-kicker">Code area</div>
+			<h1 className="mono">{label(resource, state.index)}</h1>
+			<p className="resource-path mono muted">{resource.replace(/^[msf]:/, "")}</p>
+			<section className="detail-section">
+				<h2>Active work here</h2>
+				{runs.map((id) => {
+					const f = state.flights.find((x) => x.id === id);
+					if (!f || !isActive(f)) return null;
+					return (
+						<button type="button" className="decision-row" key={id} onClick={() => onSelect({ kind: "flight", id })}>
+							<Icon name="code" />
+							<span>
+								<strong>{f.title}</strong>
+								<span>
+									{entries
+										.filter(([, os]) => os.some((o) => o.flightId === id))
+										.map(([r]) => label(r, state.index))
+										.join(" · ")}
+								</span>
+							</span>
+							<Badge badge={flightBadge(f, state.traffic.clearances[id], state)} />
 						</button>
-					)),
-				)}
-			</Block>
-		</aside>
-	);
-}
-
-// ── bits ──────────────────────────────────────────────────────────────
-
-/** Repository activity as reported by Artifacts events (operational context, not a dashboard). */
-function ArtifactsActivity({ state }: { state: ControllerState }) {
-	const events = state.log.filter((e) => e.type === "artifacts.event" || e.type === "push.received");
-	const count = (re: RegExp) => events.filter((e) => re.test(e.title)).length;
-	const pushes = count(/confirmed push to/);
-	const notes = count(/confirmed Cruce notes/);
-	const issued = count(/token\.created/);
-	const revoked = count(/token\.revoked/);
-	if (!pushes && !issued) return null;
-	return (
-		<Block title="Artifacts activity">
-			<KV k="pushes confirmed" v={`${pushes} (+${notes} notes)`} />
-			<KV k="tokens issued / revoked" v={`${issued} / ${revoked}`} />
-			<KV k="Flight forks" v={String(state.flights.filter((f) => f.artifact).length)} />
-		</Block>
-	);
-}
-
-function Block({ title, children, tone }: { title: string; children: React.ReactNode; tone?: string }) {
-	return (
-		<section className={`block ${tone ? `tone-${tone}` : ""}`}>
-			<h3 className="eyebrow">{title}</h3>
-			{children}
-		</section>
-	);
-}
-
-function KV({ k, v, mono, title, onClick }: { k: string; v: string; mono?: boolean; title?: string; onClick?: () => void }) {
-	return (
-		<div className="kv">
-			<span className="kv-k">{k}</span>
-			{onClick ? (
-				<button type="button" className={`kv-v link ${mono ? "mono" : ""}`} title={title} onClick={onClick}>
-					{v}
-				</button>
-			) : (
-				<span className={`kv-v ${mono ? "mono" : ""}`} title={title}>
-					{v}
-				</span>
-			)}
-		</div>
-	);
-}
-
-export function EventLine({ e }: { e: TowerEvent }) {
-	return (
-		<div className="ev-line">
-			<span className="ev-time mono">{timeOf(e.at)}</span>
-			<span className={`ev-actor a-${e.actor}`}>{e.actor}</span>
-			<span className="ev-title">{e.title}</span>
-		</div>
+					);
+				})}
+				{!runs.length && <p className="muted">No active task is using this scope.</p>}
+			</section>
+			{attention
+				.filter((a) => a.flights.some((id) => runs.includes(id)))
+				.map((a) => (
+					<p className="notice" key={a.id}>
+						{friendlyText(a.title, state)}
+					</p>
+				))}
+		</article>
 	);
 }

@@ -4,6 +4,7 @@ import {
 	type ArtifactRef,
 	type CanonicalState,
 	type Flight,
+	type FlightInstruction,
 	type FlightPhase,
 	type FlightPlan,
 	FlightPlanInput,
@@ -405,7 +406,7 @@ export class Controller {
 			[pub ? (pub.approved ? "matches an approved publish" : "matches a REJECTED publish") : "no matching publish request"],
 			{ commit },
 		);
-		if (!pub || !pub.approved) {
+		if (!pub?.approved) {
 			this.raise({
 				id: `unapproved-push:${flightId}:${commit}`,
 				kind: "violation",
@@ -420,8 +421,9 @@ export class Controller {
 
 	recordValidation(flightId: string, commit: string, passed: boolean, summary: string) {
 		const f = this.flight(flightId);
-		const pub = [...f.publishes].reverse().find((p) => p.commit === commit) ?? f.publishes.at(-1);
-		if (pub) pub.tests = { passed, summary };
+		const pub = [...f.publishes].reverse().find((p) => p.commit === commit && p.approved);
+		if (!pub) throw new ControllerError(`${flightId} has no approved publish for ${commit}`, 409);
+		pub.tests = { passed, summary };
 		this.emit("validation", "cruce", `${flightId} validation ${passed ? "passed" : "FAILED"}`, flightId, [summary], { commit, passed });
 	}
 
@@ -467,8 +469,53 @@ export class Controller {
 		}
 		const last = f.publishes.filter((p) => p.approved).at(-1);
 		if (!last) out.push("nothing published");
-		else if (last.tests && !last.tests.passed) out.push("validation failed");
+		else if (!last.tests) out.push("validation not reported");
+		else if (!last.tests.passed) out.push("validation failed");
 		return out;
+	}
+
+	requestReroute(flightId: string, by: string): FlightInstruction {
+		const f = this.flight(flightId);
+		if (TERMINAL_PHASES.has(f.phase)) throw new ControllerError(`${flightId} is ${f.phase}`, 409);
+		if (f.instruction?.status === "pending") return f.instruction;
+		const held = this.clearance(flightId)?.held ?? [];
+		if (!f.plan || !held.length) throw new ControllerError(`${flightId} has no waiting scope to reroute around`, 409);
+		const instruction: FlightInstruction = {
+			id: `${flightId}:reroute:${this.s.counters.event + 1}`,
+			kind: "reroute",
+			resources: [...new Set(held.map((h) => h.resource))],
+			requestedAt: this.now,
+			requestedBy: by,
+			issuedPlanVersion: f.plan.planVersion,
+			status: "pending",
+		};
+		f.instruction = instruction;
+		this.emit(
+			"agent.instruction",
+			"human",
+			`${by} asked ${flightId} to reroute`,
+			flightId,
+			instruction.resources.map((r) => resourceLabel(r, this.s.index)),
+			{ instructionId: instruction.id, status: "pending" },
+		);
+		return instruction;
+	}
+
+	ackInstruction(flightId: string, instructionId: string): FlightInstruction {
+		const instruction = this.flight(flightId).instruction;
+		if (!instruction || instruction.id !== instructionId) throw new ControllerError(`Unknown instruction ${instructionId}`, 409);
+		if (instruction.status === "acknowledged") return instruction;
+		instruction.status = "acknowledged";
+		instruction.acknowledgedAt = this.now;
+		this.emit(
+			"agent.instruction",
+			"agent",
+			`${flightId} acknowledged the reroute request`,
+			flightId,
+			["Receipt confirmed; the plan and clearance show whether the route changed."],
+			{ instructionId, status: "acknowledged" },
+		);
+		return instruction;
 	}
 
 	/**
@@ -629,16 +676,16 @@ export class Controller {
 		if (item) this.emit("attention", "human", `${by} acknowledged: ${item.title}`);
 	}
 
-	/** Time-driven checks: lease expiry (lost agents) and plan timeouts. */
+	/** Agent liveness is separate from lease ownership: a fully held agent must still heartbeat. */
 	tick() {
-		const book = new LeaseBook(this.s.leases);
-		for (const flightId of book.expired(this.now)) {
-			const f = this.s.flights.find((x) => x.id === flightId);
-			if (f && !TERMINAL_PHASES.has(f.phase) && (f.lastHeartbeat ?? 0) + LEASE_TTL_MS <= this.now) {
-				this.fail(flightId, "clearance lease expired without heartbeat", true);
-			}
-		}
 		for (const f of this.s.flights) {
+			if (TERMINAL_PHASES.has(f.phase)) continue;
+			// Filing a plan is also agent contact. The fallback supports snapshots predating heartbeats.
+			const lastContact = f.plan ? Math.max(f.lastHeartbeat ?? f.plan.filedAt, f.plan.filedAt) : undefined;
+			if (lastContact !== undefined && lastContact + LEASE_TTL_MS <= this.now) {
+				this.fail(f.id, "agent heartbeat expired without contact for 10 minutes", true);
+				continue;
+			}
 			if (f.phase === "discovery" && f.startedAt !== undefined && this.now - f.startedAt > PLAN_TIMEOUT_MS && !f.plan) {
 				this.raise({
 					id: `plan-timeout:${f.id}`,
@@ -768,6 +815,15 @@ export function clearanceBrief(state: ControllerState, flightId: string): string
 	if (c.held.length) lines.push(`HOLD — do not modify: ${c.held.map((h) => `${label(h.resource)} (${h.reason})`).join("; ")}.`);
 	if (c.landAfter.length) lines.push(`You will land after ${c.landAfter.map((l) => l.flightId).join(", ")}.`);
 	if (f.stale) lines.push(`Your baseline is stale: ${f.stale.reasons.join("; ")}. Re-read the code and file an amended Flight Plan.`);
+	if (f.instruction?.status === "pending") {
+		lines.push(
+			`Pending reroute request ${f.instruction.id}: find a way around ${f.instruction.resources.map(label).join(", ")} without dropping the mission's requirements. File an amended plan if feasible; otherwise explain why it is not.`,
+		);
+	} else if (f.instruction?.status === "acknowledged") {
+		lines.push(
+			`Acknowledged reroute request ${f.instruction.id} (issued for plan v${f.instruction.issuedPlanVersion}; current plan v${f.plan?.planVersion}). This confirms receipt only; any route change requires an amended plan and updated clearance.`,
+		);
+	}
 	lines.push("You may read anything. To touch anything else, request a Flight Plan amendment first.");
 	return lines.join("\n");
 }

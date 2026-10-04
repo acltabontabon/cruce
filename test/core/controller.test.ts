@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Controller } from "../../src/core/controller.ts";
+import { Controller, clearanceBrief } from "../../src/core/controller.ts";
 import { changedRanges } from "../../src/core/line-diff.ts";
 import type { ChangedFile } from "../../src/core/publish-gate.ts";
 import { JWT_MIGRATION, overlayFiles, ROTATION_AMENDMENT, ROTATION_V1, ROTATION_V2, SESSION_CLEANUP } from "../../src/demo/scenario.ts";
@@ -89,6 +89,7 @@ describe("controller lifecycle (the demo story)", () => {
 
 		// F-023 lands independently; it does not affect F-021.
 		expect(t.step((c) => c.requestPublish(F023, "c4", diff(seed, "f023-session-cleanup"), "cleanup")).approved).toBe(true);
+		t.step((c) => c.recordValidation(F023, "c4", true, "11 passed"));
 		t.step((c) => c.land(F023, "m2", indexAfter("f022-jwt-migration", "f023-session-cleanup").index, "Land F-023"));
 		expect(t.state.flights.find((f) => f.id === F021)?.stale?.byFlight).toBe(F022);
 
@@ -143,6 +144,42 @@ describe("human overrides", () => {
 		return t;
 	};
 
+	it("persists reroute delivery without changing clearance or pretending the plan changed", () => {
+		const t = flying();
+		const before = t.state.traffic.clearances["F-021"];
+		const instruction = t.step((c) => c.requestReroute("F-021", "developer"));
+		expect(instruction.status).toBe("pending");
+		expect(instruction.resources).toEqual(before.held.map((h) => h.resource));
+		expect(t.step((c) => c.requestReroute("F-021", "developer")).id).toBe(instruction.id);
+		expect(t.state.log.filter((e) => e.type === "agent.instruction")).toHaveLength(1);
+		expect(clearanceBrief(t.state, "F-021")).toContain(`Pending reroute request ${instruction.id}`);
+		const restored = new Controller(JSON.parse(JSON.stringify(t.state)), 20_000);
+		expect(restored.flight("F-021").instruction?.id).toBe(instruction.id);
+		expect(() => restored.ackInstruction("F-021", "wrong-id")).toThrow("Unknown instruction");
+		restored.ackInstruction("F-021", instruction.id);
+		restored.ackInstruction("F-021", instruction.id);
+		const result = restored.commit();
+		expect(result.events).toHaveLength(1);
+		expect(result.state.flights.find((f) => f.id === "F-021")?.instruction?.status).toBe("acknowledged");
+		expect(result.state.traffic.clearances["F-021"]).toEqual(before);
+		expect(result.state.flights.find((f) => f.id === "F-021")?.plan?.planVersion).toBe(1);
+		expect(clearanceBrief(result.state, "F-021")).not.toContain("Pending reroute");
+		expect(clearanceBrief(result.state, "F-021")).toContain(
+			`Acknowledged reroute request ${instruction.id} (issued for plan v1; current plan v1)`,
+		);
+		expect(clearanceBrief(result.state, "F-021")).toContain("This confirms receipt only");
+		const next = new Controller(result.state, 21_000);
+		expect(next.requestReroute("F-021", "developer").id).not.toBe(instruction.id);
+		expect(() => next.ackInstruction("F-021", instruction.id)).toThrow("Unknown instruction");
+	});
+
+	it("rejects rerouting a finished run or a run with no waiting scope", () => {
+		const t = flying();
+		expect(() => t.step((c) => c.requestReroute("F-022", "developer"))).toThrow("no waiting scope");
+		t.step((c) => c.cancel("F-021", "developer"));
+		expect(() => t.step((c) => c.requestReroute("F-021", "developer"))).toThrow("cancelled");
+	});
+
 	it("ALLOW BOTH clears both Flights", () => {
 		const t = flying();
 		t.step((c) => c.applyOverride("F-021|F-022", "allow-both", "dev"));
@@ -169,7 +206,67 @@ describe("human overrides", () => {
 	});
 });
 
+describe("validation evidence", () => {
+	it("requires passing validation of the latest approved commit", () => {
+		const t = setup();
+		const id = "F-023";
+		t.step((c) => c.submitPlan(id, SESSION_CLEANUP));
+		t.step((c) => c.requestPublish(id, "first", diff(seed, "f023-session-cleanup"), "cleanup"));
+		expect(t.step((c) => c.landingBlockers(id))).toContain("validation not reported");
+		expect(() => t.step((c) => c.land(id, "merge", undefined, "integration"))).toThrow("validation not reported");
+		expect(() => t.step((c) => c.recordValidation(id, "unknown", true, "passed"))).toThrow("no approved publish");
+		expect(t.state.flights.find((f) => f.id === id)?.publishes[0].tests).toBeUndefined();
+		t.step((c) => c.recordValidation(id, "first", false, "failed"));
+		expect(t.step((c) => c.landingBlockers(id))).toContain("validation failed");
+		t.step((c) => c.recordValidation(id, "first", true, "rerun passed"));
+		expect(t.step((c) => c.landingBlockers(id))).toEqual([]);
+		t.step((c) => c.requestPublish(id, "second", diff(seed, "f023-session-cleanup"), "updated cleanup"));
+		t.step((c) => c.recordValidation(id, "first", true, "old commit still passes"));
+		expect(t.step((c) => c.landingBlockers(id))).toContain("validation not reported");
+		t.step((c) => c.requestPublish(id, "rejected", [{ path: "src/auth/backdoor.ts", status: "added", ranges: [] }], "outside scope"));
+		expect(() => t.step((c) => c.recordValidation(id, "rejected", true, "passed"))).toThrow("no approved publish");
+		t.step((c) => c.recordValidation(id, "second", true, "passed"));
+		expect(t.step((c) => c.landingBlockers(id))).toEqual([]);
+	});
+});
+
 describe("failure handling", () => {
+	it("expires a silent fully held run with no leases, including a restored snapshot without a heartbeat", () => {
+		let c = new Controller(freshState(), 0);
+		for (const title of ["first", "waiting"]) {
+			const f = c.createFlight({ missionId: c.createMission({ title }).id, agent: "external" });
+			c.submitPlan(f.id, SESSION_CLEANUP);
+		}
+		let state = c.commit().state;
+		expect(state.traffic.clearances["F-022"].status).toBe("hold");
+		expect(state.leases.some((l) => l.flightId === "F-022")).toBe(false);
+		expect(state.flights[1].lastHeartbeat).toBeUndefined();
+		c = new Controller(JSON.parse(JSON.stringify(state)), 10 * 60_000);
+		c.heartbeat("F-021");
+		c.tick();
+		state = c.commit().state;
+		expect(state.flights[1].phase).toBe("lost");
+		expect(state.flights[0].phase).toBe("executing");
+		expect(state.attention.some((a) => a.kind === "flight-lost" && a.flights.includes("F-022"))).toBe(true);
+	});
+
+	it("keeps a held run alive using its persisted heartbeat rather than old plan-filing time", () => {
+		let c = new Controller(freshState(), 0);
+		for (const title of ["first", "waiting"]) {
+			const f = c.createFlight({ missionId: c.createMission({ title }).id, agent: "external" });
+			c.submitPlan(f.id, SESSION_CLEANUP);
+		}
+		c = new Controller(c.commit().state, 9 * 60_000);
+		c.heartbeat("F-021");
+		c.heartbeat("F-022");
+		c = new Controller(JSON.parse(JSON.stringify(c.commit().state)), 18 * 60_000);
+		c.tick();
+		const state = c.commit().state;
+		expect(state.flights[1].phase).toBe("planned");
+		expect(state.traffic.clearances["F-022"].status).toBe("hold");
+		expect(state.attention).toEqual([]);
+	});
+
 	it("a crashed agent loses its leases and dependents are re-evaluated", () => {
 		let state = freshState();
 		const run = (at: number, fn: (c: Controller) => void) => {

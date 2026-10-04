@@ -1,3 +1,4 @@
+import { ControllerError } from "../core/controller.ts";
 import { DemoCommand, HumanCommand, PROJECTS, ProtocolRequest } from "../shared/api.ts";
 import type { ControlTower } from "./control-tower.ts";
 import { isArtifactsEvent } from "./event-subscriptions.ts";
@@ -58,13 +59,23 @@ function requireAdmin(request: Request, env: Env) {
 
 async function body<T>(
 	request: Request,
-	schema: { safeParse(v: unknown): { success: true; data: T } | { success: false; error: { message: string } } },
+	schema: {
+		safeParse(
+			v: unknown,
+		): { success: true; data: T } | { success: false; error: { message: string; issues?: { path: PropertyKey[]; message: string }[] } };
+	},
 ): Promise<T> {
 	const raw = await request.json().catch(() => {
 		throw new HttpError(400, "invalid JSON");
 	});
 	const parsed = schema.safeParse(raw);
-	if (!parsed.success) throw new HttpError(400, parsed.error.message);
+	if (!parsed.success) {
+		const explanation = parsed.error.issues
+			?.slice(0, 3)
+			.map((issue) => `${issue.path.map(String).join(".") || "request"}: ${issue.message}`)
+			.join("; ");
+		throw new HttpError(400, explanation ?? "Invalid request");
+	}
 	return parsed.data;
 }
 
@@ -117,6 +128,23 @@ async function route(request: Request, env: Env): Promise<Response> {
 
 	if (action === "audit" && request.method === "GET") return json(await stub.auditLog(project.id));
 
+	if (action === "flights" && parts.length === 6 && parts[5] === "changes" && request.method === "GET") {
+		const flightId = parts[4];
+		if (!/^F-\d{3}$/.test(flightId)) throw new HttpError(400, "bad flight id");
+		const path = url.searchParams.get("path") ?? undefined;
+		if (
+			path !== undefined &&
+			(!path ||
+				path.length > 400 ||
+				path.includes("\\") ||
+				path.includes("\0") ||
+				path.split("/").some((part) => !part || part === "." || part === ".."))
+		) {
+			throw new HttpError(400, "invalid file path");
+		}
+		return json(await stub.changes(project.id, flightId, path));
+	}
+
 	// Agent protocol: /api/projects/:p/flights/:flightId/protocol
 	if (action === "flights" && parts[5] === "protocol" && request.method === "POST") {
 		const flightId = parts[4];
@@ -136,10 +164,19 @@ export default {
 		try {
 			return await route(request, env);
 		} catch (e) {
-			if (e instanceof HttpError) return json({ error: e.message }, e.status);
+			if (e instanceof HttpError || e instanceof ControllerError) return json({ error: e.message }, e.status);
 			const message = (e as Error)?.message ?? String(e);
-			const status = /cannot land|Unknown flight|No congestion|Invalid flight plan|needs one of|try again in/.test(message) ? 409 : 500;
-			console.error("cruce api error", message);
+			// Durable Object RPC can serialize a domain error as a plain Error.
+			const status = /unknown flight|unknown mission|no congestion|not part of these changes/i.test(message)
+				? 404
+				: /invalid flight plan|needs one of|invalid.*instruction/i.test(message)
+					? 400
+					: /cannot land|try again in|nothing to reroute|no waiting scope|has not filed a plan|unknown instruction|no plan|no held|no workspace|no repository yet|baseline refresh hit a Git conflict|validation|approved|is (landed|cancelled|failed|lost)/i.test(
+								message,
+							)
+						? 409
+						: 500;
+			if (status === 500) console.error("cruce api error", message);
 			return json({ error: message }, status);
 		}
 	},

@@ -1,26 +1,45 @@
 # Demo
 
-Two modes share the same controller, Git integration, and Radar:
+Two modes share the same controller, Git integration, and Work/Traffic interface:
 
-- **Demo mode** (`project=demo`): three scripted agents, one deterministic story, on real Artifacts.
+- **Demo mode** (`project=demo`): three scripted agents, one deterministic story, using Artifacts or the
+  offline local Git backend.
   Every decision is the controller's; the script only says what each agent *attempts*. Commit ids are
   reproducible across runs.
 - **Live mode** (`project=live`): real Claude Code agents — external runners on a developer machine or
   Cloudflare Sandboxes — filing their own Flight Plans.
 
+The controls below describe the current checkout. The hosted MVP may be an earlier version until
+this refinement is deployed; use the local preview for this walkthrough.
+
 ## Driving the demo
 
-Open https://cruce.acltabontabon.workers.dev (or `pnpm exec cf dev` → http://localhost:5173).
+Open [Cruce](https://cruce.acltabontabon.workers.dev) (or `pnpm exec cf dev` →
+[localhost:5173](http://localhost:5173); use `--mode offline` for local Git without credentials).
+
+A fresh demo prepares the first seven steps and pauses at the useful overlap: three tasks are working,
+JWT library migration goes first on `TokenValidator`, and refresh-token rotation continues elsewhere.
+Work is the default view. Existing shared demo progress is preserved when another browser opens it.
 
 | Control | |
 |---|---|
-| ▶ / ❚❚ | play / pause (auto-advances with realistic gaps) |
-| ⏭ | next step (best for recording: narrate, then step) |
-| ⟲ | reset: deletes the Flight repos, returns canonical to the seed commit (rate-limited to 1 / 45 s) |
-| 0.5×–3× | speed |
-| `main @ sha` | canonical history with Cruce notes |
-| hover / click a Flight | isolates its route; context panel shows route, clearance, why, Git |
-| click a ringed node | congestion detail: why, right-of-way, traffic plan, controls |
+| Continue demo / Pause | continue from the current state / pause automatic advancement |
+| Demo options → Next step | advance once, then stay paused |
+| Demo options → Reset to overlap | reset canonical and run repositories, then prepare the paused overlap again |
+| Demo options → Replay from beginning | reset and automatically replay all 18 steps |
+| Demo options → Playback speed | 0.5×, 1×, 2× or 3× |
+| `main` and commit reference | repository history and coordination notes |
+| Task in Work | plan, scope, coordination, activity, changes and advanced run details |
+| Overlap / Why? | controller evidence, sequencing and contextual overrides |
+| Traffic | optional active-scope graph; select tasks, crossings or code areas for details |
+
+Reset/replay recreate run repositories and are limited to one reset every 45 seconds. Demo commands
+and alarm advancement are serialized. Overrides affect real controller decisions, so later scripted
+attempts may be rejected or fail; errors remain visible. Use Reset to overlap to restore the story.
+
+The agents and their progress/test reports are scripted. Plans, clearances, publish gates, Git diffs
+and merges are real. A displayed demo test report is not a test command executed by the browser; use
+the scenario verification below to check the actual code.
 
 ## The story (18 steps)
 
@@ -49,29 +68,23 @@ Why the sequencing mattered: F-021's final code uses F-022's new `ValidationResu
 `bash demo/scripts/verify-scenario.sh` — F-021's last step **fails its tests on the old baseline** and
 passes after F-022 lands. Cruce avoided that rework before any code collided.
 
-## Video script (5–10 min)
+## Walkthrough (5–7 min)
 
-1. **The problem (0:00–0:45).** "Parallel agents are easy to isolate — every agent gets its own
-   Artifacts repo. Nothing coordinates their *future* work." Show the empty radar and the canonical repo.
-2. **Delegate three Missions (0:45–1:30).** Steps 1–3. Point at the three forks in the Artifacts
-   namespace and the read-only discovery.
-3. **Plans appear (1:30–2:45).** Steps 4–6. F-023 clears instantly ("independent traffic needs no
-   human"). F-022 clears. F-021 files — the `validate()` node lights up, the dashed HOLD route appears.
-   Click the congestion: *why they intersect*, *right-of-way: contract owner*, *traffic plan*.
-   "The platform knew these two agents were about to interfere before they wasted the work."
-4. **Partial clearance (2:45–3:45).** Hover F-021: two cleared routes, one held. "It didn't stop F-021.
-   It let it work around the contested area." Steps 7–11: the publish gate rejects `logout`, the agent
-   amends, the gate approves. Mention tokens: agents never hold write credentials.
-5. **Landing changes the airspace (3:45–5:00).** Steps 12–15. F-022 lands: F-021 turns STALE with the
-   exact reasons; Cruce refreshes its baseline.
-6. **Adaptation (5:00–6:00).** Steps 16–18. Plan v3: validate becomes a read → CLEAR → lands.
-7. **Proof (6:00–7:30).** Open `main @ sha` history: merge commits, notes with plan amendments and
-   coordination decisions. Run `tools/verify-repo.sh auth-service cruce` (plain git clone of Artifacts,
-   15/15 tests). Show the tower log's Artifacts events: token.created → pushed → token.revoked.
-8. **Live mode (7:30–9:00).** Three real Claude Code Flights on `project=live` (runner or Sandbox):
-   real plans, real congestion, an agent saying "I left these alone… that change is on hold".
-9. **Close.** "Artifacts gives every agent its own safe repository. Cruce decides how all of those
-   agents should move together."
+1. **Recognize the work.** Open Work at the paused overlap. Point out `auth-service`, the three tasks,
+   the automatically coordinated overlap and no required human decision.
+2. **Explain the decision.** Open refresh-token rotation: it can continue on its independent scope
+   while `TokenValidator` waits. Open Why? to show the contract-owner rule and evidence.
+3. **See the crossing.** Open Traffic. Show the two authentication routes crossing and the independent
+   session task. Keep infrastructure and raw access sets in advanced details.
+4. **Continue the story.** Step through publishes and the rejected `logout` change (steps 8–12).
+   The agent amends its plan; the publish gate approves only work inside clearance.
+5. **Show adaptation.** Steps 13–18: JWT work integrates, rotation's baseline becomes stale, Cruce
+   refreshes it, the agent files plan v3 and completes. Completed tasks move to Recent.
+6. **Inspect the result.** Open a completed task's Changes and repository history. The diff, commit and
+   Git notes tie the code to the coordination decisions. Run `bash demo/scripts/verify-scenario.sh` for
+   the actual tests, or `tools/verify-repo.sh auth-service cruce` to clone and verify the Artifacts result.
+
+Use Replay from beginning if the audience also needs to see task creation and initial discovery.
 
 ## Live mode
 
@@ -89,3 +102,13 @@ Each runner launches a Flight (fork), clones it read-only, and runs `claude -p` 
 allowlist (edits, `cruce`, tests). The agent files its plan with the `cruce` CLI, works inside its
 clearance, requests airspace when it needs more, and Cruce publishes, validates, sequences, and lands.
 Live behaviour depends on the model; the deterministic demo is the reliable recording path.
+
+In the web interface, choose the live repository, provide controller access for this browser session,
+and enter a task. Sandbox launch is available only when that runtime is configured; the interface
+shows the external-runner alternative otherwise. Ordinary plans receive automatic clearance.
+
+Live reroute requests are delivered at an agent boundary and acknowledged after receipt; the updated
+plan shows whether a different route was feasible. Cancellation prevents subsequent publication but
+does not interrupt an already-running model process immediately. Waiting runs keep heartbeating without
+spending execution rounds. Integration requires the latest approved commit's validation report, and
+failed tests or exhausted publish retries fail the run while preserving its published repository.

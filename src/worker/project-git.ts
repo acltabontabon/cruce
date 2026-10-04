@@ -1,4 +1,6 @@
-import type { ArtifactRef } from "../core/domain.ts";
+import { ControllerError } from "../core/controller.ts";
+import type { ArtifactRef, Flight } from "../core/domain.ts";
+import type { ChangesResponse } from "../shared/api.ts";
 import type { ArtifactsHost } from "./artifacts-host.ts";
 import { type GitAuthor, type GitWorkspace, type MergeOutcome, NOTES_REF } from "./git/workspace.ts";
 
@@ -234,6 +236,33 @@ export class ProjectGit {
 
 	resolve(ref: string) {
 		return this.run(() => this.ws.resolve(ref));
+	}
+
+	/** Compare only accepted work; completed runs remain pinned to their integration commit. */
+	changes(flight: Flight, canonicalCommit: string, path?: string): Promise<ChangesResponse> {
+		return this.run(async () => {
+			const integrated = flight.phase === "landed" && !!flight.landedCommit;
+			const headCommit = integrated ? (flight.landedCommit as string) : await this.ws.resolve(flightRef(flight.id));
+			const baseCommit = headCommit
+				? integrated
+					? ((await this.ws.log(headCommit, 1))[0]?.parents[0] ?? null)
+					: await this.ws.mergeBase(canonicalCommit, headCommit)
+				: null;
+			const result: ChangesResponse = {
+				flightId: flight.id,
+				comparison: integrated ? "integrated" : "published",
+				baseCommit,
+				headCommit,
+				canonicalCommit,
+				files: [],
+				additions: 0,
+				deletions: 0,
+				statsComplete: true,
+				...(baseCommit && headCommit ? await this.ws.reviewChanges(baseCommit, headCommit, path) : {}),
+			};
+			if (path && !result.file) throw new ControllerError("File is not part of these changes", 404);
+			return result;
+		});
 	}
 
 	/** Commit history with Cruce notes attached (for the "show me it really happened" view). */

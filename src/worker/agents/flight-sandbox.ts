@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
 import type { ControlTower } from "../control-tower.ts";
 import type { OutboundProps } from "./outbound.ts";
+import { TEST_COMMAND, validationResult } from "./validation.ts";
 
 /**
  * One Linux sandbox per Flight (Cloudflare Containers via a Durable Object). It holds the Flight's
@@ -135,20 +136,14 @@ export class FlightSandbox extends DurableObject<SandboxEnv> {
 		return JSON.parse(out.stdout || "{}");
 	}
 
-	/** Validation in the Flight's own sandbox: the repository's test script, if it has one. */
+	/** Validation in the Flight's own sandbox; a missing test script cannot satisfy integration. */
 	async runTests(): Promise<{ passed: boolean; summary: string }> {
 		await this.start();
-		const hasTests = await this.run(["node", "-e", "process.exit(require('./package.json').scripts?.test ? 0 : 1)"], REPO);
-		if (hasTests.exitCode !== 0) return { passed: true, summary: "no test script" };
-		const out = await this.run(["/bin/sh", "-c", "timeout 300 npm test 2>&1 | tail -40"], REPO, TRUST);
-		const pass = /ℹ pass (\d+)/.exec(out.stdout)?.[1];
-		const fail = /ℹ fail (\d+)/.exec(out.stdout)?.[1];
-		const passed = fail === undefined ? !/fail|error/i.test(out.stdout) : fail === "0";
-		const summary =
-			pass !== undefined
-				? `${pass} passed, ${fail ?? 0} failed (npm test in sandbox)`
-				: out.stdout.split("\n").slice(-3).join(" ").slice(0, 300);
-		return { passed, summary };
+		const hasTests = await this.run(["node", "-e", "console.log(Boolean(require('./package.json').scripts?.test))"], REPO);
+		if (hasTests.exitCode !== 0) return { passed: false, summary: "Could not inspect the repository test script" };
+		if (hasTests.stdout.trim() !== "true") return { passed: false, summary: "Missing test script: validation could not run" };
+		const out = await this.run(["/bin/sh", "-c", TEST_COMMAND, "tests", `${TASK}/tests.log`], REPO, TRUST);
+		return validationResult(out.exitCode, out.stdout);
 	}
 
 	async destroy(): Promise<void> {

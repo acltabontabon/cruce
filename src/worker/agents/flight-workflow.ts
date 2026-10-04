@@ -1,5 +1,6 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep, type WorkflowStepConfig } from "cloudflare:workers";
 import type { ControlTower } from "../control-tower.ts";
+import { type CoordinationStatus, coordinationKey, deliverInstruction, waitForTrafficChange } from "./coordination.ts";
 import type { FlightSandbox, TaskStatus } from "./flight-sandbox.ts";
 import { correctionPrompt, discoveryPrompt, executionPrompt, replanPrompt } from "./prompts.ts";
 
@@ -42,25 +43,37 @@ export class FlightWorkflow extends WorkflowEntrypoint<WorkflowEnv, FlightParams
 
 		/** Run one agent task in the sandbox and wait (durably) until the sandbox reports it finished. */
 		const agentTask = async (label: string, prompt: string): Promise<TaskStatus> => {
-			const started = await run(step, `agent ${label}: start`, RETRY, () => sandbox().startTask(prompt, label));
+			// Workflows event types accept only letters, digits, '-' and '_', up to 100 characters.
+			const eventLabel = label.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 94);
+			const started = await run(step, `agent ${label}: start`, RETRY, () => sandbox().startTask(prompt, eventLabel));
 			if (started === "busy") throw new Error("sandbox busy");
+			let result: TaskStatus;
 			try {
 				const done = await step.waitForEvent<{ status: TaskStatus }>(`agent ${label}: wait`, {
-					type: `agent-${label}`,
+					type: `agent-${eventLabel}`,
 					timeout: "45 minutes",
 				});
-				return done.payload.status;
+				result = done.payload.status;
 			} catch {
-				return run(step, `agent ${label}: check`, RETRY, async () => (await sandbox().taskStatus()) as TaskStatus);
+				result = await run(step, `agent ${label}: check`, RETRY, async () => (await sandbox().taskStatus()) as TaskStatus);
 			}
+			if (result.state !== "succeeded") throw new Error(`Agent task ${label} ${result.state === "failed" ? result.error : result.state}`);
+			return result;
 		};
-		const waitForTower = async (label: string) => {
-			try {
-				await step.waitForEvent(`tower: ${label}`, { type: "tower-wake", timeout: "2 hours" });
-			} catch {
-				// timed out: re-check status anyway
-			}
-		};
+		const status = (label: string) => run(step, label, RETRY, () => tower().liveStatus(projectId, flightId));
+		const waitForTower = (label: string, before: CoordinationStatus) =>
+			waitForTrafficChange(before, {
+				heartbeat: (attempt) =>
+					run(step, `${label}: heartbeat ${attempt}`, RETRY, () => tower().protocol(projectId, flightId, { op: "heartbeat" })),
+				wait: async (attempt) => {
+					try {
+						await step.waitForEvent(`${label}: wait ${attempt}`, { type: "tower-wake", timeout: "1 minute" });
+					} catch {
+						/* On timeout, check terminal state and renew the next heartbeat. */
+					}
+				},
+				status: (attempt) => status(`${label}: status ${attempt}`),
+			});
 
 		try {
 			const repo = await run(step, "provision Flight repository", RETRY, () => tower().liveProvision(projectId, flightId));
@@ -69,6 +82,16 @@ export class FlightWorkflow extends WorkflowEntrypoint<WorkflowEnv, FlightParams
 			);
 			let base = prepared.head;
 			const mission = await run(step, "mission", RETRY, () => tower().liveMission(projectId, flightId));
+			const deliver = (label: string, current: CoordinationStatus) =>
+				deliverInstruction(
+					current,
+					mission,
+					(prompt) => agentTask(`${label}: reroute ${current.instruction?.id}`, prompt),
+					(instructionId) =>
+						run(step, `${label}: acknowledge ${instructionId}`, RETRY, () =>
+							tower().protocol(projectId, flightId, { op: "ack-instruction", instructionId }),
+						),
+				);
 
 			const discovery = await agentTask("discovery", discoveryPrompt(mission));
 			let f = await run(step, "check Flight Plan", RETRY, () => tower().liveStatus(projectId, flightId));
@@ -76,7 +99,9 @@ export class FlightWorkflow extends WorkflowEntrypoint<WorkflowEnv, FlightParams
 				throw new Error(`no Flight Plan after discovery (${discovery.state === "failed" ? discovery.error : "agent did not file one"})`);
 			}
 
-			for (let round = 1; round <= MAX_ROUNDS; round++) {
+			let executionKey: string | undefined;
+			let workRounds = 0;
+			rounds: for (let round = 1; workRounds < MAX_ROUNDS; round++) {
 				f = await run(step, `round ${round}: status`, RETRY, () => tower().liveStatus(projectId, flightId));
 				if (f.terminal) return { phase: f.phase };
 
@@ -84,20 +109,33 @@ export class FlightWorkflow extends WorkflowEntrypoint<WorkflowEnv, FlightParams
 					const refreshed = await run(step, `round ${round}: refresh baseline`, RETRY, () => tower().liveRefresh(projectId, flightId));
 					await run(step, `round ${round}: sync sandbox`, RETRY, () => sandbox().syncTo(refreshed.head));
 					base = refreshed.head;
+					workRounds++;
 					await agentTask(`replan-${round}`, replanPrompt(mission, f.stale.reasons, f.brief));
+					const replanned = await status(`round ${round}: check amended plan`);
+					if (replanned.terminal) return { phase: replanned.phase };
+					if (replanned.planVersion <= f.planVersion) throw new Error("Agent did not file an amended plan after the baseline changed");
 					continue;
 				}
+				if (await deliver(`round ${round}`, f)) continue;
 				if (f.clearance === "hold" || f.cleared === 0) {
 					await run(step, `round ${round}: holding`, RETRY, () =>
 						tower().liveActivity(projectId, flightId, "Holding: waiting for clearance"),
 					);
-					await waitForTower(`hold ${round}`);
+					await waitForTower(`hold ${round}`, f);
 					continue;
 				}
 
-				if (!f.published || f.held > 0 || f.planVersion > f.publishedPlanVersion) {
+				if (!f.published || f.planVersion > f.publishedPlanVersion || coordinationKey(f) !== executionKey) {
+					workRounds++;
+					executionKey = coordinationKey(f);
 					await agentTask(`execute-${round}`, executionPrompt(mission, f.brief));
 					for (let attempt = 1; attempt <= 3; attempt++) {
+						const boundary = await status(`round ${round}: before publish ${attempt}`);
+						if (boundary.terminal) return { phase: boundary.phase };
+						if (await deliver(`round ${round}: before publish ${attempt}`, boundary)) {
+							executionKey = undefined;
+							continue rounds;
+						}
 						const files = await run(step, `round ${round}: collect changes (${attempt})`, RETRY, () => sandbox().changes(base));
 						if (!Object.keys(files).length) break;
 						const out = (await run(step, `round ${round}: publish gate (${attempt})`, RETRY, () =>
@@ -117,8 +155,10 @@ export class FlightWorkflow extends WorkflowEntrypoint<WorkflowEnv, FlightParams
 							await run(step, `round ${round}: report validation`, RETRY, () =>
 								tower().protocol(projectId, flightId, { op: "validate", commit: out.commit, passed: tests.passed, summary: tests.summary }),
 							);
+							if (!tests.passed) throw new Error(`Validation failed: ${tests.summary}`);
 							break;
 						}
+						if (attempt === 3) throw new Error("Publish gate rejected changes after 3 attempts; unpublished changes were not integrated");
 						const brief = await run(
 							step,
 							`round ${round}: brief (${attempt})`,
@@ -129,6 +169,9 @@ export class FlightWorkflow extends WorkflowEntrypoint<WorkflowEnv, FlightParams
 					}
 				}
 
+				const boundary = await status(`round ${round}: before integration`);
+				if (boundary.terminal) return { phase: boundary.phase };
+				if (await deliver(`round ${round}: before integration`, boundary)) continue;
 				const landing = (await run(step, `round ${round}: request landing`, RETRY, () =>
 					tower().protocol(projectId, flightId, { op: "land" }),
 				)) as {
@@ -136,7 +179,7 @@ export class FlightWorkflow extends WorkflowEntrypoint<WorkflowEnv, FlightParams
 					reason?: string;
 				};
 				if (landing.landed) return { phase: "landed" };
-				await waitForTower(`after round ${round}`);
+				await waitForTower(`after round ${round}`, boundary);
 			}
 			throw new Error(`did not land within ${MAX_ROUNDS} rounds`);
 		} catch (e) {

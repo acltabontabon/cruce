@@ -1,7 +1,9 @@
+import { createTwoFilesPatch, diffLines } from "diff";
 import git, { Errors, type PromiseFsClient, type TreeEntry } from "isomorphic-git";
 import http from "isomorphic-git/http/web";
 import { changedRanges } from "../../core/line-diff.ts";
 import type { ChangedFile } from "../../core/publish-gate.ts";
+import type { ChangesResponse } from "../../shared/api.ts";
 
 /**
  * Real Git, inside the control plane. A bare workspace repository (no working tree) where Cruce
@@ -181,6 +183,77 @@ export class GitWorkspace {
 	async mergeBase(a: string, b: string): Promise<string | null> {
 		const bases = await git.findMergeBase({ ...this.base, oids: [await this.peel(a), await this.peel(b)] });
 		return bases[0] ?? null;
+	}
+
+	/** Bounded, read-only review data. Never read staging refs or decode binary files as source. */
+	async reviewChanges(
+		baseRef: string,
+		headRef: string,
+		requestedPath?: string,
+	): Promise<Pick<ChangesResponse, "files" | "additions" | "deletions" | "statsComplete" | "file">> {
+		const blobs = async (ref: string) => {
+			const result = new Map<string, string>();
+			const walk = async (oid: string, prefix = "") => {
+				for (const entry of (await git.readTree({ ...this.base, oid })).tree) {
+					if (entry.type === "tree") await walk(entry.oid, `${prefix}${entry.path}/`);
+					else if (entry.type === "blob") result.set(`${prefix}${entry.path}`, entry.oid);
+				}
+			};
+			await walk(await this.treeOf(await this.peel(ref)));
+			return result;
+		};
+		const [before, after] = await Promise.all([blobs(baseRef), blobs(headRef)]);
+		const result: Pick<ChangesResponse, "files" | "additions" | "deletions" | "statsComplete" | "file"> = {
+			files: [],
+			additions: 0,
+			deletions: 0,
+			statsComplete: true,
+		};
+		for (const path of [...new Set([...before.keys(), ...after.keys()])].sort()) {
+			const a = before.get(path);
+			const b = after.get(path);
+			if (a === b) continue;
+			const read = async (oid?: string) => (oid ? (await git.readBlob({ ...this.base, oid })).blob : new Uint8Array());
+			const [oldBytes, newBytes] = await Promise.all([read(a), read(b)]);
+			const binary = oldBytes.includes(0) || newBytes.includes(0);
+			const tooLarge = oldBytes.byteLength + newBytes.byteLength > 256_000;
+			let additions: number | null = null;
+			let deletions: number | null = null;
+			let patch: string | null = null;
+			let reason: string | undefined;
+			if (binary || tooLarge) {
+				result.statsComplete = false;
+				reason = binary ? "Binary file; source diff unavailable." : "File is too large for an inline diff.";
+			} else {
+				const oldText = decoder.decode(oldBytes);
+				const newText = decoder.decode(newBytes);
+				const parts = diffLines(oldText, newText, { timeout: 100 });
+				if (!parts) {
+					result.statsComplete = false;
+					reason = "This diff is too complex to display inline.";
+				} else {
+					additions = parts.reduce((sum, part) => sum + (part.added ? part.count : 0), 0);
+					deletions = parts.reduce((sum, part) => sum + (part.removed ? part.count : 0), 0);
+					result.additions += additions;
+					result.deletions += deletions;
+					if (requestedPath === path) {
+						patch =
+							createTwoFilesPatch(a ? `a/${path}` : "/dev/null", b ? `b/${path}` : "/dev/null", oldText, newText, undefined, undefined, {
+								context: 3,
+								timeout: 100,
+							}) ?? null;
+						if (patch === null) reason = "This diff is too complex to display inline.";
+						if (patch && patch.length > 200_000) {
+							patch = null;
+							reason = "Diff is too large to display inline.";
+						}
+					}
+				}
+			}
+			result.files.push({ path, status: !a ? "added" : !b ? "deleted" : "modified", additions, deletions, binary, tooLarge });
+			if (requestedPath === path) result.file = { path, patch, ...(reason ? { reason } : {}) };
+		}
+		return result;
 	}
 
 	/**

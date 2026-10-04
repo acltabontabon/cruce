@@ -127,6 +127,18 @@ export interface PublishRecord {
 	verified?: boolean;
 }
 
+/** A human request delivered at the agent's next safe execution boundary. */
+export interface FlightInstruction {
+	id: string;
+	kind: "reroute";
+	resources: string[];
+	requestedAt: number;
+	requestedBy: string;
+	issuedPlanVersion: number;
+	status: "pending" | "acknowledged";
+	acknowledgedAt?: number;
+}
+
 export interface Flight {
 	id: string;
 	missionId: string;
@@ -144,6 +156,7 @@ export interface Flight {
 	artifact?: ArtifactRef;
 	sandboxId?: string;
 	activity?: { text: string; at: number };
+	/** Agent liveness, including fully held runs that have no clearance leases. */
 	lastHeartbeat?: number;
 	stale?: StaleNotice;
 	publishes: PublishRecord[];
@@ -151,6 +164,8 @@ export interface Flight {
 	landedCommit?: string;
 	/** Count of rejected publishes since the last accepted plan; repeated violations escalate. */
 	violations: number;
+	/** Acknowledgement confirms receipt; an amended plan and clearance show the outcome. */
+	instruction?: FlightInstruction;
 }
 
 export interface Lease {

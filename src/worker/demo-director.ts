@@ -157,6 +157,16 @@ export function initialDemoStatus(): DemoStatus {
 	return { next: 0, total: DEMO_SCRIPT.length, running: false, speed: 1, finished: false, nextLabel: DEMO_SCRIPT[0].label };
 }
 
+/** First useful frame: real plans and partial clearance, paused before any publishes. */
+export async function prepareDemo(tower: Tower, status: DemoStatus, onProgress?: (status: DemoStatus) => void): Promise<DemoStatus> {
+	let current: DemoStatus = { ...status, running: false, nextAt: undefined };
+	while (current.next < 7 && !current.error) {
+		current = await runNextStep(tower, current);
+		onProgress?.(current);
+	}
+	return current;
+}
+
 /** Run the next step. Errors pause the demo and are reported; the step can be retried. */
 export async function runNextStep(t: Tower, status: DemoStatus): Promise<DemoStatus> {
 	const step = DEMO_SCRIPT[status.next];

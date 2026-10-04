@@ -55,11 +55,41 @@ export interface Snapshot {
 	demo: DemoStatus | null;
 	git: GitInfo;
 	liveAgents: { available: boolean; reason?: string };
+	integrationBlockers: Record<string, string[]>;
 }
 
 export type ServerMessage =
 	| ({ type: "snapshot" } & Snapshot)
-	| { type: "update"; state: ControllerState; events: TowerEvent[]; demo: DemoStatus | null };
+	| {
+			type: "update";
+			state: ControllerState;
+			events: TowerEvent[];
+			demo: DemoStatus | null;
+			integrationBlockers: Record<string, string[]>;
+	  };
+
+export interface ChangeFile {
+	path: string;
+	status: "added" | "modified" | "deleted";
+	additions: number | null;
+	deletions: number | null;
+	binary: boolean;
+	tooLarge: boolean;
+}
+
+/** A Git comparison pinned to actual commits; optional file content is requested separately. */
+export interface ChangesResponse {
+	flightId: string;
+	comparison: "published" | "integrated";
+	baseCommit: string | null;
+	headCommit: string | null;
+	canonicalCommit: string;
+	files: ChangeFile[];
+	additions: number;
+	deletions: number;
+	statsComplete: boolean;
+	file?: { path: string; patch: string | null; reason?: string };
+}
 
 export const HumanCommand = z.discriminatedUnion("type", [
 	z.object({
@@ -84,7 +114,7 @@ export const HumanCommand = z.discriminatedUnion("type", [
 export type HumanCommand = z.infer<typeof HumanCommand>;
 
 export const DemoCommand = z.object({
-	op: z.enum(["play", "pause", "step", "reset", "speed"]),
+	op: z.enum(["prepare", "play", "pause", "step", "reset", "replay", "speed"]),
 	speed: z.number().min(0.25).max(4).optional(),
 });
 export type DemoCommand = z.infer<typeof DemoCommand>;
@@ -97,6 +127,7 @@ export const ProtocolRequest = z.discriminatedUnion("op", [
 	z.object({ op: z.literal("request"), resources: z.array(PlanResource).min(1).max(20), reason: z.string().max(400) }),
 	z.object({ op: z.literal("activity"), text: z.string().min(1).max(300) }),
 	z.object({ op: z.literal("heartbeat") }),
+	z.object({ op: z.literal("ack-instruction"), instructionId: z.string().min(1).max(100) }),
 	z.object({
 		op: z.literal("publish"),
 		parent: z.string().regex(/^[0-9a-f]{40}$/),

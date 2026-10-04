@@ -81,6 +81,30 @@ describe("agent protocol", () => {
 		expect(out.granted).toContain("AuditLog");
 	});
 
+	it("delivers a persisted reroute in status and acknowledges only the matching request", async () => {
+		const { tower, id, call } = await setup();
+		await call({ op: "plan", plan: SESSION_CLEANUP });
+		const instruction = tower.mutate((c) => {
+			const other = c.createFlight({
+				missionId: c.createMission({ title: "Urgent session change", priority: "critical" }).id,
+				agent: "external",
+			});
+			c.submitPlan(other.id, SESSION_CLEANUP);
+			return c.requestReroute(id, "developer");
+		});
+		const status = await call({ op: "status" });
+		expect(status.instruction).toMatchObject({ id: instruction.id, status: "pending" });
+		expect(status.brief).toContain(instruction.id);
+		await expect(call({ op: "ack-instruction", instructionId: "unknown" })).rejects.toThrow("Unknown instruction");
+		await call({ op: "ack-instruction", instructionId: instruction.id });
+		await call({ op: "ack-instruction", instructionId: instruction.id });
+		const acknowledged = await call({ op: "status" });
+		expect(acknowledged.instruction).toMatchObject({ id: instruction.id, status: "acknowledged", issuedPlanVersion: 1 });
+		expect(acknowledged.brief).toContain(`Acknowledged reroute request ${instruction.id}`);
+		expect(acknowledged.brief).toContain("This confirms receipt only");
+		expect(tower.flight(id).plan?.planVersion).toBe(1);
+	});
+
 	it("rejects malformed protocol requests at the schema boundary", () => {
 		expect(ProtocolRequest.safeParse({ op: "publish", parent: "not-a-sha", message: "x", files: {} }).success).toBe(false);
 		expect(ProtocolRequest.safeParse({ op: "teleport" }).success).toBe(false);

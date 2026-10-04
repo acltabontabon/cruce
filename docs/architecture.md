@@ -1,12 +1,12 @@
 # Architecture
 
-Cruce is Cloudflare-native: one Worker (API + static Radar UI), one Durable Object per project as the
+Cruce is Cloudflare-native: one Worker (API + static Work/Traffic UI), one Durable Object per project as the
 authoritative control tower, a Workflow per live Flight, a container Sandbox per live Flight, Artifacts
 for every repository, and Queues event subscriptions for repository events.
 
 ```
                          ┌───────────────────────────── Cloudflare ──────────────────────────────┐
- Radar (React Flow+ELK) ─┼─ WebSocket ─┐                                                         │
+ Work / Traffic UI ─────┼─ WebSocket ─┐                                                         │
  runner / MCP / agents ──┼─ HTTPS ─────┤   Worker (router, auth, queue consumer)                 │
                          │             ▼                                                         │
                          │   ControlTower DO  (one per project — authoritative)                  │
@@ -36,18 +36,18 @@ for every repository, and Queues event subscriptions for repository events.
 | Project Git | `src/worker/project-git.ts`, `src/worker/git/*` | A bare isomorphic-git workspace on DO SQLite (`SqlFs`). Canonical at `refs/heads/main`, each Flight at `refs/heads/flights/<id>`; Artifacts repos are remotes. Commits are built from trees; merges are real three-way merges; notes on `refs/notes/cruce`. |
 | Artifacts host | `src/worker/artifacts-host.ts` | Binding wrapper: create/fork (and immediately revoke the returned long-lived tokens), 60 s tokens per Git operation, read tokens for sandboxes. |
 | Event subscriptions | `src/worker/event-subscriptions.ts` | Per-repo `artifacts.repo` subscriptions (pushed, token.created, token.revoked) → queue → Worker → ControlTower (idempotent). |
-| Agent protocol | `src/worker/protocol.ts` | status · plan · amend · request · activity · heartbeat · publish · validate · land · checkout · refresh · fail. Provider-neutral; an MCP adapter maps 1:1. |
+| Agent protocol | `src/worker/protocol.ts` | status · plan · amend · request · activity · heartbeat · ack-instruction · publish · validate · land · checkout · refresh · fail. Provider-neutral; an MCP adapter can map 1:1. |
 | FlightWorkflow | `src/worker/agents/flight-workflow.ts` | Durable lifecycle of a live Flight: provision → sandbox → discovery → plan → hold/wait → execute → gate → tests → land; re-plan when stale. |
 | FlightSandbox | `src/worker/agents/flight-sandbox.ts` | Container DO per Flight: clone (read-only), run Claude Code in the background, collect changes, run tests, resync to Cruce's commit. Heartbeats leases while the agent works. |
 | Outbound | `src/worker/agents/outbound.ts` | Sandbox egress policy: protocol for its own Flight only; read token injected for `git-upload-pack` on its own repo; `receive-pack` refused; model key injected; everything else 403. |
 | External runner | `runner/cruce-runner.ts` | Same lifecycle from a developer machine with the local `claude` CLI and a restricted tool allowlist. |
-| Radar | `src/ui/*` | React Flow + ELK airspace map, Flight list, context panel (Flight / congestion / resource), tower log, Git history with notes. |
+| Work / Traffic | `src/ui/*` | Work lists tasks, attention and recent results. Task details explain scope, coordination, activity and changes. Optional Traffic uses React Flow + ELK for active scope; controller logs and infrastructure stay in advanced details. |
 
 ## Key decisions
 
 - **One Durable Object per project is the single authority.** All coordination state changes happen in one
-  synchronous `mutate()`; Git work happens outside it and its results are applied in a later mutate. No
-  distributed coordination bugs.
+  synchronous `mutate()`; Git work happens outside it and its results are applied in a later mutate.
+  Concurrent initial readers share bootstrap; failed initialization can retry.
 - **Cruce is the only writer to Artifacts.** Agents submit changes; Cruce rebuilds the commit (same id when
   the agent supplies its metadata), runs the publish gate on the *real* diff, then pushes with a 60 s token
   that is revoked immediately. Sandboxes get read access through the egress policy and never see a token.
@@ -58,25 +58,62 @@ for every repository, and Queues event subscriptions for repository events.
   cannot compile at runtime; ast-grep is native. `StructuralIndexer` is an interface so a tree-sitter /
   ast-grep indexer can run in the Sandbox for other languages.
 - **Workflows for live Flights, alarms for the demo.** The demo is a deterministic script stepped by DO
-  alarms (pause/step/speed for video). Live Flights are long-running and failure-prone, so they run as
-  Workflows and wait with `waitForEvent` (no polling while held).
+  alarms. Demo prepare, reset, replay and advancement are serialized. Live Workflows wait for events with
+  a one-minute heartbeat/status check; external runners poll at 15 seconds while idle. Idle waiting does
+  not consume execution rounds. Controller alarms check live timeouts every 30 seconds without moving
+  an earlier deadline when another heartbeat arrives.
 - **Namespaces separate environments**: `cruce-dev` (local) and `cruce` (production).
 
 ## Data model (abridged)
 
-`Mission` → `Flight` (phase, plan, planHistory, artifact, stale, publishes, leases) → `FlightPlan`
+`Mission` → `Flight` (phase, plan, planHistory, artifact, stale, publishes, optional instruction) → `FlightPlan`
 (readSet, writeSet, contractSet, dependencies, assumptions, risk, amendment) → `TrafficPicture`
 (congestions, clearances, edges, deadlocks, landingOrder, attention, occupancy). See `src/core/domain.ts`
 and `src/core/traffic.ts`.
+
+The domain names remain internal: the UI generally says Task, Run, Plan, Scope and Integrated.
+Snapshots and WebSocket updates include `integrationBlockers` derived by the controller; the UI does
+not independently decide whether a run may integrate.
+
+## Validation and instructions
+
+Validation attaches only to the exact approved publish commit named in the request. Unknown or
+rejected commits are refused. Integration requires a passing report for the latest approved publish;
+an older commit's result cannot satisfy it. Sandbox and external test results use the command exit
+status, including timeout failure. A repository without a test script reports a validation failure
+with a missing-test reason. Missing or skipped tests cannot satisfy integration. Demo test reports are
+explicitly scripted; real scenario tests run separately.
+
+A reroute request persists on the Flight with a stable ID, target resources and pending/acknowledged
+state. Repeated requests reuse the outstanding ID. Both status APIs and the text brief retain pending
+instructions and acknowledged receipts, with the plan version at request time. Both live runtimes
+deliver the request at the next safe boundary, before further work,
+publishing or integration, then acknowledge receipt through `ack-instruction`. Delivery does not claim
+success: an amended plan and its new clearance show the outcome. A failed delivery remains pending.
+The demo's scripted agent amends immediately. Cancellation is cooperative for an agent process already
+running; the runtime checks terminal state before publishing its result.
+
+## Changes API
+
+`GET /api/projects/:project/flights/:flightId/changes` returns file counts and line statistics with
+explicit base, head and canonical commit IDs. Add `?path=<encoded-path>` for one unified file diff.
+Active runs compare their accepted workspace head to its merge base with canonical; rejected staging
+commits are excluded. Completed runs compare the integration commit to its first parent, so later
+canonical changes do not change their result. These are published changes, not an agent's unsubmitted
+working tree. Binary, oversized or overly complex diffs are omitted with a reason and incomplete
+statistics are identified.
 
 ## Failure handling
 
 | Situation | Behaviour |
 |---|---|
-| Agent crash / silence | Leases expire after 10 min without heartbeat → Flight LOST → leases released → dependents re-evaluated (`Controller.tick`). |
+| Agent crash / silence | Planned runs expire after 10 min without agent contact, including fully held runs with no leases → Flight LOST → leases released → dependents re-evaluated. Persisted heartbeat or plan-filing time survives controller restart. |
+| Launch failure | Failed repository provisioning or Workflow creation marks the run FAILED and closes any issued repository credentials; no queued run is left behind. |
 | Sandbox failure | Workflow step retries; the Flight's Artifacts repo is preserved; on final failure the Flight is FAILED with the reason. |
 | No Flight Plan | Discovery timeout (30 min) → plan-timeout attention, Flight failed, no code executed. |
-| Route expansion | Publish gate rejects with the out-of-clearance symbols; the agent amends (request airspace) or reverts. Three rejections escalate to a human. |
+| Route expansion | Publish gate rejects with the out-of-clearance symbols; the agent amends (request airspace) or reverts. Live runtimes fail after three unsuccessful publish attempts rather than integrate an older approved commit. Repeated gate violations raise attention. |
+| Validation failure | Missing or failed reports block integration. A failed test command fails the live run; published work is preserved in its repository. |
+| Stale plan | Stale state immediately returns the runtime to refresh/replan, including when detected during tests. Replanning consumes the work budget; returning without an amended plan fails the run. |
 | Dependency failure | Flights that declared a dependency on a failed Flight raise attention. |
 | Git conflict | Preflight reports conflicting paths; the Flight is not landed; attention raised. |
 | WebSocket drop | The client reconnects with backoff and receives an authoritative snapshot. |

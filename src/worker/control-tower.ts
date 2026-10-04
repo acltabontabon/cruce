@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { resolveResource, resourceLabel } from "../core/airspace.ts";
 import type { ControllerState, TowerEvent } from "../core/controller.ts";
-import { clearanceBrief } from "../core/controller.ts";
+import { Controller, clearanceBrief } from "../core/controller.ts";
 import { TERMINAL_PHASES } from "../core/domain.ts";
 import { type DecisionJudge, ModelDecisionJudge, RuleBasedDecisionJudge } from "../intelligence/judge.ts";
 import {
@@ -16,7 +16,7 @@ import {
 import type { FlightSandbox, TaskStatus } from "./agents/flight-sandbox.ts";
 import type { FlightParams } from "./agents/flight-workflow.ts";
 import { ArtifactsHost } from "./artifacts-host.ts";
-import { type DemoStatus, delayFor, initialDemoStatus, runNextStep } from "./demo-director.ts";
+import { type DemoStatus, delayFor, initialDemoStatus, prepareDemo, runNextStep } from "./demo-director.ts";
 import { type ArtifactsEvent, EventSubscriptions } from "./event-subscriptions.ts";
 import { SqlFs } from "./git/sql-fs.ts";
 import { GitWorkspace } from "./git/workspace.ts";
@@ -47,7 +47,10 @@ const LIVE_TICK_MS = 30_000;
 export class ControlTower extends DurableObject<TowerEnv> {
 	private tower?: Tower;
 	private meta?: ProjectMeta;
+	private opening?: Promise<Tower>;
 	private stepping = false;
+	private demoQueue: Promise<unknown> = Promise.resolve();
+	private alarmQueue: Promise<unknown> = Promise.resolve();
 
 	constructor(ctx: DurableObjectState, env: TowerEnv) {
 		super(ctx, env);
@@ -60,7 +63,23 @@ export class ControlTower extends DurableObject<TowerEnv> {
 	// ── setup ───────────────────────────────────────────────────────────
 
 	private async open(projectId: string): Promise<Tower> {
+		if (this.opening) return this.opening;
 		if (this.tower && this.meta?.id === projectId) return this.tower;
+		const opening = this.initialize(projectId);
+		this.opening = opening;
+		try {
+			return await opening;
+		} catch (error) {
+			// A later request can retry bootstrap rather than reuse a half-initialized tower.
+			this.tower = undefined;
+			this.meta = undefined;
+			throw error;
+		} finally {
+			this.opening = undefined;
+		}
+	}
+
+	private async initialize(projectId: string): Promise<Tower> {
 		const meta = PROJECTS.find((p) => p.id === projectId);
 		if (!meta) throw new Error(`unknown project ${projectId}`);
 		this.ctx.storage.kv.put("projectId", projectId);
@@ -82,8 +101,9 @@ export class ControlTower extends DurableObject<TowerEnv> {
 			this.store(),
 			{
 				onChange: (state, events) => {
-					this.broadcast({ type: "update", state, events, demo: this.demoStatus() });
+					this.broadcastUpdate(state, events, this.demoStatus());
 					this.wakeLiveFlights(state, events);
+					if (meta.mode === "live") this.ctx.waitUntil(this.schedule());
 				},
 				onRepo: subs ? async (repo) => void (await subs.subscribeRepo(repo)) : undefined,
 				onRepoRemoved: subs ? async (repo) => subs.unsubscribeRepo(repo) : undefined,
@@ -97,6 +117,7 @@ export class ControlTower extends DurableObject<TowerEnv> {
 		this.meta = meta;
 		this.tower = tower;
 		await tower.bootstrap();
+		if (meta.mode === "live") await this.schedule();
 		return tower;
 	}
 
@@ -149,7 +170,17 @@ export class ControlTower extends DurableObject<TowerEnv> {
 			demo: this.demoStatus(),
 			git: { backend: tower.git.backend, namespace: tower.git.namespace, canonicalRemote: tower.state.project.remote },
 			liveAgents: this.liveAgents(),
+			integrationBlockers: this.integrationBlockers(tower.state),
 		};
+	}
+
+	private integrationBlockers(state: ControllerState): Record<string, string[]> {
+		const controller = new Controller(state, Date.now());
+		return Object.fromEntries(
+			state.flights
+				.filter((flight) => !TERMINAL_PHASES.has(flight.phase))
+				.map((flight) => [flight.id, controller.landingBlockers(flight.id)]),
+		);
 	}
 
 	private liveAgents(): { available: boolean; reason?: string } {
@@ -193,10 +224,10 @@ export class ControlTower extends DurableObject<TowerEnv> {
 	private reroute(tower: Tower, flightId: string, by: string) {
 		const f = tower.flight(flightId);
 		const held = tower.state.traffic.clearances[flightId]?.held ?? [];
-		if (!f.plan || !held.length) return { ok: false, reason: "nothing to reroute around" };
+		const instruction = tower.mutate((c) => c.requestReroute(flightId, by));
 		const labels = held.map((h) => resourceLabel(h.resource, tower.state.index));
-		tower.mutate((c) => c.note("agent.instruction", "human", `${by} asked ${flightId} to reroute around ${labels.join(", ")}`, flightId));
 		if (f.agent !== "mock") return { ok: true, delivered: "with next status" };
+		if (!f.plan) throw new Error("reroute requires a plan");
 		const heldIds = new Set(held.map((h) => h.resource));
 		const { flightId: _id, planVersion: _v, filedAt: _t, baseline: _b, amendment: _a, ...fields } = f.plan;
 		const index = tower.state.index;
@@ -207,6 +238,7 @@ export class ControlTower extends DurableObject<TowerEnv> {
 			assumptions: [...fields.assumptions, `rerouted around ${labels.join(", ")}`],
 		};
 		tower.mutate((c) => c.submitPlan(flightId, plan, `rerouted around ${labels.join(", ")} by ${by}`));
+		tower.mutate((c) => c.ackInstruction(flightId, instruction.id));
 		return { ok: true };
 	}
 
@@ -219,8 +251,12 @@ export class ControlTower extends DurableObject<TowerEnv> {
 				const m = c.createMission({ title: cmd.title, description: cmd.description, priority: cmd.priority, createdBy: "controller" });
 				return c.createFlight({ missionId: m.id, agent: "external", agentRuntime: "Claude Code · external runner" });
 			});
-			await tower.provision(flight.id);
-			return { flightId: flight.id, external: true };
+			try {
+				await tower.provision(flight.id);
+				return { flightId: flight.id, external: true };
+			} catch (error) {
+				return this.failLaunch(tower, flight.id, error);
+			}
 		}
 		const live = this.liveAgents();
 		if (!live.available || !this.env.FLIGHT_WORKFLOW) throw new Error(`live Flights unavailable: ${live.reason}`);
@@ -228,20 +264,40 @@ export class ControlTower extends DurableObject<TowerEnv> {
 			const m = c.createMission({ title: cmd.title, description: cmd.description, priority: cmd.priority, createdBy: "controller" });
 			return c.createFlight({ missionId: m.id, agent: "claude-code", agentRuntime: "Claude Code · Cloudflare Sandbox" });
 		});
-		const instance = await this.env.FLIGHT_WORKFLOW.create({
-			id: `${tower.project.id}-${flight.id.toLowerCase()}-${Date.now().toString(36)}`,
-			params: { projectId: tower.project.id, flightId: flight.id },
-		});
-		this.ctx.storage.kv.put(`wf:${flight.id}`, instance.id);
-		tower.mutate((c) => c.note("flight.phase", "cruce", `${flight.id} launched · workflow ${instance.id}`, flight.id));
-		return { flightId: flight.id, workflow: instance.id };
+		try {
+			const instance = await this.env.FLIGHT_WORKFLOW.create({
+				id: `${tower.project.id}-${flight.id.toLowerCase()}-${Date.now().toString(36)}`,
+				params: { projectId: tower.project.id, flightId: flight.id },
+			});
+			this.ctx.storage.kv.put(`wf:${flight.id}`, instance.id);
+			tower.mutate((c) => c.note("flight.phase", "cruce", `${flight.id} launched · workflow ${instance.id}`, flight.id));
+			return { flightId: flight.id, workflow: instance.id };
+		} catch (error) {
+			return this.failLaunch(tower, flight.id, error);
+		}
+	}
+
+	private async failLaunch(tower: Tower, flightId: string, error: unknown): Promise<never> {
+		const reason = `Launch failed: ${(error as Error)?.message ?? String(error)}`.slice(0, 400);
+		tower.mutate((c) => c.fail(flightId, reason));
+		await tower.closeFlight(flightId);
+		throw error;
 	}
 
 	/** Tell held / sequenced live Flights that the traffic picture changed. */
 	private wakeLiveFlights(state: ControllerState, events: TowerEvent[]) {
 		if (this.meta?.mode !== "live" || !this.env.FLIGHT_WORKFLOW || !events.length) return;
 		const relevant = events.some((e) =>
-			["clearance", "flight.stale", "flight.landed", "override", "congestion.cleared", "flight.failed", "flight.lost"].includes(e.type),
+			[
+				"clearance",
+				"flight.stale",
+				"flight.landed",
+				"override",
+				"congestion.cleared",
+				"flight.failed",
+				"flight.lost",
+				"agent.instruction",
+			].includes(e.type),
 		);
 		if (!relevant) return;
 		for (const f of state.flights) {
@@ -288,6 +344,7 @@ export class ControlTower extends DurableObject<TowerEnv> {
 			stale: f.stale ? { byFlight: f.stale.byFlight, reasons: f.stale.reasons } : null,
 			published: approved.length > 0,
 			publishedPlanVersion: approved.at(-1)?.planVersion ?? 0,
+			instruction: f.instruction ?? null,
 			brief: clearanceBrief(tower.state, flightId),
 		};
 	}
@@ -332,17 +389,36 @@ export class ControlTower extends DurableObject<TowerEnv> {
 	}
 
 	async demo(projectId: string, cmd: DemoCommand): Promise<DemoStatus> {
+		return this.withDemoLock(() => this.runDemo(projectId, cmd));
+	}
+
+	private withDemoLock<T>(work: () => Promise<T>): Promise<T> {
+		const next = this.demoQueue.then(work, work);
+		this.demoQueue = next.catch(() => undefined);
+		return next;
+	}
+
+	private async runDemo(projectId: string, cmd: DemoCommand): Promise<DemoStatus> {
 		const tower = await this.open(projectId);
 		if (tower.project.mode !== "demo") throw new Error("not a demo project");
 		let status = this.demoStatus() ?? initialDemoStatus();
 		// Public deployments: a reset recreates Flight repos, so it is rate limited per project.
-		if (cmd.op === "reset" || (cmd.op === "play" && status.finished)) {
+		if (cmd.op === "reset" || cmd.op === "replay" || (cmd.op === "play" && status.finished)) {
 			const last = (this.ctx.storage.kv.get("lastReset") as number | undefined) ?? 0;
 			const wait = 45_000 - (Date.now() - last);
 			if (wait > 0) throw new Error(`The demo was reset moments ago; try again in ${Math.ceil(wait / 1000)}s`);
 			this.ctx.storage.kv.put("lastReset", Date.now());
 		}
 		switch (cmd.op) {
+			case "prepare":
+				if (status.next !== 0 || tower.state.flights.length) return status;
+				status = await prepareDemo(tower, status, (progress) => this.saveDemo(progress));
+				break;
+			case "replay":
+				this.saveDemo(initialDemoStatus());
+				await tower.reset();
+				status = { ...initialDemoStatus(), running: true, nextAt: Date.now() + delayFor(initialDemoStatus()) };
+				break;
 			case "play":
 				if (status.finished) {
 					await tower.reset();
@@ -359,15 +435,16 @@ export class ControlTower extends DurableObject<TowerEnv> {
 			case "reset":
 				this.saveDemo({ ...initialDemoStatus(), running: false });
 				await tower.reset();
-				status = initialDemoStatus();
+				status = await prepareDemo(tower, initialDemoStatus(), (progress) => this.saveDemo(progress));
 				break;
 			case "speed":
 				status = { ...status, speed: cmd.speed ?? 1 };
+				if (status.running) status.nextAt = Date.now() + delayFor(status);
 				break;
 		}
 		this.saveDemo(status);
 		await this.schedule();
-		this.broadcast({ type: "update", state: tower.state, events: [], demo: status });
+		this.broadcastUpdate(tower.state, [], status);
 		return status;
 	}
 
@@ -382,7 +459,7 @@ export class ControlTower extends DurableObject<TowerEnv> {
 			const running = latest.running && !after.finished && !after.error;
 			const status: DemoStatus = { ...after, running, speed: latest.speed, nextAt: running ? Date.now() + delayFor(after) : undefined };
 			this.saveDemo(status);
-			this.broadcast({ type: "update", state: tower.state, events: [], demo: status });
+			this.broadcastUpdate(tower.state, [], status);
 			await this.schedule();
 			return status;
 		} finally {
@@ -399,6 +476,11 @@ export class ControlTower extends DurableObject<TowerEnv> {
 		const tower = await this.open(projectId);
 		const ref = target === "canonical" ? "refs/heads/main" : `refs/heads/flights/${target}`;
 		return tower.git.history(ref, 30);
+	}
+
+	async changes(projectId: string, flightId: string, path?: string) {
+		const tower = await this.open(projectId);
+		return tower.git.changes(tower.flight(flightId), tower.state.canonical.head, path);
 	}
 
 	async auditLog(projectId: string, limit = 200): Promise<TowerEvent[]> {
@@ -454,6 +536,7 @@ export class ControlTower extends DurableObject<TowerEnv> {
 			demo: this.demoStatus(),
 			git: { backend: tower.git.backend, namespace: tower.git.namespace, canonicalRemote: tower.state.project.remote },
 			liveAgents: this.liveAgents(),
+			integrationBlockers: this.integrationBlockers(tower.state),
 		};
 		pair[1].send(JSON.stringify(snapshot));
 		return new Response(null, { status: 101, webSocket: pair[0] });
@@ -483,6 +566,10 @@ export class ControlTower extends DurableObject<TowerEnv> {
 		}
 	}
 
+	private broadcastUpdate(state: ControllerState, events: TowerEvent[], demo: DemoStatus | null) {
+		this.broadcast({ type: "update", state, events, demo, integrationBlockers: this.integrationBlockers(state) });
+	}
+
 	// ── time ────────────────────────────────────────────────────────────
 
 	private demoStatus(): DemoStatus | null {
@@ -494,14 +581,24 @@ export class ControlTower extends DurableObject<TowerEnv> {
 		this.ctx.storage.kv.put("demo", status);
 	}
 
-	private async schedule() {
+	private schedule(): Promise<void> {
+		const next = this.alarmQueue.then(() => this.updateAlarm());
+		this.alarmQueue = next.catch(() => undefined);
+		return next;
+	}
+
+	private async updateAlarm() {
 		const demo = this.demoStatus();
 		const candidates: number[] = [];
 		if (demo?.running && demo.nextAt) candidates.push(demo.nextAt);
 		if (this.meta?.mode === "live" && this.tower?.state.flights.some((f) => !TERMINAL_PHASES.has(f.phase)))
 			candidates.push(Date.now() + LIVE_TICK_MS);
-		if (candidates.length) await this.ctx.storage.setAlarm(Math.min(...candidates));
-		else await this.ctx.storage.deleteAlarm();
+		if (candidates.length) {
+			const previous = await this.ctx.storage.getAlarm();
+			const desired = Math.min(...candidates);
+			const next = this.meta?.mode === "live" && previous !== null ? Math.min(previous, desired) : desired;
+			if (previous !== next) await this.ctx.storage.setAlarm(next);
+		} else await this.ctx.storage.deleteAlarm();
 	}
 
 	async alarm() {
@@ -509,7 +606,11 @@ export class ControlTower extends DurableObject<TowerEnv> {
 		const tower = await this.open(projectId);
 		const demo = this.demoStatus();
 		if (demo?.running && demo.nextAt && demo.nextAt <= Date.now() + 50) {
-			await this.advance(tower);
+			await this.withDemoLock(async () => {
+				const current = this.demoStatus();
+				if (current?.running && current.nextAt && current.nextAt <= Date.now() + 50) await this.advance(tower);
+				else await this.schedule();
+			});
 			return;
 		}
 		if (tower.project.mode === "live") tower.mutate((c) => c.tick());

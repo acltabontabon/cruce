@@ -21,7 +21,20 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+	type CoordinationStatus,
+	coordinationKey,
+	deliverInstruction,
+	terminalStatus,
+	waitForTrafficChange,
+} from "../src/worker/agents/coordination.ts";
 import { correctionPrompt, discoveryPrompt, executionPrompt, type MissionText, replanPrompt } from "../src/worker/agents/prompts.ts";
+
+interface RunnerStatus extends CoordinationStatus {
+	cleared: string[];
+	held: { resource: string }[];
+	stale: { reasons: string[] } | null;
+}
 
 const args = new Map<string, string>();
 for (let i = 2; i < process.argv.length; i += 2) args.set(process.argv[i].replace(/^--/, ""), process.argv[i + 1] ?? "");
@@ -160,30 +173,40 @@ async function main() {
 			{ cwd: repoDir, env: agentEnv },
 		);
 		let summary = r.err.slice(-300);
+		let agentError = false;
 		try {
 			const result = JSON.parse(r.out) as { result?: string; is_error?: boolean };
 			summary = (result.result ?? "").split("\n").slice(-2).join(" ").slice(0, 200);
-			if (result.is_error) throw new Error(summary);
-		} catch (e) {
-			if (r.code !== 0) throw new Error(`claude failed: ${(e as Error).message || summary}`);
+			agentError = !!result.is_error;
+		} catch {
+			/* Keep stderr as the diagnostic when no JSON result was returned. */
 		}
+		if (r.code !== 0 || agentError) throw new Error(`claude failed: ${summary}`);
 		log(`agent: ${label} done — ${summary}`);
 	};
+	const status = () => protocol<RunnerStatus>({ op: "status" });
+	const deliver = (label: string, s: RunnerStatus) =>
+		deliverInstruction(
+			s,
+			mission,
+			(prompt) => agent(`${label}: reroute`, prompt),
+			(instructionId) => protocol({ op: "ack-instruction", instructionId }),
+		);
+	const waitForTower = (before: RunnerStatus) =>
+		waitForTrafficChange(before, {
+			heartbeat: () => protocol({ op: "heartbeat" }),
+			wait: () => new Promise((resolve) => setTimeout(resolve, 15_000)),
+			status,
+		});
 
 	try {
 		await agent("discovery", discoveryPrompt(mission));
-		for (let round = 1; round <= 10; round++) {
-			const s = await protocol<{
-				phase: string;
-				planVersion: number;
-				clearance: string;
-				cleared: string[];
-				held: { resource: string }[];
-				stale: { reasons: string[] } | null;
-				brief: string;
-			}>({ op: "status" });
+		let executionKey: string | undefined;
+		let workRounds = 0;
+		rounds: for (let round = 1; workRounds < 10; round++) {
+			const s = await status();
 			if (!s.planVersion) throw new Error("the agent did not file a Flight Plan");
-			if (["landed", "failed", "lost", "cancelled"].includes(s.phase)) {
+			if (terminalStatus(s)) {
 				log(`${flightId} ${s.phase}`);
 				return;
 			}
@@ -196,18 +219,33 @@ async function main() {
 				await resetTo(r.head);
 				base = r.head;
 				log(`baseline refreshed → ${base.slice(0, 7)}`);
+				workRounds++;
 				await agent(`re-plan (round ${round})`, replanPrompt(mission, s.stale.reasons, s.brief));
+				const replanned = await status();
+				if (terminalStatus(replanned)) return;
+				if (replanned.planVersion <= s.planVersion) throw new Error("Agent did not file an amended plan after the baseline changed");
 				continue;
 			}
+			if (await deliver(`round ${round}`, s)) continue;
 			if (s.clearance === "hold" || !s.cleared.length) {
-				await new Promise((r) => setTimeout(r, 15_000));
+				await waitForTower(s);
 				continue;
 			}
 
-			// Work is needed when nothing is published for the current plan or airspace is still held.
-			const needsWork = publishedPlan < s.planVersion || s.held.length > 0;
-			if (needsWork) await agent(`execute (round ${round})`, executionPrompt(mission, s.brief));
+			// A partial run waits after publishing its available work; polling does not spend work rounds.
+			const needsWork = publishedPlan < s.planVersion || coordinationKey(s) !== executionKey;
+			if (needsWork) {
+				workRounds++;
+				executionKey = coordinationKey(s);
+				await agent(`execute (round ${round})`, executionPrompt(mission, s.brief));
+			}
 			for (let attempt = 1; needsWork && attempt <= 3; attempt++) {
+				const boundary = await status();
+				if (terminalStatus(boundary)) return;
+				if (await deliver(`round ${round}: before publish ${attempt}`, boundary)) {
+					executionKey = undefined;
+					continue rounds;
+				}
 				await sh("git", ["add", "-A"], { cwd: repoDir });
 				const diff = await sh("git", ["diff", "--cached", "--name-status", "--no-renames", base], { cwd: repoDir });
 				const files: Record<string, string | null> = {};
@@ -240,18 +278,23 @@ async function main() {
 						summary: `${pass ?? "?"} passed, ${fail ?? "?"} failed (npm test, external runner)`,
 					});
 					log(`tests: ${passed ? "passed" : "FAILED"}`);
+					if (!passed) throw new Error("Validation failed: npm test exited unsuccessfully");
 					break;
 				}
+				if (attempt === 3) throw new Error("Publish gate rejected changes after 3 attempts; unpublished changes were not integrated");
 				const brief = (await protocol<{ brief: string }>({ op: "status" })).brief;
 				await agent(`correct (round ${round}.${attempt})`, correctionPrompt(mission, out.outside, brief));
 			}
+			const boundary = await status();
+			if (terminalStatus(boundary)) return;
+			if (await deliver(`round ${round}: before integration`, boundary)) continue;
 			const landing = await protocol<{ landed: boolean; reason?: string }>({ op: "land" });
 			if (landing.landed) {
 				log(`${flightId} LANDED`);
 				return;
 			}
 			log(`not landing yet: ${landing.reason}`);
-			await new Promise((r) => setTimeout(r, 15_000));
+			await waitForTower(boundary);
 		}
 		throw new Error("did not land within 10 rounds");
 	} catch (e) {

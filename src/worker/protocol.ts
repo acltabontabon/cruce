@@ -36,6 +36,8 @@ export async function handleProtocol(tower: Tower, flightId: string, req: Protoc
 		case "heartbeat":
 			tower.mutate((c) => c.heartbeat(flightId));
 			return { ok: true, clearance: tower.state.traffic.clearances[flightId]?.status ?? "none" };
+		case "ack-instruction":
+			return { ok: true, instruction: tower.mutate((c) => c.ackInstruction(flightId, req.instructionId)) };
 		case "publish": {
 			const out = await tower.publish(flightId, {
 				parent: req.parent,
@@ -98,5 +100,6 @@ export async function status(tower: Tower, flightId: string) {
 		head: await tower.git.resolve(flightRef(flightId)),
 		artifact: f.artifact ? { repo: f.artifact.repo, remote: f.artifact.remote } : null,
 		brief: clearanceBrief(tower.state, flightId),
+		instruction: f.instruction ?? null,
 	};
 }
