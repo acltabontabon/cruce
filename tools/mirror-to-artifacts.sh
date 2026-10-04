@@ -27,7 +27,7 @@ sleep 2
 for attempt in 1 2; do
 	IDS="$(cf artifacts namespaces repos tokens list --namespace "$NS" --name "$REPO" --state active 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s);const r=v.result??v;const t=Array.isArray(r)?r:(r.tokens??[]);process.stdout.write(t.map(x=>x.id).join(" "))}catch{}})')"
 	[ -z "$IDS" ] && break
-	for id in $IDS; do cf artifacts namespaces tokens revoke "$id" --namespace "$NS" >/dev/null 2>&1 || true; done
+	for id in $IDS; do cf artifacts namespaces tokens revoke "$id" --namespace "$NS" --force >/dev/null 2>&1 || true; done
 	sleep 2
 done
 echo "active tokens remaining: $(cf artifacts namespaces repos tokens list --namespace "$NS" --name "$REPO" --state active 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s);const r=v.result??v;process.stdout.write(String((Array.isArray(r)?r:(r.tokens??[])).length))}catch{process.stdout.write("?")}})')"

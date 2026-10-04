@@ -103,7 +103,8 @@ both tokens. `scripts/probe-push-event.sh` pushes once so a `pushed` event can b
 - Per-repo events need a subscription per repository (`source.namespace` + `source.repo_name` required).
 - Account-level event names are `repo.created` etc. (without the `cf.artifacts.` prefix used in payloads).
 - A queue can have one consumer: remove any `http_pull` consumer before attaching the Worker.
-- `cf queues consumers delete` / `subscriptions delete` need `--force` in non-interactive shells.
+- `cf queues consumers delete`, `subscriptions delete`, and `artifacts namespaces tokens revoke` need `--force`
+  in non-interactive shells — and exit 0 when they abort without it, so always pass it in scripts.
 - pnpm 12 enforces a minimum release age; `isomorphic-git` is pinned to 1.42.6 for that reason.
 - Sandbox SDK 1.0 (Sep 30 2026): a container-enabled Durable Object (`ctx.container`), egress through
   `interceptOutboundHttps` + `interceptAllOutboundHttp` to a `WorkerEntrypoint`, `enableInternet: false`.
