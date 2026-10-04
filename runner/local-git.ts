@@ -107,3 +107,20 @@ export async function observe(cwd: string, base: string, head?: string) {
 		changes,
 	};
 }
+
+/**
+ * Package committed work (base..HEAD) as a non-thin Git pack. Only commits travel: uncommitted
+ * changes stay in the working tree, and the revision Cruce records is exactly the local commit.
+ */
+export async function packRevision(cwd: string, base: string, head?: string) {
+	if (!/^[a-f0-9]{40}$/.test(base)) throw new Error("Exact workspace base revision required");
+	const revision = head ?? (await git(cwd, ["rev-parse", "HEAD"]));
+	if (revision === base) throw new Error("No new commits since the workspace head; commit your work first");
+	await git(cwd, ["merge-base", "--is-ancestor", base, revision]).catch(() => {
+		throw new Error(`HEAD does not descend from workspace head ${base}; merge or rebase locally first, preserving your work`);
+	});
+	const commits = Number(await git(cwd, ["rev-list", "--count", `${base}..${revision}`]));
+	const pack = await pipeGit(cwd, ["pack-objects", "--revs", "--stdout", "-q"], Buffer.from(`${revision}\n^${base}\n`));
+	if (pack.length > 4 * 1024 * 1024) throw new Error("Revision pack exceeds 4 MiB; publish smaller changes or large artifacts separately");
+	return { base, revision, commits, pack: pack.toString("base64") };
+}

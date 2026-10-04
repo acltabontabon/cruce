@@ -1,23 +1,29 @@
-# Demonstrations — current direction
+# Demonstrations
 
-Production opens on the authenticated native activity console at `/`. The existing deterministic coordination demo remains isolated at `/demo`; its auth-service revisions and scenario verifier are unchanged. It demonstrates the retained scheduling engine, not native human approval or live independent verification.
+The native console is `/`. The deterministic coordination demo is isolated at `/demo`; its auth-service revisions and scenario verifier are unchanged. It demonstrates the retained scheduling engine, not native intent, proposals, verification or deployment.
 
-The native payment fixture is `demo/payment-service`. `test/worker/system-runtime.test.ts` exercises real Git objects, source publication, evidence artifacts, native proposal, human attestation/review, gated promotion, lineage and export with a mocked Artifacts transport. `test/core/workstreams.test.ts` verifies partial clearance, sessions, dependencies and drift. The two-mission runtime scenario also preserves both histories through a real three-way source refresh and accepts both proposals with exactly two workspace forks. These are offline tests with a mocked Artifacts transport, not live agent runs.
+## Native lifecycle (offline tests)
 
-The native live narrative is: human records payment reliability intent; implementation and API agents accept bounded missions; independent scope continues; implementation produces an immutable source proposal with evidence; a human reviews and promotes; the dependent agent refreshes context and amends its plan; the human inspects the causal lineage afterward. A native release demo must identify human attestation versus runtime-verified results and never substitute scripted messages for real execution.
+`test/worker/project-runtime.test.ts` runs the native lifecycle against real Git objects with a mocked Artifacts transport:
 
-## Historical deterministic demo
+- a project is provisioned explicitly; reading an unprovisioned project creates nothing;
+- a mission starts from an accepted revision and gets one workspace fork;
+- a local commit is published as a Git pack and recorded as the exact revision the agent produced;
+- evidence, a proposal (#1, exact base and revision), human attestation and review lead to a non-forced promotion;
+- a Worker preview of the exact revision is built (Workers Builds mocked) and Cruce's smoke checks become runtime-verified evidence;
+- metered previews require human approval when policy says so;
+- one human decision promotes and deploys production; lineage traces the deployment back to intent and agent; rollback is explained as the proposals it removes and redeploys an earlier accepted revision;
+- two missions refresh after a promotion while preserving both histories.
 
-# Demo
+## Native narrative (live)
 
-Two modes share the same controller, Git integration, and Work/Traffic interface:
+A developer records the intent "Add rate limiting to Customer API". A mission is created. Claude Code, running locally, reads `get_context`, calls `start_mission` (base pinned to the canonical revision, workspace fork created), changes code, runs `npm test` and `wrangler dev` locally, commits, and calls `publish_revision`. It publishes the test report with `publish_artifact`, creates proposal #1 and calls `request_preview`. Cruce checks policy and budgets, pushes the exact revision to the deploy repository, waits for Workers Builds and runs smoke checks. A security agent attaches evidence for the same revision. The human sees proposal #1 with its revision, files, verification per revision and resource impact, approves, and chooses **Promote and deploy to production**. Production runs that revision, and lineage leads from production back to the intent. A live release demo must label reported, human-attested and runtime-verified results and never substitute scripted messages for real execution.
 
-- **Demo mode** (`project=demo`): three scripted agents, one deterministic story, using Artifacts or the
-  offline local Git backend.
-  Every decision is the controller's; the script only says what each agent *attempts*. Commit ids are
-  reproducible across runs.
-- **Live mode** (`project=live`): real Claude Code agents — external runners on a developer machine or
-  Cloudflare Sandboxes — filing their own Flight Plans.
+## Deterministic coordination demo
+
+Three scripted agents, one deterministic story, using Artifacts or the offline local Git backend. Every
+decision is the controller's; the script only says what each agent *attempts*. Commit ids are reproducible
+across runs.
 
 The controls below describe the current checkout. The hosted MVP may be an earlier version until
 this refinement is deployed; use the local preview for this walkthrough.
@@ -95,32 +101,3 @@ passes after F-022 lands. Cruce avoided that rework before any code collided.
    the actual tests, or `tools/verify-repo.sh auth-service cruce` to clone and verify the Artifacts result.
 
 Use Replay from beginning if the audience also needs to see task creation and initial discovery.
-
-## Live mode
-
-```sh
-export CRUCE_ADMIN_TOKEN=…        # controller token
-node runner/cruce-runner.ts --url https://cruce.acltabontabon.workers.dev --project live \
-  --title "JWT library migration" --description "…" &
-node runner/cruce-runner.ts --url https://cruce.acltabontabon.workers.dev --project live \
-  --title "Refresh-token rotation" --description "…" &
-node runner/cruce-runner.ts --url https://cruce.acltabontabon.workers.dev --project live \
-  --title "List a user's sessions" --description "…" --priority low &
-```
-
-Each runner launches a Flight (fork), clones it read-only, and runs `claude -p` with a restricted tool
-allowlist (edits, `cruce`, tests). The agent files its plan with the `cruce` CLI, works inside its
-clearance, requests airspace when it needs more, and Cruce publishes, validates, sequences, and lands.
-Live behaviour depends on the model; the deterministic demo is the reliable recording path.
-
-In the web interface, choose the live repository, provide controller access for this browser session,
-and enter a task. Sandbox launch is available only when that runtime is configured; the interface
-shows the external-runner alternative otherwise. Ordinary plans receive automatic clearance.
-
-Live reroute requests are delivered at an agent boundary and acknowledged after receipt; the updated
-plan shows whether a different route was feasible. Cancellation prevents subsequent publication but
-does not interrupt an already-running model process immediately. Waiting runs keep heartbeating without
-spending execution rounds. Integration requires the latest approved commit's validation report, and
-failed tests or exhausted publish retries fail the run while retaining published work for 24 hours,
-unless explicitly kept for recovery. Successful landings preserve accepted work and notes in canonical
-and automatically remove their Flight repositories. See [Flight resource cleanup](flight-cleanup.md).

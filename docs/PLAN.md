@@ -1,16 +1,40 @@
-# Native platform delivery — current direction
+# Delivery plan — Git + Artifacts foundation
 
-The 2026-10-05 clarification replaces the GitHub-first plan. Accepted source and collaboration are native to Cruce and Cloudflare Artifacts. External Git hosting is not required.
+The 2026-10-05 architectural clarification anchors Cruce on four foundations: Git, Cloudflare Artifacts, Cruce MCP and the Cruce Control Tower. Cruce coordinates local agents; it does not execute them. See [architecture](architecture.md).
 
-Local gates passed: typecheck, lint, 244 tests, offline build and the preserved independent scenario. Native sign-in and keyboard/mobile entry were inspected in the browser; authenticated activity and lineage still require Access.
+## Foundation order and status
 
-Delivered in this working tree: native system identity/membership, Access/MCP OAuth, typed native/machine commands, intents and specialized missions, durable workstream/session separation, one Artifacts workspace per workstream, observed-versus-verified source, partial clearance and drift, immutable source/evidence artifacts, proposals, revision-bound verification and human review, explicit disagreement resolution, versioned policy, resumable non-forced source promotion, source export, native console and lineage.
+| # | Relationship | Status |
+|---|---|---|
+| 1 | Project ↔ canonical Artifacts repository (explicit provisioning; reads never create resources) | implemented, offline-tested |
+| 2 | Git revision / canonical state model (`SourceRepository`, revision on every record, revision lineage) | implemented, offline-tested |
+| 3 | Mission ↔ Git workspace (base pinned to an accepted revision; one fork per workspace) | implemented, offline-tested |
+| 4 | Cruce MCP (catalog, per-tool schemas, scope filtering, no Cloudflare admin tools) | implemented, offline-tested |
+| 5 | Agent access to intent / mission / context (`get_context`, `get_project`, `get_mission`) | implemented, offline-tested |
+| 6 | Proposal ↔ exact Git revision (base, revision, commits, files; supersede; reject / request changes) | implemented, offline-tested |
+| 7 | Verification ↔ exact Git revision (requests, reported / human attested / runtime verified) | implemented, offline-tested |
+| 8 | Evidence / artifact relationships (anchored to revisions; execution location recorded) | implemented, offline-tested |
+| 9 | Environment model (preview, production; Worker or external target) | implemented, offline-tested |
+| 10 | Cloudflare resource / billing boundary (operator vs connected account, sealed token, resource policy, budgets, approvals) | implemented, offline-tested |
+| 11 | Worker Preview (deploy repository, Workers Builds, DeploymentWorkflow, Cruce smoke checks) | implemented; live Workers Builds unverified |
+| 12 | Promotion (non-forced accepted source; optional production deployment in the same human decision) | implemented, offline-tested |
+| 13 | Full lineage (trace any subject both ways; revision explanation; rollback explanation and redeploy) | implemented, offline-tested |
 
-Release gates still required: authenticated native tools on a real Access deployment; two-agent full refresh/amendment through Codex/Claude and tested Cursor capability claims; disposable native Artifacts publication/evidence/promotion smoke; actual Jev binding call; labeled 200-case judgment evaluation. Automatic semantic constraints stay off. Existing compatibility/demo verification does not satisfy these native gates.
+Local gates: `pnpm typecheck`, `pnpm lint`, `pnpm test`, offline `cf build` and the independent demo scenario pass.
 
-Next dependent slices: native managed execution and independently verified tests; binary/large artifact transport; artifact retention/archival policy; risk-specific security approvals; rollback mission convenience; releases and environment promotion with explicit deployment policy; external import/mirroring as interoperability.
+## Live gates still required
 
-The console must never claim a release/deployment or runtime verification that has not actually occurred. Preserve actual source, causal decisions and honest coverage at every boundary.
+- Authenticated native console and Cruce MCP on a real Access deployment, including scope consent and scope-filtered tool lists for Claude Code, Codex and Cursor.
+- `publish_revision` from a real local checkout through the bridge against real Artifacts (pack import, ancestry, workspace push).
+- Workers Builds connected to a project deploy repository: preview build observed for a proposal branch, `preview_url` and smoke checks recorded; production build from `main`; Builds API response shapes confirmed.
+- Connected-account mode: Artifacts REST repository creation and 60-second tokens in a second account.
+- Jev binding call and the labeled judgment corpus; automatic semantic constraints stay off.
+
+## Next slices
+
+Binary/large artifact transport; artifact retention policy; experiment comparison view; risk-specific approvals; budgets per environment and month; importing an existing Git repository into a project; export/mirroring to external hosts; independent verification runners (local or cloud) that can issue runtime-verified test evidence.
+
+The console must never claim a deployment, build or runtime verification that has not actually occurred.
 
 ## Historical implementation plan
 

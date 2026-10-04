@@ -19,6 +19,8 @@ import type { TowerStore } from "./tower.ts";
 export class CoordinationRuntime {
 	private queue: Promise<unknown> = Promise.resolve();
 	private running = new Set<string>();
+	/** Cloud AI is a metered resource: semantic analysis runs only when project resource policy allows it. */
+	inferenceAllowed: () => boolean = () => true;
 	constructor(
 		readonly store: TowerStore,
 		readonly git: GitWorkspace,
@@ -202,7 +204,7 @@ export class CoordinationRuntime {
 	}
 	async enqueueSemantic() {
 		const s = this.state();
-		if (s.project.policy.semantic === "off" || !this.ai) return;
+		if (s.project.policy.semantic === "off" || !this.ai || !this.inferenceAllowed()) return;
 		const jobs = this.store.get<JevJob[]>("jev:jobs") ?? [],
 			fingerprint = semanticFingerprint(s);
 		const source = await this.git.readFiles(s.index.revision).catch(() => ({}) as Record<string, string>);
@@ -251,7 +253,7 @@ export class CoordinationRuntime {
 		this.background(this.runJev());
 	}
 	async runJev() {
-		if (!this.ai) return;
+		if (!this.ai || !this.inferenceAllowed()) return;
 		const jobs = this.store.get<JevJob[]>("jev:jobs") ?? [];
 		for (const job of jobs)
 			if (job.status === "running" && !this.running.has(job.id) && (job.deadline ?? 0) <= this.now()) {

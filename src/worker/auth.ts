@@ -1,5 +1,9 @@
 import { type OAuthHelpers, OAuthProvider } from "@cloudflare/workers-oauth-provider";
+import { DEFAULT_AGENT_SCOPES, SCOPE_LABELS, SCOPES, type Scope } from "../core/capabilities.ts";
 import { CoordinationError } from "../core/workstreams.ts";
+import { decode, seal, unseal } from "./sealing.ts";
+
+export { seal, unseal };
 export interface AuthEnv {
 	OAUTH_KV: KVNamespace;
 	OAUTH_PROVIDER?: OAuthHelpers;
@@ -13,38 +17,6 @@ export interface AuthProps {
 	tenantId: string;
 	email: string;
 	accessJwt: string;
-}
-const encode = (b: Uint8Array) =>
-	btoa(String.fromCharCode(...b))
-		.replaceAll("+", "-")
-		.replaceAll("/", "_")
-		.replaceAll("=", "");
-const decode = (s: string) => Uint8Array.from(atob(s.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0));
-async function key(secret?: string) {
-	if (!secret) throw new CoordinationError(503, "Identity encryption not configured");
-	return crypto.subtle.importKey("raw", await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret)), "AES-GCM", false, [
-		"encrypt",
-		"decrypt",
-	]);
-}
-export async function seal(env: AuthEnv, data: unknown) {
-	const iv = crypto.getRandomValues(new Uint8Array(12)),
-		cipher = new Uint8Array(
-			await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await key(env.CRUCE_SECRET), new TextEncoder().encode(JSON.stringify(data))),
-		);
-	return `${encode(iv)}.${encode(cipher)}`;
-}
-export async function unseal<T>(env: AuthEnv, value: string): Promise<T> {
-	try {
-		const [iv, cipher] = value.split(".");
-		return JSON.parse(
-			new TextDecoder().decode(
-				await crypto.subtle.decrypt({ name: "AES-GCM", iv: decode(iv) }, await key(env.CRUCE_SECRET), decode(cipher)),
-			),
-		);
-	} catch {
-		throw new CoordinationError(401, "Sign in again");
-	}
 }
 function cookie(request: Request, name: string) {
 	return request.headers
@@ -147,18 +119,26 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 		const original = await oauth.parseAuthRequest(request),
 			consent = await oauth.beginConsent(original),
 			description = await oauth.describeConsent(original);
+		const requested = original.scope?.filter((s): s is Scope => (SCOPES as readonly string[]).includes(s));
+		const preset = requested?.length ? requested : DEFAULT_AGENT_SCOPES;
+		const options = SCOPES.map(
+			(scope) =>
+				`<label><input type="checkbox" name="scope" value="${scope}"${preset.includes(scope) ? " checked" : ""}${scope === "cruce:read" ? " disabled checked" : ""}> <code>${scope}</code> — ${escapeHtml(SCOPE_LABELS[scope])}</label><br>`,
+		).join("");
 		return new Response(
-			`<html lang="en"><meta charset="utf-8"><title>Connect to Cruce</title><h1>Connect to Cruce</h1><p>${escapeHtml(description.clientName ?? original.clientId)} requests coordination access to projects you can contribute to.</p><p>Signed in as ${escapeHtml(identity.email)}.</p><p>Agents can propose and report evidence. This connection does not grant promotion authority.</p><p>Redirect: ${escapeHtml(original.redirectUri)}</p><form method="post"><input type="hidden" name="handle" value="${escapeHtml(consent.handle)}"><button>Allow coordination</button></form><a href="/">Cancel</a></html>`,
+			`<html lang="en"><meta charset="utf-8"><title>Connect to Cruce</title><h1>Connect to Cruce</h1><p>${escapeHtml(description.clientName ?? original.clientId)} requests access to Cruce projects you can contribute to.</p><p>Signed in as ${escapeHtml(identity.email)}.</p><form method="post"><input type="hidden" name="handle" value="${escapeHtml(consent.handle)}"><fieldset><legend>Allow this agent to</legend>${options}</fieldset><p>Agents never promote accepted source or deploy production; those remain human decisions. Metered Cloudflare operations stay subject to project policy and budgets.</p><p>Redirect: ${escapeHtml(original.redirectUri)}</p><button>Allow</button></form><a href="/">Cancel</a></html>`,
 			{ headers: consent.headers },
 		);
 	}
 	const form = await request.formData(),
 		approved = await oauth.approveConsent(request, String(form.get("handle"))),
+		chosen = form.getAll("scope").map(String),
+		scope = SCOPES.filter((s) => s === "cruce:read" || chosen.includes(s)),
 		result = await oauth.completeAuthorization({
 			request: approved.request,
 			userId: identity.developerId,
 			metadata: {},
-			scope: ["coordination"],
+			scope,
 			props: identity,
 		});
 	approved.headers.set("location", result.redirectTo);
@@ -173,8 +153,8 @@ export function oauthProvider<E extends AuthEnv>(api: ExportedHandler<E>, fallba
 		tokenEndpoint: "/oauth/token",
 		clientRegistrationEndpoint: "/oauth/register",
 		clientIdMetadataDocumentEnabled: false,
-		scopesSupported: ["coordination", "offline_access"],
-		requiredScopes: ["coordination"],
+		scopesSupported: [...SCOPES, "offline_access"],
+		requiredScopes: ["cruce:read"],
 		resourceMetadata: { resource: `${origin}/mcp`, authorization_servers: [origin] },
 	});
 }

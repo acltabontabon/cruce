@@ -3,6 +3,7 @@ import { resolveResource, resourceLabel } from "../core/airspace.ts";
 import type { ControllerState, TowerEvent } from "../core/controller.ts";
 import { Controller, ControllerError } from "../core/controller.ts";
 import { TERMINAL_PHASES } from "../core/domain.ts";
+import { CoordinationError } from "../core/workstreams.ts";
 import type { JevBinding } from "../intelligence/jev.ts";
 import { type DecisionJudge, RuleBasedDecisionJudge } from "../intelligence/judge.ts";
 import { type DemoCommand, type HumanCommand, PROJECTS, type ProjectMeta, type ServerMessage, type Snapshot } from "../shared/api.ts";
@@ -10,6 +11,8 @@ import type { Command, Principal, ProjectConnection } from "../shared/coordinati
 import type { Actor, PlatformCommand } from "../shared/platform.ts";
 import { ArtifactsHost } from "./artifacts-host.ts";
 import { type DemoStatus, delayFor, initialDemoStatus, prepareDemo, runNextStep } from "./demo-director.ts";
+import type { DeploymentParams } from "./deployment-workflow.ts";
+import { ResourceBoundary } from "./deployments.ts";
 import { type ArtifactsEvent, EventSubscriptions } from "./event-subscriptions.ts";
 import { SqlFs } from "./git/sql-fs.ts";
 import { GitWorkspace } from "./git/workspace.ts";
@@ -31,6 +34,8 @@ export interface TowerEnv {
 	CF_EVENTS_API_TOKEN?: string;
 	GIT_BACKEND?: string;
 	AI?: JevBinding;
+	CRUCE_SECRET?: string;
+	DEPLOYMENT_WORKFLOW?: Workflow<DeploymentParams>;
 }
 
 const LIVE_TICK_MS = 30_000;
@@ -62,14 +67,36 @@ export class ControlTower extends DurableObject<TowerEnv> {
 		this.projectOpening = (async () => {
 			const git = new GitWorkspace(new SqlFs(this.ctx.storage.sql), "/native.git"),
 				host = this.env.ARTIFACTS ? new ArtifactsHost(this.env.ARTIFACTS, this.env.ARTIFACTS_NAMESPACE) : undefined;
+			const store = this.store();
+			const resources = new ResourceBoundary(
+				store,
+				{ CRUCE_SECRET: this.env.CRUCE_SECRET },
+				{
+					accountId: this.env.CF_ACCOUNT_ID,
+					namespace: this.env.ARTIFACTS_NAMESPACE,
+					host,
+				},
+			);
+			const workflow = this.env.DEPLOYMENT_WORKFLOW;
 			const runtime = new ProjectRuntime(
-				this.store(),
+				store,
 				git,
 				project,
 				host,
 				(p) => this.ctx.waitUntil(p.then(() => this.schedule())),
 				Date.now,
 				this.env.AI,
+				{
+					namespace: this.env.ARTIFACTS_NAMESPACE,
+					resources,
+					orchestrate: workflow
+						? async (deploymentId) =>
+								void (await workflow.create({
+									id: `${project.id}-${deploymentId}`.toLowerCase(),
+									params: { projectId: project.id, deploymentId },
+								}))
+						: undefined,
+				},
 			);
 			this.ctx.storage.kv.put("native-project", project);
 			await runtime.initialize();
@@ -119,6 +146,28 @@ export class ControlTower extends DurableObject<TowerEnv> {
 	async projectArtifactEvent(project: ProjectConnection) {
 		const runtime = await this.nativeProject(project);
 		return runtime.verifySource();
+	}
+	/** Explicit, human-initiated provisioning of the project's canonical Artifacts repository. */
+	async provisionProject(project: ProjectConnection, actor: Actor) {
+		const runtime = await this.nativeProject(project);
+		return runtime.provision(actor);
+	}
+	async connectAccount(project: ProjectConnection, actor: Actor, input: { accountId: string; token: string; label?: string } | null) {
+		const runtime = await this.nativeProject(project);
+		runtime.authorize(actor);
+		if (actor.kind !== "human" || !actor.maintainer) throw new CoordinationError(403, "Human maintainer connects Cloudflare accounts");
+		if (!runtime.options.resources) throw new CoordinationError(503, "Resource boundary unavailable");
+		if (!input) {
+			runtime.options.resources.disconnect();
+			return runtime.options.resources.account() ?? null;
+		}
+		return runtime.options.resources.connect(input, actor.developerId);
+	}
+	/** Called by DeploymentWorkflow; also safe to call repeatedly. */
+	async deploymentTick(deploymentId: string, expire = false) {
+		const project = this.ctx.storage.kv.get("native-project") as ProjectConnection | undefined;
+		if (!project) throw new CoordinationError(404, "No native project");
+		return (await this.nativeProject(project)).deploymentTick(deploymentId, expire);
 	}
 
 	// ── setup ───────────────────────────────────────────────────────────

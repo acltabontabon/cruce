@@ -111,3 +111,14 @@ Short, dated entries so another agent can continue. Newest last.
 - Added a real-Git two-mission offline scenario: independent API publication, implementation promotion, required refresh/amendment, preservation of both histories and drafts, second promotion, exactly one Artifacts fork per workstream. Publication and promotion crash-recovery tests pass.
 - Browser inspected native sign-in at desktop/mobile widths and keyboard skip-link focus; the isolated legacy demo opens successfully. Authenticated native overview/lineage still needs live Access inspection. Cloudflare CLI reports not signed in; requested a non-production environment/Access hostname for live gates.
 - Hardened native governance: maintainers can re-enable a disabled system without enabling source access during suspension; removed members cannot retrieve system details through a replayed creation request. Tenant and role checks still apply.
+
+## 2026-10-05 — Git + Artifacts foundation
+
+- Re-anchored Cruce on Git, Cloudflare Artifacts, Cruce MCP and the Control Tower. Renamed System → Project across domain, API (`/api/projects`), MCP, UI and docs; earlier repository descriptions remain accepted for ownership checks. The legacy demo API moved to `/api/demo/*`.
+- Removed cloud agent execution (FlightSandbox container, FlightWorkflow, Outbound egress, sandbox image, legacy runner, launch form, live/protocol paths). The deterministic demo and its reproducible revisions are unchanged.
+- Projects provision their canonical Artifacts repository explicitly; reads never create resources. Missions start from an accepted revision; `publish_revision` imports a local Git pack and records the agent's exact commit; source artifacts carry commits, parent and file counts.
+- Cruce MCP catalog (`src/shared/tools.ts`) with per-tool schemas, scopes, control/resource class and cost; OAuth consent grants explicit scopes; human decisions are unreachable by agents.
+- Resource policy and budgets (`src/core/capabilities.ts`), resource requests with human approval, cloud AI gated by policy. Proposals gain numbers, repository, commits/files, supersede, reject and request changes; verification requests; promotion requests.
+- Environments, deployments and the resource boundary: Worker detection, operator/connected Cloudflare account with sealed token, Artifacts REST host, Workers Builds client, per-project deploy repository, DeploymentWorkflow, Cruce smoke checks as runtime-verified evidence, promote-and-deploy, rollback explanation and redeploy, lineage tracing both ways.
+- Native console rebuilt into overview, proposal, mission, intent, artifact, lineage and environments views with hash routes; no raw JSON by default.
+- Checks: typecheck, lint, 242 tests, offline `cf build`, independent scenario verifier. Live Access, Artifacts, Workers Builds and connected-account gates remain open (see PLAN).

@@ -1,4 +1,6 @@
-# Flight resource cleanup
+# Demo resource cleanup
+
+This applies to the deterministic `/demo` (and legacy Flight records). Native workspace forks and evidence are retained; see the [Artifacts model](artifacts-model.md).
 
 Cruce owns the resources created for each Flight. One Artifacts repository per Flight remains the
 isolation boundary; completed execution resources are temporary, while accepted work and coordination
@@ -14,10 +16,7 @@ history remain available.
   transition. **Keep for recovery** pauses repository expiry; **Restore automatic expiry** restores the
   original deadline. Overdue work becomes immediately eligible. Retention cannot be changed once
   deletion starts or after work expires.
-- Tokens and execution resources are released immediately, including for kept repositories. Unpublished
-  sandbox files are not a recovery archive. Terminal agents cannot checkout, refresh, heartbeat, publish,
-  or start another sandbox task. A token minted concurrently with termination is revoked before it can
-  be returned. External runner processes stop cooperatively; Cruce blocks further protocol work.
+- Tokens are revoked immediately, including for kept repositories. Terminal Flights cannot publish or land.
 - Queued or provisioning launches that never start fail after 30 minutes, just as discovery without a
   plan expires. Both routes enter the same cleanup lifecycle.
 
@@ -26,7 +25,8 @@ history remain available.
 The project's Durable Object stores a separate `flightResources` ledger before invoking a fork or
 Workflow creation. Records contain the namespace, exact repository name, repository ID when known,
 project and Flight IDs, reset epoch, execution-resource identifiers, expiry, and independent progress
-for tokens, Workflow, sandbox, repository, subscriptions, and local resources. No credentials are stored
+for tokens, repository, subscriptions, and local resources (records from the removed cloud agent runtime
+also carry now-inert Workflow and sandbox steps). No credentials are stored
 in this ledger.
 
 Records survive restarts and demo resets. An interrupted fork can be adopted only when its exact name,

@@ -1,6 +1,4 @@
-# Native setup clarification
-
-For the current native system, Access identity, MCP and Artifacts source flow, follow [native setup](native-setup.md). The material below preserves historical deployment, deterministic demo and opt-in runner/Sandbox provisioning details. It is not a requirement to launch an agent or connect GitHub/GitLab.
+For native projects (Access identity, scopes, Cruce MCP, Artifacts source, connected accounts and environments) follow [native setup](native-setup.md). This page covers the Cloudflare resources and the deterministic demo.
 
 # Cloudflare setup
 
@@ -9,10 +7,9 @@ used for the project (only its docs were consulted for event-subscription body s
 
 ## Requirements
 
-- A Cloudflare account on **Workers Paid** (Artifacts and Containers require it; Durable Objects, Workflows,
-  and Queues are included).
-- Node 22.18+ (the runner and demo-repo tests need Node 23.6+ for TypeScript type stripping), pnpm, git.
-- Docker — only to build the Sandbox image (live Sandbox Flights).
+- A Cloudflare account on **Workers Paid** (Artifacts requires it; Durable Objects, Workflows and Queues are
+  included).
+- Node 22.18+ (the local bridge and demo-repo tests need Node 23.6+ for TypeScript type stripping), pnpm, git.
 
 ```sh
 npm install --global cf@latest
@@ -24,12 +21,13 @@ cf auth whoami
 
 | Resource | Name / id | Created by | Purpose |
 |---|---|---|---|
-| Worker | `cruce` → https://cruce.acltabontabon.workers.dev | `cf deploy` | API, Radar UI, queue consumer |
-| Durable Object | `ControlTower` (SQLite) | `cf deploy` | one control tower per project |
-| Durable Object + Container | `FlightSandbox` / `cruce-agent` | `CRUCE_SANDBOX=on cf deploy` | one sandbox per live Flight |
-| Workflow | `cruce-flight` | `CRUCE_SANDBOX=on cf deploy` | live Flight lifecycle |
-| Artifacts namespaces | `cruce` (prod), `cruce-dev` (dev) | implicitly on first repo | canonical + Flight repos |
-| Artifacts repos | `auth-service`, `auth-service-live`, `auth-service--fNNN`, `auth-service-live--fNNN`; `cruce-dev/cruce-bootstrap` (setup verification) | Cruce / bootstrap tool | |
+| Worker | `cruce` → https://cruce.acltabontabon.workers.dev | `cf deploy` | console, Cruce MCP, API, queue consumer |
+| Durable Object | `ControlTower` (SQLite) | `cf deploy` | one Control Tower per project (and the demo) |
+| Durable Object | `ProjectDirectory` (SQLite) | `cf deploy` | project membership and identity |
+| Workflow | `cruce-deployment` (`DeploymentWorkflow`) | `cf deploy` | await Workers Builds, run smoke checks, record evidence |
+| KV | `OAUTH_KV` | `cf deploy` | MCP OAuth grants |
+| Artifacts namespaces | `cruce` (prod), `cruce-dev` (dev) | implicitly on first repo | project, workspace, evidence and deploy repositories; demo repos |
+| Artifacts repos | `project-<id>`, `project-<id>--w-<n>`, `project-<id>--evidence`, `project-<id>--deploy`; demo `auth-service`, `auth-service--fNNN` | Cruce | |
 | Queue | `cruce-artifact-events` (`f86ac1b9…`) | `cf queues create` | Artifacts event delivery; consumer = Worker |
 | Event subscription | `cruce artifacts account` (source `artifacts`) | `cf queues subscriptions create` | repo.created / forked / deleted / imported |
 | Event subscriptions | `cruce repo <ns>/<repo>` (source `artifacts.repo`) | Cruce at runtime | pushed / token.created / token.revoked per repo |
@@ -39,10 +37,10 @@ cf auth whoami
 
 | Secret | Used for | Where |
 |---|---|---|
-| `CRUCE_SECRET` | HMAC for per-Flight agent-protocol tokens | `.dev.vars`, `.secrets.prod.json` |
-| `CRUCE_ADMIN_TOKEN` | controller token for live-mode commands (launch, overrides on `live`) | same |
+| `CRUCE_SECRET` | sealing identity cookies and connected-account credentials | `.dev.vars`, `.secrets.prod.json` |
 | `CF_EVENTS_API_TOKEN` | event-subscription management | same |
-| `ANTHROPIC_API_KEY` | model access for Sandbox Flights (injected by the egress policy; never enters the sandbox) | same (only with `CRUCE_SANDBOX=on`) |
+
+Connected-account API tokens are entered by project maintainers in the console and stored sealed per project; they are not deployment secrets.
 
 `.dev.vars` and `.secrets*` are gitignored. Never commit them; never put tokens in Git remotes.
 
@@ -50,10 +48,9 @@ cf auth whoami
 
 ```sh
 pnpm install
-cp .dev.vars.example .dev.vars          # fill CRUCE_SECRET, CRUCE_ADMIN_TOKEN (any random strings)
+cp .dev.vars.example .dev.vars          # fill CRUCE_SECRET and Access settings
 pnpm exec cf dev                        # Artifacts (remote binding, namespace cruce-dev)
 pnpm exec cf dev --mode offline         # no account needed: local Git backend
-CRUCE_SANDBOX=on pnpm exec cf dev       # + Sandbox Flights (Docker + ANTHROPIC_API_KEY)
 ```
 
 The Artifacts binding has no local simulator; `bindings.artifacts({ dev: { remote: true } })` makes local
@@ -65,8 +62,6 @@ production; locally Cruce records its own gated pushes.
 ```sh
 pnpm exec cf deploy --dry-run
 pnpm exec cf deploy --secrets-file .secrets.prod.json
-# with Sandbox Flights (Docker running, ANTHROPIC_API_KEY in the secrets file):
-CRUCE_SANDBOX=on pnpm exec cf deploy --secrets-file .secrets.prod.json
 ```
 
 ## Workers Builds / previews (Cruce's own source)
@@ -81,8 +76,8 @@ Cruce's source is mirrored into Artifacts with `tools/mirror-to-artifacts.sh` (�
 3. Turn on **Builds for Preview branches**: pushes to non-`main` branches of `cruce-platform` produce
    Worker Previews; `main` deploys production. Secrets stay configured on the Worker.
 
-This is optional: Cruce's coordination does not depend on it. It is the natural way to review agent changes
-*to Cruce itself* (a Flight's branch becomes a Preview URL).
+This is optional and separate from the product's own Worker Preview path for projects (see
+[native setup](native-setup.md#cloudflare-account-and-environments)), which uses a per-project deploy repository.
 
 ## Verifying Artifacts from scratch
 
@@ -110,5 +105,6 @@ both tokens. `scripts/probe-push-event.sh` pushes once so a `pushed` event can b
 - `cf queues consumers delete`, `subscriptions delete`, and `artifacts namespaces tokens revoke` need `--force`
   in non-interactive shells — and exit 0 when they abort without it, so always pass it in scripts.
 - pnpm 12 enforces a minimum release age; `isomorphic-git` is pinned to 1.42.6 for that reason.
-- Sandbox SDK 1.0 (Sep 30 2026): a container-enabled Durable Object (`ctx.container`), egress through
-  `interceptOutboundHttps` + `interceptAllOutboundHttp` to a `WorkerEntrypoint`, `enableInternet: false`.
+- Workers Builds builds Artifacts repositories directly (production branch must be `main`; other branches
+  produce Worker Previews). The Builds API lists builds with commit hash, branch, outcome and `preview_url`;
+  connecting a repository to a Worker is a dashboard step for Artifacts today.

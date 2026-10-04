@@ -15,14 +15,16 @@ import {
 } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
-import { type Command, CommandInput, type Decision, PARTICIPATION, READ_TOOLS, TOOLS } from "../src/shared/coordination.ts";
-import { PLATFORM_READ_TOOLS, PLATFORM_TOOLS, PlatformCommandInput } from "../src/shared/platform.ts";
+import type { Decision } from "../src/shared/coordination.ts";
+import { CRUCE_INSTRUCTIONS, CRUCE_TOOLS, toolByName, toolInputShape } from "../src/shared/tools.ts";
 import { configureClient } from "./client-config.ts";
-import { git, observe, pipeGit, workspace } from "./local-git.ts";
+import { git, observe, packRevision, pipeGit, workspace } from "./local-git.ts";
 
 interface Connection {
 	missionId?: string;
 	missionVersion?: number;
+	/** Head of the mission's isolated workspace in Artifacts; the base for the next publish_revision. */
+	workspaceHead?: string;
 	server: string;
 	projectId: string;
 	workstreamId?: string;
@@ -144,7 +146,7 @@ async function main() {
 	const operation = args[0] ?? "help";
 	if (operation === "help" || args.includes("--help")) {
 		process.stdout.write(
-			"cruce connect --project ID --client codex|claude|cursor [--server URL]\ncruce checkout --project ID --directory NEW_DIRECTORY\ncruce mcp --client TOOL\ncruce refresh\ncruce check\ncruce release\n",
+			"cruce connect --project ID --client codex|claude|cursor [--server URL]\ncruce checkout --project ID --directory NEW_DIRECTORY\ncruce mcp --client TOOL\ncruce refresh\ncruce publish [--title TEXT]   publish committed work (base..HEAD) to the mission workspace\ncruce check\ncruce release\n",
 		);
 		return;
 	}
@@ -186,7 +188,7 @@ async function main() {
 		remote = new Client({ name: "cruce-local-bridge", version: "0.3.0" });
 	await remote.connect(transport);
 	const refreshSource = async () => {
-		await remote.callTool({ name: "get_project_context", arguments: { projectId: connection.projectId } });
+		await remote.callTool({ name: "get_canonical_revision", arguments: { projectId: connection.projectId } });
 		const response = await fetch(`${connection.server}/mcp/export?projectId=${encodeURIComponent(connection.projectId)}`, {
 			headers: { authorization: `Bearer ${credentials.tokens()?.access_token}` },
 		});
@@ -218,11 +220,14 @@ async function main() {
 		return;
 	}
 	let queue: Promise<unknown> = Promise.resolve();
+	/** Calls a public Cruce MCP tool, filling identity, session, versions and local Git context. */
 	const execute = async (input: Record<string, unknown> & { tool: string }) => {
-		const native = (PLATFORM_TOOLS as readonly string[]).includes(input.tool),
-			readOnly = native ? PLATFORM_READ_TOOLS.has(input.tool) : READ_TOOLS.has(input.tool as Command["tool"]);
-		const common = { projectId: connection.projectId, ...(!readOnly ? { idempotencyKey: randomUUID() } : {}), ...input };
-		const data = native
+		const tool = toolByName(input.tool);
+		if (!tool) throw new Error(`Unknown Cruce tool ${input.tool}`);
+		const native = tool.via.kind === "platform";
+		const common = { projectId: connection.projectId, ...(tool.mutation ? { idempotencyKey: randomUUID() } : {}), ...input };
+		delete (common as { tool?: string }).tool;
+		const data: Record<string, unknown> = native
 			? {
 					missionId: connection.missionId,
 					sessionId: connection.sessionId,
@@ -237,7 +242,7 @@ async function main() {
 					expectedPlanVersion: connection.planVersion,
 					...common,
 				};
-		if (["register_intent", "attach_workstream", "update_intent", "report_scope", "accept_mission"].includes(input.tool))
+		if (["start_mission", "update_plan", "report_scope"].includes(tool.name))
 			Object.assign(data, {
 				workspace: await workspace(cwd),
 				agent: {
@@ -246,9 +251,19 @@ async function main() {
 					role: "writer",
 				},
 			});
-		if (input.tool === "report_change") Object.assign(data, { observation: await observe(cwd, (await workspace(cwd)).base) });
-		const cmd = native ? PlatformCommandInput.parse(data) : CommandInput.parse(data);
-		const response = await remote.callTool({ name: input.tool, arguments: cmd });
+		if (tool.name === "report_change") Object.assign(data, { observation: await observe(cwd, (await workspace(cwd)).base) });
+		if (tool.name === "publish_revision" && !data.pack && !data.files) {
+			if (!connection.workspaceHead) throw new Error("Start a mission first; its workspace head is the publication base");
+			const packed = await packRevision(cwd, connection.workspaceHead);
+			Object.assign(data, {
+				base: packed.base,
+				revision: packed.revision,
+				pack: packed.pack,
+				execution: data.execution ?? "local",
+				executionDetail: data.executionDetail ?? option("client") ?? "local",
+			});
+		}
+		const response = await remote.callTool({ name: tool.name, arguments: data });
 		if (response.isError) throw new Error(response.content.map((c) => (c.type === "text" ? c.text : "")).join("\n"));
 		const result = (response.structuredContent ?? JSON.parse(response.content.find((c) => c.type === "text")?.text ?? "{}")) as Record<
 			string,
@@ -266,6 +281,8 @@ async function main() {
 			connection.missionId = mission.id;
 			connection.missionVersion = mission.version;
 		}
+		const ws = result.workspace as { headRevision?: string } | undefined;
+		if (ws?.headRevision) connection.workspaceHead = ws.headRevision;
 		await save(connectionFile, connection);
 		return result;
 	};
@@ -275,7 +292,7 @@ async function main() {
 		return next;
 	};
 	if (operation === "mcp") {
-		const server = new McpServer({ name: "Cruce local bridge", version: "0.3.0" }, { instructions: PARTICIPATION });
+		const server = new McpServer({ name: "Cruce local bridge", version: "0.4.0" }, { instructions: CRUCE_INSTRUCTIONS });
 		server.registerTool(
 			"refresh_source",
 			{
@@ -291,14 +308,24 @@ async function main() {
 				}
 			},
 		);
-		for (const tool of [...TOOLS, ...PLATFORM_TOOLS]) {
-			const native = (PLATFORM_TOOLS as readonly string[]).includes(tool),
-				inputSchema = native
-					? PlatformCommandInput.omit({ tool: true, projectId: true, sessionId: true }).partial().shape
-					: CommandInput.omit({ tool: true, projectId: true, sessionId: true }).partial().shape;
-			server.registerTool(tool, { description: tool.replaceAll("_", " "), inputSchema }, async (input: Record<string, unknown>) => {
+		for (const tool of CRUCE_TOOLS) {
+			// The bridge supplies identity, session, versions and local Git content.
+			const {
+				projectId: _p,
+				sessionId: _s,
+				workstreamId: _w,
+				idempotencyKey: _i,
+				expectedVersion: _v,
+				expectedPlanVersion: _pv,
+				...inputSchema
+			} = toolInputShape(tool);
+			const description =
+				tool.name === "publish_revision"
+					? "Publish your committed local work (workspace head..HEAD) to the mission workspace as a Git pack. Commit first; the recorded revision is your exact commit."
+					: tool.description;
+			server.registerTool(tool.name, { description, inputSchema }, async (input: Record<string, unknown>) => {
 				try {
-					const result = await serialized({ ...input, tool });
+					const result = await serialized({ ...input, tool: tool.name });
 					return { content: [{ type: "text" as const, text: JSON.stringify(result) }], structuredContent: result };
 				} catch (e) {
 					return { isError: true, content: [{ type: "text" as const, text: (e as Error).message }] };
@@ -321,13 +348,18 @@ async function main() {
 		await server.connect(new StdioServerTransport());
 		return;
 	}
-	if (operation === "check") {
+	if (operation === "publish") {
+		const result = await serialized({ tool: "publish_revision", ...(option("title") ? { title: option("title") } : {}) });
+		process.stdout.write(
+			`${JSON.stringify({ revision: result.revision, artifact: (result.artifact as { id?: string })?.id, resourceRequest: result.resourceRequest }, null, 2)}\n`,
+		);
+	} else if (operation === "check") {
 		if (!connection.workstreamId) {
-			process.stdout.write("No accepted mission is attached; source coordination has limited visibility.\n");
+			process.stdout.write("No started mission is attached; source coordination has limited visibility.\n");
 			process.exitCode = 2;
 		} else {
 			await serialized({ tool: "report_change" });
-			const d = await serialized({ tool: "request_publish" });
+			const d = await serialized({ tool: "check_coordination" });
 			process.stdout.write(`${JSON.stringify(d, null, 2)}\n`);
 			process.exitCode = d.publication === "PROCEED" ? 0 : 1;
 		}

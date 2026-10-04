@@ -1,3 +1,4 @@
+import { DEFAULT_AGENT_SCOPES } from "../core/capabilities.ts";
 import { ControllerError } from "../core/controller.ts";
 import { CoordinationError } from "../core/workstreams.ts";
 import { DemoCommand, HumanCommand, PROJECTS } from "../shared/api.ts";
@@ -7,6 +8,7 @@ import { isArtifactsEvent } from "./event-subscriptions.ts";
 import { type PlatformEnv, platformRoute } from "./platform-router.ts";
 
 export { ControlTower } from "./control-tower.ts";
+export { DeploymentWorkflow } from "./deployment-workflow.ts";
 export { ProjectDirectory } from "./project-directory.ts";
 
 interface Env extends PlatformEnv {
@@ -171,8 +173,10 @@ const api = {
 	async fetch(request, env, ctx) {
 		try {
 			const auth = ctx as ExecutionContext & { props: AuthProps; auth: { scope: string[] } };
-			if (!auth.auth?.scope.includes("coordination")) return json({ error: "Coordination scope required" }, 403);
-			return (await platformRoute(request, env, ctx, auth.props)) ?? json({ error: "Not found" }, 404);
+			// Connections granted before explicit scopes carry "coordination"; they keep the default agent grant.
+			const scopes = auth.auth?.scope.includes("coordination") ? [...DEFAULT_AGENT_SCOPES] : (auth.auth?.scope ?? []);
+			if (!scopes.includes("cruce:read")) return json({ error: "cruce:read scope required" }, 403);
+			return (await platformRoute(request, env, ctx, auth.props, scopes)) ?? json({ error: "Not found" }, 404);
 		} catch (error) {
 			return json({ error: (error as Error).message }, error instanceof CoordinationError ? error.status : 400);
 		}

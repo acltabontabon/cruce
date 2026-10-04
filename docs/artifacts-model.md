@@ -1,22 +1,41 @@
-# Native Artifacts model — current direction
-
-Cloudflare Artifacts is fundamental to Cruce source and collaboration. It owns accepted state; external hosting is future interoperability only.
-
-A native system uses `system-<uuid>` as accepted source, immutable `-baseline-<revision>` snapshots for race-free provisioning, and exactly one `--w-<id>` fork for each durable mission workstream. Tool handoff keeps that fork. A separate `--evidence` Artifacts repository versions typed reports and context without changing source candidate history.
-
-The logical Artifact is an immutable addressable record with intent, mission, producer/model, source/parent revisions, execution environment, content hash, related artifacts, storage revision and trust. Source artifacts reference verified Git snapshots. Evidence content and metadata are versioned together. Native text inputs are bounded; binary and large-output transport remains a release extension.
-
-Publication creates a verified candidate, not accepted state. A Proposal names exactly that immutable source and its parent. Evidence and reviews name its exact revision. Agent assertions are reported; human attestations are explicit; only internal execution can issue runtime-verified evidence. Human promotion requires current baseline, policy, independent evidence requirements, approvals and coordination.
-
-Accepted history is never force-pushed or rewritten. Export preserves real source Git objects. Rollback creates a forward-change specification and must go through a new mission, source artifact, proposal, evidence and promotion. Unexpected remote source movement is diagnosed, not silently accepted.
-
-Agents never receive write tokens. Cruce mints server-side 60-second tokens per managed push and revokes them. Ownership is checked before writing or deleting resources. Legacy failed-flight cleanup remains intact. Native workspaces retaining immutable source outputs are retained; execution completion is not permission to delete historical artifacts.
-
-## Historical demo/compatibility implementation
-
-The following documents existing Flight forks, Git notes, deterministic landing and ownership-safe cleanup. Those records remain intact during native migration.
-
 # Artifacts model
+
+Cloudflare Artifacts is the canonical home of every Cruce project's Git state. Cruce is structurally aware of it: refs, commits, ancestry, trees, changed files, diffs, merges and forks. External hosting (GitHub, GitLab) is future import/export/mirroring only.
+
+```text
+project-<id>                       canonical repository; main = accepted source (one per project)
+  │  promotion = non-forced advance of main to a proposal's exact revision
+  ├─ project-<id>-baseline-<sha16> immutable snapshot of an accepted revision
+  │     └─ project-<id>--w-<n>     one fork per mission workspace (agent commits land here)
+  ├─ project-<id>--evidence        immutable evidence artifacts (typed reports, preview checks)
+  └─ project-<id>--deploy          deployment intent, in the project's resource account:
+                                   main = production, cruce/proposal-<N> = Worker Preview
+```
+
+- **Canonical revision**: the head of `main` in the canonical repository, tracked by the Control Tower and re-verified on Artifacts push events. Movement made outside Cruce is reported as `unexpected_revision`, never accepted silently.
+- **Mission ↔ workspace**: `start_mission` pins the mission's base to an accepted revision (the canonical head, or an ancestor in accepted history) and forks a workspace from an immutable baseline snapshot. Tool handoff keeps the same fork; experiments get their own missions and forks.
+- **Revision as anchor**: source artifacts record the exact commit, its parent, the commits in `base..revision` and the number of changed files. Evidence artifacts, verifications, reviews, promotions and deployments all name a revision.
+- **Proposal**: exact base and proposed revision, workspace repository, commit and file counts. A newer proposal from the same mission supersedes the open one.
+- **Verification**: always targets the proposal's exact revision; trust is reported, human attested, or runtime verified.
+- **Deployment**: the deploy repository mirrors deployment intent only. Cruce pushes the exact revision; Workers Builds builds it; Cruce records build, URL and its own smoke checks. Production can move back to an earlier accepted revision (rollback) without rewriting accepted history.
+
+## Credentials
+
+| Token | Scope | TTL | Holder | Revoked |
+|---|---|---|---|---|
+| `create()` / `fork()` initial token | write | ~1 year / 24 h | — | immediately |
+| Git operation token (fetch / push / promote / deploy) | read or write | 60 s | Control Tower | right after the operation |
+| Connected-account API token | Workers Builds read, Scripts read, Artifacts edit | owner-defined | sealed in the project's Durable Object | on disconnect (and at Cloudflare) |
+
+Agents never receive Artifacts write tokens. Local agents publish commits as Git packs through Cruce MCP; Cruce verifies and pushes them. Source checkout and refresh use Cruce's export of real Git objects.
+
+## Immutability and retention
+
+Accepted history is never force-pushed. Export preserves real Git objects. Workspace forks and evidence are retained after missions complete: execution completion is not permission to delete historical artifacts. Ownership (repository description and source) is checked before writing or deleting resources.
+
+## Deterministic demo (`/demo`)
+
+The following documents the demo's Flight forks, Git notes, deterministic landing and ownership-safe cleanup.
 
 Cruce is built around Cloudflare Artifacts' premise: create isolated Git repositories at the scale of
 projects, sessions, tasks, and agents; persist the code *and the context* agents produce; fork many
@@ -28,7 +47,7 @@ isolated repositories from a common starting point; compare and merge results la
           ┌─────────────┼──────────────┐
           ▼             ▼              ▼
  auth-service--f021  auth-service--f022  auth-service--f023     ← one fork per Flight
-   (own history, refs, tokens, lifecycle, sandbox, Git notes)
+   (own history, refs, tokens, lifecycle, Git notes)
 ```
 
 Namespaces: `cruce-dev` (local development), `cruce` (production). Repository names follow the Artifacts
@@ -48,11 +67,7 @@ rules (letters, digits, `.`, `_`, `-`). Humans see `F-021 · Refresh-token rotat
 - `repo.fork(name, { defaultBranchOnly: true })` from canonical when the Flight is provisioned; the 24-hour
   write token returned by `fork()` is revoked immediately.
 - Cruce stores: repository id, namespace, name, remote URL, base commit, fork source, created time, head.
-- The Flight's agent (sandbox or external runner) gets **read** access only:
-  - Sandbox: the `Outbound` egress policy injects a cached 15-minute read token into `git-upload-pack`
-    requests for *this* repository; `git-receive-pack` is refused; the sandbox never sees the token.
-  - External runner: `checkout` returns a 15-minute read token, used per command via
-    `git -c http.extraHeader="Authorization: Bearer …"` (never stored in a remote or config).
+- Demo agents are scripted; no agent holds a token.
 
 ## Token lifecycle
 
@@ -60,19 +75,17 @@ rules (letters, digits, `.`, `_`, `-`). Humans see `F-021 · Refresh-token rotat
 |---|---|---|---|---|
 | `create()` / `fork()` initial token | write | ~1 year / 24 h | — | immediately |
 | Git operation token (fetch / push / land / refresh) | read or write | 60 s | Cruce (Durable Object) | right after the operation |
-| Sandbox / runner read token | read | 15 min | Cruce egress / runner | on expiry (cached 12 min) |
 
 Artifacts emits `token.created` / `token.revoked` events for each; Cruce records them in its audit log, so
 every publish shows up as *token.created(write) → pushed → token.revoked*.
 
 ## Publish → push
 
-1. The agent leaves its change uncommitted (sandbox) or sends `{ parent, files, message }` (runner).
+1. The scripted agent sends `{ parent, files, message }`.
 2. Cruce rebuilds the commit in its workspace from the parent tree + files (same commit id when the agent
    supplies its own metadata) and computes the real diff.
 3. The publish gate maps changed line ranges to symbols and checks them against the current clearance.
 4. Approved → 60 s write token → push to the Flight repo (`main`) and `refs/notes/cruce` → revoke.
-5. The agent resyncs to Cruce's commit (`git fetch` + `reset`) before continuing.
 
 ## Git notes (`refs/notes/cruce`)
 

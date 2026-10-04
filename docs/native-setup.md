@@ -1,53 +1,63 @@
-# Native system setup
+# Native project setup
 
-Cruce uses Cloudflare Artifacts and native membership. GitHub/GitLab credentials are unnecessary.
+Cruce uses Git, Cloudflare Artifacts and native membership. GitHub/GitLab credentials are unnecessary.
 
 ## Infrastructure and identity
 
-Use `cf` and `cloudflare.config.ts`. Non-offline mode binds Artifacts and Workers AI. `SystemDirectory` and `ControlTower` are SQLite Durable Objects; OAuth tokens use the configured KV binding.
+Use `cf` and `cloudflare.config.ts` (never `wrangler`). Non-offline mode binds Artifacts and Workers AI. `ProjectDirectory` and `ControlTower` are SQLite Durable Objects; `DeploymentWorkflow` orchestrates deployments; OAuth tokens use the configured KV binding.
 
-Configure a Cloudflare Access application for the Cruce hostname with your chosen identity provider. Protect the console and `/auth/*` and `/authorize`. Allow the OAuth protocol endpoints (`/oauth/*`, discovery under `/.well-known/*`) and `/mcp` to reach Cruce without an Access browser redirect; Cruce protects MCP with OAuth and revalidates the Access identity behind it. The public isolated demo and its `/api/projects/demo/*` endpoints may be excluded from Access deliberately.
-
-Set deployment configuration:
+Configure a Cloudflare Access application for the Cruce hostname with your identity provider. Protect the console, `/auth/*` and `/authorize`. Allow the OAuth endpoints (`/oauth/*`, `/.well-known/*`) and `/mcp` to reach Cruce without an Access browser redirect; Cruce protects MCP with OAuth and revalidates the Access identity behind it. The public demo and `/api/demo/*` may be excluded from Access deliberately.
 
 ```text
 CRUCE_PUBLIC_ORIGIN=https://YOUR_CRUCE_HOST
 CRUCE_ACCESS_ISSUER=https://YOUR_TEAM.cloudflareaccess.com
 CRUCE_ACCESS_AUD=YOUR_ACCESS_APPLICATION_AUDIENCE
-CRUCE_SECRET=<server-only random encryption/protocol secret>
+CRUCE_SECRET=<server-only random secret: identity cookies and connected-account credentials>
 ```
 
-Issuer/audience are configuration, not developer-supplied authorization. Cruce verifies JWT signature, audience, issuer, expiry and native membership. OAuth access is bounded by the underlying Access JWT; expired identity requires sign-in. Access user revocation follows its session/token lifetime; native membership removal takes effect on the next request. No shared production admin token authorizes the native system.
+Cruce verifies JWT signature, audience, issuer, expiry and native membership on every request. No shared admin token authorizes native projects.
 
-Sign in, create a named System, and record intent. Creation assigns an immutable system ID and the creator as maintainer. Authenticated governance API `POST /api/systems/access?systemId=…` supports versioned membership, display-name and active-state updates; no external organization installation is needed. Disabling a system denies source and agent access while allowing its existing maintainers to re-enable it through governance. Contributors propose; observers read; human maintainers promote or change policy.
+## Projects and their repositories
 
-## Existing clients
+Sign in and create a project. Creation assigns an immutable project ID, makes the creator maintainer and provisions the canonical Artifacts repository `project-<id>` with an initial revision on `main`. That is the only time the canonical repository is created; reading a project never creates resources (an older project without a repository shows a "Create Artifacts repository" action for maintainers, `POST /api/projects/provision`).
+
+Governance: `POST /api/projects/access?projectId=…` supports versioned membership, display name and active state. Contributors propose; observers read; human maintainers promote, decide resource requests, configure environments and change policy.
+
+## Existing agents
 
 ```sh
-node /ABSOLUTE/PATH/cruce/runner/cruce.ts checkout --url https://YOUR_CRUCE_HOST --system SYSTEM_ID --directory ./payments
-node /ABSOLUTE/PATH/cruce/runner/cruce.ts connect --url https://YOUR_CRUCE_HOST --system SYSTEM_ID --client codex --cwd ./payments
+node /ABSOLUTE/PATH/cruce/runner/cruce.ts checkout --server https://YOUR_CRUCE_HOST --project PROJECT_ID --directory ./payments
+node /ABSOLUTE/PATH/cruce/runner/cruce.ts connect --server https://YOUR_CRUCE_HOST --project PROJECT_ID --client claude --cwd ./payments
 ```
 
-Checkout creates a new directory from accepted source; it never replaces an existing checkout. Connect attaches the existing checkout without changing its branch. Use `claude` or `cursor` as the client. The command opens browser authorization with PKCE and stores MCP credentials outside source in `~/.config/cruce` with mode 0600. `.cruce/` contains non-secret local associations and is ignored by Git.
+Checkout creates a new directory from accepted source (real Git objects at the canonical revision); it never replaces an existing checkout. Connect configures Codex (`.codex/config.toml` + `AGENTS.md`), Claude (`.mcp.json` + `CLAUDE.md`) or Cursor (`.cursor/mcp.json` + rule) without touching other MCP servers, opens browser authorization with PKCE, and stores credentials in `~/.config/cruce` (mode 0600). `.cruce/` holds non-secret local associations and is ignored by Git.
 
-The bridge preserves other MCP servers and adds narrowly scoped participation instructions. Codex uses trusted project `.codex/config.toml` plus `AGENTS.md`; Claude uses `.mcp.json` plus `CLAUDE.md`; Cursor uses `.cursor/mcp.json` plus its always-applied Cruce rule. Trust/enable the server in the chosen client. Basic configuration does not guarantee adaptive participation; hooks and adaptive verification are explicitly false until live sequences pass.
+At consent the human chooses the agent's **scopes**:
 
-`cruce refresh` (or the local `refresh_source` MCP tool) fetches accepted Git objects into `refs/cruce/accepted` without changing or discarding working-tree files. Agents inspect and reconcile with normal Git tools before amending plans. Managed source publication performs a real three-way refresh against an amended baseline; conflicts preserve the existing workspace and require explicit resolution.
+| Scope | Allows |
+| --- | --- |
+| `cruce:read` | Intent, missions, policy, source, diffs, history and lineage (always granted) |
+| `workspace:write` | `start_mission`, `publish_revision`, `publish_artifact`, plan updates, coordination responses, `complete_mission` |
+| `proposal:write` | `create_intent`, `create_mission`, `create_proposal`, `attach_evidence`, `request_verification`, `review_proposal` |
+| `preview:request` | `request_preview` (metered; subject to policy and budgets) |
+| `promotion:request` | `request_promotion` (asks a human; never promotes) |
 
-Run normal tools. Agents discover source/context/policy, create a bounded mission, accept it, check coordination, report actual changes, publish source/evidence, create a proposal and request review. Human UI or authenticated browser API reviews evidence and promotes. MCP identities cannot promote, resolve disagreement or change policy.
+The typical loop: `get_context` → `start_mission` (Cruce pins the base to an accepted revision and creates the workspace fork) → work and commit locally → `publish_revision` → `publish_artifact` (test reports, analyses) → `create_proposal` → `request_verification` / `request_preview` → `request_promotion`. `cruce publish` publishes committed work from a terminal; `cruce refresh` (or the bridge's `refresh_source` tool) fetches accepted objects into `refs/cruce/accepted` without touching the working tree; `cruce check` reports the publication decision.
 
-`node runner/cruce.ts mcp --cwd ./payments` is the stdio bridge. `node runner/cruce.ts check --cwd ./payments` reports local constraints and exits nonzero for uncertain/blocked publication. The remote server is Streamable HTTP `/mcp`. It is stateless; durable business state belongs to the system authority, not the transport session.
+`node runner/cruce.ts mcp --cwd ./payments` is the stdio bridge for clients that need a local process; remote clients use Streamable HTTP `/mcp` directly. Durable state belongs to the project authority, not the transport session. Mutations require idempotency keys and expected versions; a retry returns the original receipt.
 
-Native commands require idempotency keys and relevant expected versions. A successful retry returns a receipt, not renewed clearance. Use new keys for new actions, inspect latest versions after constraints, and acknowledge instructions separately from resolution. Never discard local code implicitly during refresh.
+## Revisions, evidence and policy
 
-## Source, evidence and policy
+`publish_revision` accepts a base64 Git pack (bounded to 4 MiB of pack) with the exact `base` (workspace head) and `revision`. The recorded revision is the agent's commit; it must descend from the workspace head and contain the latest plan baseline, otherwise the agent merges locally first. A bounded files mode remains for clients without a checkout.
 
-`publish_source` accepts bounded changed text files, exact workspace base and live writer/plan versions. Cruce creates actual source objects, analyzes the exact diff and gates the managed workspace push. Native request bodies are bounded to 4 MiB; focused file/output text is capped at 100,000 characters, export packs at 32 MiB.
+`publish_artifact` stores typed evidence against an exact revision, recording where it executed. `attach_evidence` cites artifacts of the proposal's exact revision; agent results remain *reported*. Human attestation and Cruce's own runtime checks are labeled differently. `set_policy` (human maintainer, reason, current version) sets approvals, required trusted evidence, resource rules and budgets.
 
-`publish_artifact` records typed outputs against an exact source revision. `read_artifact` retrieves content with provenance. `attach_verification` references exact-revision evidence; agent results remain reported. Human attestation is labeled and distinct from runtime verification. `set_policy` is human-maintainer-only, requires a reason and current policy version, and supports required evidence kinds and human approval counts. Agents never gain production authority.
+## Cloudflare account and environments
 
-Source promotion is the current native boundary. Hosted mission execution, automated runtime verifier, environment deployments and release records require subsequent implementation and verification. The optional legacy Sandbox remains behind `CRUCE_SANDBOX=on` and `CRUCE_LEGACY_RUNTIME=on`; it is not a native setup requirement.
+Infrastructure Cruce triggers belongs to the project's Cloudflare account. In **Environments** a maintainer connects an account ID and an API token with Workers Builds read, Workers Scripts read and Artifacts edit permissions (`POST /api/projects/account`). The token is verified, sealed with `CRUCE_SECRET` and never returned. If the account is the one Cruce is deployed in, deploy repositories use the Artifacts binding (operator mode); otherwise Artifacts' REST API (connected mode).
+
+Enable deployment with a Worker name (detected from `wrangler.jsonc/json/toml` or `cloudflare.config.ts` when present) and smoke check paths. Cruce creates `project-<id>--deploy` and records Worker Preview and Production environments. Then, in the Cloudflare dashboard, connect Workers Builds for that Worker to the deploy repository (production branch `main`, preview builds enabled); Cruce never edits Worker settings. Applications deployed elsewhere can record an external production environment; every other lifecycle feature still applies.
 
 ## Platform references
 
-[Artifacts](https://developers.cloudflare.com/artifacts/), [Access JWT validation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/), [MCP transport](https://developers.cloudflare.com/agents/model-context-protocol/protocol/transport/), [Jev](https://developers.cloudflare.com/ai/models/typesafe/jev/), [Codex MCP](https://developers.openai.com/codex/mcp/), [Claude MCP](https://code.claude.com/docs/en/mcp), [Cursor MCP](https://cursor.com/docs/mcp).
+[Artifacts](https://developers.cloudflare.com/artifacts/), [Workers Builds Artifacts integration](https://developers.cloudflare.com/workers/ci-cd/builds/git-integration/artifacts-integration/), [Builds API](https://developers.cloudflare.com/workers/ci-cd/builds/api-reference/), [Workflows](https://developers.cloudflare.com/workflows/), [Access JWT validation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/), [MCP transport](https://developers.cloudflare.com/agents/model-context-protocol/protocol/transport/), [Codex MCP](https://developers.openai.com/codex/mcp/), [Claude MCP](https://code.claude.com/docs/en/mcp), [Cursor MCP](https://cursor.com/docs/mcp).

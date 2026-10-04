@@ -1,15 +1,17 @@
 # Product thesis
 
-Cruce is an agent-native software development platform where humans define intent, agents perform work, Artifacts preserve source and evidence, and review and policy govern promotion.
+Cruce is the logical evolution of Git collaboration for an era where agents are first-class software engineers.
 
-The software collaboration unit is an intent, not a pull request. An intent creates bounded missions for implementation, investigation, tests, architecture or security. Missions produce durable outputs in isolated Artifacts workspaces. A proposal names immutable source and its evidence. Completing a mission does not change accepted state.
+**Git stays.** Revisions, history, diffs, forks, merges, conflicts and rollback are exactly what agents need: start from a known revision, work in isolation, compare before and after, merge compatible work, abandon experiments, revert failures. Cruce relies on Git instead of inventing a weaker replacement.
 
-Humans supervise rather than micromanage. The home answers: what is happening, what needs me, what changed, what is ready, and why? Details reveal scope, source, differences, evidence strength, disagreements, policy and causal lineage. Raw logs are diagnostic material, not the main experience.
+**The collaboration model above Git changes.** The unit of collaboration is an intent, not a pull request. An intent creates bounded missions; each mission starts from a concrete accepted revision in an isolated workspace; agents produce real commits and immutable evidence; a proposal names exact base and proposed revisions; verification targets that exact revision; human policy governs promotion; deployment is traceable back to intent.
 
-Agents keep using their existing tools through authenticated MCP. Cruce supplies context, coordination and publication policy; it neither requires an IDE replacement nor depends on GitHub/GitLab. Git remains useful underneath source storage and for export.
+**Cloudflare Artifacts is the canonical home.** Every project's repository, workspaces, evidence and deployment intent live in Artifacts. Cruce understands refs, commits, ancestry, trees and diffs; it never treats the repository as an opaque URL, and it never needs GitHub or GitLab.
 
-Artifacts are the source substrate and collaboration record. Every output links to its intent, mission, producer, source revision, environment and related evidence. Agents can disagree; reasoned human decisions remain in history. Reported, human-attested and runtime-verified evidence are visibly different.
+**Agents stay where they are.** Claude Code, Codex, Cursor and future agents run on the developer's machine with local caches, Docker and familiar tools. Cruce coordinates the agent; it does not execute it. Agent vendors remain interchangeable because the interface is Cruce MCP: intentional lifecycle operations, not cloud administration.
 
-Coordination remains fundamental: workspaces provide isolation; Cruce manages crossing scope, dependencies, stale assumptions and safe throughput. Deterministic facts govern. Jev advises within bounded evidence and permitted actions. Uncertainty does not become fabricated safety.
+**Autonomy is safe, not unlimited.** Agents get broad context and explicit, narrow authority. Actions that consume cloud resources carry a cost class and pass project policy and budgets; production is always a human decision. The project's Cloudflare account owns and pays for its infrastructure.
 
-Success is practical: independent agents produce a reviewable, traceable proposal, supporting evidence is inspected, and explicit policy permits promotion without requiring an external Git platform.
+**The connection is the product.** Git knows what changed; Artifacts knows which versions exist; the agent knows what it is implementing; Workers knows what is running. Cruce connects why (intent), what work (mission), who (agent), what changed (revision), what was produced (artifacts), why we trust it (verification), where it ran (environment) and what is live (deployment) — in both directions.
+
+The console answers: what changed, why, can I trust it, does it need me, where is it running? It stays calm and technical: no chat, no editor, no CI dashboard, no Git GUI, no vanity metrics. Technical detail is progressively disclosed.

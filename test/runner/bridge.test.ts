@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { configureClient } from "../../runner/client-config.ts";
-import { git, observe, workspace } from "../../runner/local-git.ts";
+import { git, observe, packRevision, workspace } from "../../runner/local-git.ts";
+import { MemoryFs } from "../../src/worker/git/memory-fs.ts";
+import { GitWorkspace } from "../../src/worker/git/workspace.ts";
 
 describe("native client connection", () => {
 	for (const client of ["codex", "claude", "cursor"] as const)
@@ -33,7 +35,8 @@ describe("native client connection", () => {
 					"utf8",
 				);
 				expect(instructions.match(/<!-- Cruce participation -->/g)).toHaveLength(1);
-				expect(instructions).toContain("preserve working-tree changes");
+				expect(instructions).toContain("preserving working-tree changes");
+				expect(instructions).toContain("publish_revision");
 				expect(await readFile(join(root, ".gitignore"), "utf8")).toContain(".cruce/");
 			} finally {
 				await rm(root, { recursive: true, force: true });
@@ -62,6 +65,34 @@ describe("native client connection", () => {
 			expect(changes.changes.map((c) => c.status).sort()).toEqual(["added", "added", "deleted", "modified"]);
 			expect(await git(root, ["rev-parse", "HEAD"])).toBe(before.head);
 			expect((await workspace(root)).checkoutId).toBe(before.checkoutId);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+	it("packages committed work as a Git pack the control plane imports with the exact revision", async () => {
+		const root = await mkdtemp(join(tmpdir(), "cruce-pack-"));
+		const commit = (message: string) =>
+			git(root, ["-c", "commit.gpgSign=false", "-c", "core.hooksPath=/dev/null", "commit", "-qm", message]);
+		try {
+			await git(root, ["init", "-b", "main"]);
+			await git(root, ["config", "user.name", "Fixture"]);
+			await git(root, ["config", "user.email", "fixture@invalid.test"]);
+			await writeFile(join(root, "app.ts"), "export const limit = 10;\n");
+			await git(root, ["add", "."]);
+			await commit("Baseline");
+			const base = await git(root, ["rev-parse", "HEAD"]);
+			await expect(packRevision(root, base)).rejects.toThrow("commit your work first");
+			await writeFile(join(root, "app.ts"), "export const limit = 100;\n");
+			await git(root, ["add", "."]);
+			await commit("Raise rate limit");
+			await writeFile(join(root, "draft.ts"), "uncommitted\n");
+			const packed = await packRevision(root, base);
+			expect(packed).toMatchObject({ base, commits: 1, revision: await git(root, ["rev-parse", "HEAD"]) });
+			const server = new GitWorkspace(new MemoryFs() as never, "/server.git");
+			await server.ensureInit();
+			await server.importPack(Uint8Array.from(Buffer.from(packed.pack, "base64")));
+			expect(await server.readFiles(packed.revision)).toEqual({ "app.ts": "export const limit = 100;\n" });
+			expect((await server.log(packed.revision, 1))[0].parents).toEqual([base]);
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
