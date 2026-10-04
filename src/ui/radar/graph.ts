@@ -1,4 +1,3 @@
-import ELK from "elkjs/lib/elk.bundled.js";
 import type { AirspaceIndex } from "../../core/airspace.ts";
 import { componentName, moduleLabel, parseResourceId } from "../../core/airspace.ts";
 
@@ -249,7 +248,12 @@ function resolveEndpoint(resource: string, endpoint: Record<string, string>, ind
 	return endpoint[resource];
 }
 
-const elk = new ELK();
+// ELK is large; load it on first layout so the shell paints immediately.
+let elkInstance: Promise<{ layout(graph: unknown): Promise<unknown> }> | undefined;
+const elk = () => {
+	elkInstance ??= import("elkjs/lib/elk.bundled.js").then((m) => new m.default());
+	return elkInstance;
+};
 
 /** Run ELK and flatten to absolute-in-parent coordinates for React Flow. */
 export async function layout(structure: Structure): Promise<RadarGraph> {
@@ -288,7 +292,7 @@ export async function layout(structure: Structure): Promise<RadarGraph> {
 		edges: structure.edges.filter((e) => e.kind === "route").map((e) => ({ id: e.id, sources: [e.source], targets: [e.target] })),
 	};
 	type ElkNode = { id: string; x?: number; y?: number; width?: number; height?: number; children?: ElkNode[] };
-	const result = (await elk.layout(graph as never)) as unknown as ElkNode;
+	const result = (await (await elk()).layout(graph)) as ElkNode;
 	const placed: RadarNode[] = [];
 	const visit = (n: ElkNode, parent?: string) => {
 		const src = structure.nodes.find((x) => x.id === n.id);

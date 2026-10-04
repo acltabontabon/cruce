@@ -6,7 +6,7 @@ dist/
 !.dev.vars.example
 .env*
 !.env.example
-.secrets.json
+.secrets*
 *.log
 .DS_Store
 coverage/

@@ -6,6 +6,7 @@ export { ControlTower } from "./control-tower.ts";
 
 interface Env {
 	CONTROL_TOWER: DurableObjectNamespace<ControlTower>;
+	ARTIFACTS_NAMESPACE: string;
 	CRUCE_SECRET?: string;
 	CRUCE_ADMIN_TOKEN?: string;
 }
@@ -126,7 +127,7 @@ export default {
 		} catch (e) {
 			if (e instanceof HttpError) return json({ error: e.message }, e.status);
 			const message = (e as Error)?.message ?? String(e);
-			const status = /cannot land|Unknown flight|No congestion|Invalid flight plan|needs one of/.test(message) ? 409 : 500;
+			const status = /cannot land|Unknown flight|No congestion|Invalid flight plan|needs one of|try again in/.test(message) ? 409 : 500;
 			console.error("cruce api error", message);
 			return json({ error: message }, status);
 		}
@@ -137,6 +138,11 @@ export default {
 		for (const msg of batch.messages) {
 			const evt = msg.body;
 			if (!isArtifactsEvent(evt)) {
+				msg.ack();
+				continue;
+			}
+			// The queue receives events for every namespace in the account; only ours are routed.
+			if (evt.source.namespace !== env.ARTIFACTS_NAMESPACE) {
 				msg.ack();
 				continue;
 			}

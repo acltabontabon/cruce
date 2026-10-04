@@ -22,8 +22,8 @@ export interface TowerStore {
 export interface TowerHooks {
 	onChange(state: ControllerState, events: TowerEvent[]): void;
 	/** Called after a Flight repo is created (e.g. to subscribe to its Artifacts events). */
-	onFlightRepo?(flight: Flight): Promise<void>;
-	onFlightRepoRemoved?(repo: string): Promise<void>;
+	onRepo?(repo: string): Promise<void>;
+	onRepoRemoved?(repo: string): Promise<void>;
 }
 
 export interface Submission {
@@ -112,6 +112,12 @@ export class Tower {
 		const index = buildIndex(files, head);
 		const state = initialState({ ...this.project, remote }, index, head, this.now(), this.firstFlight);
 		this.store.put("state", state);
+		const subscribed = this.hooks.onRepo
+			? await this.hooks.onRepo(this.project.repo).then(
+					() => true,
+					() => false,
+				)
+			: false;
 		this.mutate((c) =>
 			c.note(
 				"project.ready",
@@ -121,6 +127,7 @@ export class Tower {
 				[
 					this.git.backend === "artifacts" ? `Artifacts ${this.git.namespace}/${this.project.repo}` : "local Git backend (offline)",
 					`indexed ${index.files.length} files in ${index.modules.length} modules (${index.indexer})`,
+					...(subscribed ? [`subscribed to ${this.project.repo} push events`] : []),
 				],
 			),
 		);
@@ -136,7 +143,7 @@ export class Tower {
 			c.setPhase(flightId, "discovery");
 		});
 		await this.hooks
-			.onFlightRepo?.(this.flight(flightId))
+			.onRepo?.(artifact.repo)
 			.catch((e) =>
 				this.mutate((c) =>
 					c.note("artifacts.event", "artifacts", `Event subscription for ${artifact.repo} not created`, flightId, [String(e)]),
@@ -295,7 +302,7 @@ export class Tower {
 			this.author(),
 			flights.map((f) => f.id),
 		);
-		for (const f of flights) if (f.artifact) await this.hooks.onFlightRepoRemoved?.(f.artifact.repo).catch(() => undefined);
+		for (const f of flights) if (f.artifact) await this.hooks.onRepoRemoved?.(f.artifact.repo).catch(() => undefined);
 		this.store.delete("state");
 		const files = await this.git.filesAt(head);
 		const index = buildIndex(files, head);

@@ -75,8 +75,8 @@ export class ControlTower extends DurableObject<TowerEnv> {
 			this.store(),
 			{
 				onChange: (state, events) => this.broadcast({ type: "update", state, events, demo: this.demoStatus() }),
-				onFlightRepo: subs ? async (f) => void (f.artifact && (await subs.subscribeRepo(f.artifact.repo))) : undefined,
-				onFlightRepoRemoved: subs ? async (repo) => subs.unsubscribeRepo(repo) : undefined,
+				onRepo: subs ? async (repo) => void (await subs.subscribeRepo(repo)) : undefined,
+				onRepoRemoved: subs ? async (repo) => subs.unsubscribeRepo(repo) : undefined,
 			},
 			Date.now,
 			meta.firstFlight,
@@ -184,6 +184,13 @@ export class ControlTower extends DurableObject<TowerEnv> {
 		const tower = await this.open(projectId);
 		if (tower.project.mode !== "demo") throw new Error("not a demo project");
 		let status = this.demoStatus() ?? initialDemoStatus();
+		// Public deployments: a reset recreates Flight repos, so it is rate limited per project.
+		if (cmd.op === "reset" || (cmd.op === "play" && status.finished)) {
+			const last = (this.ctx.storage.kv.get("lastReset") as number | undefined) ?? 0;
+			const wait = 45_000 - (Date.now() - last);
+			if (wait > 0) throw new Error(`The demo was reset moments ago; try again in ${Math.ceil(wait / 1000)}s`);
+			this.ctx.storage.kv.put("lastReset", Date.now());
+		}
 		switch (cmd.op) {
 			case "play":
 				if (status.finished) {
@@ -263,7 +270,9 @@ export class ControlTower extends DurableObject<TowerEnv> {
 		const short = (s?: string) => (s ? s.slice(0, 7) : "—");
 		const kind = evt.type.replace("cf.artifacts.repo.", "");
 		tower.mutate((c) => {
-			if (kind === "pushed") {
+			if (kind === "pushed" && evt.payload.ref === "refs/notes/cruce") {
+				c.note("artifacts.event", "artifacts", `Artifacts confirmed Cruce notes on ${repo} · ${short(evt.payload.after)}`, flight?.id);
+			} else if (kind === "pushed") {
 				c.note("artifacts.event", "artifacts", `Artifacts confirmed push to ${repo} · ${short(evt.payload.after)}`, flight?.id, [
 					`${evt.payload.ref} ${short(evt.payload.before)} → ${short(evt.payload.after)}`,
 					...(evt.payload.commits ?? []).slice(0, 3).map((x) => `${x.id.slice(0, 7)} ${x.message.split("\n")[0]}`),

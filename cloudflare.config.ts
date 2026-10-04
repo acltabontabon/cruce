@@ -10,6 +10,8 @@ import * as entrypoint from "./src/worker/index.ts" with { type: "cf-worker" };
  */
 export default defineConfig(({ mode }) => {
 	const offline = mode === "offline";
+	// Local development and production never share repositories.
+	const namespace = mode === "development" || offline ? "cruce-dev" : "cruce";
 	return {
 		accountId: offline ? undefined : "YOUR_32_CHARACTER_ACCOUNT_ID",
 		worker: {
@@ -24,14 +26,13 @@ export default defineConfig(({ mode }) => {
 			},
 			env: {
 				CONTROL_TOWER: bindings.durableObject({ worker: "cruce", exportName: "ControlTower" }),
-				...(offline
-					? { GIT_BACKEND: bindings.text("local") }
-					: { ARTIFACTS: bindings.artifacts({ namespace: "cruce-dev", dev: { remote: true } }) }),
-				ARTIFACTS_NAMESPACE: bindings.text("cruce-dev"),
+				...(offline ? { GIT_BACKEND: bindings.text("local") } : { ARTIFACTS: bindings.artifacts({ namespace, dev: { remote: true } }) }),
+				ARTIFACTS_NAMESPACE: bindings.text(namespace),
 				CF_ACCOUNT_ID: bindings.text("YOUR_32_CHARACTER_ACCOUNT_ID"),
 				EVENTS_QUEUE_ID: bindings.text("YOUR_QUEUE_ID"),
 				CRUCE_SECRET: bindings.secret(),
 				CRUCE_ADMIN_TOKEN: bindings.secret(),
+				CF_EVENTS_API_TOKEN: bindings.secret(),
 			},
 			triggers: offline ? [] : [triggers.queue({ name: "cruce-artifact-events", maxBatchSize: 10, maxBatchTimeout: 2 })],
 		},

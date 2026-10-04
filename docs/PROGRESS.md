@@ -26,3 +26,10 @@ Short, dated entries so another agent can continue. Newest last.
   rejected publish, amendment, merges into canonical with Git notes, stale → refresh → re-plan → land.
   `tools/verify-repo.sh` re-verifies with `cf` + plain git: history, notes, and 15/15 tests on the clone.
 - `isomorphic-git` pinned to 1.42.6 (pnpm 12 minimum-release-age policy rejects 1.43.0, published <24h).
+- Radar UI (React Flow + ELK) with realtime WebSocket state; verified in the browser through the full story.
+- Separate namespaces: local dev `cruce-dev`, production `cruce` (queue consumer ignores other namespaces).
+- API token `cruce-event-subscriptions` (account-owned, Queues Write only, expires 2026-12-31) creates per-repo
+  push subscriptions; stored only in `.dev.vars` / `.secrets.prod.json` (both gitignored) and as a Worker secret.
+- Removed the temporary `http_pull` consumer and the bootstrap repo's subscription.
+- Deployed: https://cruce.acltabontabon.workers.dev (Durable Object + queue consumer). Demo runs in ~30 s at 2×
+  on production Artifacts; push/token events arrive through the queue (token.created → push → token.revoked per publish).
