@@ -129,3 +129,8 @@ Short, dated entries so another agent can continue. Newest last.
 - Updated coordination operation/capability names, evidence metadata, rollback explanations, onboarding and product documentation. Existing stored context moves onto missions; stored plans migrate without rewriting Git revisions or evidence contents.
 - Validation: typecheck and lint passed; all 260 unit tests, 17 browser checks (including responsive pages and agent-created mission navigation), and the demo scenario verifier passed.
 - Isolated commit snapshot also passed TypeScript checks, lint and 247 unit tests; unrelated console/environment work remains outside the commit.
+
+### 2026-10-05 — first-project welcome
+
+- Added a dark welcome explaining version control built for agents and the first steps: project creation, local agent connection and prompting, revision review and promotion. Includes a demo link, storage disclosure and a next-step note; no standalone intent form.
+- Desktop/mobile fixture checks confirmed no horizontal overflow and successful creation. UI TypeScript and focused lint checks passed.

@@ -146,35 +146,96 @@ export function ProjectConsole() {
 					</p>
 				)}
 				{projectsLoaded && !selected && !error && (
-					<section className="console-empty">
-						<h1>Create a project.</h1>
-						<p>
-							Each project gets a canonical Git repository in Cloudflare Artifacts. Agents keep working locally with Git and their own
-							tools; Cruce adds missions, evidence, verification and promotion.
-						</p>
-						<form
-							onSubmit={(e) => {
-								e.preventDefault();
-								setBusy(true);
-								void request<ProjectConnection>("/api/projects", { name, idempotencyKey: crypto.randomUUID() })
-									.then((p) => {
-										setProjects([p]);
-										setSelected(p.id);
-										setName("");
-									})
-									.catch((e) => setError(e.message))
-									.finally(() => setBusy(false));
-							}}
-						>
-							<label>
-								Project name
-								<input required maxLength={200} value={name} onChange={(e) => setName(e.target.value)} placeholder="Payment service" />
-							</label>
-							<button type="submit" className="btn" disabled={busy}>
-								{busy ? "Creating repository…" : "Create project"}
-							</button>
-							<p className="muted">Creating a project creates its Artifacts repository (Cloudflare Artifacts storage).</p>
-						</form>
+					<section className="console-welcome" aria-labelledby="welcome-title">
+						<div className="welcome-intro">
+							<p className="eyebrow">Powered by Git + Cloudflare Artifacts</p>
+							<h1 id="welcome-title">Welcome to Cruce.</h1>
+							<p className="welcome-description">Version control built for agents.</p>
+							<p className="welcome-context">
+								Give your agents tasks locally. Cruce coordinates their missions, preserves real Git history and brings proposed revisions
+								and evidence together for your review.
+							</p>
+							<h2 className="welcome-path-title">Your first steps</h2>
+							<ol className="welcome-steps">
+								<li>
+									<span className="welcome-step-number" aria-hidden="true">
+										01
+									</span>
+									<div>
+										<h3>Create a project</h3>
+										<p>Start with a canonical Git repository in Cloudflare Artifacts.</p>
+									</div>
+								</li>
+								<li>
+									<span className="welcome-step-number" aria-hidden="true">
+										02
+									</span>
+									<div>
+										<h3>Connect your agent and give it a task</h3>
+										<p>
+											Connect through Cruce MCP, then prompt your agent in your own tools. It registers a mission and works locally from an
+											accepted revision.
+										</p>
+									</div>
+								</li>
+								<li>
+									<span className="welcome-step-number" aria-hidden="true">
+										03
+									</span>
+									<div>
+										<h3>Review and accept revisions</h3>
+										<p>
+											Inspect the diff, evidence and verification, then decide what to promote to accepted source. Deploying to production
+											is a separate human decision.
+										</p>
+									</div>
+								</li>
+							</ol>
+							<a className="welcome-demo" href="/demo">
+								Explore the demo <span aria-hidden="true">↗</span>
+							</a>
+						</div>
+						<div className="welcome-create">
+							<p className="eyebrow">Start here</p>
+							<h2>Create your first project</h2>
+							<p className="welcome-form-description">A home for your source, missions and review decisions.</p>
+							<form
+								onSubmit={(e) => {
+									e.preventDefault();
+									setBusy(true);
+									void request<ProjectConnection>("/api/projects", { name, idempotencyKey: crypto.randomUUID() })
+										.then((p) => {
+											setProjects([p]);
+											setSelected(p.id);
+											setName("");
+										})
+										.catch((e) => setError(e.message))
+										.finally(() => setBusy(false));
+								}}
+							>
+								<label>
+									Project name
+									<input
+										required
+										maxLength={200}
+										value={name}
+										onChange={(e) => setName(e.target.value)}
+										placeholder="e.g. Payment service"
+										aria-describedby="welcome-resource-note"
+									/>
+								</label>
+								<button type="submit" className="btn welcome-submit" disabled={busy}>
+									{busy ? "Creating repository…" : "Create project"}
+								</button>
+								<p className="muted" id="welcome-resource-note">
+									Creates a Git repository in Cloudflare Artifacts and uses Cloudflare Artifacts storage.
+								</p>
+							</form>
+							<p className="welcome-next">
+								<strong>Next:</strong> Connect your local agent and ask it to start your first mission. Follow its work and review proposals
+								in your project overview.
+							</p>
+						</div>
 					</section>
 				)}
 				{selected && !view && !error && (

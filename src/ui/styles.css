@@ -2263,6 +2263,143 @@ svg {
 	color: var(--muted);
 	line-height: 1.7;
 }
+.project-console .console-welcome {
+	display: grid;
+	grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+	align-items: start;
+	gap: 72px;
+	margin: clamp(32px, 8vh, 88px) 0 32px;
+}
+.project-console .welcome-intro > .eyebrow {
+	color: var(--clear);
+}
+.project-console .welcome-intro h1 {
+	font-size: clamp(30px, 3vw, 40px);
+	line-height: 1.2;
+	letter-spacing: -1.3px;
+	margin: 12px 0 20px;
+}
+.welcome-description {
+	font-size: 20px;
+	line-height: 1.5;
+	color: var(--text-2);
+	margin: 0 0 16px;
+	max-width: 440px;
+}
+.welcome-context {
+	font-size: 13px;
+	line-height: 1.8;
+	color: var(--muted);
+	margin: 0;
+}
+.project-console .welcome-path-title {
+	margin: 32px 0 18px;
+	font-size: 12px;
+	color: var(--text-2);
+}
+.welcome-steps {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	gap: 22px;
+}
+.welcome-steps li {
+	display: flex;
+	align-items: flex-start;
+	gap: 16px;
+}
+.welcome-step-number {
+	flex: 0 0 32px;
+	padding-top: 2px;
+	font: 11px / 24px var(--mono);
+	color: var(--clear);
+	border-top: 1px solid var(--line-2);
+}
+.project-console .welcome-steps h3 {
+	margin: 0 0 4px;
+	font-size: 13px;
+}
+.welcome-steps p {
+	margin: 0;
+	font-size: 12px;
+	line-height: 1.7;
+	color: var(--muted);
+}
+.welcome-demo {
+	display: inline-flex;
+	align-items: center;
+	gap: 12px;
+	margin-top: 28px;
+	font-size: 12px;
+	color: var(--text-2);
+	text-decoration: none;
+}
+.welcome-demo:hover {
+	color: var(--clear);
+}
+.welcome-create {
+	padding: 28px;
+	background: var(--surface);
+	border: 1px solid var(--line-2);
+	border-top: 2px solid var(--clear);
+	border-radius: 8px;
+}
+.project-console .welcome-create h2 {
+	font-size: 20px;
+	letter-spacing: -0.5px;
+	margin: 12px 0 8px;
+}
+.welcome-form-description {
+	margin: 0;
+	font-size: 13px;
+	color: var(--muted);
+	line-height: 1.7;
+}
+.project-console .welcome-create form {
+	padding-top: 12px;
+}
+.project-console .welcome-submit {
+	width: 100%;
+	margin-top: 4px;
+	padding: 11px 16px;
+	background: var(--clear);
+	border-color: var(--clear);
+	color: var(--bg);
+}
+.project-console .welcome-submit:hover:not(:disabled) {
+	background: #a4d5bc;
+	border-color: #a4d5bc;
+}
+.welcome-next {
+	margin: 24px 0 0;
+	padding-top: 20px;
+	border-top: 1px solid var(--line);
+	font-size: 12px;
+	line-height: 1.7;
+	color: var(--muted);
+}
+.welcome-next strong {
+	font-weight: 550;
+	color: var(--text-2);
+}
+@media (max-width: 900px) {
+	.project-console .console-welcome {
+		gap: 32px;
+	}
+	.welcome-create {
+		padding: 22px;
+	}
+}
+@media (max-width: 700px) {
+	.project-console .console-welcome {
+		grid-template-columns: minmax(0, 1fr);
+		margin-top: 24px;
+	}
+	.welcome-description {
+		font-size: 18px;
+	}
+}
 .coordination-graph > .react-flow {
 	height: min(65vh, 620px);
 	min-height: 300px;
