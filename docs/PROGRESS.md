@@ -18,3 +18,11 @@ Short, dated entries so another agent can continue. Newest last.
   replays the story with real git: all steps merge cleanly and tests pass; F-021's final step fails on the
   old baseline (proves the sequencing).
 - 45 unit tests (`pnpm test`) including the full demo story through the controller.
+- Control plane: `ControlTower` Durable Object (SQLite state + audit log, WebSocket hibernation, alarms)
+  hosting a runtime-agnostic `Tower` (controller + Git). Git runs in the Worker with isomorphic-git on a
+  bare workspace persisted in DO SQLite (`SqlFs`); Artifacts repos are remotes; Cruce is the only writer
+  (agents submit files → Cruce rebuilds the commit → publish gate → 60s write token → push → revoke).
+- Demo director (18 deterministic steps) ran end to end on real Artifacts: 3 forks, gated pushes,
+  rejected publish, amendment, merges into canonical with Git notes, stale → refresh → re-plan → land.
+  `tools/verify-repo.sh` re-verifies with `cf` + plain git: history, notes, and 15/15 tests on the clone.
+- `isomorphic-git` pinned to 1.42.6 (pnpm 12 minimum-release-age policy rejects 1.43.0, published <24h).

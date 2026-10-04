@@ -311,13 +311,17 @@ export function computeTraffic(input: TrafficInput): TrafficPicture {
 		const level = primary.level;
 		const severity = primary.severity;
 		const levels = [...new Set(views.map((v) => v.level))].sort() as CongestionLevel[];
+
 		const control: Control = views.some((v) => v.control === "exclusive")
 			? "exclusive"
 			: views.some((v) => v.control === "land-after")
 				? "land-after"
 				: "caution";
+		// The contested airspace: the most specific side of each interaction that carries the pair's
+		// strongest control (an exclusive collision outranks a landing order, which outranks a caution).
+		const controlling = views.filter((v) => v.control === control);
 		const focus = [
-			...new Set(views.map((v) => (isAncestorOrEqual(v.resource, v.otherResource, index) ? v.otherResource : v.resource))),
+			...new Set(controlling.map((v) => (isAncestorOrEqual(v.resource, v.otherResource, index) ? v.otherResource : v.resource))),
 		].sort();
 
 		const why: string[] = [];

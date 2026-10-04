@@ -54,6 +54,8 @@ export type TowerEventType =
 	| "override"
 	| "flight.failed"
 	| "flight.lost"
+	| "artifacts.event"
+	| "agent.instruction"
 	| "attention";
 
 export interface TowerEvent {
@@ -638,6 +640,11 @@ export class Controller {
 				this.fail(f.id, "plan timeout: no Flight Plan filed after discovery");
 			}
 		}
+	}
+
+	/** Record an orchestration event (Git, Artifacts, agent runtime) in the tower log. */
+	note(type: TowerEventType, actor: Actor, title: string, flightId?: string, detail?: string[], data?: Record<string, unknown>) {
+		this.emit(type, actor, title, flightId, detail, data);
 	}
 
 	// ── internals ───────────────────────────────────────────────────────

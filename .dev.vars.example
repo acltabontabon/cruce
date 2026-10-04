@@ -1,0 +1,8 @@
+# Copy to .dev.vars for local development. Never commit .dev.vars.
+# Signs per-Flight agent protocol tokens (any long random string).
+CRUCE_SECRET=change-me-to-a-long-random-string
+# Bearer token required for live-mode commands (launching real agents, overrides on the live project).
+CRUCE_ADMIN_TOKEN=change-me-too
+# Optional: API token limited to Queues/Event Subscriptions edit, used to subscribe each Flight repo to
+# Artifacts push events. Without it Cruce still records its own gated pushes.
+# CF_EVENTS_API_TOKEN=
