@@ -134,3 +134,16 @@ Short, dated entries so another agent can continue. Newest last.
 
 - Added a dark welcome explaining version control built for agents and the first steps: project creation, local agent connection and prompting, revision review and promotion. Includes a demo link, storage disclosure and a next-step note; no standalone intent form.
 - Desktop/mobile fixture checks confirmed no horizontal overflow and successful creation. UI TypeScript and focused lint checks passed.
+
+### 2026-10-05 — first alpha and release-tag deployments
+
+- Drafted `0.1.0-alpha.1`, aligned package and MCP versions, and added a concise changelog with SemVer/release instructions.
+- Added GitHub checks for main/PRs and deployment only for matching `v*` tags contained in main, with changelog validation, serialized deployments and tagged Worker version metadata. Existing working-tree changes were preserved.
+- Created the GitHub production environment and saved existing non-secret Access settings. `CLOUDFLARE_API_TOKEN` still needs to be supplied; no release tag, push or deployment was performed.
+- Validation passed: typecheck, lint, 274 tests, demo scenario, workflow YAML, offline build and production/prebuilt deployment dry runs. Local network checks ran outside the sandbox; the scenario verifier disabled inherited commit signing for its temporary repositories.
+
+### 2026-10-05 — GitHub release activation
+
+- Prepared an isolated release-setup commit and verified the GitHub production environment and Access settings. Ordinary pushes only run checks; no release tag was created.
+- Cloudflare deployment-token creation was rejected by automatic approval review; account-scoped Worker/KV/Queues write access, Account Settings read access and export to GitHub require explicit approval. Token creation did not run.
+- Isolated release snapshot passed typecheck, lint, 261 tests, offline build and the demo verifier before commit.

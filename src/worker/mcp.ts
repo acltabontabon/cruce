@@ -4,6 +4,7 @@ import { COST_LABELS, type Scope } from "../core/capabilities.ts";
 import type { Command } from "../shared/coordination.ts";
 import type { PlatformCommand } from "../shared/platform.ts";
 import { CRUCE_INSTRUCTIONS, CRUCE_TOOLS, toInternalCommand, toolInputShape } from "../shared/tools.ts";
+import { CRUCE_VERSION } from "../shared/version.ts";
 export type MachineCommand = Command | PlatformCommand;
 
 /**
@@ -12,7 +13,7 @@ export type MachineCommand = Command | PlatformCommand;
  * scopes allow. Generic Cloudflare administration belongs to Cloudflare's own MCP servers.
  */
 export function cruceServer(execute: (command: MachineCommand) => Promise<unknown>, scopes?: readonly Scope[]) {
-	const server = new McpServer({ name: "Cruce", version: "0.4.0" }, { instructions: CRUCE_INSTRUCTIONS });
+	const server = new McpServer({ name: "Cruce", version: CRUCE_VERSION }, { instructions: CRUCE_INSTRUCTIONS });
 	for (const tool of CRUCE_TOOLS) {
 		if (scopes && !scopes.includes(tool.scope)) continue;
 		const cost = tool.class === "resource" ? ` Resource action: ${COST_LABELS[tool.cost]}; subject to project policy.` : "";

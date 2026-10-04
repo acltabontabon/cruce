@@ -1,6 +1,6 @@
 {
 	"name": "com.acltabontabon.cruce",
-	"version": "0.1.0",
+	"version": "0.1.0-alpha.1",
 	"private": true,
 	"description": "Cruce — agent-native software development, built on Cloudflare Workers and Artifacts.",
 	"license": "Apache-2.0",
@@ -15,7 +15,8 @@
 		"lint": "biome check .",
 		"format": "biome format --write .",
 		"demo:repo:test": "node --test demo/auth-service/test/",
-		"check": "pnpm typecheck && pnpm lint && pnpm test"
+		"check": "pnpm typecheck && pnpm lint && pnpm test",
+		"release:check": "node tools/check-release.mjs"
 	},
 	"dependencies": {
 		"@babel/parser": "^7.29.9",

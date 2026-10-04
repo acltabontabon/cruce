@@ -59,6 +59,8 @@ production; locally Cruce records its own gated pushes.
 
 ## Deploy
 
+Automated deployments of Cruce's own Worker use checked release tags (`v0.1.0-alpha.1` initially), not branch pushes. See [release setup](releases.md) for GitHub secrets, Access variables and versioning. The commands below are manual deployment commands.
+
 ```sh
 pnpm exec cf deploy --dry-run
 pnpm exec cf deploy --secrets-file .secrets.prod.json
@@ -73,8 +75,7 @@ Cruce's source is mirrored into Artifacts with `tools/mirror-to-artifacts.sh` (â
    repository `cruce-platform`.
 2. Build command: `pnpm install`. Deploy command: `npx cf deploy`. Preview command: `npx cf previews deploy`
    (the project uses `cf` + `cloudflare.config.ts`, not Wrangler's default commands).
-3. Turn on **Builds for Preview branches**: pushes to non-`main` branches of `cruce-platform` produce
-   Worker Previews; `main` deploys production. Secrets stay configured on the Worker.
+3. Non-`main` branches can produce Worker Previews. Keep automatic production deployment disabled when using the GitHub release-tag workflow; a push to `main` must not deploy Cruce's live Worker. Secrets stay configured on the Worker.
 
 This is optional and separate from the product's own Worker Preview path for projects (see
 [native setup](native-setup.md#cloudflare-account-and-environments)), which uses a per-project deploy repository.

@@ -40,7 +40,7 @@ export default defineConfig(({ mode }) => {
 				CRUCE_PUBLIC_ORIGIN: bindings.text(
 					env.CRUCE_PUBLIC_ORIGIN ?? (offline ? "http://localhost:5173" : "https://cruce.acltabontabon.workers.dev"),
 				),
-				...(!offline ? { AI: bindings.ai() } : {}),
+				...(!offline && env.CRUCE_CLOUD_AI === "on" ? { AI: bindings.ai() } : {}),
 				CRUCE_ACCESS_ISSUER: bindings.text(env.CRUCE_ACCESS_ISSUER ?? ""),
 				CRUCE_ACCESS_AUD: bindings.text(env.CRUCE_ACCESS_AUD ?? ""),
 

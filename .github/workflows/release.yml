@@ -1,0 +1,85 @@
+name: Checks and release
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  CF_SEND_TELEMETRY: 'false'
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Check version and changelog
+        run: pnpm release:check
+      - name: Validate release tag and accepted source
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          pnpm release:check "$RELEASE_TAG"
+          git merge-base --is-ancestor HEAD origin/main
+      - run: pnpm check
+      - run: bash demo/scripts/verify-scenario.sh
+      - name: Build without cloud resources
+        run: pnpm exec cf build --mode offline
+
+  deploy:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    concurrency:
+      group: cruce-worker-release
+      cancel-in-progress: false
+    env:
+      CRUCE_PUBLIC_ORIGIN: ${{ vars.CRUCE_PUBLIC_ORIGIN }}
+      CRUCE_ACCESS_ISSUER: ${{ vars.CRUCE_ACCESS_ISSUER }}
+      CRUCE_ACCESS_AUD: ${{ vars.CRUCE_ACCESS_AUD }}
+      CRUCE_CLOUD_AI: 'off'
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Require live Access configuration
+        run: |
+          : "${CRUCE_PUBLIC_ORIGIN:?Set CRUCE_PUBLIC_ORIGIN in GitHub variables}"
+          : "${CRUCE_ACCESS_ISSUER:?Set CRUCE_ACCESS_ISSUER in GitHub variables}"
+          : "${CRUCE_ACCESS_AUD:?Set CRUCE_ACCESS_AUD in GitHub variables}"
+      - run: pnpm exec cf build --mode production
+      - run: pnpm exec cf deploy --prebuilt --mode production --dry-run
+      - name: Deploy tagged revision
+        run: |
+          : "${CLOUDFLARE_API_TOKEN:?Set CLOUDFLARE_API_TOKEN in GitHub secrets}"
+          pnpm exec cf deploy --prebuilt --mode production --tag "$RELEASE_TAG" --message "Release $RELEASE_TAG ($GITHUB_SHA)"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

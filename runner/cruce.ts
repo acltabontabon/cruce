@@ -17,6 +17,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import type { Decision } from "../src/shared/coordination.ts";
 import { CRUCE_INSTRUCTIONS, CRUCE_TOOLS, toolByName, toolInputShape } from "../src/shared/tools.ts";
+import { CRUCE_VERSION } from "../src/shared/version.ts";
 import { configureClient } from "./client-config.ts";
 import { git, observe, packRevision, pipeGit, workspace } from "./local-git.ts";
 
@@ -185,7 +186,7 @@ async function main() {
 		return;
 	}
 	const transport = new StreamableHTTPClientTransport(new URL(`${connection.server}/mcp`), { authProvider: credentials }),
-		remote = new Client({ name: "cruce-local-bridge", version: "0.3.0" });
+		remote = new Client({ name: "cruce-local-bridge", version: CRUCE_VERSION });
 	await remote.connect(transport);
 	const refreshSource = async () => {
 		await remote.callTool({ name: "get_canonical_revision", arguments: { projectId: connection.projectId } });
@@ -292,7 +293,7 @@ async function main() {
 		return next;
 	};
 	if (operation === "mcp") {
-		const server = new McpServer({ name: "Cruce local bridge", version: "0.4.0" }, { instructions: CRUCE_INSTRUCTIONS });
+		const server = new McpServer({ name: "Cruce local bridge", version: CRUCE_VERSION }, { instructions: CRUCE_INSTRUCTIONS });
 		server.registerTool(
 			"refresh_source",
 			{
