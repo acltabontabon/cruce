@@ -11,7 +11,6 @@ field() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const
 
 if ! cf artifacts namespaces repos get "$REPO" --namespace "$NS" >/dev/null 2>&1; then
 	CREATED="$(cf artifacts namespaces repos create "$NS" --name "$REPO" --description "Cruce source (Workers Builds)" --default-branch main 2>/dev/null)"
-	INITIAL_ID="$(printf '%s' "$CREATED" | field token_id)"
 	echo "created $NS/$REPO"
 fi
 REMOTE="https://${CLOUDFLARE_ACCOUNT_ID}.artifacts.cloudflare.net/git/${NS}/${REPO}.git"
@@ -21,7 +20,15 @@ TOKEN_ID="$(printf '%s' "$TOKEN_JSON" | field id)"
 [ -n "$TOKEN" ] || { echo "could not mint a write token"; exit 1; }
 git -c credential.helper= -c http.extraHeader="Authorization: Bearer $TOKEN" push --quiet "$REMOTE" "main:refs/heads/main" --force
 echo "pushed $(git rev-parse --short main) to $NS/$REPO"
-cf artifacts namespaces tokens revoke "$TOKEN_ID" --namespace "$NS" >/dev/null 2>&1 || true
-[ -n "${INITIAL_ID:-}" ] && cf artifacts namespaces tokens revoke "$INITIAL_ID" --namespace "$NS" >/dev/null 2>&1 || true
 unset TOKEN
+# Revoke every active token on the repo (including create()'s initial token). Token ids resolve through
+# an eventually consistent index, so give it a moment and retry once.
+sleep 2
+for attempt in 1 2; do
+	IDS="$(cf artifacts namespaces repos tokens list --namespace "$NS" --name "$REPO" --state active 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s);const r=v.result??v;const t=Array.isArray(r)?r:(r.tokens??[]);process.stdout.write(t.map(x=>x.id).join(" "))}catch{}})')"
+	[ -z "$IDS" ] && break
+	for id in $IDS; do cf artifacts namespaces tokens revoke "$id" --namespace "$NS" >/dev/null 2>&1 || true; done
+	sleep 2
+done
+echo "active tokens remaining: $(cf artifacts namespaces repos tokens list --namespace "$NS" --name "$REPO" --state active 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s);const r=v.result??v;process.stdout.write(String((Array.isArray(r)?r:(r.tokens??[])).length))}catch{process.stdout.write("?")}})')"
 echo "remote: $REMOTE"

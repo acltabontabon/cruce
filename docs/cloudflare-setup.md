@@ -65,6 +65,21 @@ pnpm exec cf deploy --secrets-file .secrets.prod.json
 CRUCE_SANDBOX=on pnpm exec cf deploy --secrets-file .secrets.prod.json
 ```
 
+## Workers Builds / previews (Cruce's own source)
+
+Cruce's source is mirrored into Artifacts with `tools/mirror-to-artifacts.sh` (→ `cruce/cruce-platform`;
+2-minute write token per push, every token revoked afterwards). To build and deploy Cruce from it:
+
+1. Dashboard → **Workers & Pages** → `cruce` → **Settings → Builds → Connect** → namespace `cruce`,
+   repository `cruce-platform`.
+2. Build command: `pnpm install`. Deploy command: `npx cf deploy`. Preview command: `npx cf previews deploy`
+   (the project uses `cf` + `cloudflare.config.ts`, not Wrangler's default commands).
+3. Turn on **Builds for Preview branches**: pushes to non-`main` branches of `cruce-platform` produce
+   Worker Previews; `main` deploys production. Secrets stay configured on the Worker.
+
+This is optional: Cruce's coordination does not depend on it. It is the natural way to review agent changes
+*to Cruce itself* (a Flight's branch becomes a Preview URL).
+
 ## Verifying Artifacts from scratch
 
 `tools/artifacts-smoke` is a minimal Worker with only the Artifacts binding:

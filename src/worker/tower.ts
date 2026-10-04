@@ -59,6 +59,12 @@ export class Tower {
 		private readonly judges: DecisionJudge[] = [],
 	) {}
 
+	/** Restore persisted Git settings (call once after construction). */
+	restore(): this {
+		this.git.epoch = this.store.get<number>("repoEpoch") ?? 0;
+		return this;
+	}
+
 	// ── state ───────────────────────────────────────────────────────────
 
 	get state(): ControllerState {
@@ -283,7 +289,17 @@ export class Tower {
 		const files = await this.git.filesAt(outcome.oid);
 		const index = buildIndex(files, outcome.oid);
 		this.mutate((c) => c.land(flightId, outcome.oid as string, index, message));
+		await this.closeFlight(flightId);
 		return { landed: true };
+	}
+
+	/** Revoke any credentials still issued for a finished Flight's repository. */
+	async closeFlight(flightId: string): Promise<void> {
+		const revoked = await this.git.closeFlight(flightId).catch(() => 0);
+		if (revoked)
+			this.mutate((c) =>
+				c.note("artifacts.event", "cruce", `${flightId}: revoked ${revoked} remaining token(s) on its repository`, flightId),
+			);
 	}
 
 	/** Bring a stale Flight onto the new canonical baseline (real merge into its repository). */
@@ -321,6 +337,9 @@ export class Tower {
 			this.author(),
 			flights.map((f) => f.id),
 		);
+		// New Flight repos get fresh names; the old ones are being deleted in the background.
+		this.git.epoch = (this.store.get<number>("repoEpoch") ?? 0) + 1;
+		this.store.put("repoEpoch", this.git.epoch);
 		for (const f of flights) if (f.artifact) await this.hooks.onRepoRemoved?.(f.artifact.repo).catch(() => undefined);
 		this.store.delete("state");
 		const files = await this.git.filesAt(head);

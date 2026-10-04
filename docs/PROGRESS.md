@@ -33,3 +33,17 @@ Short, dated entries so another agent can continue. Newest last.
 - Removed the temporary `http_pull` consumer and the bootstrap repo's subscription.
 - Deployed: https://cruce.acltabontabon.workers.dev (Durable Object + queue consumer). Demo runs in ~30 s at 2×
   on production Artifacts; push/token events arrive through the queue (token.created → push → token.revoked per publish).
+- Live agents: external runner (`runner/cruce-runner.ts`, local Claude Code over the agent protocol) and
+  Sandbox runtime (`FlightSandbox` + `Outbound` + `FlightWorkflow`, gated by `CRUCE_SANDBOX=on`).
+- Real runs on `project=live` (dev): F-031 landed after a gate rejection → the agent requested airspace;
+  F-032/033/034 ran concurrently: real congestion on TokenValidator.validate, partial clearance (the agent
+  left held code alone), a deadlock between mutual contract changes (fixed: the break now re-orients landing
+  order and is labelled `deadlock-break`), F-033 landed, F-032 went stale → refresh → re-plan → landed.
+  Canonical `cruce-dev/auth-service-live`: 27/27 tests on a plain-git clone.
+- Production lessons: forks are asynchronous (wait until ready), deletes are eventually consistent (Flight
+  repo names carry a reset epoch `-rN`), token revocation right after creation can 404 (retry; Flights'
+  remaining tokens are revoked when they land/fail/cancel).
+- Bounded judgment: `DecisionJudge` (rule-based; optional model judge on live with a key). Jev (TypeSafe AI,
+  released 2026-09-15) fits the interface; not integrated (no verified API access).
+- Cruce source mirrored to `cruce/cruce-platform` (Workers Builds connection is a dashboard step).
+- BLOCKED (needs the owner): Sandbox Flights need Docker running + `ANTHROPIC_API_KEY` in `.dev.vars`.

@@ -122,6 +122,7 @@ function TrafficSummary({ state, onSelect, act, busy }: Props) {
 							: "Waiting for Flight Plans."}
 				</div>
 			)}
+			<ArtifactsActivity state={state} />
 			<Block title="Canonical">
 				<KV k="repository" v={state.project.repo} mono />
 				<KV k="head" v={short(state.canonical.head)} mono />
@@ -551,6 +552,24 @@ function ResourceDetail({ state, resource, onSelect }: Props & { resource: strin
 }
 
 // ── bits ──────────────────────────────────────────────────────────────
+
+/** Repository activity as reported by Artifacts events (operational context, not a dashboard). */
+function ArtifactsActivity({ state }: { state: ControllerState }) {
+	const events = state.log.filter((e) => e.type === "artifacts.event" || e.type === "push.received");
+	const count = (re: RegExp) => events.filter((e) => re.test(e.title)).length;
+	const pushes = count(/confirmed push to/);
+	const notes = count(/confirmed Cruce notes/);
+	const issued = count(/token\.created/);
+	const revoked = count(/token\.revoked/);
+	if (!pushes && !issued) return null;
+	return (
+		<Block title="Artifacts activity">
+			<KV k="pushes confirmed" v={`${pushes} (+${notes} notes)`} />
+			<KV k="tokens issued / revoked" v={`${issued} / ${revoked}`} />
+			<KV k="Flight forks" v={String(state.flights.filter((f) => f.artifact).length)} />
+		</Block>
+	);
+}
 
 function Block({ title, children, tone }: { title: string; children: React.ReactNode; tone?: string }) {
 	return (

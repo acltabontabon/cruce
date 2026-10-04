@@ -76,6 +76,7 @@ export async function handleProtocol(tower: Tower, flightId: string, req: Protoc
 		}
 		case "fail":
 			tower.mutate((c) => c.fail(flightId, req.reason));
+			await tower.closeFlight(flightId);
 			return { ok: true, phase: f.phase };
 	}
 }

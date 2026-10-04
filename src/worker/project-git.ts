@@ -43,8 +43,15 @@ export class ProjectGit {
 		return this.host?.namespace ?? "local";
 	}
 
+	/**
+	 * Repository epoch: bumped on every demo reset so a Flight repo name is never reused while the
+	 * previous repository's deletion is still propagating (Artifacts deletes are eventually consistent).
+	 */
+	epoch = 0;
+
 	flightRepoName(flightId: string) {
-		return `${this.repo}--${flightId.toLowerCase().replace("-", "")}`;
+		const base = `${this.repo}--${flightId.toLowerCase().replace("-", "")}`;
+		return this.epoch > 0 ? `${base}-r${this.epoch}` : base;
 	}
 
 	/** Serialize Git operations on the shared workspace. */
@@ -251,11 +258,11 @@ export class ProjectGit {
 		return t.plaintext;
 	}
 
-	async revokeReadToken(flightId: string) {
+	/** A finished Flight keeps its repository (history, notes) but no live credentials. */
+	async closeFlight(flightId: string): Promise<number> {
 		const name = this.flightRepoName(flightId);
-		const cached = this.readTokens.get(name);
 		this.readTokens.delete(name);
-		if (cached && this.host) await this.host.revokeToken(name, cached.id);
+		return this.host ? this.host.revokeAll(name) : 0;
 	}
 
 	/** Remote URLs are stable; cache them so routine Git work costs no extra control-plane calls. */

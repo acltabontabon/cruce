@@ -93,6 +93,7 @@ export class ControlTower extends DurableObject<TowerEnv> {
 			meta.firstFlight,
 			this.judges(meta),
 		);
+		tower.restore();
 		this.meta = meta;
 		this.tower = tower;
 		await tower.bootstrap();
@@ -174,6 +175,7 @@ export class ControlTower extends DurableObject<TowerEnv> {
 				return { ok: true };
 			case "cancel":
 				tower.mutate((c) => c.cancel(cmd.flightId, by));
+				await tower.closeFlight(cmd.flightId);
 				return { ok: true };
 			case "reroute":
 				return this.reroute(tower, cmd.flightId, by);

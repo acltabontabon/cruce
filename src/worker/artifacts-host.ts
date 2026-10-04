@@ -41,17 +41,46 @@ export class ArtifactsHost {
 		return { name: created.name, id: created.id, remote: created.remote, created: true };
 	}
 
-	/** Fork `source` into `target` (one isolated repository per Flight). */
+	/**
+	 * Fork `source` into `target` (one isolated repository per Flight). Forks complete asynchronously,
+	 * so this waits until the new repository is ready before returning.
+	 */
 	async fork(source: string, target: string, description: string): Promise<RepoRef> {
-		if (await this.exists(target)) {
-			using existing = await this.binding.get(target);
-			const info = await existing.info();
-			return { name: info.name, id: info.id, remote: info.remote, created: false };
+		for (let attempt = 0; attempt < 10; attempt++) {
+			const ready = await this.readyInfo(target);
+			if (ready) return { name: ready.name, id: ready.id, remote: ready.remote, created: attempt > 0 };
+			try {
+				using repo = await this.binding.get(source);
+				const forked = await repo.fork(target, { description, defaultBranchOnly: true, readOnly: false });
+				await this.revoke(target, forked.token);
+				const info = await this.waitReady(target);
+				return { name: forked.name, id: forked.id, remote: info?.remote ?? forked.remote, created: true };
+			} catch (e) {
+				const msg = String((e as Error)?.message ?? e);
+				// In progress, or the name is still held by a deletion that has not propagated: wait and retry.
+				if (!/in progress|being forked|already exists|ALREADY_EXISTS|FORK_IN_PROGRESS|not yet available/i.test(msg)) throw e;
+				await sleep(2500);
+			}
 		}
-		using repo = await this.binding.get(source);
-		const forked = await repo.fork(target, { description, defaultBranchOnly: true, readOnly: false });
-		await this.revoke(target, forked.token);
-		return { name: forked.name, id: forked.id, remote: forked.remote, created: true };
+		throw new Error(`fork of ${source} into ${target} did not become ready`);
+	}
+
+	private async readyInfo(name: string) {
+		try {
+			using repo = await this.binding.get(name);
+			return await repo.info();
+		} catch {
+			return undefined;
+		}
+	}
+
+	private async waitReady(name: string) {
+		for (let i = 0; i < 15; i++) {
+			const info = await this.readyInfo(name);
+			if (info) return info;
+			await sleep(1000);
+		}
+		return undefined;
 	}
 
 	/** Run `fn` with a short-lived repo token, revoking it afterwards no matter what. */
@@ -73,6 +102,18 @@ export class ArtifactsHost {
 
 	async revokeToken(name: string, id: string) {
 		await this.revoke(name, id);
+	}
+
+	/** Revoke every active token on a repository (used when a Flight finishes). */
+	async revokeAll(name: string): Promise<number> {
+		using repo = await this.binding.get(name);
+		const { tokens } = await repo.listTokens();
+		let revoked = 0;
+		for (const t of tokens) {
+			if (t.state !== "active") continue;
+			if (await repo.revokeToken(t.id).catch(() => false)) revoked++;
+		}
+		return revoked;
 	}
 
 	async info(name: string) {
@@ -109,3 +150,5 @@ function isNotFound(e: unknown): boolean {
 	const message = String((e as Error)?.message ?? e);
 	return code === "NOT_FOUND" || /not[ _]found|does not exist|NOT_FOUND/i.test(message);
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

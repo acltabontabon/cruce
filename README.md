@@ -17,7 +17,7 @@ their assumptions just went stale so they re-plan instead of re-working.
 
 **Live:** https://cruce.acltabontabon.workers.dev (press ▶ — the demo runs on real Cloudflare Artifacts)
 
-![radar](docs/img/radar-partial.png)
+![radar](docs/img/radar-partial.jpg)
 
 ---
 
