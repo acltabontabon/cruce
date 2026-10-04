@@ -1,0 +1,8 @@
+{
+	"extends": "./tsconfig.base.json",
+	"compilerOptions": {
+		"lib": ["es2024"],
+		"types": ["vite/client"]
+	},
+	"include": ["src/core", "src/intelligence", "src/demo", "src/worker", "cloudflare.config.ts", ".cloudflare/types"]
+}

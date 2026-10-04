@@ -1,0 +1,12 @@
+{
+	"name": "auth-service",
+	"private": true,
+	"type": "module",
+	"description": "Demo service coordinated by Cruce. Zero dependencies; tests run on Node's built-in test runner.",
+	"scripts": {
+		"test": "node --test \"test/**/*.test.ts\""
+	},
+	"engines": {
+		"node": ">=23.6"
+	}
+}

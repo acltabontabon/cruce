@@ -1,0 +1,9 @@
+packages:
+  - "."
+  - "tools/*"
+allowBuilds:
+  workerd: true
+  esbuild: true
+  "@biomejs/biome": true
+minimumReleaseAgeExclude:
+  - isomorphic-git@1.43.0

@@ -1,0 +1,9 @@
+{
+	"modules": [
+		{ "id": "auth", "label": "Authentication", "paths": ["src/auth/"] },
+		{ "id": "sessions", "label": "Sessions", "paths": ["src/sessions/"] },
+		{ "id": "persistence", "label": "Persistence", "paths": ["src/persistence/"] },
+		{ "id": "messaging", "label": "Messaging", "paths": ["src/messaging/"] },
+		{ "id": "tests", "label": "Tests", "paths": ["test/"] }
+	]
+}

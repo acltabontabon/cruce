@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.cloudflare/
+.wrangler/
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
+.secrets.json
+*.log
+.DS_Store
+coverage/
+.cruce-runner/

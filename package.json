@@ -1,0 +1,47 @@
+{
+	"name": "com.acltabontabon.cruce",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Cruce — active traffic control for autonomous coding agents, built on Cloudflare Workers and Artifacts.",
+	"license": "Apache-2.0",
+	"type": "module",
+	"scripts": {
+		"dev": "cf dev",
+		"build": "cf build",
+		"deploy": "cf deploy",
+		"typecheck": "cf workers types && tsc",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"lint": "biome check .",
+		"format": "biome format --write .",
+		"demo:repo:test": "node --test demo/auth-service/test/",
+		"check": "pnpm typecheck && pnpm lint && pnpm test"
+	},
+	"dependencies": {
+		"@babel/parser": "^7.29.9",
+		"@fontsource-variable/inter": "^5.3.0",
+		"@fontsource-variable/jetbrains-mono": "^5.3.0",
+		"@xyflow/react": "^12.12.0",
+		"diff": "^9.0.0",
+		"elkjs": "^0.12.0",
+		"isomorphic-git": "^1.43.0",
+		"react": "^19.3.0",
+		"react-dom": "^19.3.0",
+		"zod": "^4.6.5"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.15",
+		"@cloudflare/vite-plugin": "beta",
+		"@types/node": "^26.6.4",
+		"@types/react": "^19.3.0",
+		"@types/react-dom": "^19.3.0",
+		"@vitejs/plugin-react": "^6.1.1",
+		"cf": "^1.0.0-beta.12",
+		"typescript": "^7.0.2",
+		"vite": "^8.3.0",
+		"vitest": "^5.0.3"
+	},
+	"engines": {
+		"node": ">=22.18"
+	}
+}
