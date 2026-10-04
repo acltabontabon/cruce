@@ -1,37 +1,26 @@
 import { DurableObject } from "cloudflare:workers";
 import { resolveResource, resourceLabel } from "../core/airspace.ts";
 import type { ControllerState, TowerEvent } from "../core/controller.ts";
-import { Controller, ControllerError, clearanceBrief } from "../core/controller.ts";
+import { Controller, ControllerError } from "../core/controller.ts";
 import { TERMINAL_PHASES } from "../core/domain.ts";
 import type { JevBinding } from "../intelligence/jev.ts";
-import { type DecisionJudge, ModelDecisionJudge, RuleBasedDecisionJudge } from "../intelligence/judge.ts";
-import {
-	type DemoCommand,
-	type HumanCommand,
-	PROJECTS,
-	type ProjectMeta,
-	type ProtocolRequest,
-	type ServerMessage,
-	type Snapshot,
-} from "../shared/api.ts";
-import type { Command, Principal, SystemConnection } from "../shared/coordination.ts";
+import { type DecisionJudge, RuleBasedDecisionJudge } from "../intelligence/judge.ts";
+import { type DemoCommand, type HumanCommand, PROJECTS, type ProjectMeta, type ServerMessage, type Snapshot } from "../shared/api.ts";
+import type { Command, Principal, ProjectConnection } from "../shared/coordination.ts";
 import type { Actor, PlatformCommand } from "../shared/platform.ts";
-import type { FlightSandbox, TaskStatus } from "./agents/flight-sandbox.ts";
-import type { FlightParams } from "./agents/flight-workflow.ts";
 import { ArtifactsHost } from "./artifacts-host.ts";
 import { type DemoStatus, delayFor, initialDemoStatus, prepareDemo, runNextStep } from "./demo-director.ts";
 import { type ArtifactsEvent, EventSubscriptions } from "./event-subscriptions.ts";
 import { SqlFs } from "./git/sql-fs.ts";
 import { GitWorkspace } from "./git/workspace.ts";
 import { ProjectGit } from "./project-git.ts";
-import { handleProtocol } from "./protocol.ts";
-import { SystemRuntime } from "./system-runtime.ts";
+import { ProjectRuntime } from "./project-runtime.ts";
 import { Tower, type TowerStore } from "./tower.ts";
 
 /**
- * One Durable Object per project: the control tower. It is the single authority for live
- * coordination state (Flights, plans, leases, clearances, congestion, decisions) and the hub for
- * realtime radar clients (WebSocket hibernation).
+ * One Durable Object per project: the Cruce Control Tower. For native projects it is the single
+ * authority for intent, missions, coordination, proposals, verification, policy, environments and
+ * lineage around the project's Artifacts repository. It also hosts the deterministic `/demo`.
  */
 
 export interface TowerEnv {
@@ -41,19 +30,14 @@ export interface TowerEnv {
 	EVENTS_QUEUE_ID?: string;
 	CF_EVENTS_API_TOKEN?: string;
 	GIT_BACKEND?: string;
-	FLIGHT_WORKFLOW?: Workflow<FlightParams>;
-	FLIGHT_SANDBOX?: DurableObjectNamespace<FlightSandbox>;
-	ANTHROPIC_API_KEY?: string;
 	AI?: JevBinding;
-	CRUCE_DEEP_JUDGE?: string;
-	CRUCE_DEEP_JUDGE_KEY?: string;
 }
 
 const LIVE_TICK_MS = 30_000;
 
 export class ControlTower extends DurableObject<TowerEnv> {
-	private systemRuntime?: SystemRuntime;
-	private systemOpening?: Promise<SystemRuntime>;
+	private projectRuntime?: ProjectRuntime;
+	private projectOpening?: Promise<ProjectRuntime>;
 	private tower?: Tower;
 	private meta?: ProjectMeta;
 	private opening?: Promise<Tower>;
@@ -69,52 +53,52 @@ export class ControlTower extends DurableObject<TowerEnv> {
 		ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL)`);
 	}
 
-	private async nativeSystem(system: SystemConnection): Promise<SystemRuntime> {
-		if (this.systemOpening) return this.systemOpening;
-		if (this.systemRuntime) {
-			await this.systemRuntime.coordination.metadata(system);
-			return this.systemRuntime;
+	private async nativeProject(project: ProjectConnection): Promise<ProjectRuntime> {
+		if (this.projectOpening) return this.projectOpening;
+		if (this.projectRuntime) {
+			await this.projectRuntime.coordination.metadata(project);
+			return this.projectRuntime;
 		}
-		this.systemOpening = (async () => {
+		this.projectOpening = (async () => {
 			const git = new GitWorkspace(new SqlFs(this.ctx.storage.sql), "/native.git"),
 				host = this.env.ARTIFACTS ? new ArtifactsHost(this.env.ARTIFACTS, this.env.ARTIFACTS_NAMESPACE) : undefined;
-			const runtime = new SystemRuntime(
+			const runtime = new ProjectRuntime(
 				this.store(),
 				git,
-				system,
+				project,
 				host,
 				(p) => this.ctx.waitUntil(p.then(() => this.schedule())),
 				Date.now,
 				this.env.AI,
 			);
-			this.ctx.storage.kv.put("native-system", system);
+			this.ctx.storage.kv.put("native-project", project);
 			await runtime.initialize();
-			this.systemRuntime = runtime;
+			this.projectRuntime = runtime;
 			return runtime;
 		})();
 		try {
-			return await this.systemOpening;
+			return await this.projectOpening;
 		} finally {
-			this.systemOpening = undefined;
+			this.projectOpening = undefined;
 		}
 	}
-	async coordination(system: SystemConnection, cmd: Command, actor: Principal) {
-		const runtime = await this.nativeSystem(system),
+	async coordination(project: ProjectConnection, cmd: Command, actor: Principal) {
+		const runtime = await this.nativeProject(project),
 			result = await runtime.coordination.command(cmd, actor);
 		await this.schedule();
 		return result;
 	}
-	async nativeCommand(system: SystemConnection, cmd: PlatformCommand, actor: Actor) {
-		const runtime = await this.nativeSystem(system),
+	async nativeCommand(project: ProjectConnection, cmd: PlatformCommand, actor: Actor) {
+		const runtime = await this.nativeProject(project),
 			result = await runtime.command(cmd, actor);
 		await this.schedule();
 		return result;
 	}
-	async systemSnapshot(system: SystemConnection, actor: Actor) {
-		return (await this.nativeSystem(system)).snapshot(actor);
+	async projectSnapshot(project: ProjectConnection, actor: Actor) {
+		return (await this.nativeProject(project)).snapshot(actor);
 	}
-	async systemOverride(
-		system: SystemConnection,
+	async projectOverride(
+		project: ProjectConnection,
 		actor: Principal,
 		id: string,
 		resources: string[],
@@ -122,18 +106,18 @@ export class ControlTower extends DurableObject<TowerEnv> {
 		fingerprint: string,
 		expiresAt: number,
 	) {
-		return (await this.nativeSystem(system)).coordination.override(actor, id, resources, reason, fingerprint, expiresAt);
+		return (await this.nativeProject(project)).coordination.override(actor, id, resources, reason, fingerprint, expiresAt);
 	}
-	async exportSource(system: SystemConnection, actor: Principal) {
-		const runtime = await this.nativeSystem(system);
+	async exportSource(project: ProjectConnection, actor: Principal) {
+		const runtime = await this.nativeProject(project);
 		runtime.authorize(actor);
 		return {
-			head: runtime.coordination.state().system.canonicalHead!,
-			pack: await runtime.git.exportPack(runtime.coordination.state().system.canonicalHead!),
+			head: runtime.coordination.state().project.canonicalHead!,
+			pack: await runtime.git.exportPack(runtime.coordination.state().project.canonicalHead!),
 		};
 	}
-	async systemArtifactEvent(system: SystemConnection) {
-		const runtime = await this.nativeSystem(system);
+	async projectArtifactEvent(project: ProjectConnection) {
+		const runtime = await this.nativeProject(project);
 		return runtime.verifySource();
 	}
 
@@ -179,7 +163,6 @@ export class ControlTower extends DurableObject<TowerEnv> {
 			{
 				onChange: (state, events) => {
 					this.broadcastUpdate(state, events, this.demoStatus());
-					this.wakeLiveFlights(state, events);
 					this.ctx.waitUntil(this.schedule());
 				},
 				onRepo: subs ? async (repo) => void (await subs.subscribeRepo(repo)) : undefined,
@@ -190,31 +173,6 @@ export class ControlTower extends DurableObject<TowerEnv> {
 						}
 					: undefined,
 				background: (work) => this.ctx.waitUntil(work),
-				releaseWorkflow: async (record) => {
-					if (!record.workflowId) return;
-					if (!this.env.FLIGHT_WORKFLOW) throw new Error("Workflow binding unavailable for cleanup");
-					let instance: WorkflowInstance;
-					try {
-						instance = await this.env.FLIGHT_WORKFLOW.get(record.workflowId);
-					} catch (error) {
-						if (/not found|does not exist|not exist/i.test(String(error))) return;
-						throw error;
-					}
-					const { status } = await instance.status();
-					if (!["complete", "errored", "terminated"].includes(status)) {
-						try {
-							await instance.terminate();
-						} catch (error) {
-							if (!["complete", "errored", "terminated"].includes((await instance.status()).status)) throw error;
-						}
-					}
-					if (this.ctx.storage.kv.get(`wf:${record.flightId}`) === record.workflowId) this.ctx.storage.kv.delete(`wf:${record.flightId}`);
-				},
-				releaseSandbox: async (record) => {
-					if (!record.sandboxId) return;
-					if (!this.env.FLIGHT_SANDBOX) throw new Error("Sandbox binding unavailable for cleanup");
-					await this.env.FLIGHT_SANDBOX.getByName(record.sandboxId).destroy();
-				},
 			},
 			Date.now,
 			meta.firstFlight,
@@ -228,12 +186,9 @@ export class ControlTower extends DurableObject<TowerEnv> {
 		return tower;
 	}
 
-	/** Rule-based judgment always; the narrow model judge only on the live project with a key. */
-	private judges(meta: ProjectMeta): DecisionJudge[] {
-		const judges: DecisionJudge[] = [new RuleBasedDecisionJudge()];
-		if (meta.mode === "live" && this.env.CRUCE_DEEP_JUDGE === "on" && this.env.CRUCE_DEEP_JUDGE_KEY)
-			judges.push(new ModelDecisionJudge(this.env.CRUCE_DEEP_JUDGE_KEY));
-		return judges;
+	/** The demo uses rule-based judgment only; models never grant permission. */
+	private judges(_meta: ProjectMeta): DecisionJudge[] {
+		return [new RuleBasedDecisionJudge()];
 	}
 
 	private subscriptions(): EventSubscriptions | undefined {
@@ -277,7 +232,6 @@ export class ControlTower extends DurableObject<TowerEnv> {
 			state: tower.state,
 			demo: this.demoStatus(),
 			git: { backend: tower.git.backend, namespace: tower.git.namespace, canonicalRemote: tower.state.project.remote },
-			liveAgents: this.liveAgents(),
 			integrationBlockers: this.integrationBlockers(tower.state),
 		};
 	}
@@ -289,15 +243,6 @@ export class ControlTower extends DurableObject<TowerEnv> {
 				.filter((flight) => !TERMINAL_PHASES.has(flight.phase))
 				.map((flight) => [flight.id, controller.landingBlockers(flight.id)]),
 		);
-	}
-
-	private liveAgents(): { available: boolean; reason?: string } {
-		if (this.meta?.mode !== "live") return { available: false, reason: "demo project" };
-		if (!this.env.FLIGHT_WORKFLOW || !this.env.FLIGHT_SANDBOX)
-			return { available: false, reason: "Sandbox runtime not configured in this deployment" };
-		if (!this.env.ARTIFACTS) return { available: false, reason: "live Flights need the Artifacts backend" };
-		if (!this.env.ANTHROPIC_API_KEY) return { available: false, reason: "no model credentials configured (ANTHROPIC_API_KEY)" };
-		return { available: true };
 	}
 
 	async command(projectId: string, cmd: HumanCommand, by: string): Promise<unknown> {
@@ -324,8 +269,6 @@ export class ControlTower extends DurableObject<TowerEnv> {
 				return this.reroute(tower, cmd.flightId, by);
 			case "land":
 				return tower.land(cmd.flightId);
-			case "launch":
-				return this.launch(tower, cmd);
 		}
 	}
 
@@ -352,164 +295,6 @@ export class ControlTower extends DurableObject<TowerEnv> {
 		tower.mutate((c) => c.submitPlan(flightId, plan, `rerouted around ${labels.join(", ")} by ${by}`));
 		tower.mutate((c) => c.ackInstruction(flightId, instruction.id));
 		return { ok: true };
-	}
-
-	// ── live Flights (real coding agents in Sandboxes) ─────────────────
-
-	private async launch(tower: Tower, cmd: Extract<HumanCommand, { type: "launch" }>) {
-		if (cmd.runtime === "external") {
-			if (this.meta?.mode !== "live" || !this.env.ARTIFACTS) throw new Error("external Flights run on the live project with Artifacts");
-			const flight = tower.mutate((c) => {
-				const m = c.createMission({ title: cmd.title, description: cmd.description, priority: cmd.priority, createdBy: "controller" });
-				return c.createFlight({ missionId: m.id, agent: "external", agentRuntime: "Claude Code · external runner" });
-			});
-			try {
-				await tower.provision(flight.id);
-				return { flightId: flight.id, external: true };
-			} catch (error) {
-				return this.failLaunch(tower, flight.id, error);
-			}
-		}
-		const live = this.liveAgents();
-		if (!live.available || !this.env.FLIGHT_WORKFLOW) throw new Error(`live Flights unavailable: ${live.reason}`);
-		const flight = tower.mutate((c) => {
-			const m = c.createMission({ title: cmd.title, description: cmd.description, priority: cmd.priority, createdBy: "controller" });
-			return c.createFlight({ missionId: m.id, agent: "claude-code", agentRuntime: "Claude Code · Cloudflare Sandbox" });
-		});
-		try {
-			const resources = tower.cleanup.ensure(flight);
-			const workflowId = `${tower.project.id}-${flight.id.toLowerCase()}-${Date.now().toString(36)}`;
-			tower.cleanup.register(resources.key, { workflowId, sandboxId: `${tower.project.id}-${flight.id}` });
-			const instance = await this.env.FLIGHT_WORKFLOW.create({
-				id: workflowId,
-				params: { projectId: tower.project.id, flightId: flight.id },
-			});
-			this.ctx.storage.kv.put(`wf:${flight.id}`, instance.id);
-			tower.cleanup.register(resources.key, { workflowId: instance.id });
-			if (TERMINAL_PHASES.has(tower.flight(flight.id).phase)) {
-				await tower.closeFlight(flight.id);
-				throw new ControllerError("Flight closed during launch", 409);
-			}
-			tower.mutate((c) => c.note("flight.phase", "cruce", `${flight.id} launched · workflow ${instance.id}`, flight.id));
-			return { flightId: flight.id, workflow: instance.id };
-		} catch (error) {
-			return this.failLaunch(tower, flight.id, error);
-		}
-	}
-
-	private async failLaunch(tower: Tower, flightId: string, error: unknown): Promise<never> {
-		const reason = `Launch failed: ${(error as Error)?.message ?? String(error)}`.slice(0, 400);
-		tower.mutate((c) => c.fail(flightId, reason));
-		await tower.closeFlight(flightId);
-		throw error;
-	}
-
-	/** Tell held / sequenced live Flights that the traffic picture changed. */
-	private wakeLiveFlights(state: ControllerState, events: TowerEvent[]) {
-		if (this.meta?.mode !== "live" || !this.env.FLIGHT_WORKFLOW || !events.length) return;
-		const relevant = events.some((e) =>
-			[
-				"clearance",
-				"flight.stale",
-				"flight.landed",
-				"override",
-				"congestion.cleared",
-				"flight.failed",
-				"flight.lost",
-				"agent.instruction",
-			].includes(e.type),
-		);
-		if (!relevant) return;
-		for (const f of state.flights) {
-			if (f.agent !== "claude-code" || TERMINAL_PHASES.has(f.phase)) continue;
-			const id = this.ctx.storage.kv.get(`wf:${f.id}`) as string | undefined;
-			if (!id) continue;
-			const wf = this.env.FLIGHT_WORKFLOW;
-			this.ctx.waitUntil(
-				wf
-					.get(id)
-					.then((i) => i.sendEvent({ type: "tower-wake", payload: { at: Date.now() } }))
-					.catch(() => undefined),
-			);
-		}
-	}
-
-	async liveProvision(projectId: string, flightId: string) {
-		const tower = await this.open(projectId);
-		tower.assertActive(flightId);
-		if (!tower.flight(flightId).artifact) await tower.provision(flightId);
-		const a = tower.flight(flightId).artifact;
-		if (!a) throw new Error("provisioning failed");
-		return { namespace: a.namespace, repo: a.repo, remote: a.remote, baseCommit: a.baseCommit };
-	}
-
-	async liveMission(projectId: string, flightId: string) {
-		const tower = await this.open(projectId);
-		tower.assertActive(flightId);
-		const f = tower.flight(flightId);
-		const m = tower.state.missions.find((x) => x.id === f.missionId);
-		return { flightId, title: m?.title ?? f.title, description: m?.description ?? f.title };
-	}
-
-	async liveStatus(projectId: string, flightId: string) {
-		const tower = await this.open(projectId);
-		const f = tower.flight(flightId);
-		const c = tower.state.traffic.clearances[flightId];
-		const approved = f.publishes.filter((p) => p.approved);
-		return {
-			phase: f.phase,
-			terminal: TERMINAL_PHASES.has(f.phase),
-			planVersion: f.plan?.planVersion ?? 0,
-			clearance: c?.status ?? "none",
-			cleared: c?.cleared.length ?? 0,
-			held: c?.held.length ?? 0,
-			stale: f.stale ? { byFlight: f.stale.byFlight, reasons: f.stale.reasons } : null,
-			published: approved.length > 0,
-			publishedPlanVersion: approved.at(-1)?.planVersion ?? 0,
-			instruction: f.instruction ?? null,
-			brief: clearanceBrief(tower.state, flightId),
-		};
-	}
-
-	async liveRefresh(projectId: string, flightId: string) {
-		const tower = await this.open(projectId);
-		const ok = await tower.refresh(flightId);
-		if (!ok) throw new Error("baseline refresh hit a Git conflict");
-		return { head: tower.flight(flightId).baseline };
-	}
-
-	async liveActivity(projectId: string, flightId: string, text: string) {
-		const tower = await this.open(projectId);
-		tower.assertActive(flightId);
-		tower.mutate((c) => c.reportActivity(flightId, text));
-	}
-
-	/** The read token the sandbox egress policy injects for clone/fetch of the Flight's own repo. */
-	async readToken(projectId: string, flightId: string): Promise<string> {
-		const tower = await this.open(projectId);
-		const f = tower.flight(flightId);
-		if (TERMINAL_PHASES.has(f.phase)) throw new Error(`${flightId} is ${f.phase}`);
-		return tower.readToken(flightId);
-	}
-
-	/** The sandbox finished an agent task; forward it to the Flight's workflow. */
-	async agentTaskDone(projectId: string, flightId: string, label: string, status: TaskStatus) {
-		const tower = await this.open(projectId);
-		if (TERMINAL_PHASES.has(tower.flight(flightId).phase)) return;
-		tower.mutate((c) =>
-			c.note(
-				"flight.activity",
-				"agent",
-				`${flightId} agent task ${label}: ${status.state}`,
-				flightId,
-				status.state === "failed" ? [status.error.slice(0, 300)] : status.state === "succeeded" ? [status.result.slice(0, 300)] : undefined,
-			),
-		);
-		const id = this.ctx.storage.kv.get(`wf:${flightId}`) as string | undefined;
-		if (id && this.env.FLIGHT_WORKFLOW) {
-			const instance = await this.env.FLIGHT_WORKFLOW.get(id);
-			await instance.sendEvent({ type: `agent-${label}`, payload: { status } });
-		}
 	}
 
 	async demo(projectId: string, cmd: DemoCommand): Promise<DemoStatus> {
@@ -591,11 +376,6 @@ export class ControlTower extends DurableObject<TowerEnv> {
 		}
 	}
 
-	async protocol(projectId: string, flightId: string, req: ProtocolRequest): Promise<unknown> {
-		const tower = await this.open(projectId);
-		return handleProtocol(tower, flightId, req);
-	}
-
 	async history(projectId: string, target: string) {
 		const tower = await this.open(projectId);
 		const flight = target === "canonical" ? undefined : tower.flight(target);
@@ -667,7 +447,6 @@ export class ControlTower extends DurableObject<TowerEnv> {
 			state: tower.state,
 			demo: this.demoStatus(),
 			git: { backend: tower.git.backend, namespace: tower.git.namespace, canonicalRemote: tower.state.project.remote },
-			liveAgents: this.liveAgents(),
 			integrationBlockers: this.integrationBlockers(tower.state),
 		};
 		pair[1].send(JSON.stringify(snapshot));
@@ -722,28 +501,24 @@ export class ControlTower extends DurableObject<TowerEnv> {
 	private async updateAlarm() {
 		const demo = this.demoStatus();
 		const candidates: number[] = [];
-		const semanticAt = this.systemRuntime?.coordination.nextAlarm();
-		if (this.systemRuntime?.host && this.systemRuntime.coordination.state().workstreams.some((w) => w.state === "active"))
+		const semanticAt = this.projectRuntime?.coordination.nextAlarm();
+		if (this.projectRuntime?.host && this.projectRuntime.coordination.state().workstreams.some((w) => w.state === "active"))
 			candidates.push(Date.now() + LIVE_TICK_MS);
 		if (semanticAt !== undefined) candidates.push(Math.max(Date.now() + 1000, semanticAt));
 		if (demo?.running && demo.nextAt) candidates.push(demo.nextAt);
-		if (this.meta?.mode === "live" && this.tower?.state.flights.some((f) => !TERMINAL_PHASES.has(f.phase)))
-			candidates.push(Date.now() + LIVE_TICK_MS);
 		const cleanupAt = this.tower?.cleanup.nextAt();
 		if (cleanupAt !== undefined) candidates.push(Math.max(Date.now() + 1_000, cleanupAt));
 		if (candidates.length) {
 			const previous = await this.ctx.storage.getAlarm();
-			const desired = Math.min(...candidates);
-			const active = this.meta?.mode === "live" && this.tower?.state.flights.some((f) => !TERMINAL_PHASES.has(f.phase));
-			const next = active && previous !== null ? Math.min(previous, desired) : desired;
+			const next = Math.min(...candidates);
 			if (previous !== next) await this.ctx.storage.setAlarm(next);
 		} else await this.ctx.storage.deleteAlarm();
 	}
 
 	async alarm() {
-		const system = this.ctx.storage.kv.get("native-system") as SystemConnection | undefined;
-		if (system) {
-			const runtime = await this.nativeSystem(system);
+		const project = this.ctx.storage.kv.get("native-project") as ProjectConnection | undefined;
+		if (project) {
+			const runtime = await this.nativeProject(project);
 			await runtime.verifySource();
 			await runtime.coordination.runJev();
 			await this.schedule();
@@ -762,7 +537,6 @@ export class ControlTower extends DurableObject<TowerEnv> {
 			await this.schedule();
 			return;
 		}
-		if (tower.project.mode === "live") tower.mutate((c) => c.tick());
 		await tower.cleanup.run();
 		await this.schedule();
 	}

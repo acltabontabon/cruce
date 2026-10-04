@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type DemoCommand, PROJECTS } from "../shared/api.ts";
-import { Dialog, Icon } from "./components.tsx";
+import { Icon } from "./components.tsx";
 import { ContextPanel } from "./panels/Context.tsx";
 import { Header } from "./panels/Header.tsx";
 import { History } from "./panels/History.tsx";
@@ -10,10 +10,10 @@ import type { Selection } from "./radar/Radar.tsx";
 import { post, useTower } from "./store.ts";
 import "./styles.css";
 import "./responsive.css";
-import { SystemConsole } from "./SystemConsole.tsx";
+import { ProjectConsole } from "./ProjectConsole.tsx";
 
 export function App() {
-	return location.pathname === "/demo" ? <DemoApp /> : <SystemConsole />;
+	return location.pathname === "/demo" ? <DemoApp /> : <ProjectConsole />;
 }
 
 type Route = { projectId: string; view: "work" | "traffic"; selection: Selection; attentionOnly: boolean };
@@ -43,9 +43,6 @@ export function DemoApp() {
 	const [pending, setPending] = useState(false);
 	const [preparing, setPreparing] = useState(false);
 	const [toast, setToast] = useState<string | null>(null);
-	const [connectionOpen, setConnectionOpen] = useState(false);
-	const [token, setToken] = useState("");
-	const [tokenInput, setTokenInput] = useState("");
 	const prepared = useRef<string | null>(null);
 	const currentProject = useRef(route.projectId);
 	currentProject.current = route.projectId;
@@ -72,8 +69,6 @@ export function DemoApp() {
 	useEffect(() => {
 		const back = () => setRoute(readRoute());
 		window.addEventListener("popstate", back);
-		// Remove the old client’s persisted credential. New credentials live only in this session.
-		localStorage.removeItem("cruce.controllerToken");
 		return () => window.removeEventListener("popstate", back);
 	}, []);
 	useEffect(() => {
@@ -103,7 +98,7 @@ export function DemoApp() {
 		const project = route.projectId;
 		prepared.current = project;
 		setPreparing(true);
-		post(`/api/projects/${project}/demo`, { op: "prepare" })
+		post(`/api/demo/${project}/demo`, { op: "prepare" })
 			.catch((e) => {
 				if (currentProject.current === project) setToast(e.message);
 			})
@@ -124,15 +119,11 @@ export function DemoApp() {
 		}
 	};
 	const act = async (command: Record<string, unknown>) => {
-		if (route.projectId === "live" && !token) {
-			setConnectionOpen(true);
-			throw new Error("Add your controller token, then try again. Your task has been kept.");
-		}
-		return run(() => post(`/api/projects/${route.projectId}/commands`, command, token || undefined));
+		return run(() => post(`/api/demo/${route.projectId}/commands`, command));
 	};
 	const demo = (op: DemoCommand["op"], speed?: number) => {
 		if (op === "reset" || op === "replay") navigate({ selection: null });
-		void run(() => post(`/api/projects/${route.projectId}/demo`, { op, speed })).catch(() => {});
+		void run(() => post(`/api/demo/${route.projectId}/demo`, { op, speed })).catch(() => {});
 	};
 	const state = tower.state?.project.id === route.projectId ? tower.state : null;
 	const busy = pending || preparing || !tower.connected;
@@ -155,7 +146,6 @@ export function DemoApp() {
 						onView={(view) => navigate({ view, selection: null, attentionOnly: false })}
 						onDemo={demo}
 						onHistory={() => setHistoryTarget("canonical")}
-						onConnection={() => setConnectionOpen(true)}
 					/>
 					<main id="main-content" className="main-content" tabIndex={-1}>
 						{preparing && !state.flights.some((f) => f.plan) ? (
@@ -195,12 +185,10 @@ export function DemoApp() {
 						) : (
 							<Work
 								state={state}
-								liveAgents={tower.liveAgents}
 								busy={busy}
 								attentionOnly={route.attentionOnly}
 								onAttention={(attentionOnly) => navigate({ attentionOnly })}
 								onSelect={(selection) => navigate({ selection })}
-								onLaunch={(input) => act({ type: "launch", runtime: "sandbox", ...input })}
 								act={act}
 							/>
 						)}
@@ -226,54 +214,6 @@ export function DemoApp() {
 						</button>
 					)}
 				</main>
-			)}
-			{connectionOpen && (
-				<Dialog
-					title="Controller access"
-					onClose={() => {
-						setConnectionOpen(false);
-						setTokenInput("");
-					}}
-				>
-					<form
-						className="connection-form"
-						onSubmit={(e) => {
-							e.preventDefault();
-							setToken(tokenInput.trim());
-							setTokenInput("");
-							setConnectionOpen(false);
-							setToast("Controller token set for this session.");
-						}}
-					>
-						<p>Live operations require your controller token. It stays in memory for this browser session.</p>
-						<label htmlFor="controller-token">Controller token</label>
-						<input
-							id="controller-token"
-							type="password"
-							autoComplete="off"
-							value={tokenInput}
-							onChange={(e) => setTokenInput(e.target.value)}
-							required
-						/>
-						<div className="inline-actions">
-							<button type="submit" className="btn primary" disabled={!tokenInput.trim()}>
-								Use token
-							</button>
-							{token && (
-								<button
-									type="button"
-									className="btn"
-									onClick={() => {
-										setToken("");
-										setConnectionOpen(false);
-									}}
-								>
-									Clear session access
-								</button>
-							)}
-						</div>
-					</form>
-				</Dialog>
 			)}
 			{toast && (
 				<div className="toast" role="status">

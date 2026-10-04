@@ -1,6 +1,5 @@
 import type { ControllerState } from "../../core/controller.ts";
 import type { Flight } from "../../core/domain.ts";
-import type { Snapshot } from "../../shared/api.ts";
 import { Badge, Icon } from "../components.tsx";
 import {
 	agentName,
@@ -18,12 +17,10 @@ import type { Selection } from "../radar/Radar.tsx";
 
 interface Props {
 	state: ControllerState;
-	liveAgents: Snapshot["liveAgents"] | null;
 	busy: boolean;
 	attentionOnly: boolean;
 	onSelect(selection: Selection): void;
 	onAttention(value: boolean): void;
-	onLaunch(input: { title: string; description: string; priority: string }): Promise<unknown>;
 	act(cmd: Record<string, unknown>): Promise<unknown>;
 }
 export function Work({ state, busy, attentionOnly, onSelect, onAttention, act }: Props) {

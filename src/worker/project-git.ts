@@ -29,7 +29,6 @@ export const TOWER_AUTHOR = { name: "Cruce Tower", email: "tower@cruce.acltabont
 
 export class ProjectGit {
 	private queue: Promise<unknown> = Promise.resolve();
-	private readonly readTokens = new Map<string, { token: string; id: string; until: number }>();
 	private readonly remotes = new Map<string, string>();
 	readonly backend: GitBackend;
 
@@ -264,31 +263,6 @@ export class ProjectGit {
 		});
 	}
 
-	/**
-	 * A read token for a Flight's repository, injected by the sandbox egress policy for clone/fetch.
-	 * Cached for most of its 15-minute life so Git traffic does not mint a token per request.
-	 */
-	async readToken(flightId: string, assertActive: () => void): Promise<string> {
-		assertActive();
-		if (!this.host) throw new Error("no Artifacts backend");
-		const name = this.flightRepoName(flightId);
-		const cached = this.readTokens.get(name);
-		if (cached && cached.until > Date.now()) return cached.token;
-		const t = await this.host.mint(name, "read", 900);
-		try {
-			assertActive();
-		} catch (error) {
-			await this.host.revokeToken(name, t.id);
-			throw error;
-		}
-		this.readTokens.set(name, { token: t.plaintext, id: t.id, until: Date.now() + 12 * 60 * 1000 });
-		return t.plaintext;
-	}
-
-	clearReadToken(repo: string) {
-		this.readTokens.delete(repo);
-	}
-
 	/** Verify durable canonical history and notes before destroying the isolated copy. */
 	verifyLanding(flight: Pick<Flight, "id" | "landedCommit"> & { publishedHead?: string }) {
 		return this.run(async () => {
@@ -314,7 +288,6 @@ export class ProjectGit {
 
 	clearFlightResources(flightId: string, repo: string, clearRefs: boolean) {
 		return this.run(async () => {
-			this.readTokens.delete(repo);
 			this.remotes.delete(repo);
 			if (clearRefs) {
 				await this.ws.deleteRef(flightRef(flightId));

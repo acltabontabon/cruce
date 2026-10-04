@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { type AuthEnv, accessIdentity, seal, unseal } from "../../src/worker/auth.ts";
-import { SystemDirectory } from "../../src/worker/system-directory.ts";
+import { ProjectDirectory } from "../../src/worker/project-directory.ts";
 
 vi.mock("cloudflare:workers", () => ({
 	DurableObject: class {
@@ -62,15 +62,15 @@ function directory() {
 			list: async ({ prefix }: { prefix: string }) =>
 				new Map([...data].filter(([k]) => k.startsWith(prefix)).map(([k, v]) => [k, structuredClone(v)])),
 		};
-	return new SystemDirectory({ storage } as unknown as DurableObjectState, {} as never);
+	return new ProjectDirectory({ storage } as unknown as DurableObjectState, {} as never);
 }
-describe("native system authority", () => {
+describe("native project authority", () => {
 	it("serializes duplicate initialization and retains authority across a rename", async () => {
 		const d = directory(),
 			identity = { developerId: "owner", tenantId: "tenant" };
 		const [a, b] = await Promise.all([d.create(identity, "Payments", "once"), d.create(identity, "Payments", "once")]);
 		expect(a.id).toBe(b.id);
-		expect(await d.systems()).toHaveLength(1);
+		expect(await d.projects()).toHaveLength(1);
 		const renamed = await d.update(identity, a.id, 1, { name: "Settlements" });
 		expect(renamed.id).toBe(a.id);
 		expect(renamed.artifactRepository).toBe(a.artifactRepository);
@@ -84,7 +84,7 @@ describe("native system authority", () => {
 		expect(() => d.principal({ ...identity, developerId: "stranger" }, s)).toThrow("access denied");
 		const observer = await d.update(identity, s.id, s.version, { member: { id: "viewer", role: "observer" } });
 		expect(d.principal({ ...identity, developerId: "viewer" }, observer).canWrite).toBe(false);
-		await expect(d.update(identity, s.id, 1, { name: "Stale" })).rejects.toThrow("System changed");
+		await expect(d.update(identity, s.id, 1, { name: "Stale" })).rejects.toThrow("Project changed");
 		const revoked = await d.update(identity, s.id, observer.version, { member: { id: "viewer", role: "remove" } });
 		expect(() => d.principal({ ...identity, developerId: "viewer" }, revoked)).toThrow("access denied");
 		await expect(d.update(identity, s.id, revoked.version, { member: { id: "owner", role: "remove" } })).rejects.toThrow(
@@ -101,13 +101,13 @@ describe("native system authority", () => {
 		const enabled = await d.update(identity, s.id, disabled.version, { active: true });
 		expect(d.principal(identity, enabled).maintainer).toBe(true);
 	});
-	it("does not let revoked creators replay creation to retrieve system details", async () => {
+	it("does not let revoked creators replay creation to retrieve project details", async () => {
 		const d = directory(),
 			identity = { developerId: "owner", tenantId: "tenant" },
 			s = await d.create(identity, "Payments", "new");
 		const withSuccessor = await d.update(identity, s.id, s.version, { member: { id: "successor", role: "maintainer" } });
 		await d.update({ ...identity, developerId: "successor" }, s.id, withSuccessor.version, { member: { id: "owner", role: "remove" } });
 		await expect(d.create(identity, "Payments", "new")).rejects.toThrow("access denied");
-		expect(await d.systems()).toHaveLength(1);
+		expect(await d.projects()).toHaveLength(1);
 	});
 });

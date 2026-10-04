@@ -7,7 +7,7 @@ export const TOOLS = [
 	"register_intent",
 	"update_intent",
 	"attach_workstream",
-	"get_system_context",
+	"get_project_context",
 	"get_active_work",
 	"get_dependencies",
 	"check_coordination",
@@ -25,11 +25,11 @@ export type Capability = "git_observation" | "intent_mcp" | "adaptive" | "native
 export interface Principal {
 	developerId: string;
 	tenantId: string;
-	systemIds: string[];
+	projectIds: string[];
 	maintainer?: boolean;
 	canWrite?: boolean;
 }
-export interface SystemConnection {
+export interface ProjectConnection {
 	id: string;
 	tenantId: string;
 	artifactRepository: string;
@@ -43,7 +43,7 @@ export interface SystemConnection {
 		semantic: "off" | "shadow" | "advisory" | "automatic";
 	};
 }
-export function systemKey(tenant: string, immutableId: string) {
+export function projectKey(tenant: string, immutableId: string) {
 	return JSON.stringify([tenant, immutableId]);
 }
 export interface WorkspaceAttachment {
@@ -178,14 +178,14 @@ export interface Decision {
 	nextAction: string;
 	revision: number;
 	fingerprint: string;
-	validity: { systemVersion: number; canonicalHead?: string; planVersions: Record<string, number>; expiresAt: number };
+	validity: { projectVersion: number; canonicalHead?: string; planVersions: Record<string, number>; expiresAt: number };
 	coverage: { capabilities: Capability[]; limitations: string[]; intent: boolean };
 	instructions: Instruction[];
 	overridden: boolean;
 	human: string;
 }
 export interface CoordinationState {
-	system: SystemConnection;
+	project: ProjectConnection;
 	revision: number;
 	counter: number;
 	index: AirspaceIndex;
@@ -218,7 +218,7 @@ export const WorkspaceInput = z.object({
 });
 export const CommandInput = z.object({
 	tool: z.enum(TOOLS),
-	systemId: z.string().min(1).max(300),
+	projectId: z.string().min(1).max(300),
 	idempotencyKey: z.string().min(1).max(200).optional(),
 	workstreamId: z.string().max(80).optional(),
 	sessionId: z.string().max(80).optional(),
@@ -260,6 +260,6 @@ export const CommandInput = z.object({
 		.optional(),
 });
 export type Command = z.infer<typeof CommandInput>;
-export const READ_TOOLS = new Set<Tool>(["get_system_context", "get_active_work", "get_dependencies", "check_coordination"]);
+export const READ_TOOLS = new Set<Tool>(["get_project_context", "get_active_work", "get_dependencies", "check_coordination"]);
 export const PARTICIPATION =
 	"Register your task and structured plan before shared changes. Check coordination before expanding scope, publication, and after context changes. Continue cleared scope, preserve working-tree changes, acknowledge instructions, refresh the specified revision using your normal tools, then amend your plan. Cruce does not authorize reset or discarded code. Source and evidence are durable Artifacts. Agents create proposals; human review and policy govern promotion. Local checks are cooperative; managed publication is verified by Cruce.";

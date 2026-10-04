@@ -7,8 +7,8 @@ import {
 	type CoordinationState,
 	type Decision,
 	type Principal,
-	type SystemConnection,
-	systemKey,
+	type ProjectConnection,
+	projectKey,
 } from "../../src/shared/coordination.ts";
 
 const files = {
@@ -16,10 +16,10 @@ const files = {
 	"src/payment/response.ts": "export interface PaymentResponse { id: string }\n",
 	"other.py": "def retry(): pass\n",
 };
-const repository: SystemConnection = {
-	id: systemKey("tenant", "123"),
+const repository: ProjectConnection = {
+	id: projectKey("tenant", "123"),
 	tenantId: "tenant",
-	artifactRepository: "system-payments",
+	artifactRepository: "project-payments",
 	name: "team/payments",
 	active: true,
 	version: 1,
@@ -27,7 +27,7 @@ const repository: SystemConnection = {
 	capabilities: ["git_observation"],
 	policy: { mode: "observation", semantic: "advisory" },
 };
-const principal: Principal = { developerId: "human", tenantId: "tenant", systemIds: [repository.id], maintainer: true };
+const principal: Principal = { developerId: "human", tenantId: "tenant", projectIds: [repository.id], maintainer: true };
 const plan = (summary: string, writes: string[], reads: string[] = []) => ({
 	summary,
 	intent: summary,
@@ -49,7 +49,7 @@ function register(
 	const c = new WorkstreamController(s, now),
 		cmd = CommandInput.parse({
 			tool: "register_intent",
-			systemId: s.system.id,
+			projectId: s.project.id,
 			idempotencyKey: name,
 			plan: plan(name, writes),
 			workspace: {
@@ -71,7 +71,7 @@ const fresh = () => initialCoordination(repository, buildIndex(files, "base"));
 function mutation(s: CoordinationState, d: Decision & { sessionId?: string }, tool: Command["tool"], extra: Partial<Command> = {}) {
 	const w = s.workstreams.find((w) => w.id === d.workstreamId)!;
 	return CommandInput.parse({
-		systemId: repository.id,
+		projectId: repository.id,
 		tool,
 		idempotencyKey: `${tool}:${s.counter}:${s.revision}`,
 		workstreamId: w.id,
@@ -92,19 +92,19 @@ describe("repository coordination", () => {
 		const { cmd } = register(fresh());
 		for (const p of [
 			{ ...principal, tenantId: "other" },
-			{ ...principal, systemIds: [] },
+			{ ...principal, projectIds: [] },
 		])
 			expect(() => new WorkstreamController(fresh(), 10).execute(cmd, p)).toThrow("access denied");
 		const s = fresh();
-		s.system.active = false;
+		s.project.active = false;
 		expect(() => new WorkstreamController(s, 10).execute(cmd, principal)).toThrow("access denied");
 	});
 	it("keeps authority stable after a rename", () => {
-		expect(systemKey("tenant", "123")).toBe(repository.id);
+		expect(projectKey("tenant", "123")).toBe(repository.id);
 		const s = fresh();
-		s.system.name = "team/renamed";
-		expect(register(s).c.state.system.id).toBe(repository.id);
-		expect(systemKey("other", "123")).not.toBe(repository.id);
+		s.project.name = "team/renamed";
+		expect(register(s).c.state.project.id).toBe(repository.id);
+		expect(projectKey("other", "123")).not.toBe(repository.id);
 	});
 	it("gives partial clearance while constraining publication", () => {
 		const a = register(fresh()),
@@ -182,7 +182,7 @@ describe("repository coordination", () => {
 		const a = register(fresh());
 		a.c.execute(mutation(a.c.state, a.result, "complete_workstream"), principal);
 		expect(a.c.state.workstreams[0].state).toBe("completed");
-		expect(a.c.state.system.canonicalHead).toBe("base");
+		expect(a.c.state.project.canonicalHead).toBe("base");
 	});
 	it("rejects dependency cycles", () => {
 		const a = register(fresh()),
@@ -207,7 +207,7 @@ describe("repository coordination", () => {
 		const a = register(fresh()),
 			b = register(a.c.state, "Retry API", ["PaymentResponse"]),
 			c = b.c;
-		c.state.system.policy.semantic = "automatic";
+		c.state.project.policy.semantic = "automatic";
 		const constraint = {
 			id: "semantic",
 			capability: "dependency",
@@ -231,7 +231,7 @@ describe("repository coordination", () => {
 	it("rejects stale semantic results", () => {
 		const a = register(fresh()),
 			fingerprint = semanticFingerprint(a.c.state);
-		a.c.state.system.version++;
+		a.c.state.project.version++;
 		expect(
 			a.c.applySemantic(
 				{
@@ -269,7 +269,7 @@ describe("repository coordination", () => {
 		);
 		expect(decide(b.c.state, b.result.workstreamId, 10).overridden).toBe(false);
 	});
-	it("does not grant system-wide scope to unresolved contract names", () => {
+	it("does not grant project-wide scope to unresolved contract names", () => {
 		const a = register(fresh(), "New component", ["UnknownComponent"]);
 		expect(a.result.cleared).not.toContain("m:root");
 	});

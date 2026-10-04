@@ -2005,13 +2005,13 @@ svg {
 }
 
 /* Native development console; diagnostic legacy traffic styles remain isolated below. */
-.system-console {
+.project-console {
 	min-height: 100dvh;
 	height: auto;
 	overflow: visible;
 	background: var(--bg);
 }
-.system-header {
+.project-header {
 	display: flex;
 	align-items: center;
 	gap: 24px;
@@ -2019,7 +2019,7 @@ svg {
 	padding: 16px 32px;
 	border-bottom: 1px solid var(--line);
 }
-.system-header .wordmark {
+.project-header .wordmark {
 	font-size: 20px;
 	font-weight: 650;
 	letter-spacing: -0.7px;
@@ -2038,29 +2038,29 @@ svg {
 .spacer {
 	flex: 1;
 }
-.system-main {
+.project-main {
 	max-width: 1120px;
 	margin: auto;
 	width: 100%;
 	padding: 48px 32px 80px;
 }
-.system-main h1 {
+.project-main h1 {
 	font-size: 30px;
 	font-weight: 550;
 	letter-spacing: -1px;
 	margin: 6px 0 12px;
 }
-.system-main h2 {
+.project-main h2 {
 	font-size: 17px;
 	font-weight: 550;
 	margin: 0 0 20px;
 }
-.system-main h3 {
+.project-main h3 {
 	font-size: 14px;
 	font-weight: 550;
 	margin: 24px 0 12px;
 }
-.system-console .muted {
+.project-console .muted {
 	color: var(--muted);
 	font-size: 12px;
 	line-height: 1.6;
@@ -2119,22 +2119,22 @@ svg {
 	font-size: 11px;
 	line-height: 1.5;
 }
-.system-console .state-dot {
+.project-console .state-dot {
 	width: 6px;
 	height: 6px;
 	flex-shrink: 0;
 	border-radius: 50%;
 	background: var(--muted);
 }
-.system-console .state-dot[data-state="Working safely"],
-.system-console .state-dot[data-state="Coordinated"],
-.system-console .state-dot[data-state="Ready"] {
+.project-console .state-dot[data-state="Working safely"],
+.project-console .state-dot[data-state="Coordinated"],
+.project-console .state-dot[data-state="Ready"] {
 	background: var(--clear);
 }
-.system-console .state-dot[data-state="Waiting"] {
+.project-console .state-dot[data-state="Waiting"] {
 	background: var(--hold);
 }
-.system-console .state-dot[data-state="Needs attention"] {
+.project-console .state-dot[data-state="Needs attention"] {
 	background: var(--collision);
 }
 .task-status {
@@ -2159,16 +2159,16 @@ svg {
 	padding: 24px 0;
 	border-top: 1px solid var(--line);
 }
-.system-console summary {
+.project-console summary {
 	cursor: pointer;
 	color: var(--text-2);
 	padding: 10px 0;
 }
-.system-console form {
+.project-console form {
 	max-width: 640px;
 	padding-top: 16px;
 }
-.system-console label {
+.project-console label {
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
@@ -2176,9 +2176,9 @@ svg {
 	color: var(--text-2);
 	margin: 16px 0;
 }
-.system-console input,
-.system-console textarea,
-.system-console select {
+.project-console input,
+.project-console textarea,
+.project-console select {
 	color: var(--text);
 	background: var(--surface);
 	border: 1px solid var(--line-2);
@@ -2186,26 +2186,26 @@ svg {
 	padding: 10px 12px;
 	font: 12px var(--sans);
 }
-.system-console textarea {
+.project-console textarea {
 	min-height: 100px;
 	resize: vertical;
 }
-.system-console button:disabled {
+.project-console button:disabled {
 	opacity: 0.45;
 	cursor: default;
 }
-.system-console :focus-visible {
+.project-console :focus-visible {
 	outline: 2px solid var(--text-2);
 	outline-offset: 4px;
 }
-.system-console .quiet {
+.project-console .quiet {
 	background: transparent;
 	color: var(--text-2);
 }
-.system-selector {
+.project-selector {
 	margin: 0 !important;
 }
-.system-selector select {
+.project-selector select {
 	max-width: 220px;
 }
 .workstream-detail {
@@ -2273,7 +2273,7 @@ svg {
 	border: 1px solid var(--line);
 	background: var(--surface);
 }
-.system-console .react-flow__node {
+.project-console .react-flow__node {
 	background: var(--panel);
 	color: var(--text);
 	border: 1px solid var(--line-2);
@@ -2302,26 +2302,26 @@ svg {
 	font-weight: 500;
 	line-height: 1.5;
 }
-.system-console .react-flow__edge-path {
+.project-console .react-flow__edge-path {
 	stroke: var(--line-2);
 	stroke-width: 1.4;
 }
 @media (max-width: 600px) {
-	.system-header {
+	.project-header {
 		padding: 12px 16px;
 		gap: 12px;
 		flex-wrap: wrap;
 	}
-	.system-header > span.muted {
+	.project-header > span.muted {
 		display: none;
 	}
-	.system-main {
+	.project-main {
 		padding: 28px 16px 48px;
 	}
 	.overview-heading {
 		align-items: flex-start;
 	}
-	.system-main h1 {
+	.project-main h1 {
 		font-size: 25px;
 	}
 	.task-status {
@@ -2331,21 +2331,21 @@ svg {
 	.workstream-detail {
 		padding: 18px;
 	}
-	.system-selector select {
+	.project-selector select {
 		max-width: 170px;
 	}
 }
 @media (prefers-reduced-motion: reduce) {
-	.system-console *,
-	.system-console *::before,
-	.system-console *::after {
+	.project-console *,
+	.project-console *::before,
+	.project-console *::after {
 		animation: none !important;
 		transition: none !important;
 		scroll-behavior: auto !important;
 	}
 }
 
-.system-console .react-flow__controls-button {
+.project-console .react-flow__controls-button {
 	background: var(--panel);
 	color: var(--text-2);
 	fill: var(--text-2);

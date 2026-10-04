@@ -5,27 +5,6 @@ import { GitWorkspace, NOTES_REF } from "../../src/worker/git/workspace.ts";
 import { CANONICAL, ProjectGit } from "../../src/worker/project-git.ts";
 
 describe("cleanup Git safety", () => {
-	it("revokes a read token minted concurrently with termination instead of returning it", async () => {
-		let resolve!: (token: { plaintext: string; id: string }) => void;
-		const mint = vi.fn(
-			() =>
-				new Promise<{ plaintext: string; id: string }>((done) => {
-					resolve = done;
-				}),
-		);
-		const revokeToken = vi.fn(async () => {});
-		const host = { namespace: "cruce", mint, revokeToken } as unknown as ArtifactsHost;
-		const git = new ProjectGit(new GitWorkspace(new MemoryFs() as never), "auth-service", host);
-		let active = true;
-		const request = git.readToken("F-001", () => {
-			if (!active) throw new Error("terminal");
-		});
-		active = false;
-		resolve({ plaintext: "test-only", id: "read-id" });
-		await expect(request).rejects.toThrow("terminal");
-		expect(revokeToken).toHaveBeenCalledWith("auth-service--f001", "read-id");
-	});
-
 	it("requires the canonical remote's landing note and reachable published work", async () => {
 		const ws = new GitWorkspace(new MemoryFs() as never);
 		await ws.ensureInit();

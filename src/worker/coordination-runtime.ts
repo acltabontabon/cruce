@@ -8,8 +8,8 @@ import {
 	type ManagedWorkspaceRecord,
 	type Observation,
 	type Principal,
+	type ProjectConnection,
 	READ_TOOLS,
-	type SystemConnection,
 } from "../shared/coordination.ts";
 import type { GitWorkspace } from "./git/workspace.ts";
 import type { CloudflareArtifactWorkspace } from "./managed-workspace.ts";
@@ -29,18 +29,18 @@ export class CoordinationRuntime {
 	) {}
 	state(): CoordinationState {
 		const state = this.store.get<CoordinationState>("coordination");
-		if (!state) throw new CoordinationError(503, "System authority not initialized");
+		if (!state) throw new CoordinationError(503, "Project authority not initialized");
 		return state;
 	}
 	private save(s: CoordinationState) {
 		this.store.put("coordination", s);
 	}
-	metadata(system: SystemConnection) {
+	metadata(project: ProjectConnection) {
 		return this.serialize(() => {
 			const s = this.state();
-			if (system.id !== s.system.id) throw new CoordinationError(403, "System authority mismatch");
-			if (system.name !== s.system.name || system.active !== s.system.active) {
-				s.system = { ...s.system, name: system.name, active: system.active, version: s.system.version + 1 };
+			if (project.id !== s.project.id) throw new CoordinationError(403, "Project authority mismatch");
+			if (project.name !== s.project.name || project.active !== s.project.active) {
+				s.project = { ...s.project, name: project.name, active: project.active, version: s.project.version + 1 };
 				this.save(s);
 			}
 		});
@@ -53,11 +53,11 @@ export class CoordinationRuntime {
 		this.queue = next.catch(() => {});
 		return next;
 	}
-	initialize(system: SystemConnection, head: string, files: Record<string, string>) {
+	initialize(project: ProjectConnection, head: string, files: Record<string, string>) {
 		return this.serialize(() => {
 			const old = this.store.get<CoordinationState>("coordination");
 			if (old) return old;
-			const s = initialCoordination({ ...system, canonicalHead: head }, buildIndex(files, head));
+			const s = initialCoordination({ ...project, canonicalHead: head }, buildIndex(files, head));
 			this.save(s);
 			return s;
 		});
@@ -116,13 +116,13 @@ export class CoordinationRuntime {
 			return d;
 		});
 	}
-	policy(p: Principal, policy: SystemConnection["policy"]) {
+	policy(p: Principal, policy: ProjectConnection["policy"]) {
 		return this.serialize(() => {
 			const c = new WorkstreamController(this.state(), this.now());
 			c.authorize(p);
 			if (!p.maintainer) throw new CoordinationError(403, "Maintainer required");
-			c.state.system.policy = policy;
-			c.state.system.version++;
+			c.state.project.policy = policy;
+			c.state.project.version++;
 			c.state.revision++;
 			this.save(c.state);
 			return policy;
@@ -202,7 +202,7 @@ export class CoordinationRuntime {
 	}
 	async enqueueSemantic() {
 		const s = this.state();
-		if (s.system.policy.semantic === "off" || !this.ai) return;
+		if (s.project.policy.semantic === "off" || !this.ai) return;
 		const jobs = this.store.get<JevJob[]>("jev:jobs") ?? [],
 			fingerprint = semanticFingerprint(s);
 		const source = await this.git.readFiles(s.index.revision).catch(() => ({}) as Record<string, string>);
@@ -211,7 +211,7 @@ export class CoordinationRuntime {
 		const active = s.workstreams.filter((w) => w.state === "active" && w.plans.length);
 		for (const w of active)
 			for (const other of active.filter((o) => o.id !== w.id)) {
-				const id = `${w.id}:${other.id}:${w.plans.length}:${other.plans.length}:${s.system.version}`;
+				const id = `${w.id}:${other.id}:${w.plans.length}:${other.plans.length}:${s.project.version}`;
 				if (jobs.some((j) => j.id === id && j.packet.fingerprint === fingerprint)) continue;
 				const evidence = [w, other]
 					.flatMap((stream) => stream.plans.at(-1)?.writeSet ?? [])
@@ -230,7 +230,7 @@ export class CoordinationRuntime {
 									source: source[file.path]?.slice(0, 6000),
 									limitations: file.limitation,
 								}),
-								verified: source[file.path] !== undefined && s.system.canonicalHead === s.index.revision,
+								verified: source[file.path] !== undefined && s.project.canonicalHead === s.index.revision,
 							},
 						];
 					});

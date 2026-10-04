@@ -29,7 +29,7 @@ export function History({
 		const abort = new AbortController();
 		setCommits(null);
 		setError(null);
-		fetch(`/api/projects/${encodeURIComponent(projectId)}/history?target=${encodeURIComponent(target)}`, { signal: abort.signal })
+		fetch(`/api/demo/${encodeURIComponent(projectId)}/history?target=${encodeURIComponent(target)}`, { signal: abort.signal })
 			.then((r) => readResponse<Commit[]>(r))
 			.then((data) => {
 				if (!abort.signal.aborted) setCommits(data);

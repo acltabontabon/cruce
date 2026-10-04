@@ -15,22 +15,8 @@ interface Props {
 	onView(view: "work" | "traffic"): void;
 	onDemo(op: DemoCommand["op"], speed?: number): void;
 	onHistory(): void;
-	onConnection(): void;
 }
-export function Header({
-	state,
-	demo,
-	connected,
-	projects,
-	projectId,
-	view,
-	busy,
-	onProject,
-	onView,
-	onDemo,
-	onHistory,
-	onConnection,
-}: Props) {
+export function Header({ state, demo, connected, projects, projectId, view, busy, onProject, onView, onDemo, onHistory }: Props) {
 	return (
 		<>
 			<header className="app-header">
@@ -63,9 +49,6 @@ export function Header({
 					<span />
 					{connected ? "Live updates" : "Reconnecting"}
 				</span>
-				<button className="icon-button" type="button" onClick={onConnection} aria-label="Controller access">
-					<Icon name="settings" />
-				</button>
 			</header>
 			<div className="navigation-bar">
 				<nav aria-label="Primary">

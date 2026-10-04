@@ -110,15 +110,6 @@ function FlightDetail({ state, f, projectId, integrationBlockers, onSelect, act,
 									Request reroute
 								</button>
 							) : null}
-							{state.project.mode === "live" && (
-								<button
-									type="button"
-									disabled={busy || blockers.length > 0}
-									onClick={() => void act({ type: "land", flightId: f.id }).catch(() => {})}
-								>
-									Integrate changes
-								</button>
-							)}
 							<button
 								type="button"
 								className="danger"

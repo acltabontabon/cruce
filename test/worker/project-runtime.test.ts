@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { CommandInput, type SystemConnection } from "../../src/shared/coordination.ts";
+import { CommandInput, type ProjectConnection } from "../../src/shared/coordination.ts";
 import { type Actor, type Artifact, PlatformCommandInput, type Proposal } from "../../src/shared/platform.ts";
 import type { ArtifactsHost } from "../../src/worker/artifacts-host.ts";
 import { MemoryFs } from "../../src/worker/git/memory-fs.ts";
 import { GitWorkspace } from "../../src/worker/git/workspace.ts";
-import { SystemRuntime } from "../../src/worker/system-runtime.ts";
+import { ProjectRuntime } from "../../src/worker/project-runtime.ts";
 import type { TowerStore } from "../../src/worker/tower.ts";
 
 async function setup() {
@@ -59,8 +59,8 @@ async function setup() {
 		if (r?.head) await git.setRef(input.localRef, r.head);
 		return r?.head ?? null;
 	});
-	const system: SystemConnection = {
-		id: "native-system",
+	const project: ProjectConnection = {
+		id: "native-project",
 		tenantId: "tenant",
 		name: "Payments",
 		artifactRepository: "native-payments",
@@ -69,10 +69,10 @@ async function setup() {
 		capabilities: ["managed_artifacts", "intent_mcp", "native_promotion"],
 		policy: { mode: "enforced", semantic: "off" },
 	};
-	const runtime = new SystemRuntime(
+	const runtime = new ProjectRuntime(
 		store,
 		git,
-		system,
+		project,
 		host as unknown as ArtifactsHost,
 		() => {},
 		() => 1700000000000,
@@ -81,7 +81,7 @@ async function setup() {
 	const human: Actor = {
 			developerId: "owner",
 			tenantId: "tenant",
-			systemIds: [system.id],
+			projectIds: [project.id],
 			maintainer: true,
 			canWrite: true,
 			kind: "human",
@@ -89,12 +89,12 @@ async function setup() {
 		agent: Actor = { ...human, kind: "agent" };
 	let count = 0;
 	const command = (tool: typeof PlatformCommandInput._output.tool, fields: Record<string, unknown> = {}) =>
-		PlatformCommandInput.parse({ tool, systemId: system.id, idempotencyKey: `op-${++count}`, ...fields });
-	return { runtime, git, push, store, system, human, agent, host, repos, command };
+		PlatformCommandInput.parse({ tool, projectId: project.id, idempotencyKey: `op-${++count}`, ...fields });
+	return { runtime, git, push, store, project, human, agent, host, repos, command };
 }
 async function source() {
 	const x = await setup(),
-		base = x.runtime.coordination.state().system.canonicalHead!;
+		base = x.runtime.coordination.state().project.canonicalHead!;
 	const i = (await x.runtime.command(
 		x.command("create_intent", { title: "Retry payment", context: "Retries preserve idempotency" }),
 		x.human,
@@ -183,7 +183,7 @@ async function promoteSource(x: Awaited<ReturnType<typeof source>>, artifact: Ar
 describe("native Artifacts collaboration", () => {
 	it("publishes an inspectable source artifact without changing accepted source", async () => {
 		const x = await source();
-		expect(x.runtime.coordination.state().system.canonicalHead).toBe(x.base);
+		expect(x.runtime.coordination.state().project.canonicalHead).toBe(x.base);
 		expect(x.output.artifact.revision).not.toBe(x.base);
 		expect(x.output.artifact.storage.repository).toContain("--w-");
 		expect(await x.git.readFiles(x.output.artifact.revision)).toHaveProperty("src/pay.ts");
@@ -252,7 +252,7 @@ describe("native Artifacts collaboration", () => {
 		expect(await x.runtime.command(promote, x.human)).toEqual(ticket);
 
 		expect(ticket.state).toBe("complete");
-		expect(x.runtime.coordination.state().system.canonicalHead).toBe(x.output.artifact.revision);
+		expect(x.runtime.coordination.state().project.canonicalHead).toBe(x.output.artifact.revision);
 		expect(x.repos.get("native-payments")?.head).toBe(ticket.to);
 		expect(x.runtime.state().timeline.map((e) => e.kind)).toEqual(
 			expect.arrayContaining(["intent", "mission", "execution", "artifact", "proposal", "verification", "review", "promotion"]),
@@ -306,9 +306,9 @@ describe("native Artifacts collaboration", () => {
 	});
 	it("detects external accepted-source movement without promoting it", async () => {
 		const x = await source();
-		x.repos.get(x.system.artifactRepository)!.head = x.output.artifact.revision;
+		x.repos.get(x.project.artifactRepository)!.head = x.output.artifact.revision;
 		expect(await x.runtime.verifySource()).toMatchObject({ state: "unexpected_revision" });
-		expect(x.runtime.coordination.state().system.canonicalHead).toBe(x.base);
+		expect(x.runtime.coordination.state().project.canonicalHead).toBe(x.base);
 		expect(x.runtime.state().promotions).toHaveLength(0);
 	});
 
@@ -367,7 +367,7 @@ describe("native Artifacts collaboration", () => {
 		await x.runtime.coordination.command(
 			CommandInput.parse({
 				tool: "update_intent",
-				systemId: x.system.id,
+				projectId: x.project.id,
 				idempotencyKey: "api-refresh",
 				workstreamId: work.id,
 				sessionId: accepted.coordination.sessionId,
@@ -409,7 +409,7 @@ describe("native Artifacts collaboration", () => {
 			"API unexpectedly stale",
 		).toBeUndefined();
 		await promoteSource(x, refreshed.artifact, m.id);
-		expect(x.runtime.coordination.state().system.canonicalHead).toBe(refreshed.artifact.revision);
+		expect(x.runtime.coordination.state().project.canonicalHead).toBe(refreshed.artifact.revision);
 		expect(x.host.fork).toHaveBeenCalledTimes(2);
 		expect(
 			x.runtime

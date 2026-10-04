@@ -15,7 +15,7 @@ export function connectTower(
 	let attempt = 0;
 	const connect = () => {
 		if (disposed) return;
-		const ws = makeSocket(`${url}/api/projects/${encodeURIComponent(projectId)}/ws`);
+		const ws = makeSocket(`${url}/api/demo/${encodeURIComponent(projectId)}/ws`);
 		current = ws;
 		const owns = () => !disposed && current === ws;
 		ws.onopen = () => {

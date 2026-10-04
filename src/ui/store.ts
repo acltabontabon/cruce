@@ -7,7 +7,6 @@ export interface TowerView {
 	state: ControllerState | null;
 	demo: DemoStatus | null;
 	git: GitInfo | null;
-	liveAgents: Snapshot["liveAgents"] | null;
 	integrationBlockers: Record<string, string[]>;
 	connected: boolean;
 	error: string | null;
@@ -16,7 +15,6 @@ const emptyView = (): TowerView => ({
 	state: null,
 	demo: null,
 	git: null,
-	liveAgents: null,
 	integrationBlockers: {},
 	connected: false,
 	error: null,
@@ -38,7 +36,6 @@ export function useTower(projectId: string): TowerView {
 								state: data.state,
 								demo: data.demo,
 								git: data.git,
-								liveAgents: data.liveAgents,
 								integrationBlockers: data.integrationBlockers ?? {},
 								connected: true,
 								error: null,
@@ -50,7 +47,7 @@ export function useTower(projectId: string): TowerView {
 			(location.protocol === "https:" ? "wss://" : "ws://") + location.host,
 		);
 		// HTTP establishes a useful initial/error state even when a proxy blocks WebSockets.
-		fetch(`/api/projects/${encodeURIComponent(projectId)}`, { signal: abort.signal })
+		fetch(`/api/demo/${encodeURIComponent(projectId)}`, { signal: abort.signal })
 			.then((r) => readResponse<Snapshot>(r))
 			.then((snap) => {
 				if (!disposed) setView((v) => (v.state ? v : { ...v, ...snap, integrationBlockers: snap.integrationBlockers ?? {}, error: null }));

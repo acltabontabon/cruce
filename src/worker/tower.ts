@@ -6,7 +6,7 @@ import { candidatePairs, type DecisionJudge } from "../intelligence/judge.ts";
 import { buildIndex } from "../intelligence/structural-index.ts";
 import type { GitAuthor } from "./git/workspace.ts";
 import { CANONICAL, flightRef, type ProjectGit, TOWER_AUTHOR } from "./project-git.ts";
-import { type FlightResources, ResourceCleanup } from "./resource-cleanup.ts";
+import { ResourceCleanup } from "./resource-cleanup.ts";
 
 /**
  * The control tower runtime: the authoritative controller state plus the Git work around it.
@@ -28,8 +28,6 @@ export interface TowerHooks {
 	onRepoRemoved?(repo: string): Promise<void>;
 	/** Keep background work alive (Durable Object `ctx.waitUntil`). */
 	background?(work: Promise<unknown>): void;
-	releaseWorkflow?(record: FlightResources): Promise<void>;
-	releaseSandbox?(record: FlightResources): Promise<void>;
 }
 
 export interface Submission {
@@ -71,8 +69,6 @@ export class Tower {
 				update: (id, cleanup) => this.mutate((c) => c.recordCleanup(id, cleanup)),
 				attention: (key, id, failed) => this.mutate((c) => c.cleanupAttention(key, id, failed)),
 				note: (title, id) => this.mutate((c) => c.note("flight.cleanup", "cruce", title, id)),
-				workflow: hooks.releaseWorkflow,
-				sandbox: hooks.releaseSandbox,
 				unsubscribe: hooks.onRepoRemoved,
 				subscriptionConfigured: !!hooks.onRepo,
 			},
@@ -354,18 +350,6 @@ export class Tower {
 	assertActive(flightId: string) {
 		const f = this.flight(flightId);
 		if (TERMINAL_PHASES.has(f.phase)) throw new ControllerError(`${flightId} is ${f.phase}`, 409);
-	}
-
-	async readToken(flightId: string) {
-		try {
-			return await this.git.readToken(flightId, () => this.assertActive(flightId));
-		} catch (error) {
-			if (TERMINAL_PHASES.has(this.flight(flightId).phase)) {
-				this.cleanup.retryTokens(this.flight(flightId));
-				this.hooks.background?.(this.cleanup.run());
-			}
-			throw error;
-		}
 	}
 
 	retain(flightId: string, keep: boolean, by: string) {

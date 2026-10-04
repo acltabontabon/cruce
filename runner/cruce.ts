@@ -24,7 +24,7 @@ interface Connection {
 	missionId?: string;
 	missionVersion?: number;
 	server: string;
-	systemId: string;
+	projectId: string;
 	workstreamId?: string;
 	sessionId?: string;
 	workstreamVersion?: number;
@@ -144,29 +144,29 @@ async function main() {
 	const operation = args[0] ?? "help";
 	if (operation === "help" || args.includes("--help")) {
 		process.stdout.write(
-			"cruce connect --system ID --client codex|claude|cursor [--server URL]\ncruce checkout --system ID --directory NEW_DIRECTORY\ncruce mcp --client TOOL\ncruce refresh\ncruce check\ncruce release\n",
+			"cruce connect --project ID --client codex|claude|cursor [--server URL]\ncruce checkout --project ID --directory NEW_DIRECTORY\ncruce mcp --client TOOL\ncruce refresh\ncruce check\ncruce release\n",
 		);
 		return;
 	}
 	const connection = await read<Connection>(connectionFile, {
 		server: option("server") ?? option("url") ?? "https://cruce.acltabontabon.workers.dev",
-		systemId: option("system") ?? "",
+		projectId: option("project") ?? "",
 	});
 	connection.server = (option("server") ?? option("url") ?? connection.server).replace(/\/$/, "");
-	connection.systemId = option("system") ?? connection.systemId;
+	connection.projectId = option("project") ?? connection.projectId;
 	const origin = new URL(connection.server);
 	if (origin.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(origin.hostname)) throw new Error("Use HTTPS for Cruce");
 	const credentials = new Credentials(connection.server);
 	await credentials.load();
 	if (operation === "connect" || operation === "checkout") await login(connection.server, credentials);
-	if (!connection.systemId) throw new Error("Choose the native system ID; no external Git provider is required");
+	if (!connection.projectId) throw new Error("Choose the native project ID; no external Git provider is required");
 	if (operation === "checkout") {
 		const target = option("directory");
 		if (!target) throw new Error("Choose a new directory for source checkout");
 		const directory = resolve(target);
 		await mkdir(directory, { recursive: true });
 		if ((await readdir(directory)).length) throw new Error("Checkout requires an empty directory; existing work is preserved");
-		const response = await fetch(`${connection.server}/mcp/export?systemId=${encodeURIComponent(connection.systemId)}`, {
+		const response = await fetch(`${connection.server}/mcp/export?projectId=${encodeURIComponent(connection.projectId)}`, {
 			headers: { authorization: `Bearer ${credentials.tokens()?.access_token}` },
 		});
 		if (!response.ok) throw new Error("Source export denied or unavailable");
@@ -186,8 +186,8 @@ async function main() {
 		remote = new Client({ name: "cruce-local-bridge", version: "0.3.0" });
 	await remote.connect(transport);
 	const refreshSource = async () => {
-		await remote.callTool({ name: "get_system_context", arguments: { systemId: connection.systemId } });
-		const response = await fetch(`${connection.server}/mcp/export?systemId=${encodeURIComponent(connection.systemId)}`, {
+		await remote.callTool({ name: "get_project_context", arguments: { projectId: connection.projectId } });
+		const response = await fetch(`${connection.server}/mcp/export?projectId=${encodeURIComponent(connection.projectId)}`, {
 			headers: { authorization: `Bearer ${credentials.tokens()?.access_token}` },
 		});
 		const head = response.headers.get("x-cruce-revision");
@@ -221,7 +221,7 @@ async function main() {
 	const execute = async (input: Record<string, unknown> & { tool: string }) => {
 		const native = (PLATFORM_TOOLS as readonly string[]).includes(input.tool),
 			readOnly = native ? PLATFORM_READ_TOOLS.has(input.tool) : READ_TOOLS.has(input.tool as Command["tool"]);
-		const common = { systemId: connection.systemId, ...(!readOnly ? { idempotencyKey: randomUUID() } : {}), ...input };
+		const common = { projectId: connection.projectId, ...(!readOnly ? { idempotencyKey: randomUUID() } : {}), ...input };
 		const data = native
 			? {
 					missionId: connection.missionId,
@@ -294,8 +294,8 @@ async function main() {
 		for (const tool of [...TOOLS, ...PLATFORM_TOOLS]) {
 			const native = (PLATFORM_TOOLS as readonly string[]).includes(tool),
 				inputSchema = native
-					? PlatformCommandInput.omit({ tool: true, systemId: true, sessionId: true }).partial().shape
-					: CommandInput.omit({ tool: true, systemId: true, sessionId: true }).partial().shape;
+					? PlatformCommandInput.omit({ tool: true, projectId: true, sessionId: true }).partial().shape
+					: CommandInput.omit({ tool: true, projectId: true, sessionId: true }).partial().shape;
 			server.registerTool(tool, { description: tool.replaceAll("_", " "), inputSchema }, async (input: Record<string, unknown>) => {
 				try {
 					const result = await serialized({ ...input, tool });

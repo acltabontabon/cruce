@@ -184,7 +184,7 @@ const path = z
 export const PlatformCommandInput = z
 	.object({
 		tool: z.enum(PLATFORM_TOOLS),
-		systemId: z.string().min(1).max(300),
+		projectId: z.string().min(1).max(300),
 		idempotencyKey: z.string().min(1).max(200).optional(),
 		expectedVersion: z.number().int().nonnegative().optional(),
 		workspace: WorkspaceInput.optional(),

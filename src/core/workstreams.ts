@@ -4,9 +4,9 @@ import {
 	type Decision,
 	type Observation,
 	type Principal,
+	type ProjectConnection,
 	READ_TOOLS,
 	type SemanticConstraint,
-	type SystemConnection,
 	type Workstream,
 } from "../shared/coordination.ts";
 import { type AirspaceIndex, isAncestorOrEqual, overlap, resolveResource } from "./airspace.ts";
@@ -35,9 +35,9 @@ export function stable(value: unknown): string {
 			.join(",")}}`;
 	return JSON.stringify(value) ?? "null";
 }
-export function initialCoordination(system: SystemConnection, index: AirspaceIndex): CoordinationState {
+export function initialCoordination(project: ProjectConnection, index: AirspaceIndex): CoordinationState {
 	return {
-		system: structuredClone(system),
+		project: structuredClone(project),
 		index: structuredClone(index),
 		revision: 0,
 		counter: 0,
@@ -52,7 +52,7 @@ export function initialCoordination(system: SystemConnection, index: AirspaceInd
 }
 export function inputFingerprint(s: CoordinationState): string {
 	return stable({
-		system: s.system,
+		project: s.project,
 		index: s.index.revision,
 		plans: s.workstreams.map((w) => [w.id, w.plans.at(-1), w.state, w.staleRevision, w.released, w.publications]),
 		semantic: s.semantic.filter((c) => c.automatic).map((c) => c.id),
@@ -95,11 +95,11 @@ function activeConstraint(s: CoordinationState, c: SemanticConstraint) {
 }
 export function semanticFingerprint(s: CoordinationState): string {
 	return stable({
-		system: s.system.version,
-		head: s.system.canonicalHead,
+		project: s.project.version,
+		head: s.project.canonicalHead,
 		index: s.index.revision,
 		plans: s.workstreams.map((w) => [w.id, w.plans.at(-1), w.sessions.at(-1), w.state]),
-		policy: s.system.policy,
+		policy: s.project.policy,
 		observations: s.workstreams.map((w) => {
 			const o = s.observations.filter((o) => o.workstreamIds.includes(w.id)).at(-1);
 			return o ? [w.id, o.base, o.head, o.changes, o.verified, o.headIndex] : [w.id];
@@ -320,7 +320,7 @@ export function decide(s: CoordinationState, id: string, now: number, observatio
 			? publicationOutcome
 			: effective.some((c) => c.boundary === "integration")
 				? "WAIT"
-				: s.system.policy.mode === "enforced" && !latest?.verified
+				: s.project.policy.mode === "enforced" && !latest?.verified
 					? "BLOCK"
 					: "PROCEED";
 	for (const c of publication.congestions.filter((c) => c.flights.includes(id)))
@@ -393,17 +393,17 @@ export function decide(s: CoordinationState, id: string, now: number, observatio
 		revision: s.revision,
 		fingerprint,
 		validity: {
-			systemVersion: s.system.version,
-			canonicalHead: s.system.canonicalHead,
+			projectVersion: s.project.version,
+			canonicalHead: s.project.canonicalHead,
 			planVersions: Object.fromEntries(s.workstreams.map((w) => [w.id, w.plans.at(-1)?.version ?? 0])),
 			expiresAt: now + SESSION_TTL,
 		},
 		coverage: {
 			capabilities: [
 				...new Set([
-					...(shared?.workspace.capabilities ?? s.system.capabilities).filter((c) => c === "intent_mcp" || c === "git_observation"),
+					...(shared?.workspace.capabilities ?? s.project.capabilities).filter((c) => c === "intent_mcp" || c === "git_observation"),
 					...(latest?.verified && latest.source === "managed_git" ? ["managed_artifacts" as const] : []),
-					...(s.system.capabilities.includes("native_promotion") ? ["native_promotion" as const] : []),
+					...(s.project.capabilities.includes("native_promotion") ? ["native_promotion" as const] : []),
 				]),
 			],
 			limitations: [...new Set(limits)],
@@ -424,8 +424,8 @@ export class WorkstreamController {
 		this.state = structuredClone(state);
 	}
 	authorize(p: Principal) {
-		const r = this.state.system;
-		if (!r.active || p.tenantId !== r.tenantId || !p.systemIds.includes(r.id)) throw new CoordinationError(403, "System access denied");
+		const r = this.state.project;
+		if (!r.active || p.tenantId !== r.tenantId || !p.projectIds.includes(r.id)) throw new CoordinationError(403, "Project access denied");
 	}
 	private next(prefix: string) {
 		return `${prefix}-${++this.state.counter}`;
@@ -436,7 +436,7 @@ export class WorkstreamController {
 		return w;
 	}
 	private writer(w: Workstream, p: Principal, cmd: Command) {
-		if (p.canWrite === false) throw new CoordinationError(403, "System contribution access was revoked");
+		if (p.canWrite === false) throw new CoordinationError(403, "Project contribution access was revoked");
 		const a = this.state.sessions.find((a) => a.id === cmd.sessionId && a.workstreamId === w.id && a.developerId === p.developerId);
 		if (a?.role !== "writer" || !a.connected || a.expiresAt <= this.now)
 			throw new CoordinationError(409, "Attach a current writer session before changing this workstream");
@@ -467,14 +467,14 @@ export class WorkstreamController {
 		});
 		w.sessions.push(id);
 		w.version++;
-		if (w.plans.at(-1)?.baseline !== this.state.system.canonicalHead) w.staleRevision = this.state.system.canonicalHead;
+		if (w.plans.at(-1)?.baseline !== this.state.project.canonicalHead) w.staleRevision = this.state.project.canonicalHead;
 		return id;
 	}
 	execute(cmd: Command, p: Principal): unknown {
 		this.authorize(p);
 		if (!READ_TOOLS.has(cmd.tool) && p.canWrite === false)
-			throw new CoordinationError(403, "System contribution permission required for participation");
-		if (cmd.systemId !== this.state.system.id) throw new CoordinationError(403, "System authority mismatch");
+			throw new CoordinationError(403, "Project contribution permission required for participation");
+		if (cmd.projectId !== this.state.project.id) throw new CoordinationError(403, "Project authority mismatch");
 		const request = stable(cmd),
 			replayKey = `${p.developerId}:${cmd.idempotencyKey}`;
 		if (!READ_TOOLS.has(cmd.tool)) {
@@ -485,8 +485,8 @@ export class WorkstreamController {
 				return old.result;
 			}
 		}
-		if (cmd.tool === "get_system_context")
-			return { system: this.state.system, index: this.state.index, capabilities: this.state.system.capabilities };
+		if (cmd.tool === "get_project_context")
+			return { project: this.state.project, index: this.state.index, capabilities: this.state.project.capabilities };
 		if (cmd.tool === "get_active_work")
 			return {
 				workstreams: this.state.workstreams.map((w) => ({
@@ -678,10 +678,10 @@ export class WorkstreamController {
 		return result;
 	}
 	canonical(head: string, index: AirspaceIndex, integratedHeads: string[], resources: string[]) {
-		const old = this.state.system.canonicalHead;
-		this.state.system.canonicalHead = head;
+		const old = this.state.project.canonicalHead;
+		this.state.project.canonicalHead = head;
 		this.state.index = index;
-		if (old !== head) this.state.system.version++;
+		if (old !== head) this.state.project.version++;
 		for (const w of this.state.workstreams) {
 			for (const p of w.publications) if (integratedHeads.includes(p.head)) p.integrated = true;
 			if (
@@ -727,7 +727,7 @@ export class WorkstreamController {
 			);
 		if (c.dependency) edges.push({ from: w.id, to: c.dependency, reason: "semantic" });
 		c.automatic =
-			this.state.system.policy.semantic === "automatic" &&
+			this.state.project.policy.semantic === "automatic" &&
 			evaluationPassed &&
 			c.probability >= 0.95 &&
 			c.response !== "escalate" &&

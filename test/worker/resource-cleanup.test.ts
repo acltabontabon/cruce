@@ -39,7 +39,6 @@ function harness(count = 1) {
 		artifacts: new ArtifactsHost(binding, "cruce"),
 		flightRepoName: (id: string) => `auth-service--${id.toLowerCase().replace("-", "")}${git.epoch ? `-r${git.epoch}` : ""}`,
 		clearFlightResources: clear,
-		clearReadToken: vi.fn(),
 		verifyLanding: verify,
 	} as unknown as ProjectGit;
 	const kv = new Map<string, unknown>();
@@ -55,8 +54,6 @@ function harness(count = 1) {
 	};
 	const attention = vi.fn();
 	const notes = vi.fn();
-	const workflow = vi.fn(async () => {});
-	const sandbox = vi.fn(async () => {});
 	const unsubscribe = vi.fn(async () => {});
 	const hooks = {
 		flights: () => flights,
@@ -65,8 +62,6 @@ function harness(count = 1) {
 		},
 		attention,
 		note: notes,
-		workflow,
-		sandbox,
 		unsubscribe,
 	};
 	const create = () => new ResourceCleanup("demo", git, store, hooks, () => now);
@@ -106,8 +101,6 @@ function harness(count = 1) {
 		deleted,
 		attention,
 		notes,
-		workflow,
-		sandbox,
 		unsubscribe,
 		list,
 		provision,
@@ -167,15 +160,13 @@ describe("durable Flight resource cleanup", () => {
 		expect(h.deleted).toHaveBeenCalledTimes(2);
 	});
 	it.each(["failed", "cancelled", "lost"] as const)(
-		"releases execution immediately and expires %s work at exactly 24 hours",
+		"revokes credentials immediately and expires %s work at exactly 24 hours",
 		async (phase) => {
 			const h = harness();
 			h.provision();
 			h.finish(0, phase);
 			await h.cleanup.run();
 			expect(h.revoked).toHaveBeenCalledOnce();
-			expect(h.workflow).toHaveBeenCalledOnce();
-			expect(h.sandbox).toHaveBeenCalledOnce();
 			expect(h.deleted).not.toHaveBeenCalled();
 			h.setTime(1_000 + FAILED_FLIGHT_RETENTION_MS - 1);
 			await h.cleanup.run();

@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { initialPlatform, PlatformController } from "../../src/core/platform.ts";
 import { type Actor, PlatformCommandInput, type Proposal, type Verification } from "../../src/shared/platform.ts";
 
-const human: Actor = { developerId: "human", tenantId: "tenant", systemIds: ["system"], kind: "human", maintainer: true, canWrite: true },
+const human: Actor = { developerId: "human", tenantId: "tenant", projectIds: ["project"], kind: "human", maintainer: true, canWrite: true },
 	agent: Actor = { ...human, kind: "agent" };
 const command = (tool: typeof PlatformCommandInput._output.tool, extra: Record<string, unknown> = {}) =>
-	PlatformCommandInput.parse({ tool, systemId: "system", idempotencyKey: tool, ...extra });
+	PlatformCommandInput.parse({ tool, projectId: "project", idempotencyKey: tool, ...extra });
 function fixture() {
 	const c = new PlatformController(initialPlatform(), 100);
 	const i = c.execute(
@@ -158,7 +158,7 @@ describe("native collaboration and promotion policy", () => {
 				"base",
 			),
 		).toThrow("exact source revision");
-		expect(() => PlatformCommandInput.parse({ tool: "publish_artifact", systemId: "system", trust: "verified" })).toThrow();
+		expect(() => PlatformCommandInput.parse({ tool: "publish_artifact", projectId: "project", trust: "verified" })).toThrow();
 	});
 	it("holds failed verification even when another report says pass", () => {
 		const { c, p } = fixture();

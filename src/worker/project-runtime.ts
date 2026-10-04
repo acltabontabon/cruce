@@ -2,7 +2,7 @@ import { initialPlatform, PlatformController } from "../core/platform.ts";
 import { CoordinationError, decide, WorkstreamController } from "../core/workstreams.ts";
 import type { JevBinding } from "../intelligence/jev.ts";
 import { buildIndex } from "../intelligence/structural-index.ts";
-import { CommandInput, type Principal, type SystemConnection } from "../shared/coordination.ts";
+import { CommandInput, type Principal, type ProjectConnection } from "../shared/coordination.ts";
 import { type Actor, PLATFORM_READ_TOOLS, type PlatformCommand, type PlatformState } from "../shared/platform.ts";
 import type { ArtifactsHost } from "./artifacts-host.ts";
 import { CoordinationRuntime } from "./coordination-runtime.ts";
@@ -13,13 +13,13 @@ import type { TowerStore } from "./tower.ts";
 const SOURCE = "refs/cruce/accepted",
 	EVIDENCE = "refs/cruce/evidence";
 /** Native source, collaboration and promotion authority. No external Git provider is consulted. */
-export class SystemRuntime {
+export class ProjectRuntime {
 	readonly coordination: CoordinationRuntime;
 	private queue: Promise<unknown> = Promise.resolve();
 	constructor(
 		readonly store: TowerStore,
 		readonly git: GitWorkspace,
-		readonly system: SystemConnection,
+		readonly project: ProjectConnection,
 		readonly host: ArtifactsHost | undefined,
 		readonly background: (p: Promise<unknown>) => void,
 		readonly now: () => number = Date.now,
@@ -31,7 +31,7 @@ export class SystemRuntime {
 			background,
 			now,
 			ai,
-			host ? new CloudflareArtifactWorkspace(host, git, system.artifactRepository, now) : undefined,
+			host ? new CloudflareArtifactWorkspace(host, git, project.artifactRepository, now) : undefined,
 		);
 	}
 	private serialize<T>(run: () => T | Promise<T>) {
@@ -52,9 +52,9 @@ export class SystemRuntime {
 		await this.git.ensureInit();
 		let head = await this.git.resolve(SOURCE);
 		if (this.host) {
-			const repo = await this.host.ensure(this.system.artifactRepository, `Cruce system ${this.system.id}`);
+			const repo = await this.host.ensure(this.project.artifactRepository, `Cruce project ${this.project.id}`);
 			const info = await this.host.info(repo.name);
-			if (info.description !== `Cruce system ${this.system.id}`) throw new CoordinationError(409, "System artifact ownership mismatch");
+			if (info.description !== `Cruce project ${this.project.id}`) throw new CoordinationError(409, "Project artifact ownership mismatch");
 			if ((await this.host.log(repo.name, "main", 1)).length)
 				head = (await this.host.withToken(repo.name, "read", (token) => this.git.fetch({ url: repo.remote, token, localRef: SOURCE })))
 					.result;
@@ -64,7 +64,7 @@ export class SystemRuntime {
 					(await this.git.commit({
 						ref: SOURCE,
 						parent: null,
-						files: { "README.md": `# ${this.system.name}\n\nSource is governed by Cruce proposals and promotion.\n` },
+						files: { "README.md": `# ${this.project.name}\n\nSource is governed by Cruce proposals and promotion.\n` },
 						message: "Initial source revision",
 						author: this.author(),
 					}));
@@ -78,19 +78,19 @@ export class SystemRuntime {
 				(await this.git.commit({
 					ref: SOURCE,
 					parent: null,
-					files: { "README.md": `# ${this.system.name}\n` },
+					files: { "README.md": `# ${this.project.name}\n` },
 					message: "Offline source fixture",
 					author: this.author(),
 				}));
 		if (!head) throw new CoordinationError(503, "Source revision unavailable");
 		const known = this.store.get<ReturnType<CoordinationRuntime["state"]>>("coordination");
-		await this.git.setRef(SOURCE, known?.system.canonicalHead ?? head);
-		await this.coordination.initialize(this.system, head, await this.git.readFiles(head));
+		await this.git.setRef(SOURCE, known?.project.canonicalHead ?? head);
+		await this.coordination.initialize(this.project, head, await this.git.readFiles(head));
 		if (!this.store.get("platform")) this.save(initialPlatform());
 		this.store.put("source-health", {
-			state: known && known.system.canonicalHead !== head ? "unexpected_revision" : "verified",
+			state: known && known.project.canonicalHead !== head ? "unexpected_revision" : "verified",
 			observedHead: head,
-			verifiedHead: known?.system.canonicalHead ?? head,
+			verifiedHead: known?.project.canonicalHead ?? head,
 			at: this.now(),
 		});
 	}
@@ -101,7 +101,7 @@ export class SystemRuntime {
 		this.authorize(actor);
 		const coordination = this.coordination.snapshot(actor),
 			state = this.state(),
-			canonical = coordination.system.canonicalHead!;
+			canonical = coordination.project.canonicalHead!;
 		return {
 			...state,
 			missions: state.missions.map((m) => {
@@ -112,7 +112,7 @@ export class SystemRuntime {
 					state: w?.state === "integrated" || w?.state === "completed" ? "completed" : m.state,
 				};
 			}),
-			system: coordination.system,
+			project: coordination.project,
 			coordination,
 			proposals: state.proposals.map((p) => ({ ...p, readiness: new PlatformController(state, this.now()).readiness(p.id, canonical) })),
 			replays: undefined,
@@ -124,10 +124,10 @@ export class SystemRuntime {
 	verifySource() {
 		return this.serialize(async () => {
 			if (!this.host) return;
-			const accepted = this.coordination.state().system.canonicalHead;
+			const accepted = this.coordination.state().project.canonicalHead;
 			try {
-				const repo = await this.host.info(this.system.artifactRepository);
-				if (repo.description !== `Cruce system ${this.system.id}`) throw new CoordinationError(409, "Source ownership mismatch");
+				const repo = await this.host.info(this.project.artifactRepository);
+				if (repo.description !== `Cruce project ${this.project.id}`) throw new CoordinationError(409, "Source ownership mismatch");
 				const observed = await this.host.withToken(repo.name, "read", (token) =>
 					this.git.fetch({ url: repo.remote, token, localRef: "refs/cruce/observed-source" }),
 				);
@@ -148,9 +148,9 @@ export class SystemRuntime {
 	command(cmd: PlatformCommand, actor: Actor) {
 		return this.serialize(async () => {
 			this.authorize(actor);
-			if (cmd.systemId !== this.system.id) throw new CoordinationError(403, "System authority mismatch");
+			if (cmd.projectId !== this.project.id) throw new CoordinationError(403, "Project authority mismatch");
 			const c = new PlatformController(this.state(), this.now()),
-				canonical = this.coordination.state().system.canonicalHead!;
+				canonical = this.coordination.state().project.canonicalHead!;
 			if (PLATFORM_READ_TOOLS.has(cmd.tool)) {
 				if (cmd.tool === "read_artifact") {
 					const artifact = c.state.artifacts.find((a) => a.id === cmd.artifactId);
@@ -219,7 +219,7 @@ export class SystemRuntime {
 				const d = (await this.coordination.command(
 					CommandInput.parse({
 						tool: work ? "attach_workstream" : "register_intent",
-						systemId: cmd.systemId,
+						projectId: cmd.projectId,
 						idempotencyKey: `mission:${cmd.idempotencyKey}`,
 						workstreamId: work?.id,
 						expectedVersion: work?.version,
@@ -291,7 +291,7 @@ export class SystemRuntime {
 							actor,
 							CommandInput.parse({
 								tool: "report_change",
-								systemId: cmd.systemId,
+								projectId: cmd.projectId,
 								idempotencyKey: `source:${cmd.idempotencyKey}`,
 								workstreamId: w.id,
 								sessionId: cmd.sessionId,
@@ -363,13 +363,13 @@ export class SystemRuntime {
 	}
 	private async storeEvidence(ledgerKey: string, content: string, metadata: unknown, request: string) {
 		if (!this.host) throw new CoordinationError(503, "Cloudflare Artifacts evidence storage unavailable");
-		const name = `${this.system.artifactRepository}--evidence`,
-			repo = await this.host.ensure(name, `Cruce evidence ${this.system.id}`),
+		const name = `${this.project.artifactRepository}--evidence`,
+			repo = await this.host.ensure(name, `Cruce evidence ${this.project.id}`),
 			id = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(ledgerKey))))
 				.map((b) => b.toString(16).padStart(2, "0"))
 				.join(""),
 			path = `artifacts/${id}.json`;
-		if ((await this.host.info(name)).description !== `Cruce evidence ${this.system.id}`)
+		if ((await this.host.info(name)).description !== `Cruce evidence ${this.project.id}`)
 			throw new CoordinationError(409, "Evidence ownership mismatch");
 		const pending = this.store.get<{ request: string; revision: string }>(ledgerKey);
 		if (pending && pending.request !== request) throw new CoordinationError(409, "Artifact inputs changed");
@@ -394,7 +394,7 @@ export class SystemRuntime {
 		return this.coordination.withAuthority(async (state) => {
 			const p = c.proposal(cmd.proposalId),
 				m = c.mission(p.missionId),
-				canonical = state.system.canonicalHead!;
+				canonical = state.project.canonicalHead!;
 			const ticket = c.preparePromotion(cmd, actor, canonical);
 			if (ticket.state === "complete") return ticket;
 			const ledgerKey = `native-io:${actor.developerId}:${actor.kind}:${cmd.idempotencyKey}`;
@@ -408,7 +408,7 @@ export class SystemRuntime {
 			if (canonical !== ticket.to) ticket.coordinationFingerprint = decision.fingerprint;
 			if (!this.host) throw new CoordinationError(503, "Artifacts canonical source required for promotion");
 			this.save(c.state); // Durable prepared ticket recovers a push that succeeds before a process restart.
-			const repo = await this.host.info(this.system.artifactRepository);
+			const repo = await this.host.info(this.project.artifactRepository);
 			const remote = await this.host.withToken(repo.name, "read", (token) =>
 				this.git.fetch({ url: repo.remote, token, localRef: "refs/cruce/promotion/current" }),
 			);
@@ -442,7 +442,7 @@ export class SystemRuntime {
 		if (actor.kind !== "human" || !actor.maintainer || !cmd.revision)
 			throw new CoordinationError(403, "Human maintainer and target revision required");
 		// Rollback creates a proposal with a forward revision; accepted history is never rewritten.
-		const current = this.coordination.state().system.canonicalHead!,
+		const current = this.coordination.state().project.canonicalHead!,
 			before = await this.git.readFiles(current),
 			target = await this.git.readFiles(cmd.revision),
 			files: Record<string, string | null> = {};

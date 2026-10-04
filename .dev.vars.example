@@ -2,9 +2,7 @@
 # Issuer/audience also configure cloudflare.config.ts via environment variables.
 CRUCE_ACCESS_ISSUER=https://YOUR_TEAM.cloudflareaccess.com
 CRUCE_ACCESS_AUD=YOUR_APPLICATION_AUDIENCE
-# Server-only identity encryption and optional compatibility protocol signing.
+# Server-only identity and connected-account credential encryption.
 CRUCE_SECRET=change-me-to-a-long-random-string
-# Only used with CRUCE_LEGACY_RUNTIME=on; never authorizes native systems.
-CRUCE_ADMIN_TOKEN=change-me-too
 # Optional event-subscription token in non-offline deployments.
 # CF_EVENTS_API_TOKEN=

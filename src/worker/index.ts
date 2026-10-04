@@ -1,23 +1,18 @@
 import { ControllerError } from "../core/controller.ts";
 import { CoordinationError } from "../core/workstreams.ts";
-import { DemoCommand, HumanCommand, PROJECTS, ProtocolRequest } from "../shared/api.ts";
+import { DemoCommand, HumanCommand, PROJECTS } from "../shared/api.ts";
 import { type AuthProps, authRoute, oauthProvider } from "./auth.ts";
 import type { ControlTower } from "./control-tower.ts";
 import { isArtifactsEvent } from "./event-subscriptions.ts";
 import { type PlatformEnv, platformRoute } from "./platform-router.ts";
 
-export { FlightSandbox } from "./agents/flight-sandbox.ts";
-export { FlightWorkflow } from "./agents/flight-workflow.ts";
-export { Outbound } from "./agents/outbound.ts";
 export { ControlTower } from "./control-tower.ts";
-export { SystemDirectory } from "./system-directory.ts";
+export { ProjectDirectory } from "./project-directory.ts";
 
 interface Env extends PlatformEnv {
 	CONTROL_TOWER: DurableObjectNamespace<ControlTower>;
 	ARTIFACTS_NAMESPACE: string;
 	CRUCE_SECRET?: string;
-	CRUCE_ADMIN_TOKEN?: string;
-	CRUCE_LEGACY_RUNTIME?: string;
 }
 
 const json = (data: unknown, status = 200) => Response.json(data, { status, headers: { "cache-control": "no-store" } });
@@ -32,35 +27,6 @@ class HttpError extends Error {
 }
 
 const tower = (env: Env, projectId: string) => env.CONTROL_TOWER.getByName(projectId);
-
-/** Per-Flight bearer token for the agent protocol (HMAC; not a Git credential). */
-export async function flightToken(secret: string, projectId: string, flightId: string): Promise<string> {
-	const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-	const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`cruce:v1:${projectId}:${flightId}`));
-	return btoa(String.fromCharCode(...new Uint8Array(sig)))
-		.replace(/\+/g, "-")
-		.replace(/\//g, "_")
-		.replace(/=+$/, "");
-}
-
-function bearer(request: Request): string | undefined {
-	const h = request.headers.get("authorization");
-	return h?.startsWith("Bearer ") ? h.slice(7) : undefined;
-}
-
-function timingSafeEqualStr(a: string, b: string): boolean {
-	if (a.length !== b.length) return false;
-	let diff = 0;
-	for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-	return diff === 0;
-}
-
-function requireAdmin(request: Request, env: Env) {
-	const token = bearer(request);
-	if (!env.CRUCE_ADMIN_TOKEN || !token || !timingSafeEqualStr(token, env.CRUCE_ADMIN_TOKEN)) {
-		throw new HttpError(401, "controller token required for live operations");
-	}
-}
 
 async function body<T>(
 	request: Request,
@@ -84,21 +50,20 @@ async function body<T>(
 	return parsed.data;
 }
 
+/** The deterministic coordination demo (`/demo`). Native projects live under /api/projects and /mcp. */
 async function route(request: Request, env: Env): Promise<Response> {
 	const url = new URL(request.url);
 	const parts = url.pathname.split("/").filter(Boolean);
 	if (parts[0] !== "api") return new Response("Not found", { status: 404 });
 
 	if (parts[1] === "health") return json({ ok: true, service: "cruce" });
-	if (parts[1] !== "projects") throw new HttpError(404, "not found");
-	if (parts.length === 2) return json(PROJECTS.filter((p) => p.mode === "demo" || env.CRUCE_LEGACY_RUNTIME === "on"));
+	if (parts[1] !== "demo") throw new HttpError(404, "not found");
+	if (parts.length === 2) return json(PROJECTS);
 
 	const project = PROJECTS.find((p) => p.id === parts[2]);
-	if (!project) throw new HttpError(404, "unknown project");
-	if (project.mode === "live" && env.CRUCE_LEGACY_RUNTIME !== "on") throw new HttpError(404, "Legacy execution compatibility is disabled");
+	if (!project) throw new HttpError(404, "unknown demo");
 	const stub = tower(env, project.id);
 	const action = parts[3];
-	if (project.mode === "live" && !request.url.endsWith("/protocol")) requireAdmin(request, env);
 
 	if (!action && request.method === "GET") return json(await stub.snapshot(project.id));
 
@@ -108,24 +73,10 @@ async function route(request: Request, env: Env): Promise<Response> {
 		return stub.fetch(new Request(request, { headers }));
 	}
 
-	if (action === "demo" && request.method === "POST") {
-		if (project.mode !== "demo") throw new HttpError(400, "not a demo project");
-		return json(await stub.demo(project.id, await body(request, DemoCommand)));
-	}
+	if (action === "demo" && request.method === "POST") return json(await stub.demo(project.id, await body(request, DemoCommand)));
 
-	if (action === "commands" && request.method === "POST") {
-		if (project.mode === "live") requireAdmin(request, env);
-		const cmd = await body(request, HumanCommand);
-		const result = (await stub.command(project.id, cmd, project.mode === "live" ? "controller" : "you")) as {
-			flightId?: string;
-			external?: boolean;
-		};
-		// An external runner receives its per-Flight protocol token once, at launch.
-		if (result?.external && result.flightId && env.CRUCE_SECRET) {
-			return json({ ...result, flightToken: await flightToken(env.CRUCE_SECRET, project.id, result.flightId) });
-		}
-		return json(result);
-	}
+	if (action === "commands" && request.method === "POST")
+		return json(await stub.command(project.id, await body(request, HumanCommand), "you"));
 
 	if (action === "history" && request.method === "GET") {
 		const target = url.searchParams.get("target") ?? "canonical";
@@ -150,17 +101,6 @@ async function route(request: Request, env: Env): Promise<Response> {
 			throw new HttpError(400, "invalid file path");
 		}
 		return json(await stub.changes(project.id, flightId, path));
-	}
-
-	// Agent protocol: /api/projects/:p/flights/:flightId/protocol
-	if (action === "flights" && parts[5] === "protocol" && request.method === "POST") {
-		const flightId = parts[4];
-		if (!/^F-\d{3}$/.test(flightId)) throw new HttpError(400, "bad flight id");
-		if (!env.CRUCE_SECRET) throw new HttpError(503, "agent protocol disabled (no CRUCE_SECRET)");
-		const presented = bearer(request);
-		const expected = await flightToken(env.CRUCE_SECRET, project.id, flightId);
-		if (!presented || !timingSafeEqualStr(presented, expected)) throw new HttpError(401, "invalid flight token");
-		return json(await stub.protocol(project.id, flightId, await body(request, ProtocolRequest)));
 	}
 
 	throw new HttpError(404, "not found");
@@ -207,13 +147,13 @@ const legacy = {
 				continue;
 			}
 			const repo = evt.source.repoName;
-			const directory = env.SYSTEM_DIRECTORY?.getByName("systems");
+			const directory = env.PROJECT_DIRECTORY?.getByName("projects");
 			if (directory) {
-				const system = (await directory.systems()).find(
-					(s) => s.active && (repo === s.artifactRepository || repo.startsWith(`${s.artifactRepository}--`)),
+				const native = (await directory.projects()).find(
+					(p) => p.active && (repo === p.artifactRepository || repo.startsWith(`${p.artifactRepository}--`)),
 				);
-				if (system) {
-					await env.CONTROL_TOWER.getByName(system.id).systemArtifactEvent(system);
+				if (native) {
+					await env.CONTROL_TOWER.getByName(native.id).projectArtifactEvent(native);
 					msg.ack();
 					continue;
 				}

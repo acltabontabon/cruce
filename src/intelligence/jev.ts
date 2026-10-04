@@ -69,7 +69,7 @@ export function packetFor(s: CoordinationState, id: string, otherId: string, exc
 		evidence,
 		state: {
 			policy: instructions,
-			repository: { head: s.system.canonicalHead, version: s.system.version },
+			repository: { head: s.project.canonicalHead, version: s.project.version },
 			plans: [
 				{ id, plan: p },
 				{ id: otherId, plan: op },

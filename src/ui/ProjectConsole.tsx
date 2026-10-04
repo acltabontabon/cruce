@@ -1,10 +1,10 @@
 import { Background, Controls, type Edge, type Node, ReactFlow } from "@xyflow/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CoordinationState, Decision, SystemConnection } from "../shared/coordination.ts";
+import type { CoordinationState, Decision, ProjectConnection } from "../shared/coordination.ts";
 import type { PlatformCommand, PlatformState, PromotionReadiness, Proposal } from "../shared/platform.ts";
 
 type View = Omit<PlatformState, "proposals"> & {
-	system: SystemConnection;
+	project: ProjectConnection;
 	coordination: Omit<CoordinationState, "workstreams"> & {
 		workstreams: (CoordinationState["workstreams"][number] & { decision: Decision })[];
 	};
@@ -24,9 +24,9 @@ async function request<T>(url: string, body?: unknown): Promise<T> {
 	}
 	return response.json() as Promise<T>;
 }
-export function SystemConsole() {
-	const [systems, setSystems] = useState<SystemConnection[]>([]),
-		[systemsLoaded, setSystemsLoaded] = useState(false),
+export function ProjectConsole() {
+	const [projects, setProjects] = useState<ProjectConnection[]>([]),
+		[projectsLoaded, setProjectsLoaded] = useState(false),
 		[selected, setSelected] = useState<string | null>(null),
 		[view, setView] = useState<View | null>(null),
 		[error, setError] = useState<string | null>(null),
@@ -38,13 +38,13 @@ export function SystemConsole() {
 	useEffect(() => {
 		document.title = "Cruce · Development";
 	}, []);
-	const currentSystem = useRef(selected);
-	currentSystem.current = selected;
+	const currentProject = useRef(selected);
+	currentProject.current = selected;
 	const load = useCallback(async () => {
 		if (!selected) return;
 		try {
-			const snapshot = await request<View>(`/api/systems/snapshot?systemId=${encodeURIComponent(selected)}`);
-			if (currentSystem.current !== selected) return;
+			const snapshot = await request<View>(`/api/projects/snapshot?projectId=${encodeURIComponent(selected)}`);
+			if (currentProject.current !== selected) return;
 			setView(snapshot);
 			setError(null);
 		} catch (e) {
@@ -53,10 +53,10 @@ export function SystemConsole() {
 	}, [selected]);
 	useEffect(() => {
 		let current = true;
-		void request<SystemConnection[]>("/api/systems")
+		void request<ProjectConnection[]>("/api/projects")
 			.then((list) => {
 				if (current) {
-					setSystems(list);
+					setProjects(list);
 					setSelected(list[0]?.id ?? null);
 				}
 			})
@@ -64,7 +64,7 @@ export function SystemConsole() {
 				if (current) setError(e.message);
 			})
 			.finally(() => {
-				if (current) setSystemsLoaded(true);
+				if (current) setProjectsLoaded(true);
 			});
 		return () => {
 			current = false;
@@ -80,8 +80,8 @@ export function SystemConsole() {
 		return () => clearInterval(timer);
 	}, [load]);
 	const execute = async (input: Partial<PlatformCommand> & { tool: PlatformCommand["tool"] }) => {
-		if (!selected || view?.system.id !== selected) throw new Error("Refresh system context before acting");
-		const result = await request("/api/systems/command", { ...input, systemId: selected, idempotencyKey: crypto.randomUUID() });
+		if (!selected || view?.project.id !== selected) throw new Error("Refresh project context before acting");
+		const result = await request("/api/projects/command", { ...input, projectId: selected, idempotencyKey: crypto.randomUUID() });
 		await load();
 		return result;
 	};
@@ -94,22 +94,22 @@ export function SystemConsole() {
 			view?.reviews.find((r) => r.id === detail) ??
 			view?.promotions.find((p) => p.id === detail);
 	return (
-		<div className="app system-console">
+		<div className="app project-console">
 			<a href="#main-content" className="skip-link">
 				Skip to development activity
 			</a>
-			<header className="system-header">
+			<header className="project-header">
 				<a className="wordmark" href="/">
 					Cruce
 					<span className="brand-dot" />
 				</a>
 				<span className="muted">Development</span>
 				<div className="spacer" />
-				{systems.length > 0 && (
-					<label className="system-selector">
-						<span className="sr-only">System</span>
+				{projects.length > 0 && (
+					<label className="project-selector">
+						<span className="sr-only">Project</span>
 						<select value={selected ?? ""} onChange={(e) => setSelected(e.target.value)}>
-							{systems.map((s) => (
+							{projects.map((s) => (
 								<option key={s.id} value={s.id}>
 									{s.name}
 								</option>
@@ -121,7 +121,7 @@ export function SystemConsole() {
 					Demo
 				</a>
 			</header>
-			<main id="main-content" className="system-main">
+			<main id="main-content" className="project-main">
 				{error && selected && (
 					<div className="console-error" role="alert">
 						{error} <a href="/auth/login">Sign in</a>
@@ -141,22 +141,22 @@ export function SystemConsole() {
 						</details>
 					</section>
 				)}
-				{!systemsLoaded && !error && (
+				{!projectsLoaded && !error && (
 					<p className="muted" role="status">
 						Loading development activity…
 					</p>
 				)}
-				{systemsLoaded && !selected && !error && (
+				{projectsLoaded && !selected && !error && (
 					<section className="console-empty">
-						<h1>Give your agents a system to build.</h1>
+						<h1>Give your agents a project to build.</h1>
 						<p>Intent, source, evidence and decisions stay together. Your agents use their existing tools.</p>
 						<form
 							onSubmit={(e) => {
 								e.preventDefault();
 								setBusy(true);
-								void request<SystemConnection>("/api/systems", { name: title, idempotencyKey: crypto.randomUUID() })
+								void request<ProjectConnection>("/api/projects", { name: title, idempotencyKey: crypto.randomUUID() })
 									.then((s) => {
-										setSystems([s]);
+										setProjects([s]);
 										setSelected(s.id);
 										setTitle("");
 									})
@@ -165,11 +165,11 @@ export function SystemConsole() {
 							}}
 						>
 							<label>
-								System name
+								Project name
 								<input required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Payment service" />
 							</label>
 							<button type="submit" className="btn" disabled={busy}>
-								{busy ? "Creating…" : "Create system"}
+								{busy ? "Creating…" : "Create project"}
 							</button>
 						</form>
 					</section>
@@ -183,7 +183,7 @@ export function SystemConsole() {
 					<>
 						<div className="overview-heading">
 							<div>
-								<p className="eyebrow">{view.system.name}</p>
+								<p className="eyebrow">{view.project.name}</p>
 								<h1>What’s happening</h1>
 								<p className="muted">Agents perform the work. Evidence and review govern what becomes accepted.</p>
 							</div>
@@ -292,7 +292,7 @@ export function SystemConsole() {
 								</section>
 								<details className="intent-entry">
 									<summary>Accepted source</summary>
-									<SourceBrowser revision={view.system.canonicalHead!} execute={execute} />
+									<SourceBrowser revision={view.project.canonicalHead!} execute={execute} />
 								</details>
 								<details className="intent-entry">
 									<summary>Define intent</summary>

@@ -46,8 +46,6 @@ interface CleanupHooks {
 	update(flightId: string, cleanup: FlightCleanup): void;
 	attention(key: string, flightId: string | undefined, failed: boolean): void;
 	note(title: string, flightId?: string): void;
-	workflow?(record: FlightResources): Promise<void>;
-	sandbox?(record: FlightResources): Promise<void>;
 	unsubscribe?(repo: string): Promise<void>;
 	subscriptionConfigured?: boolean;
 }
@@ -256,11 +254,9 @@ export class ResourceCleanup {
 				if (!record.reset && this.current(record) && !TERMINAL_PHASES.has((this.current(record) as Flight).phase)) continue;
 				try {
 					if (step === "tokens") {
-						this.git.clearReadToken(record.repo);
 						if (await this.identity(record)) await this.git.artifacts?.revokeAll(record.repo);
 					}
-					if (step === "workflow") await this.hooks.workflow?.(record);
-					if (step === "sandbox") await this.hooks.sandbox?.(record);
+					// "workflow" and "sandbox" steps remain only to settle records from the removed cloud agent runtime.
 					if (step === "repository") {
 						if (!record.reset && record.phase === "landed" && !record.verified) {
 							await this.git.verifyLanding({ id: record.flightId, landedCommit: record.landedCommit, publishedHead: record.publishedHead });

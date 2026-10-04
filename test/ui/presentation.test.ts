@@ -7,7 +7,6 @@ import type { AttentionItem } from "../../src/core/traffic.ts";
 import { DEMO_FLIGHTS, JWT_MIGRATION, ROTATION_V1 } from "../../src/demo/scenario.ts";
 import { agentName, attentionItems, counts, decisionLabel, flightBadge, scopeOf } from "../../src/ui/model.ts";
 import { ContextPanel } from "../../src/ui/panels/Context.tsx";
-import { Launch, launchInput } from "../../src/ui/panels/Launch.tsx";
 import { Traffic } from "../../src/ui/panels/Traffic.tsx";
 import { TaskRow, Work } from "../../src/ui/panels/Work.tsx";
 import { freshState } from "../fixtures.ts";
@@ -134,12 +133,10 @@ describe("first frame", () => {
 		const markup = renderToStaticMarkup(
 			createElement(Work, {
 				state,
-				liveAgents: null,
 				busy: false,
 				attentionOnly: false,
 				onSelect: () => {},
 				onAttention: () => {},
-				onLaunch: async () => {},
 				act: async () => {},
 			}),
 		);
@@ -160,12 +157,10 @@ describe("first frame", () => {
 		const markup = renderToStaticMarkup(
 			createElement(Work, {
 				state: controller.state,
-				liveAgents: null,
 				busy: false,
 				attentionOnly: true,
 				onSelect: () => {},
 				onAttention: () => {},
-				onLaunch: async () => {},
 				act: async () => {},
 			}),
 		);
@@ -183,12 +178,10 @@ describe("first frame", () => {
 		const markup = renderToStaticMarkup(
 			createElement(Work, {
 				state: controller.state,
-				liveAgents: null,
 				busy: false,
 				attentionOnly: false,
 				onSelect: () => {},
 				onAttention: () => {},
-				onLaunch: async () => {},
 				act: async () => {},
 			}),
 		);
@@ -258,12 +251,10 @@ describe("decision and validation provenance", () => {
 		const work = renderToStaticMarkup(
 			createElement(Work, {
 				state,
-				liveAgents: null,
 				busy: false,
 				attentionOnly: false,
 				onSelect: () => {},
 				onAttention: () => {},
-				onLaunch: async () => {},
 				act: async () => {},
 			}),
 		);
@@ -322,29 +313,5 @@ describe("decision and validation provenance", () => {
 		expect(markup).toContain('class="validation-result muted"');
 		expect(markup).toContain("Skipped</span>");
 		expect(markup).not.toContain("Passed</span>");
-	});
-});
-
-describe("task prompt", () => {
-	it("does not imply a launch is starting when controls are disabled for another reason", () => {
-		const markup = renderToStaticMarkup(createElement(Launch, { liveAgents: { available: true }, busy: true, onLaunch: async () => {} }));
-		expect(markup).toContain('type="submit" class="btn primary" disabled="">Run');
-		expect(markup).not.toContain("Starting…");
-	});
-
-	it("bounds the title without discarding the complete task description", () => {
-		const prompt = "Improve token validation. ".repeat(50).trim();
-		const input = launchInput(`  ${prompt}  `, "high");
-		expect(input.title).toHaveLength(120);
-		expect(input.description).toBe(prompt);
-		expect(input.priority).toBe("high");
-	});
-
-	it("normalizes title whitespace while preserving description line breaks", () => {
-		expect(launchInput("  Upgrade JWT\n\nKeep compatibility  ", "normal")).toEqual({
-			title: "Upgrade JWT Keep compatibility",
-			description: "Upgrade JWT\n\nKeep compatibility",
-			priority: "normal",
-		});
 	});
 });

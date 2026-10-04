@@ -66,7 +66,7 @@ describe("project connections", () => {
 		expect(current.send).toHaveBeenCalledWith("ping");
 		current.message('{"type":"update","project":"live"}');
 		expect(currentReceive).toHaveBeenCalledTimes(1);
-		expect(current.url).toBe("ws://localhost/api/projects/live/ws");
+		expect(current.url).toBe("ws://localhost/api/demo/live/ws");
 		stopCurrent();
 		expect(vi.getTimerCount()).toBe(0);
 	});

@@ -13,7 +13,7 @@ export function Changes({ projectId, flight, canonical }: { projectId: string; f
 	const [diffError, setDiffError] = useState<string | null>(null);
 	const head = flight.artifact?.head ?? flight.publishes.filter((p) => p.approved).at(-1)?.commit;
 	const approved = flight.publishes.some((p) => p.approved);
-	const url = `/api/projects/${encodeURIComponent(projectId)}/flights/${encodeURIComponent(flight.id)}/changes`;
+	const url = `/api/demo/${encodeURIComponent(projectId)}/flights/${encodeURIComponent(flight.id)}/changes`;
 	// biome-ignore lint/correctness/useExhaustiveDependencies: Git revisions invalidate the cached comparison.
 	useEffect(() => {
 		setData(null);

@@ -42,7 +42,7 @@ export class ArtifactsHost {
 	}
 
 	/**
-	 * Fork `source` into `target` (one isolated repository per Flight). Forks complete asynchronously,
+	 * Fork `source` into `target` (one isolated repository per workspace). Forks complete asynchronously,
 	 * so this waits until the new repository is ready before returning.
 	 */
 	async fork(source: string, target: string, description: string): Promise<RepoRef> {
@@ -50,7 +50,7 @@ export class ArtifactsHost {
 			const ready = await this.readyInfo(target);
 			if (ready) {
 				if (ready.description !== description || ready.source !== `artifacts:${this.namespace}/${source}`)
-					throw new Error("Flight repository ownership mismatch");
+					throw new Error("Workspace repository ownership mismatch");
 				return { name: ready.name, id: ready.id, remote: ready.remote, created: attempt > 0 };
 			}
 			try {
@@ -98,18 +98,12 @@ export class ArtifactsHost {
 		}
 	}
 
-	/** A token kept by Cruce (e.g. the read token the sandbox egress injects); revoke it when done. */
-	async mint(name: string, scope: "read" | "write", ttlSeconds: number) {
-		using repo = await this.binding.get(name);
-		return repo.createToken(scope, ttlSeconds);
-	}
-
 	async revokeToken(name: string, id: string) {
 		using repo = await this.binding.get(name);
 		await repo.revokeToken(id);
 	}
 
-	/** Revoke every active token on a repository (used when a Flight finishes). */
+	/** Revoke every active token on a repository (used when isolated work ends). */
 	async revokeAll(name: string): Promise<number> {
 		using repo = await this.binding.get(name);
 		const { tokens } = await repo.listTokens();

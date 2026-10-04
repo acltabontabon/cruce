@@ -11,7 +11,7 @@ describe("coordination MCP", () => {
 			working: "PROCEED",
 			publication: "WAIT",
 			integration: "WAIT",
-			systemId: command.systemId,
+			projectId: command.projectId,
 		}));
 		const client = new Client({ name: "native-fixture", version: "1" });
 		await server.connect(serverTransport);
@@ -20,7 +20,7 @@ describe("coordination MCP", () => {
 			expect(client.getInstructions()).toContain("preserve working-tree changes");
 			const listed = await client.listTools();
 			expect(listed.tools.map((t) => t.name)).toEqual([...TOOLS, ...PLATFORM_TOOLS]);
-			const result = await client.callTool({ name: "get_active_work", arguments: { systemId: "repo" } });
+			const result = await client.callTool({ name: "get_active_work", arguments: { projectId: "repo" } });
 			expect(result.structuredContent).toMatchObject({ working: "PROCEED", publication: "WAIT", integration: "WAIT" });
 		} finally {
 			await client.close();
@@ -36,7 +36,7 @@ describe("coordination MCP", () => {
 			const transport = new StreamableHTTPClientTransport(new URL("https://cruce.test/mcp"), { fetch: send });
 			await client.connect(transport);
 			try {
-				expect((await client.callTool({ name: "get_active_work", arguments: { systemId: "repo" } })).structuredContent).toEqual({
+				expect((await client.callTool({ name: "get_active_work", arguments: { projectId: "repo" } })).structuredContent).toEqual({
 					revision: i,
 				});
 			} finally {
@@ -53,7 +53,7 @@ describe("coordination MCP", () => {
 		await server.connect(b);
 		await client.connect(a);
 		try {
-			expect((await client.callTool({ name: "get_active_work", arguments: { systemId: "private" } })).isError).toBe(true);
+			expect((await client.callTool({ name: "get_active_work", arguments: { projectId: "private" } })).isError).toBe(true);
 		} finally {
 			await client.close();
 			await server.close();

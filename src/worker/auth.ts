@@ -148,7 +148,7 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 			consent = await oauth.beginConsent(original),
 			description = await oauth.describeConsent(original);
 		return new Response(
-			`<html lang="en"><meta charset="utf-8"><title>Connect to Cruce</title><h1>Connect to Cruce</h1><p>${escapeHtml(description.clientName ?? original.clientId)} requests coordination access to systems you can contribute to.</p><p>Signed in as ${escapeHtml(identity.email)}.</p><p>Agents can propose and report evidence. This connection does not grant promotion authority.</p><p>Redirect: ${escapeHtml(original.redirectUri)}</p><form method="post"><input type="hidden" name="handle" value="${escapeHtml(consent.handle)}"><button>Allow coordination</button></form><a href="/">Cancel</a></html>`,
+			`<html lang="en"><meta charset="utf-8"><title>Connect to Cruce</title><h1>Connect to Cruce</h1><p>${escapeHtml(description.clientName ?? original.clientId)} requests coordination access to projects you can contribute to.</p><p>Signed in as ${escapeHtml(identity.email)}.</p><p>Agents can propose and report evidence. This connection does not grant promotion authority.</p><p>Redirect: ${escapeHtml(original.redirectUri)}</p><form method="post"><input type="hidden" name="handle" value="${escapeHtml(consent.handle)}"><button>Allow coordination</button></form><a href="/">Cancel</a></html>`,
 			{ headers: consent.headers },
 		);
 	}
