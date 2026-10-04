@@ -32,10 +32,14 @@ export default defineConfig(({ mode }) => {
 			compatibilityDate: "2026-10-01",
 			compatibilityFlags: ["nodejs_compat"],
 			entrypoint,
-			assets: { notFoundHandling: "single-page-application", runWorkerFirst: ["/api/*"] },
+			assets: {
+				notFoundHandling: "single-page-application",
+				runWorkerFirst: ["/api/*", "/mcp", "/mcp/*", "/coordination", "/auth/*", "/authorize", "/oauth/*", "/.well-known/*"],
+			},
 			observability: { enabled: true },
 			exports: {
 				ControlTower: exports.durableObject({ storage: "sqlite" }),
+				SystemDirectory: exports.durableObject({ storage: "sqlite" }),
 				...(sandboxes
 					? {
 							FlightSandbox: exports.durableObject({ storage: "sqlite", container: agentSandbox }),
@@ -46,13 +50,23 @@ export default defineConfig(({ mode }) => {
 			},
 			env: {
 				CONTROL_TOWER: bindings.durableObject({ worker: "cruce", exportName: "ControlTower" }),
+				SYSTEM_DIRECTORY: bindings.durableObject({ worker: "cruce", exportName: "SystemDirectory" }),
+				OAUTH_KV: bindings.kv(),
+				CRUCE_PUBLIC_ORIGIN: bindings.text(
+					env.CRUCE_PUBLIC_ORIGIN ?? (offline ? "http://localhost:5173" : "https://cruce.acltabontabon.workers.dev"),
+				),
+				...(!offline ? { AI: bindings.ai() } : {}),
+				CRUCE_ACCESS_ISSUER: bindings.text(env.CRUCE_ACCESS_ISSUER ?? ""),
+				CRUCE_ACCESS_AUD: bindings.text(env.CRUCE_ACCESS_AUD ?? ""),
+				CRUCE_LEGACY_RUNTIME: bindings.text(env.CRUCE_LEGACY_RUNTIME ?? "off"),
+
 				...(offline ? { GIT_BACKEND: bindings.text("local") } : { ARTIFACTS: bindings.artifacts({ namespace, dev: { remote: true } }) }),
 				ARTIFACTS_NAMESPACE: bindings.text(namespace),
 				CF_ACCOUNT_ID: bindings.text("YOUR_32_CHARACTER_ACCOUNT_ID"),
 				EVENTS_QUEUE_ID: bindings.text("YOUR_QUEUE_ID"),
 				CRUCE_SECRET: bindings.secret(),
 				CRUCE_ADMIN_TOKEN: bindings.secret(),
-				CF_EVENTS_API_TOKEN: bindings.secret(),
+				...(!offline ? { CF_EVENTS_API_TOKEN: bindings.secret() } : {}),
 				...(sandboxes
 					? {
 							FLIGHT_SANDBOX: bindings.durableObject({ worker: "cruce", exportName: "FlightSandbox" }),

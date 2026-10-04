@@ -48,7 +48,11 @@ export class ArtifactsHost {
 	async fork(source: string, target: string, description: string): Promise<RepoRef> {
 		for (let attempt = 0; attempt < 10; attempt++) {
 			const ready = await this.readyInfo(target);
-			if (ready) return { name: ready.name, id: ready.id, remote: ready.remote, created: attempt > 0 };
+			if (ready) {
+				if (ready.description !== description || ready.source !== `artifacts:${this.namespace}/${source}`)
+					throw new Error("Flight repository ownership mismatch");
+				return { name: ready.name, id: ready.id, remote: ready.remote, created: attempt > 0 };
+			}
 			try {
 				using repo = await this.binding.get(source);
 				const forked = await repo.fork(target, { description, defaultBranchOnly: true, readOnly: false });
@@ -101,7 +105,8 @@ export class ArtifactsHost {
 	}
 
 	async revokeToken(name: string, id: string) {
-		await this.revoke(name, id);
+		using repo = await this.binding.get(name);
+		await repo.revokeToken(id);
 	}
 
 	/** Revoke every active token on a repository (used when a Flight finishes). */
@@ -111,7 +116,7 @@ export class ArtifactsHost {
 		let revoked = 0;
 		for (const t of tokens) {
 			if (t.state !== "active") continue;
-			if (await repo.revokeToken(t.id).catch(() => false)) revoked++;
+			if (await repo.revokeToken(t.id)) revoked++;
 		}
 		return revoked;
 	}
@@ -119,6 +124,24 @@ export class ArtifactsHost {
 	async info(name: string) {
 		using repo = await this.binding.get(name);
 		return repo.info();
+	}
+
+	async find(name: string) {
+		try {
+			return await this.info(name);
+		} catch (error) {
+			if (isNotFound(error)) return undefined;
+			throw error;
+		}
+	}
+
+	list(cursor?: string) {
+		return this.binding.list({ limit: 100, cursor });
+	}
+
+	async readFile(name: string, ref: string, path: string) {
+		using repo = await this.binding.get(name);
+		return repo.readFile({ ref, path });
 	}
 
 	async log(name: string, ref = "main", limit = 30) {

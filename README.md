@@ -1,128 +1,65 @@
 # Cruce
 
-**Active traffic control for autonomous coding agents.**
+**An agent-native software development platform.** Humans define intent. Agents perform bounded work. Artifacts preserve source and evidence. Review and policy govern what becomes accepted.
 
-Worktrees isolate agents. Cruce coordinates their future work.
+Cruce runs on Cloudflare and Cloudflare Artifacts. It functions independently of GitHub and GitLab. Existing tools such as Codex, Claude Code and Cursor participate through MCP. The human console answers what is happening, what needs attention, what is ready, what changed, and why.
 
-When one developer delegates several tasks to several coding agents, isolation is the easy part:
-every agent gets its own repository. What nobody does is look *ahead*: Flight A is about to change
-`TokenValidator.validate`'s contract, Flight B is about to build on the old one, and Flight C is
-nowhere near either. Cruce reads each agent's **Flight Plan**, finds where routes intersect **before
-any code collides**, decides who goes first, lets everyone else keep working on the parts that are
-safe (**partial clearance**), and — when a Flight lands — tells the affected Flights exactly which of
-their assumptions just went stale so they re-plan instead of re-working.
+```text
+Intent → Mission → isolated Workspace → immutable Artifacts
+                                       ↓
+                                  Proposal
+                                       ↓
+                           Verification + Review
+                                       ↓
+                           Governed source Promotion
+```
 
-> *Git coordinates code. Cruce coordinates the agents changing it.*
-> Artifacts gives every agent its own safe repository. Cruce decides how all of those agents should move together.
+Source remains inspectable, versioned, diffable and exportable. Agents cannot promote accepted state. Each mission's durable workstream has its own Artifacts fork; switching tools preserves the same workspace and history. Source publication and source promotion are separate boundaries.
 
-The current interface opens on **Work**: three tasks, their shared scope, and the decisions that need
-attention. **Traffic** is an optional view of active routes and code areas. A fresh demo pauses at the
-real partial-clearance moment; **Continue demo** runs the rest of the story.
-
-![Work at the paused overlap](docs/img/work-overlap.jpg)
-
-The [hosted MVP](https://cruce.acltabontabon.workers.dev) runs on real Cloudflare Artifacts. This
-refinement is available in the checkout and has not been deployed to production.
-
----
-
-## What it does
-
-| | |
-|---|---|
-| **One Artifacts repo per Flight** | Every agent task gets an isolated fork of the canonical repository (`auth-service--f021`): own history, refs, tokens, lifecycle. |
-| **Flight Plans** | After read-only discovery, an agent files what it will *read*, *write*, and whose *contract* it will change. Plans are living documents: amendments re-run traffic analysis. |
-| **Deterministic traffic control** | A conflict matrix over a structural index (module → file → symbol), a dependency graph with Tarjan cycle (deadlock) detection, explainable right-of-way rules, and clearance **leases**. No model is asked anything an algorithm can answer. |
-| **Partial clearance** | Only the contested airspace is held. F-021 keeps building `RefreshTokenRepository` while `TokenValidator.validate` waits for F-022. |
-| **Publish gate** | Artifacts tokens are repo-scoped, so agents never hold a write credential. Cruce rebuilds the agent's commit, maps the *real* diff onto symbols, and only if it is inside clearance pushes it with a 60-second token that is revoked immediately. |
-| **Landing re-evaluates traffic** | Landing merges into canonical for real (three-way merge, Git notes with the coordination context). Every Flight whose route intersects what changed is marked **stale**, refreshed onto the new baseline, and asked to amend its plan. |
-| **Exception-driven** | Independent work is cleared automatically. Humans see three familiar tasks, the automatically coordinated overlap, and a labeled attention count and can override any decision (allow both, X first, hold, reroute, cancel) — every decision explains itself. |
-
-## Run it
-
-### Demo mode (no credentials needed to watch; deterministic)
-
-The local demo opens paused with three active tasks. Use **Continue demo**, or open Demo options to
-step, **Reset to overlap**, or **Replay from beginning**. Existing sessions keep their progress.
-
-Locally, without any Cloudflare account (local Git backend in Durable Object storage):
+## Run locally
 
 ```sh
 pnpm install
-cp .dev.vars.example .dev.vars
-pnpm exec cf dev --mode offline        # http://localhost:5173
+pnpm exec cf dev --mode offline
 ```
 
-Locally against real Artifacts (namespace `cruce-dev`):
+The native console is `/`. Authentication requires configured Cloudflare Access. The isolated deterministic public demo remains at `/demo` and works offline without credentials. Offline fixtures explicitly do not support managed publication or promotion.
+
+For an Artifacts-backed development environment, use `pnpm exec cf auth login`, configure Access as described in [setup](docs/native-setup.md), then run `pnpm exec cf dev`.
+
+## Connect existing tools
 
 ```sh
-pnpm exec cf auth login
-pnpm exec cf dev
+node runner/cruce.ts checkout --url https://YOUR_CRUCE_HOST --system SYSTEM_ID --directory ./payments
+node runner/cruce.ts connect --url https://YOUR_CRUCE_HOST --system SYSTEM_ID --client codex --cwd ./payments
 ```
 
-The demo replays one story with three scripted agents — JWT migration (F-022), refresh-token
-rotation (F-021), session cleanup (F-023) — but every decision comes from the controller, every
-diff passes the real publish gate, and every landing is a real merge. Commit ids are reproducible. Demo activity and test reports are explicitly scripted; the independent
-verifier executes the tests. Task details separate **Can continue** from **Waiting for**, identify the
-blocking task, and show real published or integrated diffs on demand.
+Use `claude` or `cursor` for their respective client configurations. Continue in the chosen tool; MCP supplies intent, source, policies, coordination, artifacts and proposals. `node runner/cruce.ts check --cwd ./payments` provides a cooperative local check. The bridge neither changes existing branches nor reads normal Git credentials. Connection alone does not establish verified adaptive behavior.
 
-![Partial clearance in task detail](docs/img/task-partial.jpg)
+## What is implemented
 
-### Live mode (real coding agents)
+- Native system membership, Cloudflare Access identity and MCP OAuth.
+- Durable intents, specialized missions, sessions, isolated workspaces and handoff.
+- Deterministic coordination, partial clearance, plan drift and dependency refresh instructions.
+- Managed source publication from actual Git objects, immutable typed evidence artifacts and causal lineage.
+- Exact-revision verification, agent disagreement, human review, versioned promotion policy and resumable source promotion.
+- Read-only source/diffs/history and accepted-source export. Rollback supplies a forward-change specification requiring the same proposal and verification process.
+- Native activity console and navigable lineage graph. The legacy runner/Sandbox remains opt-in compatibility (`CRUCE_LEGACY_RUNTIME=on`).
 
-Two runtimes speak the same agent protocol:
+Jev is an internal bounded adviser. Automatic semantic constraints remain disabled until the required human-labeled evaluation corpus passes. Reported agent results are distinct from human attestations and runtime-verified evidence.
 
-- **External runner** — Claude Code on your machine, coordinated by Cruce:
-  ```sh
-  export CRUCE_ADMIN_TOKEN=…   # the controller token (see docs/cloudflare-setup.md)
-  node runner/cruce-runner.ts --url https://cruce.acltabontabon.workers.dev --project live \
-    --title "Session cleanup" --description "End idle sessions automatically"
-  ```
-  Launch several in parallel to watch real agents coordinate.
-- **Cloudflare Sandbox** — one container per Flight running Claude Code, orchestrated by a Workflow.
-  Needs Docker (to build the image) and `ANTHROPIC_API_KEY`: `CRUCE_SANDBOX=on pnpm exec cf deploy …`.
+**Release limits:** live Access/MCP/client adaptation, native Artifacts and Jev smoke gates require verification before production rollout. Hosted mission execution, independent runtime verification, environment promotion and releases are not claimed as delivered by this source-promotion slice. Binary outputs and large source transfers need further artifact transport support; current native inputs are bounded text.
 
-In Work, one prompt and **Run** launch a Sandbox task when the runtime is configured. Otherwise Cruce
-shows external-runner connection instructions. Controller access uses a masked dialog; browser
-credentials remain in memory. Automatic coordination needs no acceptance; consequential overrides
-live in the selected decision's menu.
-
-Validation applies only to the exact approved commit. Integration requires the newest approved
-publish's passing result. Reroute requests persist until acknowledged; an amendment and new clearance
-show the resulting route. Healthy waiting agents heartbeat without using execution rounds.
-
-Details: [docs/demo.md](docs/demo.md) · [docs/cloudflare-setup.md](docs/cloudflare-setup.md)
-
-### Verify that it really happened
+## Verification
 
 ```sh
-tools/verify-repo.sh auth-service cruce     # mints a READ token with cf, clones with plain git,
-                                            # prints history + Cruce notes, runs the repo's tests
+pnpm typecheck
+pnpm lint
+pnpm test
+pnpm exec cf build --mode offline
+bash demo/scripts/verify-scenario.sh
 ```
 
-## Docs
+Local checks currently pass with 245 tests, typecheck, lint, offline build and the independent scenario verifier. Live release gates remain separate.
 
-- [Product thesis](docs/product-thesis.md) — why coordination is the bottleneck of the agent era
-- [Architecture](docs/architecture.md) — Workers, Durable Objects, Workflows, Sandboxes, Artifacts
-- [Controller model](docs/controller-model.md) — conflict matrix, levels, right-of-way, partial clearance, leases
-- [Artifacts model](docs/artifacts-model.md) — canonical repo, Flight forks, tokens, notes, events, landing
-- [Demo](docs/demo.md) — the story and how to drive it
-- [Cloudflare setup](docs/cloudflare-setup.md) — resources, secrets, deploy
-- [AGENTS.md](AGENTS.md) — rules for coding agents working on Cruce itself
-
-## Development
-
-```sh
-pnpm test            # controller, Git, and full-demo end-to-end tests (vitest)
-pnpm typecheck       # Worker, UI, and test programs
-pnpm lint            # biome
-bash demo/scripts/verify-scenario.sh   # replay the demo story with plain git + node --test
-```
-
-The refinement was checked with typecheck, lint, Vitest, an offline build, the independent Git
-scenario, and browser flows at 1440, 1024, 768 and 390 pixels. Isolated Artifacts checks covered forks,
-pushes, clone SHA equality, notes, token revocation and queue event delivery. A real external Claude
-Code run completed plan → publish → validation → integration and passed independent clone tests.
-Sandbox execution remains unverified here: no configured Workflow/container and no Anthropic API key.
-
-"Cruce" (Spanish: *crossing*, *intersection*) is a working name. Apache-2.0.
+See [product thesis](docs/product-thesis.md), [architecture](docs/architecture.md), [Artifacts model](docs/artifacts-model.md), [native setup](docs/native-setup.md), [delivery plan](docs/PLAN.md), [demo](docs/demo.md) and [progress](docs/PROGRESS.md). Historical demo results are separate from verification of the native flow.

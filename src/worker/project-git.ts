@@ -45,6 +45,10 @@ export class ProjectGit {
 		return this.host?.namespace ?? "local";
 	}
 
+	get artifacts() {
+		return this.host;
+	}
+
 	/**
 	 * Repository epoch: bumped on every demo reset so a Flight repo name is never reused while the
 	 * previous repository's deletion is still propagating (Artifacts deletes are eventually consistent).
@@ -84,16 +88,10 @@ export class ProjectGit {
 		});
 	}
 
-	/** Demo reset: canonical back to the seed commit (reproducible oid), Flight repos removed. */
-	resetToSeed(seed: Record<string, string>, author: GitAuthor, flightIds: string[]) {
+	/** Demo reset: canonical back to the seed; the durable cleanup ledger owns Flight disposal. */
+	resetToSeed(seed: Record<string, string>, author: GitAuthor) {
 		return this.run(async () => {
 			const head = await this.seedCommit(seed, author);
-			for (const id of flightIds) {
-				await this.ws.deleteRef(flightRef(id));
-				await this.ws.deleteRef(stagingRef(id));
-				if (this.host) await this.host.delete(this.flightRepoName(id));
-				this.remotes.delete(this.flightRepoName(id));
-			}
 			await this.ws.deleteRef(NOTES_REF);
 			if (this.host) {
 				await this.pushTo(this.repo, CANONICAL, "refs/heads/main", true);
@@ -108,14 +106,13 @@ export class ProjectGit {
 	}
 
 	/** Create the Flight's isolated workspace: an Artifacts fork of canonical at its current head. */
-	async createFlightWorkspace(flightId: string, description: string): Promise<ArtifactRef> {
+	async createFlightWorkspace(flightId: string, description: string, name = this.flightRepoName(flightId)): Promise<ArtifactRef> {
 		const head = await this.run(async () => {
 			const canonical = await this.ws.resolve(CANONICAL);
 			if (!canonical) throw new Error("canonical repository is not initialised");
 			await this.ws.setRef(flightRef(flightId), canonical);
 			return canonical;
 		});
-		const name = this.flightRepoName(flightId);
 		if (!this.host) {
 			return { namespace: "local", repo: name, remote: `local://${name}`, baseCommit: head, forkedFrom: this.repo, createdAt: Date.now() };
 		}
@@ -131,13 +128,6 @@ export class ProjectGit {
 			forkedFrom: this.repo,
 			createdAt: Date.now(),
 		};
-	}
-
-	deleteFlightWorkspace(flightId: string) {
-		return this.run(async () => {
-			await this.ws.deleteRef(flightRef(flightId));
-			if (this.host) await this.host.delete(this.flightRepoName(flightId));
-		});
 	}
 
 	/** Pull the Flight repo's head into the workspace (e.g. after an external push). */
@@ -241,6 +231,7 @@ export class ProjectGit {
 	/** Compare only accepted work; completed runs remain pinned to their integration commit. */
 	changes(flight: Flight, canonicalCommit: string, path?: string): Promise<ChangesResponse> {
 		return this.run(async () => {
+			if (flight.phase !== "landed" && flight.cleanup?.deletedAt !== undefined) throw new ControllerError("Work expired", 410);
 			const integrated = flight.phase === "landed" && !!flight.landedCommit;
 			const headCommit = integrated ? (flight.landedCommit as string) : await this.ws.resolve(flightRef(flight.id));
 			const baseCommit = headCommit
@@ -277,21 +268,60 @@ export class ProjectGit {
 	 * A read token for a Flight's repository, injected by the sandbox egress policy for clone/fetch.
 	 * Cached for most of its 15-minute life so Git traffic does not mint a token per request.
 	 */
-	async readToken(flightId: string): Promise<string> {
+	async readToken(flightId: string, assertActive: () => void): Promise<string> {
+		assertActive();
 		if (!this.host) throw new Error("no Artifacts backend");
 		const name = this.flightRepoName(flightId);
 		const cached = this.readTokens.get(name);
 		if (cached && cached.until > Date.now()) return cached.token;
 		const t = await this.host.mint(name, "read", 900);
+		try {
+			assertActive();
+		} catch (error) {
+			await this.host.revokeToken(name, t.id);
+			throw error;
+		}
 		this.readTokens.set(name, { token: t.plaintext, id: t.id, until: Date.now() + 12 * 60 * 1000 });
 		return t.plaintext;
 	}
 
-	/** A finished Flight keeps its repository (history, notes) but no live credentials. */
-	async closeFlight(flightId: string): Promise<number> {
-		const name = this.flightRepoName(flightId);
-		this.readTokens.delete(name);
-		return this.host ? this.host.revokeAll(name) : 0;
+	clearReadToken(repo: string) {
+		this.readTokens.delete(repo);
+	}
+
+	/** Verify durable canonical history and notes before destroying the isolated copy. */
+	verifyLanding(flight: Pick<Flight, "id" | "landedCommit"> & { publishedHead?: string }) {
+		return this.run(async () => {
+			const commit = flight.landedCommit;
+			if (!commit) throw new Error("Landing commit missing");
+			let canonical = await this.ws.resolve(CANONICAL);
+			if (this.host) {
+				canonical = await this.fetchFrom(this.repo, "refs/cruce/cleanup-canonical");
+				const note = await this.host.readFile(this.repo, NOTES_REF, commit);
+				if (!note) throw new Error("Canonical landing note missing");
+				const body = JSON.parse(await note.text()) as { kind?: string; flightId?: string };
+				if (body.kind !== "landing" || body.flightId !== flight.id) throw new Error("Canonical landing note mismatch");
+			} else {
+				const note = (await this.ws.readNote(commit)) as { kind?: string; flightId?: string } | null;
+				if (note?.kind !== "landing" || note.flightId !== flight.id) throw new Error("Canonical landing note missing");
+			}
+			if (!canonical || (await this.ws.mergeBase(commit, canonical)) !== commit) throw new Error("Landing is not preserved in canonical");
+			if (flight.publishedHead && (await this.ws.mergeBase(flight.publishedHead, commit)) !== flight.publishedHead)
+				throw new Error("Published work is not preserved in the landing");
+			await this.ws.deleteRef("refs/cruce/cleanup-canonical");
+		});
+	}
+
+	clearFlightResources(flightId: string, repo: string, clearRefs: boolean) {
+		return this.run(async () => {
+			this.readTokens.delete(repo);
+			this.remotes.delete(repo);
+			if (clearRefs) {
+				await this.ws.deleteRef(flightRef(flightId));
+				await this.ws.deleteRef(stagingRef(flightId));
+			}
+			this.ws.clearCache();
+		});
 	}
 
 	/** Remote URLs are stable; cache them so routine Git work costs no extra control-plane calls. */

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FlightPlanInput } from "../../src/core/domain.ts";
+import { FAILED_FLIGHT_RETENTION_MS, FlightPlanInput } from "../../src/core/domain.ts";
 import { SESSION_CLEANUP } from "../../src/demo/scenario.ts";
 import { ControlTower, type TowerEnv } from "../../src/worker/control-tower.ts";
 import worker from "../../src/worker/index.ts";
@@ -58,10 +58,15 @@ function harness(live = false, extraBindings: Partial<TowerEnv> = {}) {
 		CONTROL_TOWER: { getByName: () => tower },
 		ARTIFACTS_NAMESPACE: "local",
 		CRUCE_ADMIN_TOKEN: "test-controller",
+		CRUCE_LEGACY_RUNTIME: "on",
 		CRUCE_SECRET: "test-secret",
 	};
 	const request = (path: string, init?: RequestInit) =>
-		worker.fetch(new Request(`https://cruce.test/api/projects/${path}`, init) as never, env as never);
+		worker.fetch(
+			new Request(`https://cruce.test/api/projects/${path}`, init) as never,
+			env as never,
+			{ waitUntil: (p: Promise<unknown>) => pending.push(p) } as never,
+		);
 	return {
 		get tower() {
 			return tower;
@@ -88,6 +93,80 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("control tower presentation contract", () => {
+	it("retains unsuccessful work through authenticated commands and returns explicit expiry after restart", async () => {
+		const h = harness(true);
+		const { flightId } = (await h.tower.command(
+			"live",
+			{ type: "launch", runtime: "external", title: "Recovery task", description: "Clean sessions", priority: "normal" },
+			"controller",
+		)) as { flightId: string };
+		await h.tower.command("live", { type: "cancel", flightId }, "controller");
+		await h.flush();
+		const command = (keep: boolean, authorized = true) =>
+			h.request("live/commands", {
+				method: "POST",
+				headers: { "content-type": "application/json", ...(authorized ? { authorization: "Bearer test-controller" } : {}) },
+				body: JSON.stringify({ type: "retain", flightId, keep }),
+			});
+		expect((await command(true, false)).status).toBe(401);
+		expect((await command(true)).status).toBe(200);
+		await h.flush();
+		expect(await h.storage.getAlarm()).toBeNull();
+		vi.setSystemTime(Date.now() + 2 * FAILED_FLIGHT_RETENTION_MS);
+		h.restart();
+		await h.tower.snapshot("live");
+		await h.flush();
+		expect((await h.tower.snapshot("live")).state.flights[0].cleanup?.keep).toBe(true);
+		expect((await command(false)).status).toBe(200);
+		await h.flush();
+		expect((await h.tower.snapshot("live")).state.flights[0].cleanup?.status).toBe("complete");
+		expect((await h.request(`live/history?target=${flightId}`)).status).toBe(401);
+		expect((await h.request(`live/history?target=${flightId}`, { headers: { authorization: "Bearer test-controller" } })).status).toBe(410);
+		expect((await h.request(`live/flights/${flightId}/changes`, { headers: { authorization: "Bearer test-controller" } })).status).toBe(
+			410,
+		);
+	});
+
+	it("keeps cleanup alarms when the demo is paused and preserves landed history after disposal", async () => {
+		const h = harness();
+		await h.tower.demo("demo", { op: "prepare" });
+		while (!(await h.tower.snapshot("demo")).state.flights.some((f) => f.phase === "landed")) await h.tower.demo("demo", { op: "step" });
+		await h.tower.demo("demo", { op: "pause" });
+		await h.flush();
+		const landed = (await h.tower.snapshot("demo")).state.flights.find((f) => f.phase === "landed")!;
+		expect(landed.cleanup?.status).toBe("complete");
+		expect((await h.request(`demo/history?target=${landed.id}`)).status).toBe(200);
+		expect((await h.request(`demo/flights/${landed.id}/changes`)).status).toBe(200);
+		await h.tower.command("demo", { type: "cancel", flightId: "F-021" }, "you");
+		await h.flush();
+		expect(await h.storage.getAlarm()).toBe(Date.now() + FAILED_FLIGHT_RETENTION_MS);
+		vi.setSystemTime(Date.now() + FAILED_FLIGHT_RETENTION_MS);
+		await h.fireAlarm();
+		expect((await h.tower.snapshot("demo")).state.flights.find((f) => f.id === "F-021")?.cleanup?.status).toBe("complete");
+	});
+
+	it("terminates a live Workflow and sandbox immediately even when its published work is retained", async () => {
+		const terminate = vi.fn(async () => {});
+		const destroy = vi.fn(async () => {});
+		const h = harness(true, {
+			ANTHROPIC_API_KEY: "test-only",
+			FLIGHT_WORKFLOW: {
+				create: async ({ id }: { id: string }) => ({ id }),
+				get: async () => ({ status: async () => ({ status: "running" }), terminate }),
+			} as unknown as TowerEnv["FLIGHT_WORKFLOW"],
+			FLIGHT_SANDBOX: { getByName: () => ({ destroy }) } as unknown as TowerEnv["FLIGHT_SANDBOX"],
+		});
+		const { flightId } = (await h.tower.command(
+			"live",
+			{ type: "launch", runtime: "sandbox", title: "Sandbox task", description: "Clean sessions", priority: "normal" },
+			"controller",
+		)) as { flightId: string };
+		await h.tower.command("live", { type: "cancel", flightId }, "controller");
+		await h.flush();
+		expect(terminate).toHaveBeenCalledOnce();
+		expect(destroy).toHaveBeenCalledOnce();
+		expect((await h.tower.snapshot("live")).state.flights[0].cleanup?.deletedAt).toBeUndefined();
+	});
 	it("shares cold initialization between concurrent readers", async () => {
 		const h = harness();
 		const bootstrap = vi.spyOn(Tower.prototype, "bootstrap");
@@ -143,7 +222,7 @@ describe("control tower presentation contract", () => {
 		expect(await h.storage.getAlarm()).toBeNull();
 	});
 
-	it("arms external-agent expiry without postponing earlier alarms, then cancels inactive alarms", async () => {
+	it("arms external-agent expiry without postponing earlier alarms, then schedules terminal cleanup", async () => {
 		const h = harness(true);
 		const launched = (await h.tower.command(
 			"live",
@@ -160,7 +239,7 @@ describe("control tower presentation contract", () => {
 		vi.setSystemTime(Date.now() + 31 * 60_000);
 		await h.fireAlarm();
 		expect((await h.tower.snapshot("live")).state.flights[0].phase).toBe("failed");
-		expect(await h.storage.getAlarm()).toBeNull();
+		expect(await h.storage.getAlarm()).toBe(Date.now() + FAILED_FLIGHT_RETENTION_MS);
 	});
 
 	it("restores held-run heartbeats and expires a silent zero-lease run through its alarm", async () => {
@@ -223,7 +302,7 @@ describe("control tower presentation contract", () => {
 		await h.flush();
 	});
 
-	it("marks a failed external provisioning attempt terminal and clears its alarm", async () => {
+	it("marks a failed external provisioning attempt terminal and keeps its cleanup alarm", async () => {
 		const h = harness(true);
 		const provision = vi.spyOn(Tower.prototype, "provision").mockRejectedValueOnce(new Error("fork unavailable"));
 		try {
@@ -238,17 +317,20 @@ describe("control tower presentation contract", () => {
 			const run = (await h.tower.snapshot("live")).state.flights[0];
 			expect(run.phase).toBe("failed");
 			expect(run.failureReason).toContain("Launch failed: fork unavailable");
-			expect(await h.storage.getAlarm()).toBeNull();
+			expect(await h.storage.getAlarm()).toBe(Date.now() + FAILED_FLIGHT_RETENTION_MS);
 		} finally {
 			provision.mockRestore();
 		}
 	});
 
-	it("marks a rejected Workflow creation terminal and clears its alarm", async () => {
+	it("marks a rejected Workflow creation terminal and keeps its cleanup alarm", async () => {
 		const create = vi.fn().mockRejectedValue(new Error("Workflow unavailable"));
 		const h = harness(true, {
-			FLIGHT_WORKFLOW: { create } as unknown as TowerEnv["FLIGHT_WORKFLOW"],
-			FLIGHT_SANDBOX: {} as TowerEnv["FLIGHT_SANDBOX"],
+			FLIGHT_WORKFLOW: {
+				create,
+				get: vi.fn().mockRejectedValue(new Error("Workflow does not exist")),
+			} as unknown as TowerEnv["FLIGHT_WORKFLOW"],
+			FLIGHT_SANDBOX: { getByName: () => ({ destroy: async () => {} }) } as unknown as TowerEnv["FLIGHT_SANDBOX"],
 			ANTHROPIC_API_KEY: "test-only",
 		});
 		await expect(
@@ -262,7 +344,7 @@ describe("control tower presentation contract", () => {
 		const run = (await h.tower.snapshot("live")).state.flights[0];
 		expect(run.phase).toBe("failed");
 		expect(run.failureReason).toContain("Launch failed: Workflow unavailable");
-		expect(await h.storage.getAlarm()).toBeNull();
+		expect(await h.storage.getAlarm()).toBe(Date.now() + FAILED_FLIGHT_RETENTION_MS);
 	});
 
 	it("validates changes requests and returns Git comparison data through HTTP", async () => {

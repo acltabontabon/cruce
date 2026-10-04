@@ -30,7 +30,7 @@ export function Changes({ projectId, flight, canonical }: { projectId: string; f
 				if (!abort.signal.aborted) setError(e.message);
 			});
 		return () => abort.abort();
-	}, [url, approved, head, canonical]);
+	}, [url, approved, head, canonical, flight.cleanup?.deletedAt]);
 	useEffect(() => {
 		setDiff(undefined);
 		setDiffError(null);

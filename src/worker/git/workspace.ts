@@ -36,7 +36,11 @@ const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 
 export class GitWorkspace {
-	private readonly cache = {};
+	private cache = {};
+
+	clearCache() {
+		this.cache = {};
+	}
 
 	constructor(
 		private readonly fs: Fs,
@@ -53,6 +57,45 @@ export class GitWorkspace {
 		} catch {
 			await git.init({ fs: this.fs, gitdir: this.gitdir, bare: true, defaultBranch: "main" });
 		}
+	}
+
+	/** Import an exact agent commit pack. No commit is rebuilt and no working tree is touched. */
+	async importPack(pack: Uint8Array) {
+		if (pack.byteLength < 32 || pack.byteLength > 32 * 1024 * 1024 || new TextDecoder().decode(pack.slice(0, 4)) !== "PACK")
+			throw new Error("Invalid or oversized Git pack");
+		const digest = new Uint8Array(await crypto.subtle.digest("SHA-1", pack.slice(0, -20)));
+		if (!digest.every((v, i) => v === pack[pack.length - 20 + i])) throw new Error("Git pack checksum mismatch");
+		const name = [...digest].map((v) => v.toString(16).padStart(2, "0")).join("");
+		await this.fs.promises.mkdir(`${this.gitdir}/objects/pack`, { recursive: true });
+		const filepath = `objects/pack/pack-${name}.pack`;
+		await this.fs.promises.writeFile(`${this.gitdir}/${filepath}`, pack);
+		const result = await git.indexPack({ ...this.base, dir: this.gitdir, filepath });
+		this.clearCache();
+		return result.oids;
+	}
+
+	/** Export immutable source using real Git objects; external hosting is never required. */
+	async exportPack(head: string, stop?: string): Promise<Uint8Array> {
+		const oids = new Set<string>();
+		const tree = async (oid: string) => {
+			if (oids.has(oid)) return;
+			oids.add(oid);
+			for (const e of (await git.readTree({ ...this.base, oid })).tree) {
+				if (e.type === "tree") await tree(e.oid);
+				else if (e.type === "blob") oids.add(e.oid);
+			}
+		};
+		const commit = async (oid: string) => {
+			if (oid === stop || oids.has(oid)) return;
+			oids.add(oid);
+			const c = await git.readCommit({ ...this.base, oid });
+			await tree(c.commit.tree);
+			for (const parent of c.commit.parent) await commit(parent);
+		};
+		await commit(head);
+		const result = await git.packObjects({ ...this.base, oids: [...oids] });
+		if (!result.packfile || result.packfile.length > 32 * 1024 * 1024) throw new Error("Source export exceeds the 32 MiB transfer limit");
+		return result.packfile;
 	}
 
 	async resolve(ref: string): Promise<string | null> {

@@ -10,11 +10,16 @@ import type { Selection } from "./radar/Radar.tsx";
 import { post, useTower } from "./store.ts";
 import "./styles.css";
 import "./responsive.css";
+import { SystemConsole } from "./SystemConsole.tsx";
+
+export function App() {
+	return location.pathname === "/demo" ? <DemoApp /> : <SystemConsole />;
+}
 
 type Route = { projectId: string; view: "work" | "traffic"; selection: Selection; attentionOnly: boolean };
 export function readRoute(search = location.search): Route {
 	const query = new URLSearchParams(search);
-	const projectId = PROJECTS.some((p) => p.id === query.get("project")) ? (query.get("project") as string) : "demo";
+	const projectId = PROJECTS.some((p) => p.mode === "demo" && p.id === query.get("project")) ? (query.get("project") as string) : "demo";
 	const run = query.get("run"),
 		crossing = query.get("crossing"),
 		scope = query.get("scope");
@@ -31,7 +36,7 @@ export function readRoute(search = location.search): Route {
 		attentionOnly: query.get("attention") === "1",
 	};
 }
-export function App() {
+export function DemoApp() {
 	const [route, setRoute] = useState(readRoute);
 	const tower = useTower(route.projectId);
 	const [historyTarget, setHistoryTarget] = useState<string | null>(null);
@@ -142,7 +147,7 @@ export function App() {
 						state={state}
 						demo={tower.demo}
 						connected={tower.connected}
-						projects={PROJECTS}
+						projects={PROJECTS.filter((p) => p.mode === "demo")}
 						projectId={route.projectId}
 						view={route.view}
 						busy={busy}

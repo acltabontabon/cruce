@@ -1,3 +1,21 @@
+# Native Artifacts model — current direction
+
+Cloudflare Artifacts is fundamental to Cruce source and collaboration. It owns accepted state; external hosting is future interoperability only.
+
+A native system uses `system-<uuid>` as accepted source, immutable `-baseline-<revision>` snapshots for race-free provisioning, and exactly one `--w-<id>` fork for each durable mission workstream. Tool handoff keeps that fork. A separate `--evidence` Artifacts repository versions typed reports and context without changing source candidate history.
+
+The logical Artifact is an immutable addressable record with intent, mission, producer/model, source/parent revisions, execution environment, content hash, related artifacts, storage revision and trust. Source artifacts reference verified Git snapshots. Evidence content and metadata are versioned together. Native text inputs are bounded; binary and large-output transport remains a release extension.
+
+Publication creates a verified candidate, not accepted state. A Proposal names exactly that immutable source and its parent. Evidence and reviews name its exact revision. Agent assertions are reported; human attestations are explicit; only internal execution can issue runtime-verified evidence. Human promotion requires current baseline, policy, independent evidence requirements, approvals and coordination.
+
+Accepted history is never force-pushed or rewritten. Export preserves real source Git objects. Rollback creates a forward-change specification and must go through a new mission, source artifact, proposal, evidence and promotion. Unexpected remote source movement is diagnosed, not silently accepted.
+
+Agents never receive write tokens. Cruce mints server-side 60-second tokens per managed push and revokes them. Ownership is checked before writing or deleting resources. Legacy failed-flight cleanup remains intact. Native workspaces retaining immutable source outputs are retained; execution completion is not permission to delete historical artifacts.
+
+## Historical demo/compatibility implementation
+
+The following documents existing Flight forks, Git notes, deterministic landing and ownership-safe cleanup. Those records remain intact during native migration.
+
 # Artifacts model
 
 Cruce is built around Cloudflare Artifacts' premise: create isolated Git repositories at the scale of
@@ -75,7 +93,7 @@ git fetch origin 'refs/notes/cruce:refs/notes/cruce' && git notes --ref=cruce sh
 | Subscription | Source | Events | Created |
 |---|---|---|---|
 | account | `artifacts` | `repo.created`, `repo.forked`, `repo.deleted`, `repo.imported` | once (setup) |
-| per repository | `artifacts.repo` + `namespace` + `repo_name` | `pushed`, `token.created`, `token.revoked` | canonical at bootstrap; each Flight at provisioning; removed on reset |
+| per repository | `artifacts.repo` + `namespace` + `repo_name` | `pushed`, `token.created`, `token.revoked` | canonical at bootstrap; each Flight at provisioning; removed by durable Flight cleanup |
 
 Destination: queue `cruce-artifact-events` → Worker `queue()` → filtered by namespace → routed by repo
 name (`<repo>` or `<repo>--fNNN`) to the project's ControlTower → deduplicated by
@@ -101,4 +119,13 @@ seeded demo repository; import is a straightforward extension of `ArtifactsHost.
 
 Artifacts bills repository operations and storage. Cruce keeps operations low: incremental fetches into a
 persistent workspace, remote URLs cached, one fork per Flight, short-lived tokens only when needed, demo
-resets rate-limited (one per 45 s per project). A full demo run is on the order of fifty operations.
+resets rate-limited (one per 45 s per project). Cleanup adds canonical verification, token revocation,
+repository deletion, and subscription removal; retry batches and reconciliation pages are bounded.
+
+## Flight lifecycle
+
+Landed repositories are deleted after canonical commits and notes are verified. Unsuccessful Flights
+retain published work for 24 hours, with an explicit keep-for-recovery override. Execution resources
+and tokens are released immediately. A durable ownership ledger survives resets and interrupted
+provisioning; alarms retry failed cleanup and reconcile owned resources daily. See
+[Flight resource cleanup](flight-cleanup.md) for recovery, migration, and review behavior.

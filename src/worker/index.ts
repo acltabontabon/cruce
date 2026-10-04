@@ -1,18 +1,23 @@
 import { ControllerError } from "../core/controller.ts";
+import { CoordinationError } from "../core/workstreams.ts";
 import { DemoCommand, HumanCommand, PROJECTS, ProtocolRequest } from "../shared/api.ts";
+import { type AuthProps, authRoute, oauthProvider } from "./auth.ts";
 import type { ControlTower } from "./control-tower.ts";
 import { isArtifactsEvent } from "./event-subscriptions.ts";
+import { type PlatformEnv, platformRoute } from "./platform-router.ts";
 
 export { FlightSandbox } from "./agents/flight-sandbox.ts";
 export { FlightWorkflow } from "./agents/flight-workflow.ts";
 export { Outbound } from "./agents/outbound.ts";
 export { ControlTower } from "./control-tower.ts";
+export { SystemDirectory } from "./system-directory.ts";
 
-interface Env {
+interface Env extends PlatformEnv {
 	CONTROL_TOWER: DurableObjectNamespace<ControlTower>;
 	ARTIFACTS_NAMESPACE: string;
 	CRUCE_SECRET?: string;
 	CRUCE_ADMIN_TOKEN?: string;
+	CRUCE_LEGACY_RUNTIME?: string;
 }
 
 const json = (data: unknown, status = 200) => Response.json(data, { status, headers: { "cache-control": "no-store" } });
@@ -86,12 +91,14 @@ async function route(request: Request, env: Env): Promise<Response> {
 
 	if (parts[1] === "health") return json({ ok: true, service: "cruce" });
 	if (parts[1] !== "projects") throw new HttpError(404, "not found");
-	if (parts.length === 2) return json(PROJECTS);
+	if (parts.length === 2) return json(PROJECTS.filter((p) => p.mode === "demo" || env.CRUCE_LEGACY_RUNTIME === "on"));
 
 	const project = PROJECTS.find((p) => p.id === parts[2]);
 	if (!project) throw new HttpError(404, "unknown project");
+	if (project.mode === "live" && env.CRUCE_LEGACY_RUNTIME !== "on") throw new HttpError(404, "Legacy execution compatibility is disabled");
 	const stub = tower(env, project.id);
 	const action = parts[3];
+	if (project.mode === "live" && !request.url.endsWith("/protocol")) requireAdmin(request, env);
 
 	if (!action && request.method === "GET") return json(await stub.snapshot(project.id));
 
@@ -159,12 +166,17 @@ async function route(request: Request, env: Env): Promise<Response> {
 	throw new HttpError(404, "not found");
 }
 
-export default {
-	async fetch(request, env) {
+const legacy = {
+	async fetch(request, env, ctx) {
 		try {
+			const auth = await authRoute(request, env);
+			if (auth) return auth;
+			const repository = await platformRoute(request, env, ctx);
+			if (repository) return repository;
 			return await route(request, env);
 		} catch (e) {
-			if (e instanceof HttpError || e instanceof ControllerError) return json({ error: e.message }, e.status);
+			if (e instanceof HttpError || e instanceof ControllerError || e instanceof CoordinationError)
+				return json({ error: e.message }, e.status);
 			const message = (e as Error)?.message ?? String(e);
 			// Durable Object RPC can serialize a domain error as a plain Error.
 			const status = /unknown flight|unknown mission|no congestion|not part of these changes/i.test(message)
@@ -195,6 +207,17 @@ export default {
 				continue;
 			}
 			const repo = evt.source.repoName;
+			const directory = env.SYSTEM_DIRECTORY?.getByName("systems");
+			if (directory) {
+				const system = (await directory.systems()).find(
+					(s) => s.active && (repo === s.artifactRepository || repo.startsWith(`${s.artifactRepository}--`)),
+				);
+				if (system) {
+					await env.CONTROL_TOWER.getByName(system.id).systemArtifactEvent(system);
+					msg.ack();
+					continue;
+				}
+			}
 			const project = [...PROJECTS]
 				.sort((a, b) => b.repo.length - a.repo.length)
 				.find((p) => repo === p.repo || repo.startsWith(`${p.repo}--`));
@@ -202,4 +225,25 @@ export default {
 			msg.ack();
 		}
 	},
+} satisfies ExportedHandler<Env>;
+
+const api = {
+	async fetch(request, env, ctx) {
+		try {
+			const auth = ctx as ExecutionContext & { props: AuthProps; auth: { scope: string[] } };
+			if (!auth.auth?.scope.includes("coordination")) return json({ error: "Coordination scope required" }, 403);
+			return (await platformRoute(request, env, ctx, auth.props)) ?? json({ error: "Not found" }, 404);
+		} catch (error) {
+			return json({ error: (error as Error).message }, error instanceof CoordinationError ? error.status : 400);
+		}
+	},
+} satisfies ExportedHandler<Env>;
+
+export default {
+	fetch(request, env, ctx) {
+		return env.OAUTH_KV
+			? oauthProvider(api, legacy, env.CRUCE_PUBLIC_ORIGIN ?? "https://cruce.acltabontabon.workers.dev").fetch(request, env, ctx)
+			: legacy.fetch!(request, env, ctx);
+	},
+	queue: legacy.queue,
 } satisfies ExportedHandler<Env>;

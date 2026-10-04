@@ -20,16 +20,25 @@ const API = "https://api.cloudflare.com/client/v4";
 export class EventSubscriptions {
 	constructor(private readonly cfg: SubscriptionConfig) {}
 
-	private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
+	private async request<T>(method: string, path: string, body?: unknown) {
 		const res = await fetch(`${API}/accounts/${this.cfg.accountId}/event_subscriptions/subscriptions${path}`, {
 			method,
 			headers: { Authorization: `Bearer ${this.cfg.apiToken}`, "content-type": "application/json" },
 			body: body ? JSON.stringify(body) : undefined,
 		});
-		const json = (await res.json()) as { success: boolean; result: T; errors?: { message: string }[] };
+		const json = (await res.json()) as {
+			success: boolean;
+			result: T;
+			result_info?: { total_pages?: number };
+			errors?: { message: string }[];
+		};
 		if (!res.ok || !json.success)
 			throw new Error(`event subscription ${method} failed: ${json.errors?.map((e) => e.message).join("; ") ?? res.status}`);
-		return json.result;
+		return json;
+	}
+
+	private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
+		return (await this.request<T>(method, path, body)).result;
 	}
 
 	nameFor(repo: string) {
@@ -50,13 +59,27 @@ export class EventSubscriptions {
 	}
 
 	async unsubscribeRepo(repo: string): Promise<void> {
-		const id = await this.find(repo);
-		if (id) await this.call("DELETE", `/${id}`);
+		for (const id of await this.findAll(repo)) {
+			try {
+				await this.call("DELETE", `/${id}`);
+			} catch (error) {
+				if (!/404|not found/i.test(String(error))) throw error;
+			}
+		}
 	}
 
 	private async find(repo: string): Promise<string | undefined> {
-		const list = await this.call<{ id: string; name: string }[]>("GET", "?per_page=100");
-		return list.find((s) => s.name === this.nameFor(repo))?.id;
+		return (await this.findAll(repo))[0];
+	}
+
+	private async findAll(repo: string): Promise<string[]> {
+		const ids: string[] = [];
+		for (let page = 1; ; page++) {
+			const response = await this.request<{ id: string; name: string }[]>("GET", `?per_page=100&page=${page}`);
+			ids.push(...response.result.filter((s) => s.name === this.nameFor(repo)).map((s) => s.id));
+			if (response.result_info?.total_pages !== undefined ? page >= response.result_info.total_pages : response.result.length < 100) break;
+		}
+		return ids;
 	}
 }
 

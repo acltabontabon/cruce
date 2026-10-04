@@ -1,3 +1,42 @@
+# Native architecture — current direction
+
+The latest product clarification supersedes the GitHub-first plan and the historical launcher model below. Cruce is a standalone agent-native platform. No GitHub App, external PR check, installation registry or GitHub sign-in participates in the native path.
+
+```text
+Human console / existing agent tools
+       │ HTTPS + OAuth Streamable HTTP MCP / local stdio bridge
+       ▼
+Worker: identity + native system membership + typed command adapters
+       │ immutable tenant/system identity
+       ▼
+ControlTower Durable Object: SystemRuntime + CoordinationRuntime
+       │ pure PlatformController + WorkstreamController
+       │ SQLite: intents, missions, sessions, plans, lineage, policy, IO tickets
+       │ actual Git objects + parser indexes
+       ▼
+Cloudflare Artifacts
+       ├ accepted system source
+       ├ immutable baseline snapshots
+       ├ one isolated fork per mission workstream
+       └ versioned immutable evidence outputs
+```
+
+`SystemDirectory` stores native membership and immutable authority identities. Renames affect display metadata. Cloudflare Access JWTs are cryptographically validated; OAuth credentials grant machine contribution, never human promotion. Each request rechecks native membership.
+
+Human and machine adapters call the same application commands. Durable workstreams outlive sessions. One writer executes per workstream; leases expire independently of source artifacts, publications and unresolved dependencies. Local Git assertions remain distinct from managed verified scope.
+
+Source publication verifies exact Git objects and declared scope before a server-only short-lived token can push to the workspace. Unknown symbols may widen conservative scheduling but never grant write permission. Unsupported languages/parser failures retain file-level coverage.
+
+Native collaboration is intent → mission → execution/workspace → immutable artifact → proposal → exact-revision verification/review → source promotion. Agents report evidence and independent agents review; only human maintainers promote. Policy changes invalidate old proposal readiness. Reviews preserve disagreement and explicit resolution. Prepared promotion tickets and fixed publication revisions survive retries. Promotion is a non-forced accepted-source advance, not deployment.
+
+The native console shows activity, attention, readiness and recent decisions. Its lineage graph and read-only evidence/source views disclose technical detail progressively. The isolated legacy demo remains `/demo`; legacy runner/Sandbox APIs require explicit compatibility opt-in.
+
+Jev jobs use typed bounded evidence, exact-input fingerprints, two concurrent requests, deadlines, three attempts and daily budgets. Automatic semantic constraints remain gated off pending labeled evaluations. Hosted native execution, runtime test verification, releases and environment deployment are subsequent delivery slices, not simulated completion.
+
+## Historical coordination runtime (retained compatibility)
+
+The following records explain the existing deterministic demo, Sandbox and cleanup behavior. Their Flight/landing terms and launcher architecture are historical, not the native product contract.
+
 # Architecture
 
 Cruce is Cloudflare-native: one Worker (API + static Work/Traffic UI), one Durable Object per project as the
@@ -57,7 +96,7 @@ for every repository, and Queues event subscriptions for repository events.
 - **Babel instead of tree-sitter in the Worker.** Tree-sitter grammars are Wasm side modules that Workers
   cannot compile at runtime; ast-grep is native. `StructuralIndexer` is an interface so a tree-sitter /
   ast-grep indexer can run in the Sandbox for other languages.
-- **Workflows for live Flights, alarms for the demo.** The demo is a deterministic script stepped by DO
+- **Workflows for live Flights, alarms for time and cleanup.** The demo is a deterministic script stepped by DO
   alarms. Demo prepare, reset, replay and advancement are serialized. Live Workflows wait for events with
   a one-minute heartbeat/status check; external runners poll at 15 seconds while idle. Idle waiting does
   not consume execution rounds. Controller alarms check live timeouts every 30 seconds without moving
@@ -90,8 +129,9 @@ instructions and acknowledged receipts, with the plan version at request time. B
 deliver the request at the next safe boundary, before further work,
 publishing or integration, then acknowledge receipt through `ack-instruction`. Delivery does not claim
 success: an amended plan and its new clearance show the outcome. A failed delivery remains pending.
-The demo's scripted agent amends immediately. Cancellation is cooperative for an agent process already
-running; the runtime checks terminal state before publishing its result.
+The demo's scripted agent amends immediately. Cancellation immediately blocks agent protocol work and
+schedules durable token revocation, Workflow termination, and sandbox destruction. External runner
+processes stop cooperatively at their next boundary. See [Flight resource cleanup](flight-cleanup.md).
 
 ## Changes API
 
@@ -109,10 +149,10 @@ statistics are identified.
 |---|---|
 | Agent crash / silence | Planned runs expire after 10 min without agent contact, including fully held runs with no leases → Flight LOST → leases released → dependents re-evaluated. Persisted heartbeat or plan-filing time survives controller restart. |
 | Launch failure | Failed repository provisioning or Workflow creation marks the run FAILED and closes any issued repository credentials; no queued run is left behind. |
-| Sandbox failure | Workflow step retries; the Flight's Artifacts repo is preserved; on final failure the Flight is FAILED with the reason. |
+| Sandbox failure | Workflow step retries; final failure marks the Flight FAILED and retains published work for 24 hours unless kept for recovery. Execution resources are released. |
 | No Flight Plan | Discovery timeout (30 min) → plan-timeout attention, Flight failed, no code executed. |
 | Route expansion | Publish gate rejects with the out-of-clearance symbols; the agent amends (request airspace) or reverts. Live runtimes fail after three unsuccessful publish attempts rather than integrate an older approved commit. Repeated gate violations raise attention. |
-| Validation failure | Missing or failed reports block integration. A failed test command fails the live run; published work is preserved in its repository. |
+| Validation failure | Missing or failed reports block integration. A failed test command fails the live run; published work is retained for 24 hours unless kept for recovery. |
 | Stale plan | Stale state immediately returns the runtime to refresh/replan, including when detected during tests. Replanning consumes the work budget; returning without an amended plan fails the run. |
 | Dependency failure | Flights that declared a dependency on a failed Flight raise attention. |
 | Git conflict | Preflight reports conflicting paths; the Flight is not landed; attention raised. |

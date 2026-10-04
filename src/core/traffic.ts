@@ -34,6 +34,8 @@ export interface TrafficInput {
 	flights: Flight[];
 	overrides: Override[];
 	semantic?: SemanticFinding[];
+	/** Native plans may bound newly declared contracts to their explicit write files. */
+	accesses?: Record<string, Access[]>;
 }
 
 export interface InteractionView {
@@ -89,7 +91,7 @@ export interface FlightClearance {
 
 export interface AttentionItem {
 	id: string;
-	kind: "deadlock" | "semantic" | "git-conflict" | "violation" | "flight-lost" | "plan-timeout" | "dependency-failed";
+	kind: "deadlock" | "semantic" | "git-conflict" | "violation" | "flight-lost" | "plan-timeout" | "dependency-failed" | "cleanup";
 	severity: Severity;
 	flights: string[];
 	title: string;
@@ -159,7 +161,7 @@ export function writeResources(accesses: Access[]): string[] {
 export function computeTraffic(input: TrafficInput): TrafficPicture {
 	const { index } = input;
 	const active = input.flights.filter(isActive).sort((a, b) => a.id.localeCompare(b.id));
-	const accesses = new Map(active.map((f) => [f.id, planAccesses(f.plan, index)]));
+	const accesses = new Map(active.map((f) => [f.id, input.accesses?.[f.id] ?? planAccesses(f.plan, index)]));
 	const overrides = new Map(input.overrides.map((o) => [o.congestionKey, o]));
 	const label = (id: string) => resourceLabel(id, index);
 

@@ -22,10 +22,14 @@ export interface IndexedSymbol {
 	startLine: number;
 	endLine: number;
 	exported: boolean;
+	/** Parser-derived public declaration shape, excluding implementation bodies and positions. */
+	contract?: string;
 }
 
 export interface IndexedFile {
 	path: string;
+	coverage?: "symbols" | "file";
+	limitation?: string;
 	module: string;
 	symbols: IndexedSymbol[];
 	/** Repo-relative paths of files this file imports (resolved where possible). */

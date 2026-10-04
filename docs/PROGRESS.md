@@ -76,3 +76,38 @@ Short, dated entries so another agent can continue. Newest last.
 - Final verification: `pnpm typecheck`, `pnpm lint`, `pnpm test` (156 tests across 20 files),
   `pnpm exec cf build --mode offline`, and the independent scenario verifier all pass. Remaining
   tooling notices are Biome's existing configuration deprecation and large graph bundle warnings.
+
+### 2026-10-04 — implementation plan refresh
+
+- Updated `PLAN.md` phase statuses against the implementation and recorded verification; corrected
+  Sandbox read-token/publish-gate handling and documented remaining Sandbox verification, Builds/
+  previews and refinement deployment. Platform observations and verification results are historical;
+  this documentation refresh did not recheck live infrastructure.
+
+### 2026-10-05 — durable Flight resource cleanup
+
+- Added terminal timestamps, immediate landed-repository cleanup after canonical commit/note checks,
+  24-hour retention for unsuccessful Flights, and authenticated keep/release controls in Flight details.
+- Persisted ownership before forks/Workflow creation. Independent cleanup steps survive restarts and
+  reset epochs, retry with bounded alarms, report repeated failures, and reconcile owned repos daily.
+  Paginated subscription removal and identity checks protect canonical and replacement repositories.
+- Terminal agents cannot obtain fresh credentials or continue protocol work. Workflow and sandbox
+  resources release immediately; delayed token minting, fork completion, and sandbox callbacks cannot
+  revive a Flight. Landed history remains readable; expired unsuccessful review returns HTTP 410.
+- `pnpm typecheck && pnpm lint && pnpm test` passed (187 tests across 24 files). The independent scenario
+  passed with signing disabled only for its disposable commits; reproducible demo history is unchanged.
+  Cloudflare type generation required a temporary localhost listener outside the filesystem sandbox.
+- No production deployment or live resource deletion performed. Unreachable durable Git objects remain
+  a separate maintenance concern; legacy resources without proven ownership are reported, not deleted.
+
+## 2026-10-05 — native platform direction
+
+- Superseded the GitHub-first implementation with native Systems, Cloudflare Access/MCP identity, Artifacts accepted source, isolated mission workspaces and immutable evidence outputs. Removed newly introduced GitHub authority code; preserved pre-existing cleanup changes and deterministic demo history.
+- Added intent/mission/proposal/verification/review/promotion/lineage controllers and shared adapters. Source publication verifies actual Git scope; human policy governs accepted-source promotion. Fixed unresolved-symbol fallback widening publication permissions.
+- Added native activity console, read-only evidence/source/diff inspection, human attestations, agent disagreement resolution and lineage. Legacy demo remains `/demo`; old live runner/Sandbox APIs are opt-in compatibility.
+- Native live Access/client adaptation, Artifacts/Jev smoke and labeled judgment-corpus gates remain outstanding. Automatic semantic constraints stay disabled; environment/release promotion and independently executed native verification are not represented as completed.
+
+- Final native checks: `pnpm typecheck`, `pnpm lint`, 245 Vitest tests, offline `cf` build and independent scenario verifier passed. The scenario was run with commit signing/hooks disabled only in the disposable fixture to avoid user-global GPG settings. Existing controller demo revisions remain reproducible in its tests.
+- Added a real-Git two-mission offline scenario: independent API publication, implementation promotion, required refresh/amendment, preservation of both histories and drafts, second promotion, exactly one Artifacts fork per workstream. Publication and promotion crash-recovery tests pass.
+- Browser inspected native sign-in at desktop/mobile widths and keyboard skip-link focus; the isolated legacy demo opens successfully. Authenticated native overview/lineage still needs live Access inspection. Cloudflare CLI reports not signed in; requested a non-production environment/Access hostname for live gates.
+- Hardened native governance: maintainers can re-enable a disabled system without enabling source access during suspension; removed members cannot retrieve system details through a replayed creation request. Tenant and role checks still apply.

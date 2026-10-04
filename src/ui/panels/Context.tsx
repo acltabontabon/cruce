@@ -294,6 +294,32 @@ function FlightDetail({ state, f, projectId, integrationBlockers, onSelect, act,
 					</section>
 				</div>
 				<aside className="detail-aside" aria-label="Run context">
+					{f.cleanup && (
+						<section>
+							<h3>Resource cleanup</h3>
+							<p>
+								{f.cleanup.deletedAt !== undefined
+									? `Repository removed ${timeOf(f.cleanup.deletedAt)}`
+									: f.cleanup.status === "retrying"
+										? "Cruce is retrying cleanup."
+										: f.cleanup.keep
+											? "Published work kept for recovery."
+											: f.phase === "landed"
+												? "Removing the Flight repository. Accepted work is preserved in main."
+												: `Published work expires ${new Date(f.cleanup.expiresAt).toLocaleString()}`}
+							</p>
+							{f.phase !== "landed" && f.cleanup.deletedAt === undefined && (
+								<button
+									type="button"
+									className="link"
+									disabled={busy}
+									onClick={() => void act({ type: "retain", flightId: f.id, keep: !f.cleanup?.keep }).catch(() => {})}
+								>
+									{f.cleanup.keep ? "Restore automatic expiry" : "Keep for recovery"}
+								</button>
+							)}
+						</section>
+					)}
 					<section>
 						<h3>Validation</h3>
 						{latest?.tests ? (

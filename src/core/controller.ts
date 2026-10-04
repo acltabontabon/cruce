@@ -3,7 +3,9 @@ import {
 	type AgentKind,
 	type ArtifactRef,
 	type CanonicalState,
+	FAILED_FLIGHT_RETENTION_MS,
 	type Flight,
+	type FlightCleanup,
 	type FlightInstruction,
 	type FlightPhase,
 	type FlightPlan,
@@ -56,6 +58,7 @@ export type TowerEventType =
 	| "override"
 	| "flight.failed"
 	| "flight.lost"
+	| "flight.cleanup"
 	| "artifacts.event"
 	| "agent.instruction"
 	| "attention";
@@ -204,6 +207,7 @@ export class Controller {
 
 	attachArtifact(flightId: string, artifact: ArtifactRef) {
 		const f = this.flight(flightId);
+		if (TERMINAL_PHASES.has(f.phase)) throw new ControllerError(`${flightId} is ${f.phase}`, 409);
 		f.artifact = artifact;
 		f.baseline = artifact.baseCommit;
 		this.emit("flight.phase", "artifacts", `${flightId} workspace forked: ${artifact.repo}`, flightId, [
@@ -220,6 +224,10 @@ export class Controller {
 		if (TERMINAL_PHASES.has(f.phase)) throw new ControllerError(`${flightId} is ${f.phase}`, 409);
 		if (f.phase === phase) return;
 		f.phase = phase;
+		if (TERMINAL_PHASES.has(phase)) {
+			this.finish(f);
+			this.leaseBook((b) => b.release(flightId));
+		}
 		if (phase === "discovery" && !f.startedAt) f.startedAt = this.now;
 		this.emit("flight.phase", "cruce", `${flightId} → ${phase.toUpperCase()}`, flightId, note ? [note] : undefined);
 		this.recompute();
@@ -227,6 +235,7 @@ export class Controller {
 
 	reportActivity(flightId: string, text: string) {
 		const f = this.flight(flightId);
+		if (TERMINAL_PHASES.has(f.phase)) throw new ControllerError(`${flightId} is ${f.phase}`, 409);
 		f.activity = { text: text.slice(0, 300), at: this.now };
 		f.lastHeartbeat = this.now;
 		this.leaseBook((b) => b.heartbeat(flightId, this.now));
@@ -235,6 +244,7 @@ export class Controller {
 
 	heartbeat(flightId: string) {
 		const f = this.flight(flightId);
+		if (TERMINAL_PHASES.has(f.phase)) throw new ControllerError(`${flightId} is ${f.phase}`, 409);
 		f.lastHeartbeat = this.now;
 		this.leaseBook((b) => b.heartbeat(flightId, this.now));
 	}
@@ -349,6 +359,7 @@ export class Controller {
 		baseIndex?: AirspaceIndex,
 	): GateResult & { reasons: string[] } {
 		const f = this.flight(flightId);
+		if (TERMINAL_PHASES.has(f.phase)) throw new ControllerError(`${flightId} is ${f.phase}`, 409);
 		const c = this.clearance(flightId);
 		const reasons: string[] = [];
 		if (!f.plan || !c) reasons.push("no Flight Plan on file");
@@ -530,6 +541,7 @@ export class Controller {
 		const changed = planAccesses(landedPlan, this.s.index).filter((a) => a.mode !== "read" && a.origin === "declared");
 
 		f.phase = "landed";
+		this.finish(f);
 		f.landedAt = this.now;
 		f.landedCommit = mergeCommit;
 		this.leaseBook((b) => b.release(flightId));
@@ -596,11 +608,12 @@ export class Controller {
 		const f = this.flight(flightId);
 		if (TERMINAL_PHASES.has(f.phase)) return;
 		f.phase = lost ? "lost" : "failed";
+		this.finish(f);
 		f.failureReason = reason;
 		const released = this.leaseBook((b) => b.release(flightId));
 		this.emit(lost ? "flight.lost" : "flight.failed", "cruce", `${flightId} ${lost ? "LOST" : "FAILED"}: ${reason}`, flightId, [
 			`released ${released.length} lease(s); dependent Flights re-evaluated`,
-			"its Artifacts repository is preserved for retry or inspection",
+			"its published work is retained for 24 hours unless kept for recovery",
 		]);
 		const dependents = this.s.flights.filter((x) => isActive(x) && x.plan.dependencies.includes(flightId)).map((x) => x.id);
 		if (lost || dependents.length) {
@@ -620,9 +633,71 @@ export class Controller {
 		const f = this.flight(flightId);
 		if (TERMINAL_PHASES.has(f.phase)) return;
 		f.phase = "cancelled";
+		this.finish(f);
 		this.leaseBook((b) => b.release(flightId));
 		this.emit("flight.phase", "human", `${flightId} CANCELLED by ${by}`, flightId);
 		this.recompute();
+	}
+
+	private finish(f: Flight) {
+		f.finishedAt ??= this.now;
+		f.cleanup ??= {
+			status: "pending",
+			expiresAt: f.finishedAt + (f.phase === "landed" ? 0 : FAILED_FLIGHT_RETENTION_MS),
+			keep: false,
+		};
+	}
+
+	/** Upgrade legacy terminal snapshots without guessing when unpublished work expired. */
+	backfillCleanup() {
+		for (const f of this.s.flights)
+			if (TERMINAL_PHASES.has(f.phase)) {
+				f.finishedAt ??= f.landedAt ?? this.now;
+				this.finish(f);
+			}
+	}
+
+	retainFlight(flightId: string, keep: boolean, by: string) {
+		const f = this.flight(flightId);
+		if (!TERMINAL_PHASES.has(f.phase) || f.phase === "landed")
+			throw new ControllerError("Only unsuccessful terminal Flights can be kept", 409);
+		this.finish(f);
+		if (f.cleanup?.deletedAt !== undefined) throw new ControllerError("Work expired", 410);
+		if (f.cleanup?.keep === keep) return;
+		(f.cleanup as FlightCleanup).keep = keep;
+		this.emit("flight.cleanup", "human", `${flightId}: ${keep ? "kept for recovery" : "automatic expiry restored"} by ${by}`, flightId);
+	}
+
+	recordCleanup(flightId: string, cleanup: FlightCleanup) {
+		const f = this.flight(flightId);
+		if (!TERMINAL_PHASES.has(f.phase)) throw new ControllerError("Cannot clean an active Flight", 409);
+		const before = f.cleanup;
+		f.cleanup = cleanup;
+		if (before?.status !== cleanup.status || before?.deletedAt !== cleanup.deletedAt)
+			this.emit("flight.cleanup", "cruce", `${flightId}: cleanup ${cleanup.status}`, flightId, [
+				cleanup.deletedAt !== undefined
+					? "Flight repository removed; coordination history preserved"
+					: `Repository expiry: ${cleanup.expiresAt}`,
+			]);
+	}
+
+	cleanupAttention(key: string, flightId: string | undefined, failed: boolean) {
+		const id = `cleanup:${key}`;
+		if (!failed) {
+			this.s.attention = this.s.attention.filter((a) => a.id !== id);
+			return;
+		}
+		const unowned = key.startsWith("unowned:");
+		this.raise({
+			id,
+			kind: "cleanup",
+			severity: "medium",
+			flights: flightId ? [flightId] : [],
+			title: unowned ? `Review repository ownership: ${key.slice(8)}` : `Resource cleanup needs attention: ${key}`,
+			detail: unowned
+				? "This repository resembles a Flight repository, but Cruce cannot establish ownership. Review it before deleting; automatic cleanup left it untouched."
+				: "Cruce could not finish cleanup after three attempts. Check resource ownership and Cloudflare availability; retries continue hourly.",
+		});
 	}
 
 	applyOverride(congestionKey: string, kind: OverrideKind, by: string, flightId?: string) {
@@ -680,6 +755,10 @@ export class Controller {
 	tick() {
 		for (const f of this.s.flights) {
 			if (TERMINAL_PHASES.has(f.phase)) continue;
+			if ((f.phase === "queued" || f.phase === "provisioning") && this.now - f.createdAt > PLAN_TIMEOUT_MS) {
+				this.fail(f.id, "provisioning timeout: Flight did not start within 30 minutes");
+				continue;
+			}
 			// Filing a plan is also agent contact. The fallback supports snapshots predating heartbeats.
 			const lastContact = f.plan ? Math.max(f.lastHeartbeat ?? f.plan.filedAt, f.plan.filedAt) : undefined;
 			if (lastContact !== undefined && lastContact + LEASE_TTL_MS <= this.now) {

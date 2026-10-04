@@ -5,5 +5,6 @@ export default defineConfig({
 	test: {
 		include: ["test/**/*.test.ts"],
 		environment: "node",
+		server: { deps: { inline: ["@cloudflare/workers-oauth-provider", "agents"] } },
 	},
 });

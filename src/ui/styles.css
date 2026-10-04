@@ -2003,3 +2003,351 @@ svg {
 	font-size: 11.5px;
 	margin-top: 2px;
 }
+
+/* Native development console; diagnostic legacy traffic styles remain isolated below. */
+.system-console {
+	min-height: 100dvh;
+	height: auto;
+	overflow: visible;
+	background: var(--bg);
+}
+.system-header {
+	display: flex;
+	align-items: center;
+	gap: 24px;
+	min-height: 72px;
+	padding: 16px 32px;
+	border-bottom: 1px solid var(--line);
+}
+.system-header .wordmark {
+	font-size: 20px;
+	font-weight: 650;
+	letter-spacing: -0.7px;
+	color: var(--text);
+	text-decoration: none;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+.brand-dot {
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: var(--clear);
+}
+.spacer {
+	flex: 1;
+}
+.system-main {
+	max-width: 1120px;
+	margin: auto;
+	width: 100%;
+	padding: 48px 32px 80px;
+}
+.system-main h1 {
+	font-size: 30px;
+	font-weight: 550;
+	letter-spacing: -1px;
+	margin: 6px 0 12px;
+}
+.system-main h2 {
+	font-size: 17px;
+	font-weight: 550;
+	margin: 0 0 20px;
+}
+.system-main h3 {
+	font-size: 14px;
+	font-weight: 550;
+	margin: 24px 0 12px;
+}
+.system-console .muted {
+	color: var(--muted);
+	font-size: 12px;
+	line-height: 1.6;
+}
+.eyebrow {
+	font-size: 11px;
+	color: var(--muted);
+	letter-spacing: 0.04em;
+	margin: 0;
+}
+.overview-heading {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	margin-bottom: 44px;
+}
+.activity-section {
+	padding: 24px 0;
+	border-top: 1px solid var(--line);
+}
+.count {
+	color: var(--faint);
+	margin-left: 8px;
+	font: 12px var(--mono);
+}
+.workstream-row {
+	display: flex;
+	align-items: center;
+	text-align: left;
+	gap: 14px;
+	width: 100%;
+	padding: 16px 4px;
+	border: 0;
+	border-top: 1px solid var(--line);
+	background: transparent;
+	color: var(--text);
+	cursor: pointer;
+}
+.workstream-row:hover {
+	background: var(--surface);
+}
+.workstream-summary {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+}
+.workstream-summary strong {
+	font-size: 13px;
+	font-weight: 500;
+}
+.workstream-summary small {
+	color: var(--muted);
+	font-size: 11px;
+	line-height: 1.5;
+}
+.system-console .state-dot {
+	width: 6px;
+	height: 6px;
+	flex-shrink: 0;
+	border-radius: 50%;
+	background: var(--muted);
+}
+.system-console .state-dot[data-state="Working safely"],
+.system-console .state-dot[data-state="Coordinated"],
+.system-console .state-dot[data-state="Ready"] {
+	background: var(--clear);
+}
+.system-console .state-dot[data-state="Waiting"] {
+	background: var(--hold);
+}
+.system-console .state-dot[data-state="Needs attention"] {
+	background: var(--collision);
+}
+.task-status {
+	font-size: 11px;
+	color: var(--text-2);
+	max-width: 160px;
+}
+.timeline-row {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 4px;
+	padding: 12px 0;
+	width: 100%;
+	text-align: left;
+	font-size: 13px;
+	background: transparent;
+	border: 0;
+	color: var(--text);
+}
+.intent-entry {
+	padding: 24px 0;
+	border-top: 1px solid var(--line);
+}
+.system-console summary {
+	cursor: pointer;
+	color: var(--text-2);
+	padding: 10px 0;
+}
+.system-console form {
+	max-width: 640px;
+	padding-top: 16px;
+}
+.system-console label {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	font-size: 12px;
+	color: var(--text-2);
+	margin: 16px 0;
+}
+.system-console input,
+.system-console textarea,
+.system-console select {
+	color: var(--text);
+	background: var(--surface);
+	border: 1px solid var(--line-2);
+	border-radius: 4px;
+	padding: 10px 12px;
+	font: 12px var(--sans);
+}
+.system-console textarea {
+	min-height: 100px;
+	resize: vertical;
+}
+.system-console button:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+.system-console :focus-visible {
+	outline: 2px solid var(--text-2);
+	outline-offset: 4px;
+}
+.system-console .quiet {
+	background: transparent;
+	color: var(--text-2);
+}
+.system-selector {
+	margin: 0 !important;
+}
+.system-selector select {
+	max-width: 220px;
+}
+.workstream-detail {
+	margin: 28px 0;
+	padding: 28px;
+	background: var(--surface);
+	border: 1px solid var(--line-2);
+	border-radius: 6px;
+}
+.workstream-detail > .eyebrow {
+	margin-top: 24px;
+}
+.workstream-detail p {
+	font-size: 13px;
+	line-height: 1.7;
+}
+.workstream-detail pre {
+	max-height: 55vh;
+	overflow: auto;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	padding: 16px;
+	background: var(--bg);
+	border: 1px solid var(--line);
+	font: 11px / 1.7 var(--mono);
+}
+.evidence-row {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 14px 0;
+	border-bottom: 1px solid var(--line);
+	font-size: 12px;
+}
+.evidence-row strong {
+	font-weight: 500;
+}
+.review-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin: 16px 0;
+}
+.coverage-note {
+	font-size: 12px;
+	color: var(--hold);
+	padding: 10px 0;
+}
+.console-error {
+	font-size: 13px;
+	color: var(--collision);
+	padding: 14px 0;
+}
+.console-empty {
+	margin: 12vh 0;
+	max-width: 620px;
+}
+.console-empty p {
+	color: var(--muted);
+	line-height: 1.7;
+}
+.coordination-graph > .react-flow {
+	height: min(65vh, 620px);
+	min-height: 300px;
+	border: 1px solid var(--line);
+	background: var(--surface);
+}
+.system-console .react-flow__node {
+	background: var(--panel);
+	color: var(--text);
+	border: 1px solid var(--line-2);
+	border-radius: 5px;
+	padding: 0;
+}
+.graph-workstream {
+	width: 100%;
+	min-height: 90px;
+	padding: 14px;
+	background: transparent;
+	border: 0;
+	color: var(--text);
+	text-align: left;
+	cursor: pointer;
+}
+.graph-workstream small {
+	color: var(--muted);
+	font: 10px var(--mono);
+	text-transform: uppercase;
+}
+.graph-workstream strong {
+	display: block;
+	margin-top: 8px;
+	font-size: 12px;
+	font-weight: 500;
+	line-height: 1.5;
+}
+.system-console .react-flow__edge-path {
+	stroke: var(--line-2);
+	stroke-width: 1.4;
+}
+@media (max-width: 600px) {
+	.system-header {
+		padding: 12px 16px;
+		gap: 12px;
+		flex-wrap: wrap;
+	}
+	.system-header > span.muted {
+		display: none;
+	}
+	.system-main {
+		padding: 28px 16px 48px;
+	}
+	.overview-heading {
+		align-items: flex-start;
+	}
+	.system-main h1 {
+		font-size: 25px;
+	}
+	.task-status {
+		max-width: 90px;
+		font-size: 10px;
+	}
+	.workstream-detail {
+		padding: 18px;
+	}
+	.system-selector select {
+		max-width: 170px;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.system-console *,
+	.system-console *::before,
+	.system-console *::after {
+		animation: none !important;
+		transition: none !important;
+		scroll-behavior: auto !important;
+	}
+}
+
+.system-console .react-flow__controls-button {
+	background: var(--panel);
+	color: var(--text-2);
+	fill: var(--text-2);
+	border-color: var(--line);
+}

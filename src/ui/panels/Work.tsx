@@ -15,7 +15,6 @@ import {
 	short,
 } from "../model.ts";
 import type { Selection } from "../radar/Radar.tsx";
-import { Launch } from "./Launch.tsx";
 
 interface Props {
 	state: ControllerState;
@@ -27,7 +26,7 @@ interface Props {
 	onLaunch(input: { title: string; description: string; priority: string }): Promise<unknown>;
 	act(cmd: Record<string, unknown>): Promise<unknown>;
 }
-export function Work({ state, liveAgents, busy, attentionOnly, onSelect, onAttention, onLaunch, act }: Props) {
+export function Work({ state, busy, attentionOnly, onSelect, onAttention, act }: Props) {
 	const c = counts(state);
 	const attention = attentionItems(state);
 	const allActive = state.flights.filter(isActive);
@@ -45,7 +44,7 @@ export function Work({ state, liveAgents, busy, attentionOnly, onSelect, onAtten
 							? "Concurrent tasks, coordinated."
 							: completed.length
 								? "No active work. Review completed and closed runs below."
-								: "Give an agent something to do."}
+								: "Connected tools register work automatically."}
 					</p>
 				</div>
 				<button
@@ -63,7 +62,6 @@ export function Work({ state, liveAgents, busy, attentionOnly, onSelect, onAtten
 					</span>
 				</button>
 			</div>
-			{state.project.mode === "live" && <Launch liveAgents={liveAgents} busy={busy} onLaunch={onLaunch} />}
 			{attention.length > 0 && (
 				<section className="attention-list" aria-label="Needs attention">
 					{attention.map((a) => (
@@ -157,7 +155,7 @@ export function Work({ state, liveAgents, busy, attentionOnly, onSelect, onAtten
 									: "Routine coordination is handled automatically."
 								: state.project.mode === "demo"
 									? "Continue or replay the demo to see three agents work together."
-									: "Add a task above. Cruce coordinates agents when their work overlaps."}
+									: "Continue in your existing coding tools. Cruce coordinates their reported work."}
 						</p>
 					</div>
 				)}

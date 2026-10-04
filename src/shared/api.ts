@@ -101,6 +101,7 @@ export const HumanCommand = z.discriminatedUnion("type", [
 	z.object({ type: z.literal("clear-override"), congestionKey: z.string() }),
 	z.object({ type: z.literal("dismiss"), attentionId: z.string() }),
 	z.object({ type: z.literal("cancel"), flightId: z.string() }),
+	z.object({ type: z.literal("retain"), flightId: z.string(), keep: z.boolean() }),
 	z.object({ type: z.literal("reroute"), flightId: z.string() }),
 	z.object({ type: z.literal("land"), flightId: z.string() }),
 	z.object({

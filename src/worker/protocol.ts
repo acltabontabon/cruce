@@ -12,6 +12,7 @@ import type { Tower } from "./tower.ts";
  */
 export async function handleProtocol(tower: Tower, flightId: string, req: ProtocolRequest): Promise<unknown> {
 	const f = tower.flight(flightId);
+	if (!["status", "fail"].includes(req.op)) tower.assertActive(flightId);
 	switch (req.op) {
 		case "status":
 			return status(tower, flightId);
@@ -67,7 +68,7 @@ export async function handleProtocol(tower: Tower, flightId: string, req: Protoc
 			if (!f.artifact) throw new Error(`${flightId} has no repository yet`);
 			return {
 				remote: f.artifact.remote,
-				readToken: await tower.git.readToken(flightId),
+				readToken: await tower.readToken(flightId),
 				head: await tower.git.resolve(flightRef(flightId)),
 			};
 		}
@@ -79,7 +80,7 @@ export async function handleProtocol(tower: Tower, flightId: string, req: Protoc
 		case "fail":
 			tower.mutate((c) => c.fail(flightId, req.reason));
 			await tower.closeFlight(flightId);
-			return { ok: true, phase: f.phase };
+			return { ok: true, phase: tower.flight(flightId).phase };
 	}
 }
 
@@ -98,7 +99,8 @@ export async function status(tower: Tower, flightId: string) {
 		stale: f.stale ?? null,
 		baseline: f.baseline,
 		head: await tower.git.resolve(flightRef(flightId)),
-		artifact: f.artifact ? { repo: f.artifact.repo, remote: f.artifact.remote } : null,
+		artifact: f.artifact && f.finishedAt === undefined ? { repo: f.artifact.repo, remote: f.artifact.remote } : null,
+		cleanup: f.cleanup ?? null,
 		brief: clearanceBrief(tower.state, flightId),
 		instruction: f.instruction ?? null,
 	};

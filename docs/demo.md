@@ -1,3 +1,13 @@
+# Demonstrations — current direction
+
+Production opens on the authenticated native activity console at `/`. The existing deterministic coordination demo remains isolated at `/demo`; its auth-service revisions and scenario verifier are unchanged. It demonstrates the retained scheduling engine, not native human approval or live independent verification.
+
+The native payment fixture is `demo/payment-service`. `test/worker/system-runtime.test.ts` exercises real Git objects, source publication, evidence artifacts, native proposal, human attestation/review, gated promotion, lineage and export with a mocked Artifacts transport. `test/core/workstreams.test.ts` verifies partial clearance, sessions, dependencies and drift. The two-mission runtime scenario also preserves both histories through a real three-way source refresh and accepts both proposals with exactly two workspace forks. These are offline tests with a mocked Artifacts transport, not live agent runs.
+
+The native live narrative is: human records payment reliability intent; implementation and API agents accept bounded missions; independent scope continues; implementation produces an immutable source proposal with evidence; a human reviews and promotes; the dependent agent refreshes context and amends its plan; the human inspects the causal lineage afterward. A native release demo must identify human attestation versus runtime-verified results and never substitute scripted messages for real execution.
+
+## Historical deterministic demo
+
 # Demo
 
 Two modes share the same controller, Git integration, and Work/Traffic interface:
@@ -111,4 +121,6 @@ Live reroute requests are delivered at an agent boundary and acknowledged after 
 plan shows whether a different route was feasible. Cancellation prevents subsequent publication but
 does not interrupt an already-running model process immediately. Waiting runs keep heartbeating without
 spending execution rounds. Integration requires the latest approved commit's validation report, and
-failed tests or exhausted publish retries fail the run while preserving its published repository.
+failed tests or exhausted publish retries fail the run while retaining published work for 24 hours,
+unless explicitly kept for recovery. Successful landings preserve accepted work and notes in canonical
+and automatically remove their Flight repositories. See [Flight resource cleanup](flight-cleanup.md).

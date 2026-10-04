@@ -150,6 +150,9 @@ export interface Flight {
 	createdAt: number;
 	startedAt?: number;
 	landedAt?: number;
+	/** First terminal transition, using the controller's injected clock. */
+	finishedAt?: number;
+	cleanup?: FlightCleanup;
 	baseline: string;
 	plan?: FlightPlan;
 	planHistory: FlightPlan[];
@@ -167,6 +170,15 @@ export interface Flight {
 	/** Acknowledgement confirms receipt; an amended plan and clearance show the outcome. */
 	instruction?: FlightInstruction;
 }
+
+export interface FlightCleanup {
+	status: "pending" | "retained" | "retrying" | "complete";
+	expiresAt: number;
+	keep: boolean;
+	deletedAt?: number;
+}
+
+export const FAILED_FLIGHT_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 export interface Lease {
 	resource: string;

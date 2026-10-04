@@ -59,6 +59,12 @@ export function evaluatePublish(
 
 	for (const change of changes) {
 		const fid = fileId(change.path);
+		if (index.files.find((f) => f.path === change.path)?.coverage === "file") {
+			touched.add(fid);
+			if (!covered(fid))
+				outside.push({ path: change.path, resource: fid, reason: "File-level analysis requires file or module clearance" });
+			continue;
+		}
 		if (change.status === "added") {
 			touched.add(fid);
 			if (covered(fid)) continue;

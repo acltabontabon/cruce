@@ -1,3 +1,7 @@
+# Native setup clarification
+
+For the current native system, Access identity, MCP and Artifacts source flow, follow [native setup](native-setup.md). The material below preserves historical deployment, deterministic demo and opt-in runner/Sandbox provisioning details. It is not a requirement to launch an agent or connect GitHub/GitLab.
+
 # Cloudflare setup
 
 Everything here was set up with the `cf` CLI (1.0.0-beta.12) and `cloudflare.config.ts`. Wrangler is not

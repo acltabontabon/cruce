@@ -1,8 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
 import { resolveResource, resourceLabel } from "../core/airspace.ts";
 import type { ControllerState, TowerEvent } from "../core/controller.ts";
-import { Controller, clearanceBrief } from "../core/controller.ts";
+import { Controller, ControllerError, clearanceBrief } from "../core/controller.ts";
 import { TERMINAL_PHASES } from "../core/domain.ts";
+import type { JevBinding } from "../intelligence/jev.ts";
 import { type DecisionJudge, ModelDecisionJudge, RuleBasedDecisionJudge } from "../intelligence/judge.ts";
 import {
 	type DemoCommand,
@@ -13,6 +14,8 @@ import {
 	type ServerMessage,
 	type Snapshot,
 } from "../shared/api.ts";
+import type { Command, Principal, SystemConnection } from "../shared/coordination.ts";
+import type { Actor, PlatformCommand } from "../shared/platform.ts";
 import type { FlightSandbox, TaskStatus } from "./agents/flight-sandbox.ts";
 import type { FlightParams } from "./agents/flight-workflow.ts";
 import { ArtifactsHost } from "./artifacts-host.ts";
@@ -22,6 +25,7 @@ import { SqlFs } from "./git/sql-fs.ts";
 import { GitWorkspace } from "./git/workspace.ts";
 import { ProjectGit } from "./project-git.ts";
 import { handleProtocol } from "./protocol.ts";
+import { SystemRuntime } from "./system-runtime.ts";
 import { Tower, type TowerStore } from "./tower.ts";
 
 /**
@@ -40,11 +44,16 @@ export interface TowerEnv {
 	FLIGHT_WORKFLOW?: Workflow<FlightParams>;
 	FLIGHT_SANDBOX?: DurableObjectNamespace<FlightSandbox>;
 	ANTHROPIC_API_KEY?: string;
+	AI?: JevBinding;
+	CRUCE_DEEP_JUDGE?: string;
+	CRUCE_DEEP_JUDGE_KEY?: string;
 }
 
 const LIVE_TICK_MS = 30_000;
 
 export class ControlTower extends DurableObject<TowerEnv> {
+	private systemRuntime?: SystemRuntime;
+	private systemOpening?: Promise<SystemRuntime>;
 	private tower?: Tower;
 	private meta?: ProjectMeta;
 	private opening?: Promise<Tower>;
@@ -58,6 +67,74 @@ export class ControlTower extends DurableObject<TowerEnv> {
 			`CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY, at INTEGER NOT NULL, type TEXT NOT NULL, flight TEXT, body TEXT NOT NULL)`,
 		);
 		ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL)`);
+	}
+
+	private async nativeSystem(system: SystemConnection): Promise<SystemRuntime> {
+		if (this.systemOpening) return this.systemOpening;
+		if (this.systemRuntime) {
+			await this.systemRuntime.coordination.metadata(system);
+			return this.systemRuntime;
+		}
+		this.systemOpening = (async () => {
+			const git = new GitWorkspace(new SqlFs(this.ctx.storage.sql), "/native.git"),
+				host = this.env.ARTIFACTS ? new ArtifactsHost(this.env.ARTIFACTS, this.env.ARTIFACTS_NAMESPACE) : undefined;
+			const runtime = new SystemRuntime(
+				this.store(),
+				git,
+				system,
+				host,
+				(p) => this.ctx.waitUntil(p.then(() => this.schedule())),
+				Date.now,
+				this.env.AI,
+			);
+			this.ctx.storage.kv.put("native-system", system);
+			await runtime.initialize();
+			this.systemRuntime = runtime;
+			return runtime;
+		})();
+		try {
+			return await this.systemOpening;
+		} finally {
+			this.systemOpening = undefined;
+		}
+	}
+	async coordination(system: SystemConnection, cmd: Command, actor: Principal) {
+		const runtime = await this.nativeSystem(system),
+			result = await runtime.coordination.command(cmd, actor);
+		await this.schedule();
+		return result;
+	}
+	async nativeCommand(system: SystemConnection, cmd: PlatformCommand, actor: Actor) {
+		const runtime = await this.nativeSystem(system),
+			result = await runtime.command(cmd, actor);
+		await this.schedule();
+		return result;
+	}
+	async systemSnapshot(system: SystemConnection, actor: Actor) {
+		return (await this.nativeSystem(system)).snapshot(actor);
+	}
+	async systemOverride(
+		system: SystemConnection,
+		actor: Principal,
+		id: string,
+		resources: string[],
+		reason: string,
+		fingerprint: string,
+		expiresAt: number,
+	) {
+		return (await this.nativeSystem(system)).coordination.override(actor, id, resources, reason, fingerprint, expiresAt);
+	}
+	async exportSource(system: SystemConnection, actor: Principal) {
+		const runtime = await this.nativeSystem(system);
+		runtime.authorize(actor);
+		return {
+			head: runtime.coordination.state().system.canonicalHead!,
+			pack: await runtime.git.exportPack(runtime.coordination.state().system.canonicalHead!),
+		};
+	}
+	async systemArtifactEvent(system: SystemConnection) {
+		const runtime = await this.nativeSystem(system);
+		return runtime.verifySource();
 	}
 
 	// ── setup ───────────────────────────────────────────────────────────
@@ -103,11 +180,41 @@ export class ControlTower extends DurableObject<TowerEnv> {
 				onChange: (state, events) => {
 					this.broadcastUpdate(state, events, this.demoStatus());
 					this.wakeLiveFlights(state, events);
-					if (meta.mode === "live") this.ctx.waitUntil(this.schedule());
+					this.ctx.waitUntil(this.schedule());
 				},
 				onRepo: subs ? async (repo) => void (await subs.subscribeRepo(repo)) : undefined,
-				onRepoRemoved: subs ? async (repo) => subs.unsubscribeRepo(repo) : undefined,
+				onRepoRemoved: host
+					? async (repo) => {
+							if (!subs) throw new Error("Event subscription cleanup credentials unavailable");
+							await subs.unsubscribeRepo(repo);
+						}
+					: undefined,
 				background: (work) => this.ctx.waitUntil(work),
+				releaseWorkflow: async (record) => {
+					if (!record.workflowId) return;
+					if (!this.env.FLIGHT_WORKFLOW) throw new Error("Workflow binding unavailable for cleanup");
+					let instance: WorkflowInstance;
+					try {
+						instance = await this.env.FLIGHT_WORKFLOW.get(record.workflowId);
+					} catch (error) {
+						if (/not found|does not exist|not exist/i.test(String(error))) return;
+						throw error;
+					}
+					const { status } = await instance.status();
+					if (!["complete", "errored", "terminated"].includes(status)) {
+						try {
+							await instance.terminate();
+						} catch (error) {
+							if (!["complete", "errored", "terminated"].includes((await instance.status()).status)) throw error;
+						}
+					}
+					if (this.ctx.storage.kv.get(`wf:${record.flightId}`) === record.workflowId) this.ctx.storage.kv.delete(`wf:${record.flightId}`);
+				},
+				releaseSandbox: async (record) => {
+					if (!record.sandboxId) return;
+					if (!this.env.FLIGHT_SANDBOX) throw new Error("Sandbox binding unavailable for cleanup");
+					await this.env.FLIGHT_SANDBOX.getByName(record.sandboxId).destroy();
+				},
 			},
 			Date.now,
 			meta.firstFlight,
@@ -117,14 +224,15 @@ export class ControlTower extends DurableObject<TowerEnv> {
 		this.meta = meta;
 		this.tower = tower;
 		await tower.bootstrap();
-		if (meta.mode === "live") await this.schedule();
+		await this.schedule();
 		return tower;
 	}
 
 	/** Rule-based judgment always; the narrow model judge only on the live project with a key. */
 	private judges(meta: ProjectMeta): DecisionJudge[] {
 		const judges: DecisionJudge[] = [new RuleBasedDecisionJudge()];
-		if (meta.mode === "live" && this.env.ANTHROPIC_API_KEY) judges.push(new ModelDecisionJudge(this.env.ANTHROPIC_API_KEY));
+		if (meta.mode === "live" && this.env.CRUCE_DEEP_JUDGE === "on" && this.env.CRUCE_DEEP_JUDGE_KEY)
+			judges.push(new ModelDecisionJudge(this.env.CRUCE_DEEP_JUDGE_KEY));
 		return judges;
 	}
 
@@ -208,6 +316,10 @@ export class ControlTower extends DurableObject<TowerEnv> {
 				tower.mutate((c) => c.cancel(cmd.flightId, by));
 				await tower.closeFlight(cmd.flightId);
 				return { ok: true };
+			case "retain":
+				tower.retain(cmd.flightId, cmd.keep, by);
+				await this.schedule();
+				return { ok: true };
 			case "reroute":
 				return this.reroute(tower, cmd.flightId, by);
 			case "land":
@@ -265,11 +377,19 @@ export class ControlTower extends DurableObject<TowerEnv> {
 			return c.createFlight({ missionId: m.id, agent: "claude-code", agentRuntime: "Claude Code · Cloudflare Sandbox" });
 		});
 		try {
+			const resources = tower.cleanup.ensure(flight);
+			const workflowId = `${tower.project.id}-${flight.id.toLowerCase()}-${Date.now().toString(36)}`;
+			tower.cleanup.register(resources.key, { workflowId, sandboxId: `${tower.project.id}-${flight.id}` });
 			const instance = await this.env.FLIGHT_WORKFLOW.create({
-				id: `${tower.project.id}-${flight.id.toLowerCase()}-${Date.now().toString(36)}`,
+				id: workflowId,
 				params: { projectId: tower.project.id, flightId: flight.id },
 			});
 			this.ctx.storage.kv.put(`wf:${flight.id}`, instance.id);
+			tower.cleanup.register(resources.key, { workflowId: instance.id });
+			if (TERMINAL_PHASES.has(tower.flight(flight.id).phase)) {
+				await tower.closeFlight(flight.id);
+				throw new ControllerError("Flight closed during launch", 409);
+			}
 			tower.mutate((c) => c.note("flight.phase", "cruce", `${flight.id} launched · workflow ${instance.id}`, flight.id));
 			return { flightId: flight.id, workflow: instance.id };
 		} catch (error) {
@@ -316,6 +436,7 @@ export class ControlTower extends DurableObject<TowerEnv> {
 
 	async liveProvision(projectId: string, flightId: string) {
 		const tower = await this.open(projectId);
+		tower.assertActive(flightId);
 		if (!tower.flight(flightId).artifact) await tower.provision(flightId);
 		const a = tower.flight(flightId).artifact;
 		if (!a) throw new Error("provisioning failed");
@@ -324,6 +445,7 @@ export class ControlTower extends DurableObject<TowerEnv> {
 
 	async liveMission(projectId: string, flightId: string) {
 		const tower = await this.open(projectId);
+		tower.assertActive(flightId);
 		const f = tower.flight(flightId);
 		const m = tower.state.missions.find((x) => x.id === f.missionId);
 		return { flightId, title: m?.title ?? f.title, description: m?.description ?? f.title };
@@ -358,6 +480,7 @@ export class ControlTower extends DurableObject<TowerEnv> {
 
 	async liveActivity(projectId: string, flightId: string, text: string) {
 		const tower = await this.open(projectId);
+		tower.assertActive(flightId);
 		tower.mutate((c) => c.reportActivity(flightId, text));
 	}
 
@@ -366,12 +489,13 @@ export class ControlTower extends DurableObject<TowerEnv> {
 		const tower = await this.open(projectId);
 		const f = tower.flight(flightId);
 		if (TERMINAL_PHASES.has(f.phase)) throw new Error(`${flightId} is ${f.phase}`);
-		return tower.git.readToken(flightId);
+		return tower.readToken(flightId);
 	}
 
 	/** The sandbox finished an agent task; forward it to the Flight's workflow. */
 	async agentTaskDone(projectId: string, flightId: string, label: string, status: TaskStatus) {
 		const tower = await this.open(projectId);
+		if (TERMINAL_PHASES.has(tower.flight(flightId).phase)) return;
 		tower.mutate((c) =>
 			c.note(
 				"flight.activity",
@@ -474,7 +598,14 @@ export class ControlTower extends DurableObject<TowerEnv> {
 
 	async history(projectId: string, target: string) {
 		const tower = await this.open(projectId);
-		const ref = target === "canonical" ? "refs/heads/main" : `refs/heads/flights/${target}`;
+		const flight = target === "canonical" ? undefined : tower.flight(target);
+		if (flight && flight.phase !== "landed" && flight.cleanup?.deletedAt !== undefined) throw new ControllerError("Work expired", 410);
+		const ref =
+			flight?.phase === "landed"
+				? (flight.artifact?.head ?? (flight.landedCommit as string))
+				: target === "canonical"
+					? "refs/heads/main"
+					: `refs/heads/flights/${target}`;
 		return tower.git.history(ref, 30);
 	}
 
@@ -510,7 +641,8 @@ export class ControlTower extends DurableObject<TowerEnv> {
 					`${evt.payload.ref} ${short(evt.payload.before)} → ${short(evt.payload.after)}`,
 					...(evt.payload.commits ?? []).slice(0, 3).map((x) => `${x.id.slice(0, 7)} ${x.message.split("\n")[0]}`),
 				]);
-				if (flight && evt.payload.after && evt.payload.ref === "refs/heads/main") c.recordPush(flight.id, evt.payload.after, "event");
+				if (flight && !TERMINAL_PHASES.has(flight.phase) && evt.payload.after && evt.payload.ref === "refs/heads/main")
+					c.recordPush(flight.id, evt.payload.after, "event");
 			} else {
 				c.note(
 					"artifacts.event",
@@ -590,18 +722,33 @@ export class ControlTower extends DurableObject<TowerEnv> {
 	private async updateAlarm() {
 		const demo = this.demoStatus();
 		const candidates: number[] = [];
+		const semanticAt = this.systemRuntime?.coordination.nextAlarm();
+		if (this.systemRuntime?.host && this.systemRuntime.coordination.state().workstreams.some((w) => w.state === "active"))
+			candidates.push(Date.now() + LIVE_TICK_MS);
+		if (semanticAt !== undefined) candidates.push(Math.max(Date.now() + 1000, semanticAt));
 		if (demo?.running && demo.nextAt) candidates.push(demo.nextAt);
 		if (this.meta?.mode === "live" && this.tower?.state.flights.some((f) => !TERMINAL_PHASES.has(f.phase)))
 			candidates.push(Date.now() + LIVE_TICK_MS);
+		const cleanupAt = this.tower?.cleanup.nextAt();
+		if (cleanupAt !== undefined) candidates.push(Math.max(Date.now() + 1_000, cleanupAt));
 		if (candidates.length) {
 			const previous = await this.ctx.storage.getAlarm();
 			const desired = Math.min(...candidates);
-			const next = this.meta?.mode === "live" && previous !== null ? Math.min(previous, desired) : desired;
+			const active = this.meta?.mode === "live" && this.tower?.state.flights.some((f) => !TERMINAL_PHASES.has(f.phase));
+			const next = active && previous !== null ? Math.min(previous, desired) : desired;
 			if (previous !== next) await this.ctx.storage.setAlarm(next);
 		} else await this.ctx.storage.deleteAlarm();
 	}
 
 	async alarm() {
+		const system = this.ctx.storage.kv.get("native-system") as SystemConnection | undefined;
+		if (system) {
+			const runtime = await this.nativeSystem(system);
+			await runtime.verifySource();
+			await runtime.coordination.runJev();
+			await this.schedule();
+			return;
+		}
 		const projectId = (this.ctx.storage.kv.get("projectId") as string | undefined) ?? "demo";
 		const tower = await this.open(projectId);
 		const demo = this.demoStatus();
@@ -611,9 +758,12 @@ export class ControlTower extends DurableObject<TowerEnv> {
 				if (current?.running && current.nextAt && current.nextAt <= Date.now() + 50) await this.advance(tower);
 				else await this.schedule();
 			});
+			await tower.cleanup.run();
+			await this.schedule();
 			return;
 		}
 		if (tower.project.mode === "live") tower.mutate((c) => c.tick());
+		await tower.cleanup.run();
 		await this.schedule();
 	}
 }

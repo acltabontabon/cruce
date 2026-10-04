@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ProjectInfo } from "../../src/core/domain.ts";
 import { overlayFiles, SESSION_CLEANUP } from "../../src/demo/scenario.ts";
 import { ProtocolRequest } from "../../src/shared/api.ts";
@@ -41,6 +41,32 @@ async function setup() {
 }
 
 describe("agent protocol", () => {
+	it("does not revive a Flight when provisioning finishes after cancellation", async () => {
+		const { tower, id } = await setup();
+		const artifact = tower.flight(id).artifact!;
+		let finish!: () => void;
+		vi.spyOn(tower.git, "createFlightWorkspace").mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finish = () => resolve(artifact);
+				}),
+		);
+		const provisioning = tower.provision(id);
+		tower.mutate((c) => c.cancel(id, "you"));
+		await tower.closeFlight(id);
+		finish();
+		await expect(provisioning).rejects.toThrow("closed during provisioning");
+		expect(tower.flight(id).phase).toBe("cancelled");
+		expect(tower.cleanup.records()[0].provisionUntil).toBeUndefined();
+	});
+	it("rejects terminal checkout, refresh, heartbeat, and activity while preserving status", async () => {
+		const { tower, id, call } = await setup();
+		tower.mutate((c) => c.cancel(id, "you"));
+		await tower.closeFlight(id);
+		for (const request of [{ op: "checkout" }, { op: "refresh" }, { op: "heartbeat" }, { op: "activity", text: "late" }])
+			await expect(call(request)).rejects.toThrow("cancelled");
+		expect(await call({ op: "status" })).toMatchObject({ phase: "cancelled", artifact: null });
+	});
 	it("plan → status → publish → validate → land", async () => {
 		const { tower, id, call } = await setup();
 		const filed = await call({ op: "plan", plan: SESSION_CLEANUP });

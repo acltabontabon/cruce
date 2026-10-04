@@ -13,7 +13,7 @@ import type { AirspaceIndex, IndexedFile, IndexedModule, IndexedSymbol, SymbolKi
 export interface StructuralIndexer {
 	readonly name: string;
 	supports(path: string): boolean;
-	indexFile(path: string, source: string): { symbols: IndexedSymbol[]; imports: string[] };
+	indexFile(path: string, source: string): { symbols: IndexedSymbol[]; imports: string[]; limitation?: string };
 }
 
 interface ModuleConfig {
@@ -41,13 +41,13 @@ export class BabelTypeScriptIndexer implements StructuralIndexer {
 				errorRecovery: true,
 			});
 		} catch {
-			return { symbols: [], imports: [] };
+			return { symbols: [], imports: [], limitation: "Parser failed; file-level coordination only" };
 		}
 		const symbols: IndexedSymbol[] = [];
 		const imports = new Set<string>();
 		const start = (n: Node) => Math.min(n.loc.start.line, ...(n.leadingComments ?? []).map((c: Node) => c.loc.start.line));
 		const add = (name: string, kind: SymbolKind, n: Node, outer: Node, exported: boolean) =>
-			symbols.push({ name, kind, startLine: start(outer), endLine: n.loc.end.line, exported });
+			symbols.push({ name, kind, startLine: start(outer), endLine: n.loc.end.line, exported, contract: declarationShape(n) });
 
 		for (const stmt of ast.program.body as Node[]) {
 			if (
@@ -91,8 +91,36 @@ export class BabelTypeScriptIndexer implements StructuralIndexer {
 					break;
 			}
 		}
-		return { symbols, imports: [...imports].sort() };
+		return {
+			symbols,
+			imports: [...imports].sort(),
+			...(ast.errors?.length ? { limitation: "Parser recovered errors; file-level coordination only" } : {}),
+		};
 	}
+}
+
+function declarationShape(n: Node): string {
+	const clean = (value: Node): Node => {
+		if (Array.isArray(value)) return value.map(clean);
+		if (value && typeof value === "object")
+			return Object.fromEntries(
+				Object.entries(value)
+					.filter(([key]) => !["start", "end", "loc", "extra", "leadingComments", "trailingComments", "innerComments"].includes(key))
+					.map(([key, value]) => [key, clean(value)]),
+			);
+		return value;
+	};
+	return JSON.stringify(
+		clean({
+			type: n.type,
+			params: n.params,
+			returnType: n.returnType,
+			typeParameters: n.typeParameters,
+			annotation: n.typeAnnotation ?? n.id?.typeAnnotation,
+			extends: n.extends ?? n.superClass,
+			members: n.type === "TSInterfaceDeclaration" ? n.body : undefined,
+		}),
+	);
 }
 
 function memberName(member: Node): string | undefined {
@@ -146,9 +174,7 @@ export function buildIndex(
 	} catch {
 		config = undefined;
 	}
-	const sourcePaths = Object.keys(files)
-		.filter((p) => indexer.supports(p))
-		.sort();
+	const sourcePaths = Object.keys(files).sort();
 	const modules = inferModules(sourcePaths, config);
 	const moduleFor = (path: string) => {
 		let best: { id: string; len: number } | undefined;
@@ -157,8 +183,17 @@ export function buildIndex(
 		return best?.id ?? "root";
 	};
 	const indexed: IndexedFile[] = sourcePaths.map((path) => {
-		const { symbols, imports } = indexer.indexFile(path, files[path]);
-		return { path, module: moduleFor(path), symbols, imports: imports.filter((i) => i in files) };
+		const { symbols, imports, limitation } = indexer.supports(path)
+			? indexer.indexFile(path, files[path])
+			: { symbols: [], imports: [], limitation: "Language has file-level coverage" };
+		return {
+			path,
+			module: moduleFor(path),
+			symbols: limitation ? [] : symbols,
+			imports: imports.filter((i) => i in files),
+			coverage: limitation ? "file" : "symbols",
+			...(limitation ? { limitation } : {}),
+		};
 	});
 	if (indexed.some((f) => f.module === "root") && !modules.some((m) => m.id === "root")) {
 		modules.push({ id: "root", label: "Repository", paths: [""] });

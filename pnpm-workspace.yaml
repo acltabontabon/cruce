@@ -2,3 +2,4 @@ allowBuilds:
   workerd: true
   esbuild: true
   "@biomejs/biome": true
+  core-js-pure: false

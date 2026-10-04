@@ -1,8 +1,10 @@
-# Copy to .dev.vars for local development. Never commit .dev.vars.
-# Signs per-Flight agent protocol tokens (any long random string).
+# Native development uses Cloudflare Access; identity providers are chosen in Access.
+# Issuer/audience also configure cloudflare.config.ts via environment variables.
+CRUCE_ACCESS_ISSUER=https://YOUR_TEAM.cloudflareaccess.com
+CRUCE_ACCESS_AUD=YOUR_APPLICATION_AUDIENCE
+# Server-only identity encryption and optional compatibility protocol signing.
 CRUCE_SECRET=change-me-to-a-long-random-string
-# Bearer token required for live-mode commands (launching real agents, overrides on the live project).
+# Only used with CRUCE_LEGACY_RUNTIME=on; never authorizes native systems.
 CRUCE_ADMIN_TOKEN=change-me-too
-# Optional: API token limited to Queues/Event Subscriptions edit, used to subscribe each Flight repo to
-# Artifacts push events. Without it Cruce still records its own gated pushes.
+# Optional event-subscription token in non-offline deployments.
 # CF_EVENTS_API_TOKEN=

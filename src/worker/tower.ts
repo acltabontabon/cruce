@@ -1,11 +1,12 @@
-import { Controller, type ControllerState, initialState, type TowerEvent } from "../core/controller.ts";
-import type { Flight, ProjectInfo } from "../core/domain.ts";
+import { Controller, ControllerError, type ControllerState, initialState, type TowerEvent } from "../core/controller.ts";
+import { type Flight, type ProjectInfo, TERMINAL_PHASES } from "../core/domain.ts";
 import type { GateResult } from "../core/publish-gate.ts";
 import { seedFiles } from "../demo/scenario.ts";
 import { candidatePairs, type DecisionJudge } from "../intelligence/judge.ts";
 import { buildIndex } from "../intelligence/structural-index.ts";
 import type { GitAuthor } from "./git/workspace.ts";
 import { CANONICAL, flightRef, type ProjectGit, TOWER_AUTHOR } from "./project-git.ts";
+import { type FlightResources, ResourceCleanup } from "./resource-cleanup.ts";
 
 /**
  * The control tower runtime: the authoritative controller state plus the Git work around it.
@@ -27,6 +28,8 @@ export interface TowerHooks {
 	onRepoRemoved?(repo: string): Promise<void>;
 	/** Keep background work alive (Durable Object `ctx.waitUntil`). */
 	background?(work: Promise<unknown>): void;
+	releaseWorkflow?(record: FlightResources): Promise<void>;
+	releaseSandbox?(record: FlightResources): Promise<void>;
 }
 
 export interface Submission {
@@ -49,6 +52,7 @@ export interface PublishOutcome {
 export const DEMO_EPOCH = Date.UTC(2026, 9, 14, 9, 0, 0) / 1000;
 
 export class Tower {
+	readonly cleanup: ResourceCleanup;
 	constructor(
 		readonly project: ProjectInfo,
 		readonly git: ProjectGit,
@@ -57,7 +61,24 @@ export class Tower {
 		private readonly now: () => number = Date.now,
 		private readonly firstFlight = 1,
 		private readonly judges: DecisionJudge[] = [],
-	) {}
+	) {
+		this.cleanup = new ResourceCleanup(
+			project.id,
+			git,
+			store,
+			{
+				flights: () => (this.ready ? this.state.flights : []),
+				update: (id, cleanup) => this.mutate((c) => c.recordCleanup(id, cleanup)),
+				attention: (key, id, failed) => this.mutate((c) => c.cleanupAttention(key, id, failed)),
+				note: (title, id) => this.mutate((c) => c.note("flight.cleanup", "cruce", title, id)),
+				workflow: hooks.releaseWorkflow,
+				sandbox: hooks.releaseSandbox,
+				unsubscribe: hooks.onRepoRemoved,
+				subscriptionConfigured: !!hooks.onRepo,
+			},
+			now,
+		);
+	}
 
 	/** Restore persisted Git settings (call once after construction). */
 	restore(): this {
@@ -84,7 +105,19 @@ export class Tower {
 		const { state, events } = c.commit();
 		this.store.put("state", state);
 		if (events.length) this.store.appendEvents(events);
+		this.cleanup.sync();
 		this.hooks.onChange(state, events);
+		if (
+			events.some(
+				(e) =>
+					["flight.landed", "flight.failed", "flight.lost"].includes(e.type) ||
+					(e.type === "flight.phase" &&
+						e.flightId &&
+						TERMINAL_PHASES.has(state.flights.find((f) => f.id === e.flightId)?.phase as Flight["phase"])),
+			)
+		) {
+			this.hooks.background?.(this.cleanup.run());
+		}
 		if (this.judges.length && events.some((e) => e.type === "plan.filed" || e.type === "plan.amended")) {
 			const work = this.judge();
 			this.hooks.background?.(work);
@@ -124,7 +157,11 @@ export class Tower {
 
 	/** Create (or attach to) the canonical repository and index it. Idempotent. */
 	async bootstrap(): Promise<void> {
-		if (this.ready) return;
+		if (this.ready) {
+			this.mutate((c) => c.backfillCleanup());
+			this.cleanup.sync();
+			return;
+		}
 		this.store.put("gitClock", 0);
 		const seed = seedFiles();
 		const { head, remote } = await this.git.ensureCanonical(
@@ -160,19 +197,32 @@ export class Tower {
 	/** Give a Flight its own repository: an Artifacts fork of canonical. */
 	async provision(flightId: string): Promise<void> {
 		const f = this.flight(flightId);
+		this.assertActive(flightId);
+		const owned = this.cleanup.ensure(f);
+		this.cleanup.provisioning(owned.key, true);
 		this.mutate((c) => c.setPhase(flightId, "provisioning"));
-		const artifact = await this.git.createFlightWorkspace(flightId, `Cruce Flight ${flightId}: ${f.title}`);
-		this.mutate((c) => {
-			c.attachArtifact(flightId, artifact);
-			c.setPhase(flightId, "discovery");
-		});
-		await this.hooks
-			.onRepo?.(artifact.repo)
-			.catch((e) =>
-				this.mutate((c) =>
-					c.note("artifacts.event", "artifacts", `Event subscription for ${artifact.repo} not created`, flightId, [String(e)]),
-				),
-			);
+		try {
+			const artifact = await this.git.createFlightWorkspace(flightId, owned.description, owned.repo);
+			this.cleanup.register(owned.key, { repoId: artifact.repoId });
+			if (this.git.epoch !== owned.epoch || TERMINAL_PHASES.has(this.flight(flightId).phase)) {
+				throw new ControllerError(`${flightId} closed during provisioning`, 409);
+			}
+			this.mutate((c) => {
+				c.attachArtifact(flightId, artifact);
+				c.setPhase(flightId, "discovery");
+			});
+			await this.hooks
+				.onRepo?.(artifact.repo)
+				.catch((e) =>
+					this.mutate((c) =>
+						c.note("artifacts.event", "artifacts", `Event subscription for ${artifact.repo} not created`, flightId, [String(e)]),
+					),
+				);
+		} finally {
+			this.cleanup.provisioning(owned.key, false);
+			if (this.cleanup.records().find((r) => r.key === owned.key)?.finishedAt !== undefined) await this.cleanup.run();
+			this.hooks.onChange(this.state, []);
+		}
 	}
 
 	/**
@@ -180,6 +230,7 @@ export class Tower {
 	 * diff onto airspace, and only if it is inside clearance pushes it with a 60-second token.
 	 */
 	async publish(flightId: string, sub: Submission): Promise<PublishOutcome> {
+		this.assertActive(flightId);
 		const f = this.flight(flightId);
 		const parent = sub.parent ?? (await this.git.resolve(flightRef(flightId)));
 		if (!parent) throw new Error(`${flightId} has no workspace`);
@@ -196,6 +247,7 @@ export class Tower {
 		if (!gate.approved) return { approved: false, commit: staged.oid, gate, matchesClaim };
 
 		const latest = this.flight(flightId);
+		this.assertActive(flightId);
 		const clearance = this.state.traffic.clearances[flightId];
 		await this.git.publish(flightId, staged.oid, {
 			cruce: 1,
@@ -295,15 +347,36 @@ export class Tower {
 
 	/** Revoke any credentials still issued for a finished Flight's repository. */
 	async closeFlight(flightId: string): Promise<void> {
-		const revoked = await this.git.closeFlight(flightId).catch(() => 0);
-		if (revoked)
-			this.mutate((c) =>
-				c.note("artifacts.event", "cruce", `${flightId}: revoked ${revoked} remaining token(s) on its repository`, flightId),
-			);
+		this.flight(flightId);
+		await this.cleanup.run();
+	}
+
+	assertActive(flightId: string) {
+		const f = this.flight(flightId);
+		if (TERMINAL_PHASES.has(f.phase)) throw new ControllerError(`${flightId} is ${f.phase}`, 409);
+	}
+
+	async readToken(flightId: string) {
+		try {
+			return await this.git.readToken(flightId, () => this.assertActive(flightId));
+		} catch (error) {
+			if (TERMINAL_PHASES.has(this.flight(flightId).phase)) {
+				this.cleanup.retryTokens(this.flight(flightId));
+				this.hooks.background?.(this.cleanup.run());
+			}
+			throw error;
+		}
+	}
+
+	retain(flightId: string, keep: boolean, by: string) {
+		this.cleanup.assertRetainable(this.flight(flightId));
+		this.mutate((c) => c.retainFlight(flightId, keep, by));
+		this.hooks.background?.(this.cleanup.run());
 	}
 
 	/** Bring a stale Flight onto the new canonical baseline (real merge into its repository). */
 	async refresh(flightId: string): Promise<boolean> {
+		this.assertActive(flightId);
 		const outcome = await this.git.refreshFlight(flightId, this.author());
 		if (!outcome.clean || !outcome.oid) {
 			this.mutate((c) =>
@@ -331,16 +404,14 @@ export class Tower {
 	/** Remove every Flight and return canonical to the seed (demo reset). */
 	async reset(): Promise<void> {
 		const flights = this.ready ? this.state.flights : [];
+		for (const f of flights) this.cleanup.ensure(f);
+		this.cleanup.reset();
+		await this.cleanup.run();
 		this.store.put("gitClock", 0);
-		const head = await this.git.resetToSeed(
-			seedFiles(),
-			this.author(),
-			flights.map((f) => f.id),
-		);
+		const head = await this.git.resetToSeed(seedFiles(), this.author());
 		// New Flight repos get fresh names; the old ones are being deleted in the background.
 		this.git.epoch = (this.store.get<number>("repoEpoch") ?? 0) + 1;
 		this.store.put("repoEpoch", this.git.epoch);
-		for (const f of flights) if (f.artifact) await this.hooks.onRepoRemoved?.(f.artifact.repo).catch(() => undefined);
 		this.store.delete("state");
 		const files = await this.git.filesAt(head);
 		const index = buildIndex(files, head);

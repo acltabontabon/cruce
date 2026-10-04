@@ -108,6 +108,12 @@ describe("demo mode end to end (controller + real Git)", () => {
 		expect(types).toContain("flight.stale");
 		expect(types).toContain("baseline.refreshed");
 		expect(tower.state.canonical.head).toBe(history[0].oid);
+		for (const flight of tower.state.flights) {
+			expect(flight.finishedAt).toBe(flight.landedAt);
+			expect(flight.cleanup?.status).toBe("complete");
+			expect(await git.resolve(`refs/heads/flights/${flight.id}`)).toBeNull();
+			expect((await git.history(flight.artifact!.head!))[0]?.oid).toBe(flight.artifact?.head);
+		}
 	});
 
 	it("is reproducible: two runs produce identical canonical history", async () => {

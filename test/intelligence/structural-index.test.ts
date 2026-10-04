@@ -3,7 +3,14 @@ import { baseIndex } from "../fixtures.ts";
 
 describe("structural index (Babel TypeScript)", () => {
 	it("groups files into modules from cruce.json", () => {
-		expect(baseIndex.modules.map((m) => m.label)).toEqual(["Authentication", "Sessions", "Persistence", "Messaging", "Tests"]);
+		expect(baseIndex.modules.map((m) => m.label)).toEqual([
+			"Authentication",
+			"Sessions",
+			"Persistence",
+			"Messaging",
+			"Tests",
+			"Repository",
+		]);
 		expect(baseIndex.files.find((f) => f.path === "src/auth/token-validator.ts")?.module).toBe("auth");
 	});
 

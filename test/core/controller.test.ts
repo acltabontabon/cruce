@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Controller, clearanceBrief } from "../../src/core/controller.ts";
+import { FAILED_FLIGHT_RETENTION_MS } from "../../src/core/domain.ts";
 import { changedRanges } from "../../src/core/line-diff.ts";
 import type { ChangedFile } from "../../src/core/publish-gate.ts";
 import { JWT_MIGRATION, overlayFiles, ROTATION_AMENDMENT, ROTATION_V1, ROTATION_V2, SESSION_CLEANUP } from "../../src/demo/scenario.ts";
@@ -40,6 +41,63 @@ function setup() {
 		},
 	};
 }
+
+describe("Flight cleanup policy", () => {
+	it("expires interrupted queued and provisioning launches using the injected clock", () => {
+		const t = setup();
+		t.step((c) => c.setPhase(t.ids[1], "provisioning"));
+		const c = new Controller(t.state, 31 * 60_000);
+		c.tick();
+		const state = c.commit().state;
+		expect(state.flights.slice(0, 2).map((f) => f.phase)).toEqual(["failed", "failed"]);
+		expect(state.flights[0].cleanup?.expiresAt).toBe(31 * 60_000 + FAILED_FLIGHT_RETENTION_MS);
+	});
+	it.each(["landed", "failed", "lost", "cancelled"] as const)("timestamps %s once with the injected clock", (phase) => {
+		const t = setup();
+		const id = t.ids[0];
+		t.step((c) => c.setPhase(id, phase));
+		const flight = t.state.flights[0];
+		const finishedAt = flight.finishedAt as number;
+		expect(finishedAt).toBeGreaterThan(0);
+		expect(flight.cleanup?.expiresAt).toBe(finishedAt + (phase === "landed" ? 0 : FAILED_FLIGHT_RETENTION_MS));
+		t.step((c) => c.fail(id, "duplicate"));
+		expect(t.state.flights[0].finishedAt).toBe(finishedAt);
+	});
+
+	it("keeps unsuccessful work without moving its expiry and rejects active, landed, and deleted work", () => {
+		const t = setup();
+		const id = t.ids[0];
+		expect(() => t.step((c) => c.retainFlight(id, true, "you"))).toThrow("unsuccessful terminal");
+		t.step((c) => c.cancel(id, "you"));
+		const expiresAt = t.state.flights[0].cleanup?.expiresAt;
+		t.step((c) => c.retainFlight(id, true, "you"));
+		expect(t.state.flights[0].cleanup?.keep).toBe(true);
+		t.step((c) => c.retainFlight(id, false, "you"));
+		expect(t.state.flights[0].cleanup?.expiresAt).toBe(expiresAt);
+		t.step((c) => c.recordCleanup(id, { status: "complete", expiresAt: expiresAt!, keep: false, deletedAt: 123 }));
+		expect(() => t.step((c) => c.retainFlight(id, true, "you"))).toThrow("Work expired");
+		t.step((c) => c.setPhase(t.ids[1], "landed"));
+		expect(() => t.step((c) => c.retainFlight(t.ids[1], true, "you"))).toThrow("unsuccessful terminal");
+	});
+
+	it("backfills legacy unsuccessful work with a full recovery window and resolves cleanup attention", () => {
+		const t = setup();
+		const id = t.ids[0];
+		t.step((c) => c.fail(id, "old failure"));
+		delete t.state.flights[0].finishedAt;
+		delete t.state.flights[0].cleanup;
+		t.step((c) => c.backfillCleanup());
+		const migrated = t.state.flights.find((f) => f.id === id)!;
+		expect(migrated.cleanup?.expiresAt).toBe(migrated.finishedAt! + FAILED_FLIGHT_RETENTION_MS);
+		t.step((c) => {
+			c.cleanupAttention("repo", id, true);
+			c.cleanupAttention("repo", id, true);
+		});
+		expect(t.state.attention.filter((a) => a.kind === "cleanup")).toHaveLength(1);
+		t.step((c) => c.cleanupAttention("repo", id, false));
+		expect(t.state.attention.filter((a) => a.kind === "cleanup")).toHaveLength(0);
+	});
+});
 
 describe("controller lifecycle (the demo story)", () => {
 	it("flies F-021, F-022 and F-023 from plans to landing", () => {

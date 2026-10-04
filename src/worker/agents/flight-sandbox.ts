@@ -74,6 +74,10 @@ export class FlightSandbox extends DurableObject<SandboxEnv> {
 
 	/** Bind this sandbox to a Flight and clone the Flight's repository (read access via Outbound). */
 	async prepare(binding: Binding): Promise<{ head: string }> {
+		if (this.ctx.storage.kv.get("released")) throw new Error("Flight sandbox released");
+		if ((await this.env.CONTROL_TOWER.getByName(binding.projectId).liveStatus(binding.projectId, binding.flightId)).terminal)
+			throw new Error("Flight is terminal");
+		if (this.ctx.storage.kv.get("released")) throw new Error("Flight sandbox released");
 		this.ctx.storage.kv.put("binding", binding);
 		await this.start();
 		await this.run(["rm", "-rf", REPO], "/workspace");
@@ -147,11 +151,19 @@ export class FlightSandbox extends DurableObject<SandboxEnv> {
 	}
 
 	async destroy(): Promise<void> {
+		this.ctx.storage.kv.put("released", true);
 		this.ctx.storage.kv.delete("task");
 		if (this.ctx.container?.running) await this.ctx.container.destroy();
+		this.setup = undefined;
+		await this.ctx.storage.deleteAlarm();
+		this.ctx.storage.kv.delete("binding");
 	}
 
 	async alarm(): Promise<void> {
+		if (this.ctx.storage.kv.get("released")) {
+			await this.destroy();
+			return;
+		}
 		if (!this.ctx.container?.running) return;
 		const status = await this.taskStatus();
 		if (status.state === "running") {
@@ -199,6 +211,7 @@ export class FlightSandbox extends DurableObject<SandboxEnv> {
 	}
 
 	private async start(): Promise<void> {
+		if (this.ctx.storage.kv.get("released")) throw new Error("Flight sandbox released");
 		if (this.setup === undefined || !this.container.running) {
 			this.setup = this.setUp().catch((e) => {
 				this.setup = undefined;
@@ -206,6 +219,10 @@ export class FlightSandbox extends DurableObject<SandboxEnv> {
 			});
 		}
 		await this.setup;
+		if (this.ctx.storage.kv.get("released")) {
+			if (this.ctx.container?.running) await this.ctx.container.destroy();
+			throw new Error("Flight sandbox released");
+		}
 	}
 
 	private async setUp(): Promise<void> {
