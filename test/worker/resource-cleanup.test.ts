@@ -268,7 +268,7 @@ describe("durable Flight resource cleanup", () => {
 		expect(h.deleted).not.toHaveBeenCalled();
 	});
 
-	it("records intent before a partial fork and adopts only a matching owned repository", async () => {
+	it("records ownership before a partial fork and adopts only a matching owned repository", async () => {
 		const h = harness();
 		const owned = h.cleanup.ensure(h.flights[0]);
 		expect(h.cleanup.records()[0].repoId).toBeUndefined();

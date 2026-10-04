@@ -61,7 +61,7 @@ step "push a second commit + git note from the source, fetch it from the clone"
 cd "$WORK/src"
 printf '\nSecond line.\n' >> README.md
 git commit -q -am "Second commit"
-git notes --ref=cruce add -m '{"flightId":"F-000","intent":"bootstrap verification"}' HEAD
+git notes --ref=cruce add -m '{"flightId":"F-000","objective":"bootstrap verification"}' HEAD
 git_auth "$WRITE_TOKEN" push -q "$REMOTE" HEAD:refs/heads/main 'refs/notes/cruce:refs/notes/cruce'
 SECOND_SHA="$(git rev-parse HEAD)"
 cd "$WORK/clone"

@@ -36,13 +36,13 @@ At consent the human chooses the agent's **scopes**:
 
 | Scope | Allows |
 | --- | --- |
-| `cruce:read` | Intent, missions, policy, source, diffs, history and lineage (always granted) |
+| `cruce:read` | Missions, policy, source, diffs, history and lineage (always granted) |
 | `workspace:write` | `start_mission`, `publish_revision`, `publish_artifact`, plan updates, coordination responses, `complete_mission` |
-| `proposal:write` | `create_intent`, `create_mission`, `create_proposal`, `attach_evidence`, `request_verification`, `review_proposal` |
+| `proposal:write` | `create_mission`, `create_proposal`, `attach_evidence`, `request_verification`, `review_proposal` |
 | `preview:request` | `request_preview` (metered; subject to policy and budgets) |
 | `promotion:request` | `request_promotion` (asks a human; never promotes) |
 
-The typical loop: `get_context` → `start_mission` (Cruce pins the base to an accepted revision and creates the workspace fork) → work and commit locally → `publish_revision` → `publish_artifact` (test reports, analyses) → `create_proposal` → `request_verification` / `request_preview` → `request_promotion`. `cruce publish` publishes committed work from a terminal; `cruce refresh` (or the bridge's `refresh_source` tool) fetches accepted objects into `refs/cruce/accepted` without touching the working tree; `cruce check` reports the publication decision.
+The developer prompts their agent locally; there is no console intake or mission form. The agent’s typical loop: `get_project` / `get_active_work` → `create_mission` (objective, scope and plan) → `get_context` → `start_mission` (Cruce pins the base to an accepted revision and creates the workspace fork) → work and commit locally → `publish_revision` → `publish_artifact` (test reports, analyses) → `create_proposal` → `request_verification` / `request_preview` → `request_promotion`. `cruce publish` publishes committed work from a terminal; `cruce refresh` (or the bridge's `refresh_source` tool) fetches accepted objects into `refs/cruce/accepted` without touching the working tree; `cruce check` reports the publication decision.
 
 `node runner/cruce.ts mcp --cwd ./payments` is the stdio bridge for clients that need a local process; remote clients use Streamable HTTP `/mcp` directly. Durable state belongs to the project authority, not the transport session. Mutations require idempotency keys and expected versions; a retry returns the original receipt.
 

@@ -73,7 +73,7 @@ export function History({
 }
 function Note({ note, state }: { note: Record<string, unknown>; state: ControllerState }) {
 	const n = note as {
-		intent?: string;
+		objective?: string;
 		planVersion?: number;
 		flightId?: string;
 		validation?: { summary: string };
@@ -84,7 +84,7 @@ function Note({ note, state }: { note: Record<string, unknown>; state: Controlle
 	return (
 		<details className="commit-note">
 			<summary>Coordination record{n.planVersion ? ` · plan v${n.planVersion}` : ""}</summary>
-			{n.intent && <p>{friendlyText(n.intent, state)}</p>}
+			{n.objective && <p>{friendlyText(n.objective, state)}</p>}
 			{n.planAmendments?.map((a) => (
 				<p key={a.reason}>Plan updated: {friendlyText(a.reason, state)}</p>
 			))}

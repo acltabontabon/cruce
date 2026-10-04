@@ -103,7 +103,7 @@ Short, dated entries so another agent can continue. Newest last.
 ## 2026-10-05 — native platform direction
 
 - Superseded the GitHub-first implementation with native Systems, Cloudflare Access/MCP identity, Artifacts accepted source, isolated mission workspaces and immutable evidence outputs. Removed newly introduced GitHub authority code; preserved pre-existing cleanup changes and deterministic demo history.
-- Added intent/mission/proposal/verification/review/promotion/lineage controllers and shared adapters. Source publication verifies actual Git scope; human policy governs accepted-source promotion. Fixed unresolved-symbol fallback widening publication permissions.
+- Added mission/proposal/verification/review/promotion/lineage controllers and shared adapters. Source publication verifies actual Git scope; human policy governs accepted-source promotion. Fixed unresolved-symbol fallback widening publication permissions.
 - Added native activity console, read-only evidence/source/diff inspection, human attestations, agent disagreement resolution and lineage. Legacy demo remains `/demo`; old live runner/Sandbox APIs are opt-in compatibility.
 - Native live Access/client adaptation, Artifacts/Jev smoke and labeled judgment-corpus gates remain outstanding. Automatic semantic constraints stay disabled; environment/release promotion and independently executed native verification are not represented as completed.
 
@@ -120,5 +120,12 @@ Short, dated entries so another agent can continue. Newest last.
 - Cruce MCP catalog (`src/shared/tools.ts`) with per-tool schemas, scopes, control/resource class and cost; OAuth consent grants explicit scopes; human decisions are unreachable by agents.
 - Resource policy and budgets (`src/core/capabilities.ts`), resource requests with human approval, cloud AI gated by policy. Proposals gain numbers, repository, commits/files, supersede, reject and request changes; verification requests; promotion requests.
 - Environments, deployments and the resource boundary: Worker detection, operator/connected Cloudflare account with sealed token, Artifacts REST host, Workers Builds client, per-project deploy repository, DeploymentWorkflow, Cruce smoke checks as runtime-verified evidence, promote-and-deploy, rollback explanation and redeploy, lineage tracing both ways.
-- Native console rebuilt into overview, proposal, mission, intent, artifact, lineage and environments views with hash routes; no raw JSON by default.
+- Native console rebuilt into overview, proposal, mission, artifact, lineage and environments views with hash routes; no raw JSON by default.
 - Checks: typecheck, lint, 242 tests, offline `cf build`, independent scenario verifier. Live Access, Artifacts, Workers Builds and connected-account gates remain open (see PLAN).
+
+## 2026-10-05
+
+- Removed standalone intent records, creation tools, console intake, routes and lineage links. Local agents now register missions directly through MCP with a plan objective and optional context; human prompting stays local.
+- Updated coordination operation/capability names, evidence metadata, rollback explanations, onboarding and product documentation. Existing stored context moves onto missions; stored plans migrate without rewriting Git revisions or evidence contents.
+- Validation: typecheck and lint passed; all 260 unit tests, 17 browser checks (including responsive pages and agent-created mission navigation), and the demo scenario verifier passed.
+- Isolated commit snapshot also passed TypeScript checks, lint and 247 unit tests; unrelated console/environment work remains outside the commit.

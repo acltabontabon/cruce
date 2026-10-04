@@ -117,7 +117,7 @@ it, and the deadlock is raised for human review.
 
 Landing requires: a plan, not stale, nothing held, every land-after Flight landed, an approved publish,
 passing validation, and a clean Git preflight (non-destructive three-way merge against current canonical).
-Landing merges for real, attaches a Git note (intent, plan versions, amendments, coordination decisions,
+Landing merges for real, attaches a Git note (plan objective, plan versions, amendments, coordination decisions,
 validation, preflight), pushes canonical, re-indexes it, and re-evaluates every other Flight:
 
 - contract changed under a dependency or planned write → stale (ranked first)

@@ -5,9 +5,9 @@ import { Lineage } from "./console/Lineage.tsx";
 import { type Execute, href, type Route, readRoute, request, type Unprovisioned, type View } from "./console/model.ts";
 import { Overview } from "./console/Overview.tsx";
 import { ProposalView } from "./console/ProposalView.tsx";
-import { ArtifactView, IntentView, MissionView } from "./console/Records.tsx";
+import { ArtifactView, MissionView } from "./console/Records.tsx";
 
-/** The native Cruce console: intent, missions, proposals, verification, promotion and lineage around exact revisions. */
+/** The native Cruce console: missions, proposals, verification, promotion and lineage around exact revisions. */
 export function ProjectConsole() {
 	const [projects, setProjects] = useState<ProjectConnection[]>([]),
 		[projectsLoaded, setProjectsLoaded] = useState(false),
@@ -150,7 +150,7 @@ export function ProjectConsole() {
 						<h1>Create a project.</h1>
 						<p>
 							Each project gets a canonical Git repository in Cloudflare Artifacts. Agents keep working locally with Git and their own
-							tools; Cruce adds intent, missions, evidence, verification and promotion.
+							tools; Cruce adds missions, evidence, verification and promotion.
 						</p>
 						<form
 							onSubmit={(e) => {
@@ -205,7 +205,6 @@ export function ProjectConsole() {
 				{ready && route.view === "overview" && <Overview view={ready} execute={execute} />}
 				{ready && route.view === "proposal" && <ProposalView key={route.id} view={ready} id={route.id} execute={execute} />}
 				{ready && route.view === "mission" && <MissionView view={ready} id={route.id} />}
-				{ready && route.view === "intent" && <IntentView view={ready} id={route.id} />}
 				{ready && route.view === "artifact" && <ArtifactView key={route.id} view={ready} id={route.id} execute={execute} />}
 				{ready && route.view === "lineage" && <Lineage view={ready} subject={route.subject} execute={execute} />}
 				{ready && route.view === "environments" && <Environments view={ready} execute={execute} reload={load} />}

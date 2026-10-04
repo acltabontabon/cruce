@@ -1,5 +1,6 @@
 import { ControllerError } from "../core/controller.ts";
 import type { ArtifactRef, Flight } from "../core/domain.ts";
+import { migratePlanRecords } from "../core/migrate-records.ts";
 import type { ChangesResponse } from "../shared/api.ts";
 import type { ArtifactsHost } from "./artifacts-host.ts";
 import { type GitAuthor, type GitWorkspace, type MergeOutcome, NOTES_REF } from "./git/workspace.ts";
@@ -259,7 +260,7 @@ export class ProjectGit {
 	history(ref: string, depth = 25) {
 		return this.run(async () => {
 			const entries = await this.ws.log(ref, depth);
-			return Promise.all(entries.map(async (e) => ({ ...e, note: await this.ws.readNote(e.oid) })));
+			return Promise.all(entries.map(async (e) => ({ ...e, note: migratePlanRecords(await this.ws.readNote(e.oid)) })));
 		});
 	}
 

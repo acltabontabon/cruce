@@ -1,6 +1,6 @@
 # Architecture
 
-Cruce is an agent-native development platform built on **Git + Cloudflare Artifacts**. Git provides the mechanics of software evolution; Artifacts is the canonical Cloudflare-native home of that evolution; **Cruce MCP** gives agents an intentional interface to the development lifecycle; the **Cruce Control Tower** provides intent, coordination, policy, verification, governance and lineage. Cloudflare capabilities sit behind Cruce where they serve that lifecycle. The project's Cloudflare account is the resource and billing boundary. Agents execute locally unless cloud execution adds real value.
+Cruce is an agent-native development platform built on **Git + Cloudflare Artifacts**. Git provides the mechanics of software evolution; Artifacts is the canonical Cloudflare-native home of that evolution; **Cruce MCP** gives agents an intentional interface to the development lifecycle; the **Cruce Control Tower** provides coordination, policy, verification, governance and lineage. Cloudflare capabilities sit behind Cruce where they serve that lifecycle. The project's Cloudflare account is the resource and billing boundary. Agents execute locally with their own tools.
 
 No GitHub or GitLab hosting, pull requests, issues, Actions, apps or provider-specific workflows participate. They may later be supported for import, export and mirroring only.
 
@@ -13,7 +13,7 @@ No GitHub or GitLab hosting, pull requests, issues, Actions, apps or provider-sp
                          │
                          ▼
      ControlTower Durable Object (one per project) — Cruce Control Tower
-       ProjectRuntime ─ pure PlatformController (intent, mission, proposal, verification,
+       ProjectRuntime ─ pure PlatformController (mission, proposal, verification,
        │                 review, promotion, resource policy, environments, deployments, lineage)
        CoordinationRuntime ─ pure WorkstreamController (scope, partial clearance, refresh)
        SQLite: state, audit, isomorphic-git object database (actual Git objects)
@@ -24,7 +24,7 @@ No GitHub or GitLab hosting, pull requests, issues, Actions, apps or provider-sp
        project-<id>-baseline-<sha> immutable baseline snapshot a workspace forks from
        project-<id>--w-<n>         one isolated fork per mission workspace
        project-<id>--evidence      immutable evidence artifacts
-       project-<id>--deploy        deployment intent for Workers Builds (main = production,
+       project-<id>--deploy        deployment state for Workers Builds (main = production,
                                    cruce/proposal-N = Worker Preview); lives in the resource account
                          │
             local build/test/dev            Workers Builds → Worker Preview → Production
@@ -35,7 +35,7 @@ No GitHub or GitLab hosting, pull requests, issues, Actions, apps or provider-sp
 
 | Layer | Concepts | Where |
 | --- | --- | --- |
-| Intent | Intent, Mission, Agent, Proposal, Verification, Policy, Lineage | `src/core/platform.ts`, `src/shared/platform.ts` |
+| Collaboration | Mission, Agent, Proposal, Verification, Policy, Lineage | `src/core/platform.ts`, `src/shared/platform.ts` |
 | Version | Git, Artifacts, Revision, Diff, Workspace, Fork, Merge | `src/worker/git/*`, `src/worker/managed-workspace.ts`, `src/worker/artifacts-host.ts` |
 | Execution | Local machine, agent runtime, build, preview, Worker, deployment | `runner/*`, `src/worker/deployments.ts`, `src/worker/deployment-workflow.ts` |
 
@@ -43,7 +43,7 @@ No GitHub or GitLab hosting, pull requests, issues, Actions, apps or provider-sp
 
 - **Project** (`ProjectConnection`, `ProjectDirectory`): tenant, members (maintainer, contributor, observer) and its **SourceRepository** in Artifacts. Creating a project provisions the canonical repository — an explicit human action. Reading an unprovisioned project never creates resources.
 - **Revision**: a full Git commit id. Every artifact, proposal, verification, review, promotion and deployment names one.
-- **Intent** → **Mission** (bounded plan; `baseRevision` pinned to an accepted revision by Cruce; `headRevision`; `agent`; optional `experimentOf` for alternative approaches).
+- **Mission** registered through MCP by the local agent (bounded plan; `baseRevision` pinned to an accepted revision by Cruce; `headRevision`; `agent`; optional `experimentOf` for alternative approaches).
 - **Workspace**: one Artifacts fork per mission workstream, forked from an immutable baseline snapshot. Never branches of a shared repository.
 - **Artifact**: immutable output anchored to a revision: source (with commits and changed files) or typed evidence (test report, benchmark, architecture, security scan, SBOM, preview report…). Records producer and **execution** location (local, cloudflare, external) separately from source and deployment.
 - **Proposal**: exact `base` and `revision`, repository, commit and file counts, number, state (`proposed`, `promoting`, `promoted`, `rejected`, `changes_requested`, `superseded`).
@@ -53,13 +53,13 @@ No GitHub or GitLab hosting, pull requests, issues, Actions, apps or provider-sp
 - **ResourceAccount**: operator (Cruce is deployed in this account) or connected (another account via REST). Credential sealed with `CRUCE_SECRET`, never returned.
 - **ResourceRequest**: a resource action awaiting, or decided by, a human.
 - **Policy**: promotion policy (approvals, required trusted evidence) plus resource policy (allow / approval / deny per action, count budgets). Versioned; changes invalidate readiness.
-- **Lineage**: `PlatformController.trace(subject)` walks intent → mission → revision → artifacts → proposal → verification → promotion → deployment and back. `explainRevision` answers which proposal, mission, intent and agent produced an accepted revision.
+- **Lineage**: `PlatformController.trace(subject)` walks mission → revision → artifacts → proposal → verification → promotion → deployment and back. `explainRevision` answers which proposal, mission and agent produced an accepted revision.
 
 ## Cruce MCP
 
 `src/shared/tools.ts` is the single catalog: name, description, scope, control/resource class, cost class, resource action and input fields. The remote MCP server (`src/worker/mcp.ts`) and the local bridge (`runner/cruce.ts`) register from it; a connection only sees tools its scopes allow. HTTP commands go through the same `authorizeMachine` check, and human decisions (`promote_proposal`, `decide_proposal`, `set_policy`, `decide_resource_request`, `configure_environment`, `deploy_revision`, `plan_rollback`, `resolve_review`) are never reachable by agents.
 
-Cruce MCP expresses development intent, not infrastructure commands: `request_preview(proposal)` makes Cruce check the revision, Worker compatibility, scopes, policy, budgets and the connected account before it pushes anything. There are no `create_worker`, DNS, zone, D1, R2 or log tools; Cloudflare's own MCP servers cover administration.
+Cruce MCP expresses development operations, not infrastructure commands: `request_preview(proposal)` makes Cruce check the revision, Worker compatibility, scopes, policy, budgets and the connected account before it pushes anything. There are no `create_worker`, DNS, zone, D1, R2 or log tools; Cloudflare's own MCP servers cover administration.
 
 ## Control and resource actions
 

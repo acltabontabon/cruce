@@ -2,7 +2,7 @@
  * Agent authority and resource consumption. Pure and deterministic: no I/O, time is injected.
  *
  * Cruce separates two kinds of machine actions:
- * - control actions read or record Cruce domain state (intent, mission, policy, lineage). They are cheap.
+ * - control actions read or record Cruce domain state (mission, policy, lineage). They are cheap.
  * - resource actions consume infrastructure in the project's Cloudflare account (Artifacts writes,
  *   Workers Builds, previews, cloud AI, production deployment). They are governed by explicit scopes,
  *   per-project resource policy and bounded budgets, so agents cannot become a denial-of-wallet machine.
@@ -14,7 +14,7 @@
 export const SCOPES = ["cruce:read", "workspace:write", "proposal:write", "preview:request", "promotion:request"] as const;
 export type Scope = (typeof SCOPES)[number];
 export const SCOPE_LABELS: Record<Scope, string> = {
-	"cruce:read": "Read intent, missions, policy, source and lineage",
+	"cruce:read": "Read missions, policy, source and lineage",
 	"workspace:write": "Start missions in isolated workspaces and publish revisions and artifacts",
 	"proposal:write": "Create proposals, attach evidence and request verification",
 	"preview:request": "Request Worker previews (metered Cloudflare operations, subject to policy)",

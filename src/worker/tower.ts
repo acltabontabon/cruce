@@ -1,5 +1,6 @@
 import { Controller, ControllerError, type ControllerState, initialState, type TowerEvent } from "../core/controller.ts";
 import { type Flight, type ProjectInfo, TERMINAL_PHASES } from "../core/domain.ts";
+import { migratePlanRecords } from "../core/migrate-records.ts";
 import type { GateResult } from "../core/publish-gate.ts";
 import { seedFiles } from "../demo/scenario.ts";
 import { candidatePairs, type DecisionJudge } from "../intelligence/judge.ts";
@@ -87,7 +88,7 @@ export class Tower {
 	get state(): ControllerState {
 		const s = this.store.get<ControllerState>("state");
 		if (!s) throw new Error("project not bootstrapped");
-		return s;
+		return migratePlanRecords(s);
 	}
 
 	get ready(): boolean {
@@ -254,7 +255,7 @@ export class Tower {
 			agentRuntime: latest.agentRuntime,
 			planVersion: latest.plan?.planVersion,
 			baseline: latest.baseline,
-			intent: latest.plan?.intent,
+			objective: latest.plan?.objective,
 			clearance: { status: clearance?.status, cleared: clearance?.cleared, held: clearance?.held.map((h) => h.resource) },
 			gate: gate.summary,
 			touched: gate.touched,
@@ -305,7 +306,7 @@ export class Tower {
 				agentRuntime: f.agentRuntime,
 				baseline: f.baseline,
 				planVersion: f.plan?.planVersion,
-				intent: f.plan?.intent,
+				objective: f.plan?.objective,
 				planAmendments: f.planHistory.filter((p) => p.amendment).map((p) => ({ version: p.planVersion, ...p.amendment })),
 				clearance: { status: clearance?.status, cleared: clearance?.cleared },
 				congestion: this.state.traffic.congestions

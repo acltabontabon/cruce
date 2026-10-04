@@ -7,7 +7,7 @@ import { type Actor, HUMAN_TOOLS, type PlatformCommand, PlatformCommandInput, ty
 /**
  * Cruce MCP: the intentional machine interface to Cruce's development lifecycle.
  *
- * Every tool expresses a Cruce concept (intent, mission, workspace, revision, evidence, proposal,
+ * Every tool expresses a Cruce concept (mission, workspace, revision, evidence, proposal,
  * verification, preview, promotion, lineage). There is deliberately no generic Cloudflare
  * administration here: Cruce decides when Cloudflare capabilities run, behind policy. Use
  * Cloudflare's own MCP servers for account administration.
@@ -42,14 +42,14 @@ export const CRUCE_TOOLS: CruceTool[] = [
 		...read,
 		name: "get_context",
 		description:
-			"Everything an agent needs before working: intent, mission plan, workspace base/head revisions, canonical revision, policy, verification requirements, coordination decision, related artifacts and environments.",
+			"Everything an agent needs before working: mission objective and plan, workspace base/head revisions, canonical revision, policy, verification requirements, coordination decision, related artifacts and environments.",
 		via: platform("get_context"),
 		fields: ["missionId"],
 	},
 	{
 		...read,
 		name: "get_mission",
-		description: "One mission with its intent, workspace, artifacts, proposals and experiments.",
+		description: "One mission with its plan, workspace, artifacts, proposals and experiments.",
 		via: platform("get_mission"),
 		fields: ["missionId"],
 	},
@@ -92,7 +92,7 @@ export const CRUCE_TOOLS: CruceTool[] = [
 		...read,
 		name: "get_lineage",
 		description:
-			"Trace lineage. With subjectId (intent, mission, revision, proposal or deployment) returns the connected chain both ways: intent → production and production → intent.",
+			"Trace lineage. With subjectId (mission, revision, proposal or deployment) returns the connected chain both ways: mission → production and production → mission.",
 		via: platform("get_lineage"),
 		fields: ["subjectId"],
 	},
@@ -132,25 +132,15 @@ export const CRUCE_TOOLS: CruceTool[] = [
 		fields: [],
 	},
 	{
-		name: "create_intent",
-		description: "Record why work should happen (the intent). Missions are bounded work toward an intent.",
-		scope: "proposal:write",
-		class: "control",
-		cost: "none",
-		mutation: true,
-		via: platform("create_intent"),
-		fields: ["title", "context", "why"],
-	},
-	{
 		name: "create_mission",
 		description:
-			"Define a bounded mission for an intent with a structured plan (scope, contracts, verification). Set experimentOf to try an alternative approach.",
+			"Register work from your local agent as a bounded mission with a structured plan (scope, contracts, verification). Set experimentOf to try an alternative approach.",
 		scope: "proposal:write",
 		class: "control",
 		cost: "none",
 		mutation: true,
 		via: platform("create_mission"),
-		fields: ["intentId", "title", "specialization", "plan", "experimentOf"],
+		fields: ["title", "context", "specialization", "plan", "experimentOf"],
 	},
 	{
 		name: "start_mission",
@@ -171,7 +161,7 @@ export const CRUCE_TOOLS: CruceTool[] = [
 		class: "control",
 		cost: "none",
 		mutation: true,
-		via: coordination("update_intent"),
+		via: coordination("update_plan"),
 		fields: ["plan", "workspace"],
 	},
 	{
@@ -346,7 +336,7 @@ export function toInternalCommand(tool: CruceTool, args: Record<string, unknown>
 }
 
 export const CRUCE_INSTRUCTIONS =
-	"Cruce coordinates your work; it does not run you. Read get_context before working. start_mission pins an accepted base revision and an isolated workspace. Work locally with your normal tools and Git, then publish_revision (exact commits), publish_artifact for evidence anchored to that revision, and create_proposal. Verification always targets an exact revision; your own results are recorded as reported evidence. Preview requests are metered and governed by policy; production promotion is always a human decision. Check coordination before expanding scope; acknowledge instructions and refresh to the revision Cruce names, preserving working-tree changes.";
+	"Cruce coordinates your work; it does not run you. The developer prompts you locally. Read get_project and get_active_work, then register your plan with create_mission; humans do not need to define a mission in the console. Read get_context before working. start_mission pins an accepted base revision and an isolated workspace. Work locally with your normal tools and Git, then publish_revision (exact commits), publish_artifact for evidence anchored to that revision, and create_proposal. Verification always targets an exact revision; your own results are recorded as reported evidence. Preview requests are metered and governed by policy; production promotion is always a human decision. Check coordination before expanding scope; acknowledge instructions and refresh to the revision Cruce names, preserving working-tree changes.";
 
 /** Scope an agent needs for an internal command (HTTP and MCP share one authority). Undefined: humans only. */
 export function requiredScope(kind: "platform" | "coordination", tool: string): Scope | undefined {

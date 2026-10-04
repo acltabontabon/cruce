@@ -56,7 +56,7 @@ export async function workspace(cwd: string): Promise<WorkspaceAttachment> {
 		head,
 		isolation: "isolated",
 		precision: "symbols",
-		capabilities: ["git_observation", "intent_mcp"],
+		capabilities: ["git_observation", "coordination_mcp"],
 	};
 }
 /** Actual base and changed content. Git reads never use the developer's credential configuration. */

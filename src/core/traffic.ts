@@ -461,7 +461,7 @@ export function computeTraffic(input: TrafficInput): TrafficPicture {
 			congestions.push({
 				key,
 				flights: [...s.flights].sort() as [string, string],
-				label: "Intent overlap",
+				label: "Objective overlap",
 				level: 4,
 				levels: [4],
 				severity: s.recommendation === "escalate" ? "high" : "medium",
@@ -470,7 +470,9 @@ export function computeTraffic(input: TrafficInput): TrafficPicture {
 				interactions: [],
 				why: [note],
 				plan: [
-					s.recommendation === "escalate" ? "A controller should confirm both intents are compatible." : "Both proceed; review at landing.",
+					s.recommendation === "escalate"
+						? "A controller should confirm both objectives are compatible."
+						: "Both proceed; review at landing.",
 				],
 				resolution: s.recommendation === "escalate" ? "attention" : "auto",
 			});
@@ -481,7 +483,7 @@ export function computeTraffic(input: TrafficInput): TrafficPicture {
 				kind: "semantic",
 				severity: "high",
 				flights: [...s.flights],
-				title: `Possible contradictory intent: ${s.flights.join(" × ")}`,
+				title: `Possible contradictory objective: ${s.flights.join(" × ")}`,
 				detail: s.summary,
 			});
 		}

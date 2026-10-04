@@ -39,7 +39,6 @@ export type View = Omit<PlatformState, "proposals" | "missions" | "replays" | "e
 		revision: string;
 		proposal?: { id: string; number: number; summary: string };
 		mission?: string;
-		intent?: string;
 		agent?: string;
 	};
 	sourceBackend: "cloudflare_artifacts" | "offline_fixture";
@@ -65,13 +64,12 @@ export type Route =
 	| { view: "overview" }
 	| { view: "lineage"; subject?: string }
 	| { view: "environments" }
-	| { view: "proposal" | "mission" | "artifact" | "intent"; id: string };
+	| { view: "proposal" | "mission" | "artifact"; id: string };
 export function readRoute(hash = location.hash): Route {
 	const [view, id] = hash.replace(/^#\/?/, "").split("/");
 	if (view === "lineage") return { view, subject: id || undefined };
 	if (view === "environments") return { view };
-	if ((view === "proposal" || view === "mission" || view === "artifact" || view === "intent") && id)
-		return { view, id: decodeURIComponent(id) };
+	if ((view === "proposal" || view === "mission" || view === "artifact") && id) return { view, id: decodeURIComponent(id) };
 	return { view: "overview" };
 }
 export const href = (route: Route) =>

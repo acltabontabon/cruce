@@ -14,7 +14,7 @@ export const JEV_LIMITS = {
 	dailyAttempts: 500,
 	dailyTokens: 2_000_000,
 };
-export const JEV_CAPABILITIES = ["intent", "dependency", "omission", "response"] as const;
+export const JEV_CAPABILITIES = ["objective", "dependency", "omission", "response"] as const;
 export interface EvidencePacket {
 	fingerprint: string;
 	workstreamId: string;
@@ -78,7 +78,10 @@ export function packetFor(s: CoordinationState, id: string, otherId: string, exc
 			evidence,
 		},
 		questions: {
-			intent: { type: "noul", instructions: "Does the evidence support contradictory or duplicated intent between these workstreams?" },
+			objective: {
+				type: "noul",
+				instructions: "Does the evidence support contradictory or duplicated objective between these workstreams?",
+			},
 			dependency: {
 				type: "noul",
 				instructions: "Does the first workstream depend semantically on the other workstream's changing contract or assumptions?",
@@ -119,7 +122,7 @@ export function validateAssessment(packet: EvidencePacket, raw: unknown): Semant
 		throw new Error("Invalid response distribution");
 	const max = Math.max(...Object.values(response.probabilities));
 	if (Math.abs(response.probabilities[response.choice] - max) > 0.001) throw new Error("Chosen response is inconsistent with distribution");
-	const concerns = ["intent", "dependency", "omission"] as const;
+	const concerns = ["objective", "dependency", "omission"] as const;
 	return concerns.flatMap((capability) => {
 		const concern = result.answers[capability];
 		if (concern.type !== "noul") throw new Error("Concern probability required");

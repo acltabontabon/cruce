@@ -20,6 +20,7 @@ import {
 	TERMINAL_PHASES,
 } from "./domain.ts";
 import { LEASE_TTL_MS, LeaseBook } from "./leases.ts";
+import { migratePlanRecords } from "./migrate-records.ts";
 import { type ChangedFile, evaluatePublish, type GateResult } from "./publish-gate.ts";
 import {
 	type AttentionItem,
@@ -138,7 +139,7 @@ export class Controller {
 		state: ControllerState,
 		private readonly now: number,
 	) {
-		this.s = structuredClone(state);
+		this.s = migratePlanRecords(state);
 	}
 
 	get state(): Readonly<ControllerState> {
@@ -816,7 +817,7 @@ export class Controller {
 			this.emit(
 				"congestion.detected",
 				"cruce",
-				`Congestion · ${c.flights.join(" × ")} · ${c.label || "intent"}`,
+				`Congestion · ${c.flights.join(" × ")} · ${c.label || "objective"}`,
 				undefined,
 				[...c.why, ...(c.rightOfWay ? [`right-of-way: ${c.rightOfWay.winner} (${c.rightOfWay.rule})`, ...c.rightOfWay.because] : [])],
 				{ key: c.key, level: c.level, severity: c.severity, control: c.control },

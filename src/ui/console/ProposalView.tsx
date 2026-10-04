@@ -36,8 +36,7 @@ export function ProposalView({ view, id, execute }: { view: View; id: string; ex
 		[execute, id, version],
 	);
 	if (!p) return <p role="alert">Proposal unavailable.</p>;
-	const mission = view.missions.find((m) => m.id === p.missionId),
-		intent = view.intents.find((i) => i.id === mission?.intentId);
+	const mission = view.missions.find((m) => m.id === p.missionId);
 	const verifications = view.verifications.filter((v) => v.proposalId === p.id);
 	const deployments = view.deployments.filter((d) => d.proposalId === p.id);
 	const reviews = view.reviews.filter((r) => r.proposalId === p.id);
@@ -52,7 +51,6 @@ export function ProposalView({ view, id, execute }: { view: View; id: string; ex
 			</p>
 			<h1 id="proposal-title">{p.summary}</h1>
 			<p className="muted">
-				{intent && <a href={href({ view: "intent", id: intent.id })}>Intent: {intent.title}</a>}
 				{mission && (
 					<>
 						{" · "}

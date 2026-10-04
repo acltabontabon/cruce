@@ -4,7 +4,7 @@ import type { Flight, FlightPlan } from "../core/domain.ts";
 import { planAccesses, type SemanticFinding } from "../core/traffic.ts";
 
 /**
- * Bounded judgment for level-4 (semantic) congestion: two Flights on different symbols whose *intents*
+ * Bounded judgment for level-4 (semantic) congestion: two Flights on different symbols whose *objectives*
  * may contradict ("move validation into middleware" vs "centralize validation in AuthService").
  *
  * A judge answers narrow questions about a pair — overlap? severity? recommended control? — and returns
@@ -17,8 +17,8 @@ export interface DecisionJudge {
 }
 
 export interface JudgePair {
-	a: { id: string; intent: string; summary: string; modules: string[]; assumptions: string[] };
-	b: { id: string; intent: string; summary: string; modules: string[]; assumptions: string[] };
+	a: { id: string; objective: string; summary: string; modules: string[]; assumptions: string[] };
+	b: { id: string; objective: string; summary: string; modules: string[]; assumptions: string[] };
 	sharedModules: string[];
 }
 
@@ -47,7 +47,7 @@ export function candidatePairs(flights: Flight[], index: AirspaceIndex): JudgePa
 			if (!shared.length) continue;
 			const view = (f: Flight & { plan: FlightPlan }, modules: string[]) => ({
 				id: f.id,
-				intent: f.plan.intent,
+				objective: f.plan.objective,
 				summary: f.plan.summary,
 				modules,
 				assumptions: f.plan.assumptions,
@@ -73,8 +73,8 @@ export class RuleBasedDecisionJudge implements DecisionJudge {
 	async judge(pairs: JudgePair[]): Promise<SemanticFinding[]> {
 		const findings: SemanticFinding[] = [];
 		for (const p of pairs) {
-			const ma = MOVE.exec(p.a.intent);
-			const mb = MOVE.exec(p.b.intent);
+			const ma = MOVE.exec(p.a.objective);
+			const mb = MOVE.exec(p.b.objective);
 			if (ma && mb && sameConcept(ma[2], mb[2]) && ma[3].toLowerCase() !== mb[3].toLowerCase()) {
 				findings.push({
 					flights: [p.a.id, p.b.id],
@@ -85,7 +85,7 @@ export class RuleBasedDecisionJudge implements DecisionJudge {
 				});
 				continue;
 			}
-			const concept = contradictory(p.a.intent, p.b.intent) ?? contradictory(p.b.intent, p.a.intent);
+			const concept = contradictory(p.a.objective, p.b.objective) ?? contradictory(p.b.objective, p.a.objective);
 			if (concept) {
 				findings.push({
 					flights: [p.a.id, p.b.id],
@@ -143,11 +143,11 @@ export class ModelDecisionJudge implements DecisionJudge {
 					system:
 						"You compare two planned code changes in the same repository and answer one narrow question. Reply with JSON only: " +
 						'{"overlap": true|false, "severity": "low"|"medium"|"high", "recommendation": "caution"|"escalate", "summary": "<one sentence>"}. ' +
-						"overlap means the two intents contradict or would undo each other, not merely that they touch the same area.",
+						"overlap means the two objectives contradict or would undo each other, not merely that they touch the same area.",
 					messages: [
 						{
 							role: "user",
-							content: `Shared modules: ${p.sharedModules.join(", ")}\n\nFlight ${p.a.id}: ${p.a.summary}\nIntent: ${p.a.intent}\nAssumes: ${p.a.assumptions.join("; ") || "—"}\n\nFlight ${p.b.id}: ${p.b.summary}\nIntent: ${p.b.intent}\nAssumes: ${p.b.assumptions.join("; ") || "—"}`,
+							content: `Shared modules: ${p.sharedModules.join(", ")}\n\nFlight ${p.a.id}: ${p.a.summary}\nObjective: ${p.a.objective}\nAssumes: ${p.a.assumptions.join("; ") || "—"}\n\nFlight ${p.b.id}: ${p.b.summary}\nObjective: ${p.b.objective}\nAssumes: ${p.b.assumptions.join("; ") || "—"}`,
 						},
 					],
 				}),

@@ -4,14 +4,13 @@ import { type Execute, href, label, READINESS_LABEL, short, TRUST_LABEL, type Vi
 export function MissionView({ view, id }: { view: View; id: string }) {
 	const m = view.missions.find((m) => m.id === id);
 	if (!m) return <p role="alert">Mission unavailable.</p>;
-	const intent = view.intents.find((i) => i.id === m.intentId),
-		workspace = view.workspaces.find((w) => w.id === m.workstreamId),
+	const workspace = view.workspaces.find((w) => w.id === m.workstreamId),
 		artifacts = view.artifacts.filter((a) => a.missionId === m.id),
 		proposals = view.proposals.filter((p) => p.missionId === m.id),
 		group = m.experimentOf ?? m.id,
 		experiments = view.missions.filter((o) => o.id !== m.id && (o.experimentOf ?? o.id) === group && (o.experimentOf || m.experimentOf));
 	const plan = m.plan as {
-		intent?: string;
+		objective?: string;
 		writeSet?: { resource: string }[];
 		contractSet?: { resource: string }[];
 		verification?: string[];
@@ -22,11 +21,7 @@ export function MissionView({ view, id }: { view: View; id: string }) {
 				Mission · {label(m.specialization)} · {m.state}
 			</p>
 			<h1 id="mission-title">{m.title}</h1>
-			{intent && (
-				<p className="muted">
-					For intent <a href={href({ view: "intent", id: intent.id })}>{intent.title}</a>
-				</p>
-			)}
+			{m.context && <p className="muted">{m.context}</p>}
 			<dl className="kv">
 				<dt>Agent</dt>
 				<dd>{m.agent ? `${m.agent.tool} · ${m.agent.developerId}` : <span className="muted">Not started</span>}</dd>
@@ -56,7 +51,7 @@ export function MissionView({ view, id }: { view: View; id: string }) {
 					</>
 				)}
 			</dl>
-			{plan.intent && <p>{plan.intent}</p>}
+			{plan.objective && <p>{plan.objective}</p>}
 			{!!plan.writeSet?.length && (
 				<p className="muted">
 					Scope: {plan.writeSet.map((w) => w.resource).join(", ")}
@@ -106,31 +101,6 @@ export function MissionView({ view, id }: { view: View; id: string }) {
 			</ul>
 			<p>
 				<a href={href({ view: "lineage", subject: m.id })}>Trace lineage</a>
-			</p>
-		</section>
-	);
-}
-
-export function IntentView({ view, id }: { view: View; id: string }) {
-	const i = view.intents.find((i) => i.id === id);
-	if (!i) return <p role="alert">Intent unavailable.</p>;
-	const missions = view.missions.filter((m) => m.intentId === i.id);
-	return (
-		<section className="workstream-detail" aria-labelledby="intent-title">
-			<p className="eyebrow">Intent</p>
-			<h1 id="intent-title">{i.title}</h1>
-			<p>{i.context}</p>
-			{i.why && <p className="muted">Why: {i.why}</p>}
-			<h2>Missions</h2>
-			<ul className="plain-list">
-				{missions.map((m) => (
-					<li key={m.id}>
-						<a href={href({ view: "mission", id: m.id })}>{m.title}</a> <span className="muted">· {m.state}</span>
-					</li>
-				))}
-			</ul>
-			<p>
-				<a href={href({ view: "lineage", subject: i.id })}>Trace to production</a>
 			</p>
 		</section>
 	);

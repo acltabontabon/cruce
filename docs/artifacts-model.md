@@ -8,7 +8,7 @@ project-<id>                       canonical repository; main = accepted source 
   ├─ project-<id>-baseline-<sha16> immutable snapshot of an accepted revision
   │     └─ project-<id>--w-<n>     one fork per mission workspace (agent commits land here)
   ├─ project-<id>--evidence        immutable evidence artifacts (typed reports, preview checks)
-  └─ project-<id>--deploy          deployment intent, in the project's resource account:
+  └─ project-<id>--deploy          deployment state, in the project's resource account:
                                    main = production, cruce/proposal-<N> = Worker Preview
 ```
 
@@ -17,7 +17,7 @@ project-<id>                       canonical repository; main = accepted source 
 - **Revision as anchor**: source artifacts record the exact commit, its parent, the commits in `base..revision` and the number of changed files. Evidence artifacts, verifications, reviews, promotions and deployments all name a revision.
 - **Proposal**: exact base and proposed revision, workspace repository, commit and file counts. A newer proposal from the same mission supersedes the open one.
 - **Verification**: always targets the proposal's exact revision; trust is reported, human attested, or runtime verified.
-- **Deployment**: the deploy repository mirrors deployment intent only. Cruce pushes the exact revision; Workers Builds builds it; Cruce records build, URL and its own smoke checks. Production can move back to an earlier accepted revision (rollback) without rewriting accepted history.
+- **Deployment**: the deploy repository mirrors deployment state only. Cruce pushes the exact revision; Workers Builds builds it; Cruce records build, URL and its own smoke checks. Production can move back to an earlier accepted revision (rollback) without rewriting accepted history.
 
 ## Credentials
 
@@ -89,9 +89,9 @@ every publish shows up as *token.created(write) → pushed → token.revoked*.
 
 ## Git notes (`refs/notes/cruce`)
 
-Flight commits carry `kind: "flight-commit"` notes (Flight, mission, agent, plan version, baseline, intent,
+Flight commits carry `kind: "flight-commit"` notes (Flight, mission, agent, plan version, baseline, plan objective,
 clearance at publish time, gate verdict, touched airspace). Landing merge commits carry `kind: "landing"`
-notes: task, intent, plan amendments with reasons, the coordination decisions that affected the Flight
+notes: task, plan objective, plan amendments with reasons, the coordination decisions that affected the Flight
 (clearance changes, holds, yields, overrides, staleness), congestion and right-of-way, validation result,
 and the preflight (merge-base, clean, baseline behind). No secrets, tokens, or transcripts.
 

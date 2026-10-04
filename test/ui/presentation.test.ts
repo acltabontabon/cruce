@@ -213,7 +213,7 @@ describe("first frame", () => {
 		const flight = controller.createFlight({ missionId: mission.id, agent: "mock" });
 		controller.submitPlan(flight.id, {
 			summary: "Update package metadata",
-			intent: "Update package metadata",
+			objective: "Update package metadata",
 			writeSet: [{ type: "file", resource: "package.json" }],
 		});
 		expect(scopeOf(flight, controller.state)).toContain("package.json");

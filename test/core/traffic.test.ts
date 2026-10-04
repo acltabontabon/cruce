@@ -69,7 +69,7 @@ describe("clearance engine", () => {
 	it("contract change under a declared read: both fly, reader lands after", () => {
 		const reader: FlightPlanInput = {
 			summary: "Audit tokens",
-			intent: "read-only use of validate",
+			objective: "read-only use of validate",
 			readSet: [{ type: "symbol", resource: "TokenValidator.validate" }],
 			writeSet: [{ type: "component", resource: "AuditLog" }],
 		};
@@ -82,13 +82,13 @@ describe("clearance engine", () => {
 	it("detects and breaks a deadlock in declared dependencies", () => {
 		const a: FlightPlanInput = {
 			summary: "a",
-			intent: "a",
+			objective: "a",
 			writeSet: [{ type: "component", resource: "AuditLog" }],
 			dependencies: ["F-022"],
 		};
 		const b: FlightPlanInput = {
 			summary: "b",
-			intent: "b",
+			objective: "b",
 			writeSet: [{ type: "component", resource: "SessionService" }],
 			dependencies: ["F-021"],
 		};
@@ -101,13 +101,13 @@ describe("clearance engine", () => {
 		// A writes X, contract on Y; B writes Y, contract on X → each changes the other's contract.
 		const a: FlightPlanInput = {
 			summary: "a",
-			intent: "a",
+			objective: "a",
 			writeSet: [{ type: "symbol", resource: "SessionService.start" }],
 			contractSet: [{ resource: "SessionRepository.save", change: "signature" }],
 		};
 		const b: FlightPlanInput = {
 			summary: "b",
-			intent: "b",
+			objective: "b",
 			writeSet: [{ type: "symbol", resource: "SessionRepository.save" }],
 			contractSet: [{ resource: "SessionService.start", change: "signature" }],
 		};

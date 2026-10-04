@@ -1,6 +1,6 @@
 # Demonstrations
 
-The native console is `/`. The deterministic coordination demo is isolated at `/demo`; its auth-service revisions and scenario verifier are unchanged. It demonstrates the retained scheduling engine, not native intent, proposals, verification or deployment.
+The native console is `/`. The deterministic coordination demo is isolated at `/demo`; its auth-service revisions and scenario verifier are unchanged. It demonstrates the retained scheduling engine, not native missions, proposals, verification or deployment.
 
 ## Native lifecycle (offline tests)
 
@@ -12,12 +12,12 @@ The native console is `/`. The deterministic coordination demo is isolated at `/
 - evidence, a proposal (#1, exact base and revision), human attestation and review lead to a non-forced promotion;
 - a Worker preview of the exact revision is built (Workers Builds mocked) and Cruce's smoke checks become runtime-verified evidence;
 - metered previews require human approval when policy says so;
-- one human decision promotes and deploys production; lineage traces the deployment back to intent and agent; rollback is explained as the proposals it removes and redeploys an earlier accepted revision;
+- one human decision promotes and deploys production; lineage traces the deployment back to the mission and agent; rollback is explained as the proposals it removes and redeploys an earlier accepted revision;
 - two missions refresh after a promotion while preserving both histories.
 
 ## Native narrative (live)
 
-A developer records the intent "Add rate limiting to Customer API". A mission is created. Claude Code, running locally, reads `get_context`, calls `start_mission` (base pinned to the canonical revision, workspace fork created), changes code, runs `npm test` and `wrangler dev` locally, commits, and calls `publish_revision`. It publishes the test report with `publish_artifact`, creates proposal #1 and calls `request_preview`. Cruce checks policy and budgets, pushes the exact revision to the deploy repository, waits for Workers Builds and runs smoke checks. A security agent attaches evidence for the same revision. The human sees proposal #1 with its revision, files, verification per revision and resource impact, approves, and chooses **Promote and deploy to production**. Production runs that revision, and lineage leads from production back to the intent. A live release demo must label reported, human-attested and runtime-verified results and never substitute scripted messages for real execution.
+A developer asks their local Claude Code agent to add rate limiting to Customer API. The agent reads `get_project` and `get_active_work`, registers its plan with `create_mission`, reads `get_context`, and calls `start_mission` (base pinned to the canonical revision, workspace fork created), changes code, runs `npm test` and `cf dev` locally, commits, and calls `publish_revision`. It publishes the test report with `publish_artifact`, creates proposal #1 and calls `request_preview`. Cruce checks policy and budgets, pushes the exact revision to the deploy repository, waits for Workers Builds and runs smoke checks. A security agent attaches evidence for the same revision. The human sees proposal #1 with its revision, files, verification per revision and resource impact, approves, and chooses **Promote and deploy to production**. Production runs that revision, and lineage leads from production back to the mission. A live release demo must label reported, human-attested and runtime-verified results and never substitute scripted messages for real execution.
 
 ## Deterministic coordination demo
 

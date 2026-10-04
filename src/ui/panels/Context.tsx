@@ -163,7 +163,7 @@ function FlightDetail({ state, f, projectId, integrationBlockers, onSelect, act,
 								<h2>Plan</h2>
 								<span className="muted small">v{f.plan.planVersion}</span>
 							</div>
-							<p>{friendlyText(f.plan.intent, state)}</p>
+							<p>{friendlyText(f.plan.objective, state)}</p>
 							{clearance && active ? (
 								<div className="clearance-columns">
 									<div>

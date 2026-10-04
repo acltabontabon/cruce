@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { migratePlanRecords } from "../core/migrate-records.ts";
 import { CoordinationError, stable } from "../core/workstreams.ts";
 import { type Principal, type ProjectConnection, projectKey } from "../shared/coordination.ts";
 export interface ProjectRecord extends ProjectConnection {
@@ -13,12 +14,12 @@ export class ProjectDirectory extends DurableObject {
 		return next;
 	}
 	async projects() {
-		return [...(await this.ctx.storage.list<ProjectRecord>({ prefix: "project:" })).values()];
+		return migratePlanRecords([...(await this.ctx.storage.list<ProjectRecord>({ prefix: "project:" })).values()]);
 	}
 	async project(id: string) {
 		const record = await this.ctx.storage.get<ProjectRecord>(`project:${id}`);
 		if (!record) throw new CoordinationError(404, "Project unavailable");
-		return record;
+		return migratePlanRecords(record);
 	}
 	principal(identity: { developerId: string; tenantId: string }, project: ProjectRecord): Principal {
 		const role = project.members[identity.developerId];
@@ -58,7 +59,7 @@ export class ProjectDirectory extends DurableObject {
 					artifactRepository: `project-${uuid}`,
 					active: true,
 					version: 1,
-					capabilities: ["intent_mcp", "managed_artifacts", "native_promotion"],
+					capabilities: ["coordination_mcp", "managed_artifacts", "native_promotion"],
 					policy: { mode: "enforced", semantic: "advisory" },
 					members: { [identity.developerId]: "maintainer" },
 					createdAt: Date.now(),

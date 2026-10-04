@@ -10,7 +10,7 @@ The 2026-10-05 architectural clarification anchors Cruce on four foundations: Gi
 | 2 | Git revision / canonical state model (`SourceRepository`, revision on every record, revision lineage) | implemented, offline-tested |
 | 3 | Mission ↔ Git workspace (base pinned to an accepted revision; one fork per workspace) | implemented, offline-tested |
 | 4 | Cruce MCP (catalog, per-tool schemas, scope filtering, no Cloudflare admin tools) | implemented, offline-tested |
-| 5 | Agent access to intent / mission / context (`get_context`, `get_project`, `get_mission`) | implemented, offline-tested |
+| 5 | Agent access to mission / context (`get_context`, `get_project`, `get_mission`) | implemented, offline-tested |
 | 6 | Proposal ↔ exact Git revision (base, revision, commits, files; supersede; reject / request changes) | implemented, offline-tested |
 | 7 | Verification ↔ exact Git revision (requests, reported / human attested / runtime verified) | implemented, offline-tested |
 | 8 | Evidence / artifact relationships (anchored to revisions; execution location recorded) | implemented, offline-tested |

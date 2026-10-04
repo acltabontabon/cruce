@@ -19,17 +19,11 @@ const command = (tool: typeof PlatformCommandInput._output.tool, extra: Record<s
 
 function fixture(): View {
 	const c = new PlatformController(initialPlatform(), 1_700_000_000_000);
-	const i = c.execute(
-		command("create_intent", { title: "Add rate limiting", context: "Burst traffic", why: "Protect Customer API" }),
-		human,
-		BASE,
-	) as { id: string };
 	const m = c.execute(
 		command("create_mission", {
-			intentId: i.id,
 			plan: {
 				summary: "Implement and verify rate limiting",
-				intent: "Limit bursts",
+				objective: "Limit bursts",
 				writeSet: [{ type: "file", resource: "src/limit.ts" }],
 			},
 		}),
@@ -47,7 +41,6 @@ function fixture(): View {
 	const a = c.artifact({
 		kind: "source",
 		missionId: m.id,
-		intentId: i.id,
 		title: "Rate limiting",
 		summary: "Token bucket",
 		revision: HEAD,
@@ -148,7 +141,7 @@ describe("native console", () => {
 		expect(html).toContain("Build and deploy a Worker preview");
 		expect(html).toContain("#1 Token bucket");
 		expect(html).toContain("Cloudflare Worker detected");
-		expect(html).not.toMatch(/Pull request|branch/i);
+		expect(html).not.toMatch(/Pull request|branch|intent/i);
 	});
 	it("connects a proposal to exact revisions, evidence trust, resource impact and the human decision", () => {
 		const view = fixture();

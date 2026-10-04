@@ -12,7 +12,7 @@ interface Progress {
 	nextAt: number;
 }
 
-/** An intent survives partial provisioning and demo resets; no credentials are persisted here. */
+/** An ownership record survives partial provisioning and demo resets; no credentials are persisted here. */
 export interface FlightResources {
 	key: string;
 	projectId: string;
@@ -76,7 +76,7 @@ export class ResourceCleanup {
 
 	private update(key: string, fn: (record: FlightResources) => void) {
 		const latest = this.records().find((r) => r.key === key);
-		if (!latest) throw new Error("Resource ownership intent missing");
+		if (!latest) throw new Error("Resource ownership record missing");
 		fn(latest);
 		this.save(latest);
 		return latest;
@@ -110,7 +110,7 @@ export class ResourceCleanup {
 
 	register(key: string, resources: Partial<Pick<FlightResources, "repoId" | "workflowId" | "sandboxId">>) {
 		const record = this.records().find((r) => r.key === key);
-		if (!record) throw new Error("Resource ownership intent missing");
+		if (!record) throw new Error("Resource ownership record missing");
 		for (const step of STEPS) {
 			if (
 				((step === "tokens" || step === "repository" || step === "subscription" || step === "local") && resources.repoId) ||
@@ -126,7 +126,7 @@ export class ResourceCleanup {
 
 	provisioning(key: string, pending: boolean) {
 		const record = this.records().find((r) => r.key === key);
-		if (!record) throw new Error("Resource ownership intent missing");
+		if (!record) throw new Error("Resource ownership record missing");
 		record.provisionUntil = pending ? this.now() + 10 * 60_000 : undefined;
 		this.save(record);
 	}

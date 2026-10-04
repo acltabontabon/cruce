@@ -5,7 +5,7 @@ import { type Execute, href, label, liveIn, short, TRUST_LABEL, type View } from
 
 type Trace = Pick<
 	PlatformState,
-	"intents" | "missions" | "artifacts" | "proposals" | "verifications" | "reviews" | "promotions" | "deployments" | "environments"
+	"missions" | "artifacts" | "proposals" | "verifications" | "reviews" | "promotions" | "deployments" | "environments"
 > & {
 	revisions: string[];
 };
@@ -16,7 +16,7 @@ interface Record {
 	link?: string;
 }
 
-/** Intent → mission → agent → revision → artifacts → proposal → verification → preview → promotion → production, and back. */
+/** Mission → agent → revision → artifacts → proposal → verification → preview → promotion → production, and back. */
 export function Lineage({ view, subject, execute }: { view: View; subject?: string; execute: Execute }) {
 	const live = liveIn(view, "production");
 	const target = subject ?? live?.id;
@@ -68,9 +68,7 @@ export function Lineage({ view, subject, execute }: { view: View; subject?: stri
 				<summary>Read the same lineage as a timeline</summary>
 				{view.timeline
 					.filter(
-						(e) =>
-							!trace ||
-							e.ids.some((id) => [...trace.intents, ...trace.missions, ...trace.proposals, ...trace.deployments].some((r) => r.id === id)),
+						(e) => !trace || e.ids.some((id) => [...trace.missions, ...trace.proposals, ...trace.deployments].some((r) => r.id === id)),
 					)
 					.map((e) => (
 						<p key={e.id} className="timeline-row">
@@ -84,7 +82,6 @@ export function Lineage({ view, subject, execute }: { view: View; subject?: stri
 
 function Chain({ trace, view }: { trace: Trace; view: View }) {
 	const steps: { label: string; values: { text: string; link?: string }[] }[] = [
-		{ label: "Intent", values: trace.intents.map((i) => ({ text: i.title, link: href({ view: "intent", id: i.id }) })) },
 		{ label: "Mission", values: trace.missions.map((m) => ({ text: m.title, link: href({ view: "mission", id: m.id }) })) },
 		{ label: "Agent", values: [...new Set(trace.missions.flatMap((m) => (m.agent ? [m.agent.tool] : [])))].map((text) => ({ text })) },
 		{ label: "Git revision", values: trace.revisions.map((r) => ({ text: short(r) })) },
@@ -141,7 +138,6 @@ function Graph({ scope, view }: { scope: Trace; view: View }) {
 		const rev = (r: string) => `rev:${r}`;
 		const agents = scope.missions.filter((m) => m.agent).map((m) => ({ id: `agent:${m.id}`, mission: m.id, tool: m.agent!.tool }));
 		const records: Record[] = [
-			...scope.intents.map((i) => ({ id: i.id, title: i.title, kind: "Intent", link: href({ view: "intent", id: i.id }) })),
 			...scope.missions.map((m) => ({ id: m.id, title: m.title, kind: "Mission", link: href({ view: "mission", id: m.id }) })),
 			...agents.map((a) => ({ id: a.id, title: a.tool, kind: "Agent" })),
 			...scope.revisions.map((r) => ({ id: rev(r), title: short(r), kind: "Git revision" })),
@@ -169,7 +165,7 @@ function Graph({ scope, view }: { scope: Trace; view: View }) {
 		const known = new Set(records.map((r) => r.id));
 		const sourceOf = new Map(scope.artifacts.filter((a) => a.kind === "source").map((a) => [a.id, a.revision]));
 		const raw: [string, string][] = [
-			...scope.missions.map((m) => [m.intentId, m.id] as [string, string]),
+			...scope.missions.flatMap((m) => (m.experimentOf ? [[m.experimentOf, m.id] as [string, string]] : [])),
 			...agents.map((a) => [a.mission, a.id] as [string, string]),
 			...scope.artifacts
 				.filter((a) => a.kind === "source")

@@ -11,7 +11,7 @@ const packet: EvidencePacket = {
 	],
 	state: {},
 	questions: {
-		intent: { type: "noul", instructions: "intent" },
+		objective: { type: "noul", instructions: "objective" },
 		dependency: { type: "noul", instructions: "dependency" },
 		omission: { type: "noul", instructions: "omission" },
 		response: {
@@ -24,7 +24,7 @@ const packet: EvidencePacket = {
 const response = () => ({
 	model: JEV_MODEL,
 	answers: {
-		intent: { type: "noul", noul: 0.01 },
+		objective: { type: "noul", noul: 0.01 },
 		dependency: { type: "noul", noul: 0.99 },
 		omission: { type: "noul", noul: 0.01 },
 		response: {

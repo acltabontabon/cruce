@@ -73,7 +73,7 @@ async function setup(options: RuntimeOptions = {}) {
 		artifactRepository: "native-payments",
 		active: true,
 		version: 1,
-		capabilities: ["managed_artifacts", "intent_mcp", "native_promotion"],
+		capabilities: ["managed_artifacts", "coordination_mcp", "native_promotion"],
 		policy: { mode: "enforced", semantic: "off" },
 	};
 	const runtime = new ProjectRuntime(
@@ -106,16 +106,12 @@ async function setup(options: RuntimeOptions = {}) {
 async function source(options: RuntimeOptions = {}, extra: Record<string, string> = {}) {
 	const x = await setup(options),
 		base = x.runtime.coordination.state().project.canonicalHead!;
-	const i = (await x.runtime.command(
-		x.command("create_intent", { title: "Retry payment", context: "Retries preserve idempotency" }),
-		x.human,
-	)) as { id: string };
+
 	const m = (await x.runtime.command(
 		x.command("create_mission", {
-			intentId: i.id,
 			plan: {
 				summary: "Retry",
-				intent: "Implement retry",
+				objective: "Implement retry",
 				writeSet: [
 					{ type: "file", resource: "src/pay.ts" },
 					...Object.keys(extra).map((resource) => ({ type: "file" as const, resource })),
@@ -137,7 +133,7 @@ async function source(options: RuntimeOptions = {}, extra: Record<string, string
 				head: base,
 				isolation: "isolated",
 				precision: "symbols",
-				capabilities: ["intent_mcp"],
+				capabilities: ["coordination_mcp"],
 			},
 			agent: { tool: "codex", instance: "one", role: "writer" },
 		}),
@@ -153,7 +149,7 @@ async function source(options: RuntimeOptions = {}, extra: Record<string, string
 		summary: "Idempotent payment",
 	});
 	const output = (await x.runtime.command(publication, x.agent)) as { artifact: Artifact };
-	return { ...x, base, i, m: accepted.mission, accepted, publication, output };
+	return { ...x, base, m: accepted.mission, accepted, publication, output };
 }
 
 async function promoteSource(x: Awaited<ReturnType<typeof source>>, artifact: Artifact, missionId: string) {
@@ -269,7 +265,7 @@ describe("native Artifacts collaboration", () => {
 		expect(x.runtime.coordination.state().project.canonicalHead).toBe(x.output.artifact.revision);
 		expect(x.repos.get("native-payments")?.head).toBe(ticket.to);
 		expect(x.runtime.state().timeline.map((e) => e.kind)).toEqual(
-			expect.arrayContaining(["intent", "mission", "execution", "artifact", "proposal", "verification", "review", "promotion"]),
+			expect.arrayContaining(["mission", "execution", "artifact", "proposal", "verification", "review", "promotion"]),
 		);
 		expect(x.push.mock.calls.every((c) => c[0].force !== true)).toBe(true);
 	});
@@ -330,12 +326,12 @@ describe("native Artifacts collaboration", () => {
 		const x = await source(),
 			plan = {
 				summary: "Retry API",
-				intent: "Expose retry status",
+				objective: "Expose retry status",
 				writeSet: [{ type: "file", resource: "src/response.ts" }],
 				readSet: [{ type: "file", resource: "src/pay.ts" }],
 				contractSet: [{ resource: "PaymentResponse", change: "signature" }],
 			};
-		const m = (await x.runtime.command(x.command("create_mission", { intentId: x.i.id, plan }), x.agent)) as {
+		const m = (await x.runtime.command(x.command("create_mission", { plan }), x.agent)) as {
 			id: string;
 			version: number;
 		};
@@ -351,7 +347,7 @@ describe("native Artifacts collaboration", () => {
 					head: x.base,
 					isolation: "isolated",
 					precision: "symbols",
-					capabilities: ["intent_mcp"],
+					capabilities: ["coordination_mcp"],
 				},
 				agent: { tool: "claude", instance: "api", role: "writer" },
 			}),
@@ -380,7 +376,7 @@ describe("native Artifacts collaboration", () => {
 		expect(work.instructions.some((i) => i.kind === "refresh" && !i.resolvedAt)).toBe(true);
 		await x.runtime.coordination.command(
 			CommandInput.parse({
-				tool: "update_intent",
+				tool: "update_plan",
 				projectId: x.project.id,
 				idempotencyKey: "api-refresh",
 				workstreamId: work.id,
@@ -396,7 +392,7 @@ describe("native Artifacts collaboration", () => {
 					head: published.artifact.revision,
 					isolation: "isolated",
 					precision: "symbols",
-					capabilities: ["intent_mcp"],
+					capabilities: ["coordination_mcp"],
 				},
 			}),
 			x.agent,
@@ -443,10 +439,16 @@ describe("native Artifacts collaboration", () => {
 	it("isolates unauthorized human and agent identities", async () => {
 		const x = await setup();
 		await expect(
-			x.runtime.command(x.command("create_intent", { title: "Unauthorized", context: "test" }), { ...x.agent, tenantId: "other" }),
+			x.runtime.command(x.command("create_mission", { plan: { summary: "Unauthorized", objective: "test", writeSet: [] } }), {
+				...x.agent,
+				tenantId: "other",
+			}),
 		).rejects.toThrow("access denied");
 		await expect(
-			x.runtime.command(x.command("create_intent", { title: "Unauthorized", context: "test" }), { ...x.agent, canWrite: false }),
+			x.runtime.command(x.command("create_mission", { plan: { summary: "Unauthorized", objective: "test", writeSet: [] } }), {
+				...x.agent,
+				canWrite: false,
+			}),
 		).rejects.toThrow("permission");
 	});
 });
@@ -552,8 +554,7 @@ describe("Git revisions and project source", () => {
 		});
 		const m = (await x.runtime.command(
 			x.command("create_mission", {
-				intentId: x.i.id,
-				plan: { summary: "Other", intent: "Other", writeSet: [{ type: "file", resource: "x.ts" }] },
+				plan: { summary: "Other", objective: "Other", writeSet: [{ type: "file", resource: "x.ts" }] },
 			}),
 			x.agent,
 		)) as Mission;
@@ -565,7 +566,7 @@ describe("Git revisions and project source", () => {
 			head: stray,
 			isolation: "isolated",
 			precision: "symbols",
-			capabilities: ["intent_mcp"],
+			capabilities: ["coordination_mcp"],
 		};
 		await expect(
 			x.runtime.command(
@@ -728,11 +729,10 @@ describe("Worker preview, verification and production lineage", () => {
 		expect(await x.runtime.deploymentTick(promoted.deployment.id)).toBe("deployed");
 		expect(x.runtime.state().deployments.find((d) => d.id === promoted.deployment.id)).toMatchObject({ state: "deployed", url: undefined });
 		const lineage = (await x.runtime.command(x.command("get_lineage", { subjectId: promoted.deployment.id }), x.agent)) as {
-			intents: { title: string }[];
 			missions: { title: string; agent?: { tool: string } }[];
 			proposals: { id: string }[];
 		};
-		expect(lineage.intents.map((i) => i.title)).toEqual(["Retry payment"]);
+		expect(lineage.missions.map((m) => m.title)).toEqual(["Retry"]);
 		expect(lineage.missions[0].agent?.tool).toBe("codex");
 		const rollback = (await x.runtime.command(x.command("plan_rollback", { revision: x.base }), x.human)) as {
 			removes: { number: number }[];

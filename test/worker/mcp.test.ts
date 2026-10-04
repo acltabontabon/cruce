@@ -30,6 +30,10 @@ describe("Cruce MCP", () => {
 			expect(client.getInstructions()).toContain("Cruce coordinates your work; it does not run you");
 			const listed = await client.listTools();
 			expect(listed.tools.map((t) => t.name)).toEqual(CRUCE_TOOL_NAMES);
+			expect(listed.tools.map((t) => t.name)).not.toContain("create_intent");
+			const mission = listed.tools.find((t) => t.name === "create_mission")!;
+			expect(Object.keys(mission.inputSchema.properties ?? {})).toEqual(expect.arrayContaining(["plan", "context"]));
+			expect(Object.keys(mission.inputSchema.properties ?? {})).not.toContain("intentId");
 			const preview = listed.tools.find((t) => t.name === "request_preview")!;
 			expect(preview.description).toContain("Metered Cloudflare operation");
 			expect(Object.keys(preview.inputSchema.properties ?? {})).toContain("proposalId");
@@ -37,8 +41,16 @@ describe("Cruce MCP", () => {
 			expect(listed.tools.find((t) => t.name === "get_context")?.annotations?.readOnlyHint).toBe(true);
 			const result = await client.callTool({ name: "get_active_work", arguments: { projectId: "repo" } });
 			expect(result.structuredContent).toMatchObject({ working: "PROCEED" });
-			await client.callTool({ name: "update_plan", arguments: { projectId: "repo", plan: { summary: "x", intent: "y", writeSet: [] } } });
-			expect(seen.map((c) => c.tool)).toEqual(["get_active_work", "update_intent"]);
+			await client.callTool({
+				name: "update_plan",
+				arguments: { projectId: "repo", plan: { summary: "x", objective: "y", writeSet: [] } },
+			});
+			await client.callTool({
+				name: "create_mission",
+				arguments: { projectId: "repo", context: "Requested locally", plan: { summary: "Retry", objective: "Retry safely", writeSet: [] } },
+			});
+			expect(seen.map((c) => c.tool)).toEqual(["get_active_work", "update_plan", "create_mission"]);
+			expect(seen[2]).toMatchObject({ context: "Requested locally", plan: { objective: "Retry safely" } });
 		} finally {
 			await close();
 		}
@@ -55,6 +67,7 @@ describe("Cruce MCP", () => {
 		try {
 			const names = (await client.listTools()).tools.map((t) => t.name);
 			expect(names).toContain("get_context");
+			expect(names).not.toContain("create_intent");
 			expect(names).not.toContain("publish_revision");
 			expect(names).not.toContain("request_preview");
 		} finally {
@@ -65,7 +78,7 @@ describe("Cruce MCP", () => {
 		const agent = { developerId: "d", tenantId: "t", projectIds: ["p"], kind: "agent" as const, scopes: ["cruce:read" as const] };
 		expect(() => authorizeMachine(agent, { tool: "get_project", projectId: "p" } as MachineCommand)).not.toThrow();
 		expect(() => authorizeMachine(agent, { tool: "request_preview", projectId: "p" } as MachineCommand)).toThrow("preview:request");
-		expect(() => authorizeMachine(agent, { tool: "register_intent", projectId: "p" } as MachineCommand)).toThrow("workspace:write");
+		expect(() => authorizeMachine(agent, { tool: "register_workstream", projectId: "p" } as MachineCommand)).toThrow("workspace:write");
 		expect(() =>
 			authorizeMachine({ ...agent, scopes: ["cruce:read", "promotion:request"] }, {
 				tool: "promote_proposal",

@@ -42,5 +42,5 @@ export async function configureClient(cwd: string, client: "codex" | "claude" | 
 	const exclude = join(cwd, ".gitignore"),
 		ignore = await read(exclude);
 	if (!ignore.split(/\r?\n/).includes(".cruce/")) await writeFile(exclude, `${ignore.trimEnd()}\n.cruce/\n`);
-	return { client, capabilities: ["git_observation", "intent_mcp"], adaptiveVerified: false, hooksInstalled: false };
+	return { client, capabilities: ["git_observation", "coordination_mcp"], adaptiveVerified: false, hooksInstalled: false };
 }

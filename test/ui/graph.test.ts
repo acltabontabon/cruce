@@ -56,7 +56,7 @@ describe("Traffic graph", () => {
 	it("shows all crossing decisions when three runs share one member", () => {
 		const plan: FlightPlanInput = {
 			summary: "Update token validation",
-			intent: "Update token validation",
+			objective: "Update token validation",
 			writeSet: [{ type: "symbol", resource: "TokenValidator.validate" }],
 		};
 		const graph = buildStructure(scenario([plan, plan, plan]).state);

@@ -43,7 +43,7 @@ export interface RuntimeOptions {
 
 /**
  * Native project authority. Git provides the mechanics; the project's canonical repository lives in
- * Cloudflare Artifacts; Cruce adds intent, missions, evidence, proposals, verification, policy,
+ * Cloudflare Artifacts; Cruce adds missions, evidence, proposals, verification, policy,
  * environments and lineage around exact revisions. No external Git provider is consulted.
  */
 export class ProjectRuntime {
@@ -310,7 +310,6 @@ export class ProjectRuntime {
 		const workspace = this.workspaces(c.state).find((w) => w.id === m.workstreamId);
 		return {
 			mission: m,
-			intent: c.state.intents.find((i) => i.id === m.intentId),
 			workspace,
 			experiments: c.state.missions.filter(
 				(o) => o.id !== m.id && (o.experimentOf ?? o.id) === (m.experimentOf ?? m.id) && (o.experimentOf || m.experimentOf),
@@ -415,7 +414,6 @@ export class ProjectRuntime {
 			return {
 				proposal: p,
 				mission: c.state.missions.find((m) => m.id === p.missionId),
-				intent: c.state.intents.find((i) => i.id === c.state.missions.find((m) => m.id === p.missionId)?.intentId),
 				readiness: c.readiness(p.id, canonical),
 				commits: source?.source?.commits ?? [],
 				changes: { files: changes.files, additions: changes.additions, deletions: changes.deletions, statsComplete: changes.statsComplete },
@@ -559,7 +557,7 @@ export class ProjectRuntime {
 		}
 		const d = (await this.coordination.command(
 			CommandInput.parse({
-				tool: work ? "attach_workstream" : "register_intent",
+				tool: work ? "attach_workstream" : "register_workstream",
 				projectId: cmd.projectId,
 				idempotencyKey: `mission:${cmd.idempotencyKey}`,
 				workstreamId: work?.id,
@@ -578,12 +576,7 @@ export class ProjectRuntime {
 		m.state = "active";
 		m.version++;
 		if (this.host) await this.coordination.provision(actor, d.workstreamId);
-		c.event(
-			actor.developerId,
-			"execution",
-			[m.intentId, m.id, d.workstreamId],
-			`${cmd.agent.tool}: ${m.specialization} from ${base.slice(0, 12)}`,
-		);
+		c.event(actor.developerId, "execution", [m.id, d.workstreamId], `${cmd.agent.tool}: ${m.specialization} from ${base.slice(0, 12)}`);
 		return {
 			mission: m,
 			workspace: this.workspaces(c.state).find((w) => w.id === d.workstreamId) ?? {
@@ -700,7 +693,6 @@ export class ProjectRuntime {
 		const a = c.artifact({
 			kind: "source",
 			missionId: m.id,
-			intentId: m.intentId,
 			title: cmd.title ?? m.title,
 			summary: cmd.summary ?? head?.message.split("\n")[0] ?? m.title,
 			revision,
@@ -741,7 +733,6 @@ export class ProjectRuntime {
 		return c.artifact({
 			kind: cmd.kind,
 			missionId: m.id,
-			intentId: m.intentId,
 			title: cmd.title ?? cmd.kind,
 			summary: cmd.summary ?? "",
 			revision: cmd.revision,
@@ -1023,7 +1014,6 @@ export class ProjectRuntime {
 		const artifact = c.artifact({
 			kind: "preview_report",
 			missionId: m.id,
-			intentId: m.intentId,
 			title: `${env.name} smoke checks`,
 			summary: `${results.filter((r) => r.ok).length}/${results.length} checks passed at ${url}`,
 			revision: d.revision,

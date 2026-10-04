@@ -37,15 +37,15 @@ export function environmentOf(state: Pick<PlatformState, "environments">, kind: 
 }
 
 /**
- * Explain a rollback in product terms: which promoted proposals (and their missions/intents) the
+ * Explain a rollback in product terms: which promoted proposals (and their missions) the
  * target revision does not contain. `ancestry` lists accepted revisions newest first.
  */
 export function explainRollback(
-	state: Pick<PlatformState, "proposals" | "promotions" | "missions" | "intents" | "verifications">,
+	state: Pick<PlatformState, "proposals" | "promotions" | "missions" | "verifications">,
 	current: string,
 	target: string,
 	ancestry: string[],
-): { removes: { proposalId: string; number: number; summary: string; mission: string; intent: string }[]; targetVerified: boolean } {
+): { removes: { proposalId: string; number: number; summary: string; mission: string }[]; targetVerified: boolean } {
 	const currentAt = ancestry.indexOf(current),
 		targetAt = ancestry.indexOf(target);
 	if (targetAt < 0 || currentAt < 0 || targetAt < currentAt) throw new Error("Rollback target must be an earlier accepted revision");
@@ -54,9 +54,8 @@ export function explainRollback(
 		.filter((t) => t.state === "complete" && between.has(t.to))
 		.map((t) => {
 			const p = state.proposals.find((p) => p.id === t.proposalId)!,
-				m = state.missions.find((m) => m.id === p.missionId),
-				i = state.intents.find((i) => i.id === m?.intentId);
-			return { proposalId: p.id, number: p.number, summary: p.summary, mission: m?.title ?? "", intent: i?.title ?? "" };
+				m = state.missions.find((m) => m.id === p.missionId);
+			return { proposalId: p.id, number: p.number, summary: p.summary, mission: m?.title ?? "" };
 		});
 	const targetVerified = state.verifications.some((v) => v.revision === target && v.outcome === "pass" && v.trust !== "reported");
 	return { removes, targetVerified };

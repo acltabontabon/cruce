@@ -30,7 +30,7 @@ const repository: ProjectConnection = {
 const principal: Principal = { developerId: "human", tenantId: "tenant", projectIds: [repository.id], maintainer: true };
 const plan = (summary: string, writes: string[], reads: string[] = []) => ({
 	summary,
-	intent: summary,
+	objective: summary,
 	writeSet: writes.map((resource) => ({ type: "symbol" as const, resource })),
 	readSet: reads.map((resource) => ({ type: "symbol" as const, resource })),
 	contractSet: summary === "Retry core" ? [{ resource: "PaymentService.execute", change: "signature" as const }] : [],
@@ -48,7 +48,7 @@ function register(
 ) {
 	const c = new WorkstreamController(s, now),
 		cmd = CommandInput.parse({
-			tool: "register_intent",
+			tool: "register_workstream",
 			projectId: s.project.id,
 			idempotencyKey: name,
 			plan: plan(name, writes),
@@ -60,7 +60,7 @@ function register(
 				head: "base",
 				isolation: "isolated",
 				precision: "symbols",
-				capabilities: ["intent_mcp"],
+				capabilities: ["coordination_mcp"],
 			},
 			agent: { tool: "codex", instance, role: "writer" },
 		});
@@ -150,7 +150,7 @@ describe("repository coordination", () => {
 	});
 	it("checks workstream versions without coupling amendments to unrelated liveness", () => {
 		const a = register(fresh()),
-			cmd = mutation(a.c.state, a.result, "update_intent", { plan: plan("Retry core", ["PaymentService.execute"]) });
+			cmd = mutation(a.c.state, a.result, "update_plan", { plan: plan("Retry core", ["PaymentService.execute"]) });
 		a.c.state.revision += 100;
 		expect(a.c.execute(cmd, principal)).toMatchObject({ planVersion: 2 });
 		expect(() => a.c.execute({ ...cmd, idempotencyKey: "new" }, principal)).toThrow("changed");
@@ -189,14 +189,14 @@ describe("repository coordination", () => {
 			b = register(a.c.state, "Retry API", ["PaymentResponse"]);
 		const ca = new WorkstreamController(b.c.state, 10);
 		ca.execute(
-			mutation(ca.state, a.result, "update_intent", {
+			mutation(ca.state, a.result, "update_plan", {
 				plan: { ...plan("Retry core", ["PaymentService.execute"]), dependencies: [b.result.workstreamId] },
 			}),
 			principal,
 		);
 		expect(() =>
 			ca.execute(
-				mutation(ca.state, b.result, "update_intent", {
+				mutation(ca.state, b.result, "update_plan", {
 					plan: { ...plan("Retry API", ["PaymentResponse"]), dependencies: [a.result.workstreamId] },
 				}),
 				principal,
@@ -236,7 +236,7 @@ describe("repository coordination", () => {
 			a.c.applySemantic(
 				{
 					id: "x",
-					capability: "intent",
+					capability: "objective",
 					workstreamId: a.result.workstreamId,
 					resources: ["s:src/payment/service.ts#PaymentService.execute"],
 					evidence: ["e"],
@@ -264,7 +264,7 @@ describe("repository coordination", () => {
 		);
 		expect(overridden.overridden).toBe(true);
 		b.c.execute(
-			mutation(b.c.state, b.result, "update_intent", { plan: plan("Retry API updated", ["PaymentService.execute", "PaymentResponse"]) }),
+			mutation(b.c.state, b.result, "update_plan", { plan: plan("Retry API updated", ["PaymentService.execute", "PaymentResponse"]) }),
 			principal,
 		);
 		expect(decide(b.c.state, b.result.workstreamId, 10).overridden).toBe(false);

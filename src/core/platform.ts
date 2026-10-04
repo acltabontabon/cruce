@@ -22,12 +22,12 @@ import {
 	type ResourceEvaluation,
 	recordUsage,
 } from "./capabilities.ts";
+import { migratePlanRecords } from "./migrate-records.ts";
 import { CoordinationError, stable } from "./workstreams.ts";
 
 export const initialPlatform = (): PlatformState => ({
 	counter: 0,
 	version: 0,
-	intents: [],
 	missions: [],
 	artifacts: [],
 	proposals: [],
@@ -53,7 +53,26 @@ export const initialPlatform = (): PlatformState => ({
 
 /** Upgrade state stored by earlier versions without reinterpreting its records. */
 export function migratePlatform(stored: PlatformState): PlatformState {
-	const s = structuredClone(stored) as PlatformState & Record<string, unknown>;
+	const legacy = structuredClone(stored) as PlatformState & {
+		intents?: { id: string; title: string; context: string; why: string }[];
+	};
+	const retired = new Set((legacy.intents ?? []).map((i) => i.id));
+	for (const m of legacy.missions as (PlatformState["missions"][number] & { intentId?: string })[]) {
+		const parent = legacy.intents?.find((i) => i.id === m.intentId);
+		if (parent) m.context ??= [parent.title, parent.context, parent.why].filter(Boolean).join("\n\n");
+	}
+	legacy.timeline = legacy.timeline.flatMap((e) => {
+		if (e.kind === "intent") {
+			const ids = legacy.missions.filter((m) => e.ids.includes((m as typeof m & { intentId?: string }).intentId ?? "")).map((m) => m.id);
+			return ids.length ? [{ ...e, kind: "mission_context", ids }] : [];
+		}
+		return [{ ...e, ids: e.ids.filter((id) => !retired.has(id)) }];
+	});
+	// Retired creation receipts must not reintroduce the removed product record.
+	for (const [key, receipt] of Object.entries(legacy.replays)) {
+		if (JSON.parse(receipt.request).tool === "create_intent") delete legacy.replays[key];
+	}
+	const s = migratePlanRecords(legacy) as PlatformState & Record<string, unknown>;
 	const base = initialPlatform();
 	for (const key of ["verificationRequests", "resourceRequests", "environments", "deployments"] as const) s[key] ??= [];
 	s.usage ??= {};
@@ -189,7 +208,7 @@ export class PlatformController {
 	artifact(a: Omit<Artifact, "id" | "at">) {
 		const artifact = { ...a, id: this.next("A"), at: this.now };
 		this.state.artifacts.push(artifact);
-		this.event(a.producer.actor, "artifact", [a.intentId, a.missionId, artifact.id], a.title);
+		this.event(a.producer.actor, "artifact", [a.missionId, artifact.id], a.title);
 		return artifact;
 	}
 
@@ -329,12 +348,12 @@ export class PlatformController {
 
 	// ── lineage ──────────────────────────────────────────────────────────
 
-	/** Connected lineage around one subject: intent → mission → revision → artifacts → proposal → verification → deployment, and back. */
+	/** Connected lineage around one subject: mission → revision → artifacts → proposal → verification → deployment, and back. */
 	trace(subjectId: string) {
 		const s = this.state,
 			edges: [string, string][] = [];
 		const rev = (r: string) => `rev:${r}`;
-		for (const m of s.missions) edges.push([m.intentId, m.id]);
+		for (const m of s.missions) if (m.experimentOf) edges.push([m.experimentOf, m.id]);
 		for (const a of s.artifacts)
 			edges.push([a.missionId, a.id], [a.id, rev(a.revision)], ...a.related.map((r) => [a.id, r] as [string, string]));
 		for (const p of s.proposals) edges.push([p.missionId, p.id], [p.artifactId, p.id], [p.id, rev(p.revision)]);
@@ -364,7 +383,6 @@ export class PlatformController {
 		const has = (id: string) => seen.has(id);
 		return {
 			subjectId,
-			intents: s.intents.filter((i) => has(i.id)),
 			missions: s.missions.filter((m) => has(m.id)),
 			revisions: [...seen].filter((id) => id.startsWith("rev:")).map((id) => id.slice(4)),
 			artifacts: s.artifacts.filter((a) => has(a.id)),
@@ -376,16 +394,14 @@ export class PlatformController {
 			environments: s.environments.filter((e) => has(e.id)),
 		};
 	}
-	/** Which mission, proposal and intent produced an accepted revision. */
+	/** Which mission and proposal produced an accepted revision. */
 	explainRevision(revision: string) {
 		const t = this.state.promotions.find((t) => t.to === revision && t.state === "complete"),
 			p = t ? this.state.proposals.find((p) => p.id === t.proposalId) : this.state.proposals.find((p) => p.revision === revision),
-			m = p ? this.state.missions.find((m) => m.id === p.missionId) : undefined,
-			i = m ? this.state.intents.find((i) => i.id === m.intentId) : undefined;
+			m = p ? this.state.missions.find((m) => m.id === p.missionId) : undefined;
 		return {
 			proposal: p ? { id: p.id, number: p.number, summary: p.summary } : undefined,
 			mission: m?.title,
-			intent: i?.title,
 			agent: m?.agent?.tool,
 		};
 	}
@@ -423,41 +439,22 @@ export class PlatformController {
 				this.event(actor.developerId, "policy", [], cmd.reason);
 				return this.state.policy;
 			}
-			if (cmd.tool === "create_intent") {
-				if (!cmd.title?.trim() || !cmd.context?.trim()) throw new CoordinationError(400, "Intent needs a title and context");
-				const i = {
-					id: this.next("IN"),
-					version: 1,
-					title: cmd.title,
-					context: cmd.context,
-					why: cmd.why ?? "",
-					owner: actor.developerId,
-					at: this.now,
-				};
-				this.state.intents.push(i);
-				this.event(actor.developerId, "intent", [i.id], i.title);
-				return i;
-			}
 			if (cmd.tool === "create_mission") {
-				if (!this.state.intents.some((i) => i.id === cmd.intentId) || !cmd.plan)
-					throw new CoordinationError(400, "Intent and bounded plan required");
-				if (cmd.experimentOf) {
-					const original = this.mission(cmd.experimentOf);
-					if (original.intentId !== cmd.intentId) throw new CoordinationError(400, "Experiments compare approaches to the same intent");
-				}
+				if (!cmd.plan) throw new CoordinationError(400, "Bounded mission plan required");
+				const original = cmd.experimentOf ? this.mission(cmd.experimentOf) : undefined;
 				const m = {
 					id: this.next("M"),
 					version: 1,
-					intentId: cmd.intentId!,
+					context: cmd.context,
 					title: cmd.title ?? cmd.plan.summary,
 					specialization: cmd.specialization,
 					plan: cmd.plan,
-					experimentOf: cmd.experimentOf ? (this.mission(cmd.experimentOf).experimentOf ?? cmd.experimentOf) : undefined,
+					experimentOf: original ? (original.experimentOf ?? original.id) : undefined,
 					state: "ready" as const,
 					at: this.now,
 				};
 				this.state.missions.push(m);
-				this.event(actor.developerId, "mission", [m.intentId, m.id], m.title);
+				this.event(actor.developerId, "mission", [m.id], m.title);
 				return m;
 			}
 			if (cmd.tool === "complete_mission") {
@@ -470,7 +467,7 @@ export class PlatformController {
 				this.event(
 					actor.developerId,
 					"mission_completed",
-					[m.intentId, m.id],
+					[m.id],
 					cmd.summary ?? `${m.title} completed; promotion remains separately governed`,
 				);
 				return m;
@@ -509,7 +506,7 @@ export class PlatformController {
 					old.version++;
 				}
 				this.state.proposals.push(p);
-				this.event(actor.developerId, "proposal", [m.intentId, m.id, a.id, p.id], `#${p.number} ${p.summary}`);
+				this.event(actor.developerId, "proposal", [m.id, a.id, p.id], `#${p.number} ${p.summary}`);
 				return p;
 			}
 			if (cmd.tool === "decide_resource_request") return this.decideResourceRequest(cmd, actor);
@@ -649,13 +646,7 @@ export class PlatformController {
 		t.completedAt = this.now;
 		const p = this.proposal(t.proposalId);
 		p.state = "promoted";
-		const m = this.state.missions.find((m) => m.id === p.missionId);
-		this.event(
-			t.actor,
-			"promotion",
-			[m?.intentId ?? "", p.missionId, t.proposalId, t.id],
-			`#${p.number} promoted to accepted source ${t.to.slice(0, 12)}`,
-		);
+		this.event(t.actor, "promotion", [p.missionId, t.proposalId, t.id], `#${p.number} promoted to accepted source ${t.to.slice(0, 12)}`);
 		return t;
 	}
 }

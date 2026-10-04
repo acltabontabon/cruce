@@ -19,7 +19,7 @@ export const DEMO_REPO = "auth-service";
 
 export const ROTATION_V1: FlightPlanInput = {
 	summary: "Implement refresh-token rotation",
-	intent:
+	objective:
 		"Rotate refresh tokens on every use and revoke the token family when a used token is replayed. Expose the access token id (jti) from validation so refreshes can be traced, without changing the public authentication API.",
 	readSet: [{ type: "component", resource: "SecurityConfig", reason: "refresh token TTL" }],
 	writeSet: [
@@ -39,7 +39,7 @@ export const ROTATION_AMENDMENT: PlanResource[] = [
 
 export const ROTATION_V2: FlightPlanInput = {
 	summary: "Implement refresh-token rotation (re-planned on F-022's baseline)",
-	intent:
+	objective:
 		"Rotate refresh tokens on every use and revoke the token family on replay. F-022's ValidationResult now carries the token id, so TokenValidator no longer needs to change: read it instead.",
 	readSet: [
 		{ type: "symbol", resource: "TokenValidator.validate", reason: "ValidationResult.claims.jti (landed in F-022)" },
@@ -58,7 +58,7 @@ export const ROTATION_V2: FlightPlanInput = {
 
 export const JWT_MIGRATION: FlightPlanInput = {
 	summary: "Migrate to typed JWT verification",
-	intent:
+	objective:
 		"Replace the legacy JWT decoder with typed verification: algorithm allow-list, explicit failure reasons, and a token id on every token. TokenValidator.validate will return a ValidationResult instead of Claims | null; callers are updated.",
 	readSet: [{ type: "symbol", resource: "AuthService.issueAccessToken", reason: "how tokens are issued" }],
 	writeSet: [
@@ -76,7 +76,7 @@ export const JWT_MIGRATION: FlightPlanInput = {
 
 export const SESSION_CLEANUP: FlightPlanInput = {
 	summary: "Clean up idle sessions",
-	intent: "End sessions that have been idle longer than a limit, with an audit record.",
+	objective: "End sessions that have been idle longer than a limit, with an audit record.",
 	readSet: [{ type: "component", resource: "AuditLog" }],
 	writeSet: [
 		{ type: "component", resource: "SessionService", reason: "cleanupExpired()" },

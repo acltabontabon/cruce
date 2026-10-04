@@ -12,6 +12,7 @@ import {
 import { type AirspaceIndex, isAncestorOrEqual, overlap, resolveResource } from "./airspace.ts";
 import { DependencyGraph } from "./dependency-graph.ts";
 import { type Flight, type FlightPlan, FlightPlanInput } from "./domain.ts";
+import { migratePlanRecords } from "./migrate-records.ts";
 import { evaluatePublish } from "./publish-gate.ts";
 import { computeTraffic, planAccesses } from "./traffic.ts";
 
@@ -334,7 +335,7 @@ export function decide(s: CoordinationState, id: string, now: number, observatio
 	const limits = [
 		...(latest?.limitations ?? []),
 		...(!latest?.verified ? ["Local observation only; source publication and promotion require independent boundary verification"] : []),
-		...(!f.plan ? ["Intent coverage unavailable"] : []),
+		...(!f.plan ? ["Objective coverage unavailable"] : []),
 	];
 	const exhausted = w.instructions.some((i) => !i.resolvedAt && i.responses.filter((r) => r.outcome === "cannot_progress").length >= 3);
 	const semanticAttention = s.semantic.filter(
@@ -401,13 +402,13 @@ export function decide(s: CoordinationState, id: string, now: number, observatio
 		coverage: {
 			capabilities: [
 				...new Set([
-					...(shared?.workspace.capabilities ?? s.project.capabilities).filter((c) => c === "intent_mcp" || c === "git_observation"),
+					...(shared?.workspace.capabilities ?? s.project.capabilities).filter((c) => c === "coordination_mcp" || c === "git_observation"),
 					...(latest?.verified && latest.source === "managed_git" ? ["managed_artifacts" as const] : []),
 					...(s.project.capabilities.includes("native_promotion") ? ["native_promotion" as const] : []),
 				]),
 			],
 			limitations: [...new Set(limits)],
-			intent: !!f.plan,
+			objective: !!f.plan,
 		},
 		instructions: w.instructions.filter((i) => !i.resolvedAt),
 		overridden: overrides.length > 0,
@@ -421,7 +422,7 @@ export class WorkstreamController {
 		state: CoordinationState,
 		readonly now: number,
 	) {
-		this.state = structuredClone(state);
+		this.state = migratePlanRecords(state);
 	}
 	authorize(p: Principal) {
 		const r = this.state.project;
@@ -497,7 +498,7 @@ export class WorkstreamController {
 					decision: decide(this.state, w.id, this.now),
 				})),
 			};
-		if (cmd.tool === "register_intent") {
+		if (cmd.tool === "register_workstream") {
 			if (!cmd.plan) throw new CoordinationError(400, "Plan required");
 			const fields = FlightPlanInput.parse(cmd.plan),
 				id = this.next("W");
@@ -535,7 +536,7 @@ export class WorkstreamController {
 		if (cmd.tool !== "attach_workstream") this.writer(w, p, cmd);
 		let sessionId = cmd.sessionId;
 		if (cmd.tool === "attach_workstream") sessionId = this.attach(w, p, cmd);
-		if (cmd.tool === "update_intent" || cmd.tool === "report_scope") {
+		if (cmd.tool === "update_plan" || cmd.tool === "report_scope") {
 			if (!cmd.plan) throw new CoordinationError(400, "Amended plan required");
 			const fields = FlightPlanInput.parse(cmd.plan);
 			if (fields.dependencies.includes(w.id) || fields.dependencies.some((id) => !this.state.workstreams.some((w) => w.id === id)))

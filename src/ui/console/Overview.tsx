@@ -150,7 +150,6 @@ export function Overview({ view, execute }: { view: View; execute: Execute }) {
 				))}
 			</section>
 			<DeploymentSummary view={view} />
-			<IntentForm view={view} execute={execute} />
 		</>
 	);
 }
@@ -203,7 +202,7 @@ function DeploymentSummary({ view }: { view: View }) {
 				</p>
 			) : (
 				<p className="muted">
-					No Worker configuration in accepted source. Intent, missions, proposals, verification and lineage work for any application.
+					No Worker configuration in accepted source. Missions, proposals, verification and lineage work for any application.
 				</p>
 			)}
 			<ul className="plain-list">
@@ -236,53 +235,5 @@ function DeploymentSummary({ view }: { view: View }) {
 				</a>
 			)}
 		</section>
-	);
-}
-
-function IntentForm({ view, execute }: { view: View; execute: Execute }) {
-	const [title, setTitle] = useState(""),
-		[context, setContext] = useState(""),
-		[why, setWhy] = useState(""),
-		[error, setError] = useState("");
-	if (!view.permissions.contribute) return null;
-	return (
-		<details className="intent-entry">
-			<summary>Define intent</summary>
-			<form
-				onSubmit={(e) => {
-					e.preventDefault();
-					void execute({ tool: "create_intent", title, context, why })
-						.then(() => {
-							setTitle("");
-							setContext("");
-							setWhy("");
-						})
-						.catch((err) => setError(err.message));
-				}}
-			>
-				<label>
-					Intent
-					<input
-						required
-						maxLength={200}
-						value={title}
-						onChange={(e) => setTitle(e.target.value)}
-						placeholder="Add rate limiting to Customer API"
-					/>
-				</label>
-				<label>
-					Context
-					<textarea required maxLength={4000} value={context} onChange={(e) => setContext(e.target.value)} />
-				</label>
-				<label>
-					Why
-					<input maxLength={1000} value={why} onChange={(e) => setWhy(e.target.value)} placeholder="Protect the API from burst traffic" />
-				</label>
-				<button type="submit" className="btn">
-					Record intent
-				</button>
-				{error && <p role="alert">{error}</p>}
-			</form>
-		</details>
 	);
 }

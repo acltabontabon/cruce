@@ -18,12 +18,12 @@ describe("bounded judgment (level 4)", () => {
 		const s = flights([
 			{
 				summary: "a",
-				intent: "Move token validation into AuthMiddleware so routes are checked once",
+				objective: "Move token validation into AuthMiddleware so routes are checked once",
 				writeSet: [{ type: "symbol", resource: "AuthMiddleware.requireAuth" }],
 			},
 			{
 				summary: "b",
-				intent: "Centralize token validation in AuthService and simplify the middleware",
+				objective: "Centralize token validation in AuthService and simplify the middleware",
 				writeSet: [{ type: "symbol", resource: "AuthService.introspect" }],
 			},
 		]);
@@ -32,10 +32,10 @@ describe("bounded judgment (level 4)", () => {
 		expect(findings[0].recommendation).toBe("escalate");
 	});
 
-	it("stays quiet for unrelated intents and for different modules", async () => {
+	it("stays quiet for unrelated objectives and for different modules", async () => {
 		const s = flights([
-			{ summary: "a", intent: "Rotate refresh tokens on use", writeSet: [{ type: "symbol", resource: "AuthService.refreshToken" }] },
-			{ summary: "b", intent: "End idle sessions", writeSet: [{ type: "component", resource: "SessionService" }] },
+			{ summary: "a", objective: "Rotate refresh tokens on use", writeSet: [{ type: "symbol", resource: "AuthService.refreshToken" }] },
+			{ summary: "b", objective: "End idle sessions", writeSet: [{ type: "component", resource: "SessionService" }] },
 		]);
 		expect(candidatePairs(s.flights, s.index)).toEqual([]);
 		expect(await new RuleBasedDecisionJudge().judge(candidatePairs(s.flights, s.index))).toEqual([]);
@@ -45,12 +45,12 @@ describe("bounded judgment (level 4)", () => {
 		const s = flights([
 			{
 				summary: "a",
-				intent: "Move token validation into AuthMiddleware",
+				objective: "Move token validation into AuthMiddleware",
 				writeSet: [{ type: "symbol", resource: "AuthMiddleware.requireAuth" }],
 			},
 			{
 				summary: "b",
-				intent: "Centralize token validation in AuthService",
+				objective: "Centralize token validation in AuthService",
 				writeSet: [{ type: "symbol", resource: "AuthService.introspect" }],
 			},
 		]);

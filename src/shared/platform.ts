@@ -57,7 +57,6 @@ export const PLATFORM_TOOLS = [
 	"get_policy",
 	"read_artifact",
 	// lifecycle
-	"create_intent",
 	"create_mission",
 	"start_mission",
 	"publish_revision",
@@ -118,15 +117,6 @@ export interface SourceRepository {
 	acceptedRef: "refs/heads/main";
 	canonicalRevision: string;
 }
-export interface Intent {
-	id: string;
-	version: number;
-	title: string;
-	context: string;
-	why: string;
-	owner: string;
-	at: number;
-}
 export interface MissionAgent {
 	developerId: string;
 	tool: string;
@@ -134,9 +124,10 @@ export interface MissionAgent {
 	sessionId: string;
 }
 export interface Mission {
+	/** Background supplied by the local agent, without a separate parent record. */
+	context?: string;
 	id: string;
 	version: number;
-	intentId: string;
 	title: string;
 	specialization: (typeof Specializations)[number];
 	plan: z.output<typeof FlightPlanInput>;
@@ -167,7 +158,6 @@ export interface Artifact {
 	id: string;
 	kind: (typeof ArtifactKinds)[number];
 	missionId: string;
-	intentId: string;
 	title: string;
 	summary: string;
 	/** The Git revision this artifact describes (its anchor). */
@@ -352,7 +342,6 @@ export type DeploymentProfile =
 export interface PlatformState {
 	counter: number;
 	version: number;
-	intents: Intent[];
 	missions: Mission[];
 	artifacts: Artifact[];
 	proposals: Proposal[];
@@ -406,7 +395,6 @@ export const PlatformCommandInput = z
 		workspace: WorkspaceInput.optional(),
 		agent: CommandInput.shape.agent,
 		expectedPlanVersion: z.number().int().nonnegative().optional(),
-		intentId: z.string().max(100).optional(),
 		missionId: z.string().max(100).optional(),
 		proposalId: z.string().max(100).optional(),
 		artifactId: z.string().max(100).optional(),
@@ -419,7 +407,6 @@ export const PlatformCommandInput = z
 		experimentOf: z.string().max(100).optional(),
 		title: z.string().max(200).optional(),
 		context: z.string().max(4000).optional(),
-		why: z.string().max(1000).optional(),
 		summary: z.string().max(2000).optional(),
 		impact: z.string().max(2000).optional(),
 		risks: z.array(z.string().max(400)).max(20).optional(),

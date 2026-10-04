@@ -22,7 +22,7 @@ import { Tower, type TowerStore } from "./tower.ts";
 
 /**
  * One Durable Object per project: the Cruce Control Tower. For native projects it is the single
- * authority for intent, missions, coordination, proposals, verification, policy, environments and
+ * authority for missions, coordination, proposals, verification, policy, environments and
  * lineage around the project's Artifacts repository. It also hosts the deterministic `/demo`.
  */
 

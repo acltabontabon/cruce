@@ -6,7 +6,7 @@ import { type SealingEnv, seal, unseal } from "./sealing.ts";
 import type { TowerStore } from "./tower.ts";
 
 /**
- * The resource boundary. Cruce's control plane keeps intent, missions, proposals, policy and lineage;
+ * The resource boundary. Cruce's control plane keeps missions, proposals, policy and lineage;
  * the project's Cloudflare account owns (and pays for) the Artifacts deploy repository, Workers Builds
  * and the deployed Worker. Cruce orchestrates across that boundary only through policy-checked actions.
  *
@@ -208,7 +208,7 @@ export async function pushDeployment(git: GitWorkspace, host: RepositoryHost, re
 	const info = await host.info(repository);
 	const ref = `refs/cruce/deploy/${branch}`;
 	await git.setRef(ref, revision);
-	// The deploy repository mirrors deployment intent, not history: production may move back for a rollback.
+	// The deploy repository mirrors deployment state, not history: production may move back for a rollback.
 	await host.withToken(repository, "write", (token) =>
 		git.push({ url: info.remote, token, localRef: ref, remoteRef: `refs/heads/${branch}`, force: true }),
 	);

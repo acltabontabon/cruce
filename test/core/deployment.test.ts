@@ -26,12 +26,10 @@ describe("deployment knowledge", () => {
 	it("explains a rollback as the promoted proposals it removes", () => {
 		const s: PlatformState = {
 			...initialPlatform(),
-			intents: [{ id: "IN-1", version: 1, title: "Protect Customer API", context: "", why: "", owner: "h", at: 1 }],
 			missions: [
 				{
 					id: "M-1",
 					version: 1,
-					intentId: "IN-1",
 					title: "Implement rate limiting",
 					specialization: "implementation",
 					plan: {} as never,
@@ -93,9 +91,7 @@ describe("deployment knowledge", () => {
 			],
 		};
 		expect(explainRollback(s, "new", "old", ["new", "old"])).toEqual({
-			removes: [
-				{ proposalId: "P-1", number: 84, summary: "Add rate limiting", mission: "Implement rate limiting", intent: "Protect Customer API" },
-			],
+			removes: [{ proposalId: "P-1", number: 84, summary: "Add rate limiting", mission: "Implement rate limiting" }],
 			targetVerified: true,
 		});
 		expect(() => explainRollback(s, "old", "new", ["new", "old"])).toThrow("earlier accepted revision");

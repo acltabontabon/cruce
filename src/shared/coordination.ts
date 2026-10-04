@@ -4,8 +4,8 @@ import { type FlightPlanFields, FlightPlanInput } from "../core/domain.ts";
 import type { ChangedFile } from "../core/publish-gate.ts";
 
 export const TOOLS = [
-	"register_intent",
-	"update_intent",
+	"register_workstream",
+	"update_plan",
 	"attach_workstream",
 	"get_project_context",
 	"get_active_work",
@@ -21,7 +21,7 @@ export const TOOLS = [
 ] as const;
 export type Tool = (typeof TOOLS)[number];
 export type Outcome = "PROCEED" | "PROCEED_WITH_CONSTRAINTS" | "WAIT" | "REPLAN" | "BLOCK";
-export type Capability = "git_observation" | "intent_mcp" | "adaptive" | "native_guard" | "managed_artifacts" | "native_promotion";
+export type Capability = "git_observation" | "coordination_mcp" | "adaptive" | "native_guard" | "managed_artifacts" | "native_promotion";
 export interface Principal {
 	developerId: string;
 	tenantId: string;
@@ -179,7 +179,7 @@ export interface Decision {
 	revision: number;
 	fingerprint: string;
 	validity: { projectVersion: number; canonicalHead?: string; planVersions: Record<string, number>; expiresAt: number };
-	coverage: { capabilities: Capability[]; limitations: string[]; intent: boolean };
+	coverage: { capabilities: Capability[]; limitations: string[]; objective: boolean };
 	instructions: Instruction[];
 	overridden: boolean;
 	human: string;
@@ -214,7 +214,9 @@ export const WorkspaceInput = z.object({
 	head: z.string().min(1).max(64),
 	isolation: z.enum(["isolated", "shared"]),
 	precision: z.enum(["files", "symbols"]),
-	capabilities: z.array(z.enum(["git_observation", "intent_mcp", "adaptive", "native_guard", "managed_artifacts", "native_promotion"])),
+	capabilities: z.array(
+		z.enum(["git_observation", "coordination_mcp", "adaptive", "native_guard", "managed_artifacts", "native_promotion"]),
+	),
 });
 export const CommandInput = z.object({
 	tool: z.enum(TOOLS),

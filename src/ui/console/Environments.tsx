@@ -109,7 +109,7 @@ function EnvironmentConfig({ view, execute }: { view: View; execute: Execute }) 
 		<section className="activity-section" aria-labelledby="envs">
 			<h2 id="envs">Environments</h2>
 			{view.environments.length === 0 && (
-				<p className="muted">No environments. Cruce still tracks intent, revisions, evidence and promotion.</p>
+				<p className="muted">No environments. Cruce still tracks missions, revisions, evidence and promotion.</p>
 			)}
 			<ul className="plain-list">
 				{view.environments.map((e) => (
@@ -188,7 +188,7 @@ function Production({ view, execute }: { view: View; execute: Execute }) {
 	const live = liveIn(view, "production");
 	const [plan, setPlan] = useState<{
 			target: string;
-			removes: { number: number; summary: string; intent: string }[];
+			removes: { number: number; summary: string; mission: string }[];
 			targetVerified: boolean;
 		} | null>(null),
 		[error, setError] = useState("");
@@ -237,7 +237,7 @@ function Production({ view, execute }: { view: View; execute: Execute }) {
 					<ul className="plain-list">
 						{plan.removes.map((r) => (
 							<li key={r.number}>
-								#{r.number} {r.summary} <span className="muted">· {r.intent}</span>
+								#{r.number} {r.summary} <span className="muted">· {r.mission}</span>
 							</li>
 						))}
 					</ul>

@@ -8,15 +8,10 @@ const command = (tool: typeof PlatformCommandInput._output.tool, extra: Record<s
 	PlatformCommandInput.parse({ tool, projectId: "project", idempotencyKey: tool, ...extra });
 function fixture() {
 	const c = new PlatformController(initialPlatform(), 100);
-	const i = c.execute(
-		command("create_intent", { title: "Retry payments", context: "Preserve public behavior", why: "Reliability" }),
-		human,
-		"base",
-	) as { id: string };
+
 	const m = c.execute(
 		command("create_mission", {
-			intentId: i.id,
-			plan: { summary: "Retry", intent: "Implement retry", writeSet: [{ type: "file", resource: "src/pay.ts" }] },
+			plan: { summary: "Retry", objective: "Implement retry", writeSet: [{ type: "file", resource: "src/pay.ts" }] },
 		}),
 		agent,
 		"base",
@@ -24,7 +19,6 @@ function fixture() {
 	const a = c.artifact({
 		kind: "source",
 		missionId: m.id,
-		intentId: i.id,
 		title: "Retry source",
 		summary: "Retry safely",
 		revision: "head",
@@ -42,20 +36,20 @@ function fixture() {
 		agent,
 		"base",
 	) as Proposal;
-	return { c, i, m, a, p };
+	return { c, m, a, p };
 }
 describe("native collaboration and promotion policy", () => {
-	it("preserves intent-to-proposal lineage and immutable source references", () => {
-		const { c, i, m, a, p } = fixture();
-		expect(c.state.timeline.flatMap((e) => e.ids)).toEqual(expect.arrayContaining([i.id, m.id, a.id, p.id]));
+	it("preserves objective-to-proposal lineage and immutable source references", () => {
+		const { c, m, a, p } = fixture();
+		expect(c.state.timeline.flatMap((e) => e.ids)).toEqual(expect.arrayContaining([m.id, a.id, p.id]));
 		expect(p.revision).toBe(a.revision);
-		expect(c.state.intents[0].why).toBe("Reliability");
+		expect(c.state.missions[0].plan.objective).toBe("Implement retry");
 	});
 	it("replays exactly and rejects reused keys with changed requirements", () => {
 		const c = new PlatformController(initialPlatform(), 100),
-			cmd = command("create_intent", { title: "Fix", context: "Race" });
+			cmd = command("create_mission", { plan: { summary: "Fix", objective: "Resolve race", writeSet: [] }, context: "Race" });
 		expect(c.execute(cmd, human, "base")).toEqual(c.execute(cmd, human, "base"));
-		expect(c.state.intents).toHaveLength(1);
+		expect(c.state.missions).toHaveLength(1);
 		expect(() => c.execute({ ...cmd, context: "Different" }, human, "base")).toThrow("Idempotency");
 	});
 	it("does not treat reported agent tests or agent approval as promotion authority", () => {
@@ -296,8 +290,8 @@ describe("proposal lifecycle, resources and lineage", () => {
 		expect(c.state.resourceRequests[0].state).toBe("executed");
 		expect(c.gate("workspace.create", agent, { missionId: m.id, revision: "base" })?.state).toBe("pending");
 	});
-	it("treats Cruce's own deployment checks as runtime-verified evidence and traces production back to intent", () => {
-		const { c, i, p } = fixture();
+	it("treats Cruce's own deployment checks as runtime-verified evidence and traces production back to objective", () => {
+		const { c, m, p } = fixture();
 		const env = c.addEnvironment(
 			{
 				name: "Worker Preview",
@@ -320,10 +314,10 @@ describe("proposal lifecycle, resources and lineage", () => {
 		expect(v?.trust).toBe("runtime_verified");
 		expect(c.readiness(p.id, "base").missing).toEqual([]);
 		const trace = c.trace(d.id);
-		expect(trace.intents.map((x) => x.id)).toEqual([i.id]);
+		expect(trace.missions.map((x) => x.id)).toEqual([m.id]);
 		expect(trace.proposals.map((x) => x.id)).toEqual([p.id]);
 		expect(trace.revisions).toContain("head");
-		expect(c.trace(i.id).deployments.map((x) => x.id)).toEqual([d.id]);
+		expect(c.trace(m.id).deployments.map((x) => x.id)).toEqual([d.id]);
 		expect(testReport(c)).toBeDefined();
 	});
 });

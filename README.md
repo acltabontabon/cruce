@@ -1,12 +1,12 @@
 # Cruce
 
-**An agent-native development platform built on Git and Cloudflare Artifacts.** Humans define intent. Agents work locally with their own tools and Git. Cruce coordinates the lifecycle around that work: missions, exact revisions, evidence, proposals, verification, policy, environments, promotion and lineage.
+**An agent-native development platform built on Git and Cloudflare Artifacts.** Developers prompt their agents locally. Agents register missions through MCP and work with their own tools and Git. Cruce coordinates the lifecycle around that work: missions, exact revisions, evidence, proposals, verification, policy, environments, promotion and lineage.
 
 Cruce does not replace Git. It replaces the collaboration model above it.
 
 ```text
 Traditional:  Git → GitHub/GitLab → branches → pull request → human review → CI → merge
-Cruce:        Git → Cloudflare Artifacts → Intent → Mission → Workspace → Git revision
+Cruce:        Git → Cloudflare Artifacts → Mission → Workspace → Git revision
                   → Artifacts + evidence → Proposal → Verification → Promotion → Deployment
 ```
 
@@ -22,7 +22,7 @@ Cruce:        Git → Cloudflare Artifacts → Intent → Mission → Workspace 
                          │ MCP (remote, or the tiny local bridge)
                          ▼
                     Cruce MCP ──► Cruce Control Tower (Workers + Durable Objects + Workflows)
-                                   intent · missions · policy · proposals · verification · lineage · environments
+                                   missions · policy · proposals · verification · lineage · environments
                                          │ Git + Artifacts
                                          ▼
                                 Cloudflare Artifacts (canonical software state)
@@ -34,14 +34,14 @@ Cruce:        Git → Cloudflare Artifacts → Intent → Mission → Workspace 
 
 | Question | Answered by |
 | --- | --- |
-| Why did it change? | Intent |
+| Why did it change? | Mission objective and context |
 | What work? | Mission (with a concrete base revision) |
 | Who or what? | Agent identity and session |
 | What changed? | Exact Git revision, commits and diff |
 | What was produced? | Immutable artifacts anchored to that revision |
 | Why trust it? | Verification of that exact revision: reported, human attested, or verified by Cruce |
 | Where did it run? | Environment and deployment |
-| What is live? | The deployed revision, traceable back to intent |
+| What is live? | The deployed revision, traceable back to the mission |
 
 ## Run locally
 
@@ -59,7 +59,7 @@ node runner/cruce.ts checkout --server https://YOUR_CRUCE_HOST --project PROJECT
 node runner/cruce.ts connect --server https://YOUR_CRUCE_HOST --project PROJECT_ID --client claude --cwd ./payments
 ```
 
-The agent keeps running on your machine. Through MCP it reads context, starts a mission (Cruce pins an accepted base revision and creates the workspace fork), commits with normal Git, and publishes with `publish_revision`: the bridge sends a Git pack of your commits and Cruce pushes that exact revision with a 60-second server-side credential. Agents never hold Artifacts write tokens. `cruce publish` does the same from a terminal.
+The agent keeps running on your machine. Through MCP it reads context, creates a mission with its plan, starts that mission (Cruce pins an accepted base revision and creates the workspace fork), commits with normal Git, and publishes with `publish_revision`: the bridge sends a Git pack of your commits and Cruce pushes that exact revision with a 60-second server-side credential. Agents never hold Artifacts write tokens. `cruce publish` does the same from a terminal.
 
 ## Safe autonomy
 

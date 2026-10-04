@@ -39,7 +39,7 @@ export type PlanContract = z.infer<typeof PlanContract>;
  */
 export const FlightPlanInput = z.object({
 	summary: z.string().min(1).max(200),
-	intent: z.string().min(1).max(1000),
+	objective: z.string().min(1).max(1000),
 	readSet: z.array(PlanResource).max(100).default([]),
 	writeSet: z.array(PlanResource).max(100).default([]),
 	contractSet: z.array(PlanContract).max(50).default([]),

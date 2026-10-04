@@ -2155,10 +2155,6 @@ svg {
 	border: 0;
 	color: var(--text);
 }
-.intent-entry {
-	padding: 24px 0;
-	border-top: 1px solid var(--line);
-}
 .project-console summary {
 	cursor: pointer;
 	color: var(--text-2);

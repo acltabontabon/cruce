@@ -1,4 +1,5 @@
 import { resolveResource } from "../core/airspace.ts";
+import { migratePlanRecords } from "../core/migrate-records.ts";
 import { CoordinationError, decide, initialCoordination, semanticFingerprint, stable, WorkstreamController } from "../core/workstreams.ts";
 import { JEV_LIMITS, type JevBinding, type JevJob, JevResponse, packetFor, validateAssessment } from "../intelligence/jev.ts";
 import { buildIndex } from "../intelligence/structural-index.ts";
@@ -32,7 +33,7 @@ export class CoordinationRuntime {
 	state(): CoordinationState {
 		const state = this.store.get<CoordinationState>("coordination");
 		if (!state) throw new CoordinationError(503, "Project authority not initialized");
-		return state;
+		return migratePlanRecords(state);
 	}
 	private save(s: CoordinationState) {
 		this.store.put("coordination", s);
@@ -58,7 +59,7 @@ export class CoordinationRuntime {
 	initialize(project: ProjectConnection, head: string, files: Record<string, string>) {
 		return this.serialize(() => {
 			const old = this.store.get<CoordinationState>("coordination");
-			if (old) return old;
+			if (old) return migratePlanRecords(old);
 			const s = initialCoordination({ ...project, canonicalHead: head }, buildIndex(files, head));
 			this.save(s);
 			return s;
@@ -94,7 +95,7 @@ export class CoordinationRuntime {
 			this.save(c.state);
 			if (
 				!READ_TOOLS.has(cmd.tool) &&
-				["register_intent", "update_intent", "report_scope", "report_change", "attach_workstream"].includes(cmd.tool)
+				["register_workstream", "update_plan", "report_scope", "report_change", "attach_workstream"].includes(cmd.tool)
 			)
 				await this.enqueueSemantic();
 			return result;
@@ -205,7 +206,7 @@ export class CoordinationRuntime {
 	async enqueueSemantic() {
 		const s = this.state();
 		if (s.project.policy.semantic === "off" || !this.ai || !this.inferenceAllowed()) return;
-		const jobs = this.store.get<JevJob[]>("jev:jobs") ?? [],
+		const jobs = migratePlanRecords(this.store.get<JevJob[]>("jev:jobs") ?? []),
 			fingerprint = semanticFingerprint(s);
 		const source = await this.git.readFiles(s.index.revision).catch(() => ({}) as Record<string, string>);
 		for (const job of jobs)
@@ -254,7 +255,7 @@ export class CoordinationRuntime {
 	}
 	async runJev() {
 		if (!this.ai || !this.inferenceAllowed()) return;
-		const jobs = this.store.get<JevJob[]>("jev:jobs") ?? [];
+		const jobs = migratePlanRecords(this.store.get<JevJob[]>("jev:jobs") ?? []);
 		for (const job of jobs)
 			if (job.status === "running" && !this.running.has(job.id) && (job.deadline ?? 0) <= this.now()) {
 				job.status = job.attempts < JEV_LIMITS.attempts ? "queued" : "unavailable";
@@ -314,14 +315,14 @@ export class CoordinationRuntime {
 		);
 	}
 	private updateJob(job: JevJob) {
-		const jobs = this.store.get<JevJob[]>("jev:jobs") ?? [];
+		const jobs = migratePlanRecords(this.store.get<JevJob[]>("jev:jobs") ?? []);
 		this.store.put(
 			"jev:jobs",
 			jobs.map((j) => (j.id === job.id ? job : j)),
 		);
 	}
 	nextAlarm() {
-		const dates = (this.store.get<JevJob[]>("jev:jobs") ?? []).flatMap((j) =>
+		const dates = migratePlanRecords(this.store.get<JevJob[]>("jev:jobs") ?? []).flatMap((j) =>
 			j.status === "queued" ? [j.nextAt] : j.status === "running" && !this.running.has(j.id) ? [j.deadline ?? this.now()] : [],
 		);
 		return dates.length ? Math.min(...dates) : undefined;
