@@ -15,7 +15,7 @@ export const SCOPE_LABELS: Record<Scope, string> = {
 	"cruce:read": "Read authorized repositories and lineage",
 	"workspace:write": "Start workspaces and report work",
 	"revision:publish": "Publish exact Git revisions",
-	"artifact:publish": "Store artifacts",
+	"artifact:publish": "Store revision evidence",
 	"change:write": "Propose and review changes",
 	"promotion:request": "Request human source promotion",
 };

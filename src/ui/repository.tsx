@@ -4,8 +4,9 @@ import type { RepositorySnapshot } from "../shared/platform.ts";
 import { ChangeDetail } from "./change.tsx";
 import { count, short } from "./controls.tsx";
 import { Dialog, Icon } from "./design.tsx";
+import { RetainedRecordDetail, RetainedRecordRow } from "./records.tsx";
 import { Topology } from "./topology.tsx";
-import { Activity, ArtifactRow, type Execute, WorkspaceDetail, Workspaces } from "./work.tsx";
+import { Activity, type Execute, WorkspaceDetail, Workspaces } from "./work.tsx";
 
 type Open = (tab: string, id?: string) => void;
 function ChangeList({ view, open }: { view: RepositorySnapshot; open: Open }) {
@@ -39,6 +40,7 @@ function ChangeList({ view, open }: { view: RepositorySnapshot; open: Open }) {
 export function RepositoryOverview({ view, open }: { view: RepositorySnapshot; open: Open }) {
 	const [instructions, setInstructions] = useState<"clone" | "attach">();
 	const active = view.workspaces.filter((w) => w.state === "active");
+	const publications = view.artifacts.filter((a) => a.kind === "source");
 	return (
 		<>
 			<div className="page-title repository-title">
@@ -64,7 +66,7 @@ export function RepositoryOverview({ view, open }: { view: RepositorySnapshot; o
 			<div className="status-strip">
 				<span>{count(active.length, "active workspace")}</span>
 				<span>{count(active.filter((w) => w.actor.kind === "agent").length, "agent")} working</span>
-				<span>{count(view.artifacts.length, "artifact")}</span>
+				<span>{count(publications.length, "published revision")}</span>
 				<span>Reported activity</span>
 			</div>
 			<div className="coordination-layout">
@@ -88,15 +90,15 @@ export function RepositoryOverview({ view, open }: { view: RepositorySnapshot; o
 			<div className="repository-secondary">
 				<section>
 					<div className="section-heading">
-						<h2>Latest artifact</h2>
-						<button type="button" className="text-button" onClick={() => open("artifacts")}>
-							All artifacts <Icon name="arrow" />
+						<h2>Latest published revision</h2>
+						<button type="button" className="text-button" onClick={() => open("code")}>
+							All published revisions <Icon name="arrow" />
 						</button>
 					</div>
-					{view.artifacts.length ? (
-						<ArtifactRow artifact={view.artifacts.at(-1)!} open={(id) => open("artifacts", id)} />
+					{publications.length ? (
+						<RetainedRecordRow record={publications.at(-1)!} open={(id) => open("code", id)} />
 					) : (
-						<p className="empty">No artifacts published yet.</p>
+						<p className="empty">No published revisions yet.</p>
 					)}
 				</section>
 				<Activity view={view} />
@@ -158,8 +160,18 @@ export function WorkScreen({
 				<button type="button" className="text-button" onClick={() => open("work")}>
 					← All work
 				</button>
-				<WorkspaceDetail key={id} view={view} id={id} execute={execute} />
+				<WorkspaceDetail key={id} view={view} id={id} execute={execute} open={open} />
 			</div>
+		);
+	if (id && view.artifacts.some((a) => a.kind === "evidence" && a.id === id))
+		return (
+			<>
+				<button type="button" className="text-button" onClick={() => open("work")}>
+					← All work
+				</button>
+				<h1>Evidence</h1>
+				<RetainedRecordDetail key={id} view={view} id={id} execute={execute} open={open} />
+			</>
 		);
 	return (
 		<>
@@ -173,6 +185,15 @@ export function WorkScreen({
 			<section>
 				<h2>Workspaces</h2>
 				<Workspaces view={view} all open={(id) => open("work", id)} />
+			</section>
+			<section>
+				<h2>Revision evidence</h2>
+				{view.artifacts
+					.filter((a) => a.kind === "evidence")
+					.map((a) => (
+						<RetainedRecordRow key={a.id} record={a} open={(id) => open("work", id)} />
+					))}
+				{!view.artifacts.some((a) => a.kind === "evidence") && <p className="empty">No revision evidence stored yet.</p>}
 			</section>
 		</>
 	);

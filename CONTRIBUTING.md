@@ -11,7 +11,7 @@ pnpm install --frozen-lockfile
 pnpm dev:fixture
 ```
 
-Open the printed loopback URL. This separate fixture uses the real console/controllers and fixed-clock Git objects, with simulated authentication/provider behavior. Explore concurrent work, overlap, source review, artifacts, membership and responsive navigation. It cannot reach live namespaces. The reusable source overlays under `demo/auth-service` and `demo/scenario` are inputs to deterministic verification, not a second product model.
+Open the printed loopback URL. This separate fixture uses the real console/controllers and fixed-clock Git objects, with simulated authentication/provider behavior. Explore concurrent work, overlap, source review, published revisions, evidence, membership and responsive navigation. It cannot reach live namespaces. The reusable source overlays under `demo/auth-service` and `demo/scenario` are inputs to deterministic verification, not a second product model.
 
 The [local console walkthrough](docs/local-demo.md) includes curated screenshots and instructions for refreshing them as the console changes.
 

@@ -85,7 +85,7 @@ test("creation dialogs keep focus contained and explain unavailable cloud setup"
 	await page.getByRole("button", { name: "Switch namespace" }).filter({ hasText: "Design team" }).waitFor();
 	await page.getByRole("navigation", { name: "Namespace navigation" }).getByRole("button", { name: "members", exact: true }).waitFor();
 });
-test("overview shows human and agent workspaces, reported overlap and source artifact", async () => {
+test("overview shows human and agent workspaces, reported overlap and published revision", async () => {
 	await openRepo();
 	await page.getByRole("heading", { name: "Shared surfaces" }).waitFor();
 	await page.getByRole("heading", { name: "Review queue", exact: true }).waitFor();
@@ -99,7 +99,7 @@ test("repository navigation ends at source coordination and removed routes use t
 	const navigation = page.getByRole("navigation", { name: "Repository navigation" });
 	assert.deepEqual(
 		(await navigation.getByRole("button").allTextContents()).map((text) => text.trim().toLowerCase()),
-		["overview", "code", "work", "artifacts", "settings"],
+		["overview", "code", "work", "settings"],
 	);
 	assert.equal(await page.getByRole("heading", { name: "Environments", exact: true }).count(), 0);
 	await navigation.getByRole("button", { name: "work", exact: true }).click();
@@ -156,11 +156,146 @@ test("exact revision review and attestation update readiness", async () => {
 	await page.getByText("Ready for human promotion").waitFor();
 	assert.equal(await page.getByRole("button", { name: "Promote source", exact: true }).isEnabled(), true);
 });
-test("artifact lineage links the exact commit and originating workspace", async () => {
+test("published revision lineage links the exact commit and originating workspace", async () => {
 	await openRepo();
-	await page.getByRole("button", { name: /Bounded retry policy.*source/ }).click();
+	await page.getByRole("button", { name: /Bounded retry policy.*Published revision/ }).click();
 	await page.getByRole("button", { name: "Trace lineage" }).click();
 	await page.locator(".lineage").filter({ hasText: "Implement retry policy" }).waitFor();
+});
+test("Code lists source publications and keeps exact revision, diff and review links through reload and Back", async () => {
+	const data = await (await page.request.get(`${server.origin}/api/namespaces/fernloop/repositories/payments`)).json();
+	const source = data.artifacts.find((a) => a.kind === "source");
+	await openRepo();
+	await page.getByText("1 published revision", { exact: true }).waitFor();
+	await page.getByRole("navigation", { name: "Repository navigation" }).getByRole("button", { name: "code", exact: true }).click();
+	await page.getByRole("heading", { name: "Published revisions", exact: true }).waitFor();
+	assert.equal(await page.getByRole("button", { name: /Retry policy test report/ }).count(), 0);
+	await page.getByRole("button", { name: /Bounded retry policy.*Published revision/ }).click();
+	assert.ok(page.url().endsWith(`#/code/${source.id}`));
+	assert.equal(await page.getByLabel("Revision", { exact: true }).inputValue(), source.revision);
+	await page.getByText("Review base", { exact: true }).waitFor();
+	await page.getByText("Storage details", { exact: true }).click();
+	await page.getByText(source.contentHash, { exact: true }).waitFor();
+	await page.getByRole("button", { name: "Browse source", exact: true }).click();
+	await page.getByRole("navigation", { name: "Repository files" }).getByRole("button", { name: "src/retry.ts", exact: true }).click();
+	await page.locator(".source-browser pre").getByText("export const retries = 3;", { exact: false }).waitFor();
+	await page.getByRole("button", { name: "Change diff", exact: true }).click();
+	await page
+		.getByRole("navigation", { name: "Changed files" })
+		.getByRole("button", { name: /src\/retry.ts/ })
+		.click();
+	await page.locator(".patch").waitFor();
+	await page.reload();
+	assert.equal(await page.getByLabel("Revision", { exact: true }).inputValue(), source.revision);
+	await page.getByRole("button", { name: "View change #1 →", exact: true }).click();
+	await page.getByRole("heading", { name: "Bounded retry policy", exact: true, level: 1 }).waitFor();
+	await page.getByRole("button", { name: "View revision →", exact: true }).click();
+	await page.getByRole("heading", { name: "Code", exact: true }).waitFor();
+	await page.goBack();
+	await page.getByRole("heading", { name: "Bounded retry policy", exact: true, level: 1 }).waitFor();
+});
+test("saved inspection links resolve into Code or Work without adding a Back history entry", async () => {
+	await openRepo();
+	const root = `${server.origin}/?namespace=fernloop&repository=payments`;
+	await page.goto(`${root}#/artifacts/source`);
+	await page.getByRole("heading", { name: "Code", exact: true }).waitFor();
+	await page.getByRole("heading", { name: "Bounded retry policy", exact: true }).waitFor();
+	assert.ok(page.url().endsWith("#/code/source"));
+	await page.reload();
+	await page.getByRole("heading", { name: "Bounded retry policy", exact: true }).waitFor();
+	await page.goBack();
+	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
+	await page.goto(`${root}#/artifacts/test-report`);
+	await page.getByRole("heading", { name: "Retry policy test report", exact: true }).waitFor();
+	assert.ok(page.url().endsWith("#/work/test-report"));
+	await page.goto(`${root}#/artifacts`);
+	await page.getByRole("heading", { name: "Published revisions", exact: true }).waitFor();
+	assert.ok(page.url().endsWith("#/code"));
+});
+test("stored evidence is readable beside its change and discoverable from Work and its workspace", async () => {
+	await openRepo();
+	await page.getByRole("button", { name: /#1.*Bounded retry policy/ }).click();
+	await page.getByRole("button", { name: /Retry policy test report.*Evidence/ }).click();
+	assert.ok(page.url().endsWith("#/work/test-report"));
+	await page.getByRole("button", { name: "Read evidence", exact: true }).click();
+	await page.locator("pre").getByText("Reported tests: 12 passed", { exact: false }).waitFor();
+	await page.getByRole("button", { name: "Trace lineage", exact: true }).click();
+	await page.locator(".lineage").getByText("Implement retry policy", { exact: true }).waitFor();
+	await page.reload();
+	await page.getByRole("heading", { name: "Retry policy test report", exact: true }).waitFor();
+	await page.getByRole("button", { name: "View change #1 →", exact: true }).click();
+	assert.equal(await page.getByRole("button", { name: "Promote source", exact: true }).isDisabled(), true);
+	await page.getByRole("button", { name: "← All work", exact: true }).click();
+	await page.getByRole("heading", { name: "Revision evidence", exact: true }).waitFor();
+	await page.getByRole("button", { name: /Retry policy test report.*Evidence/ }).click();
+	await page.getByRole("button", { name: "Implement retry policy", exact: true }).click();
+	await page.getByRole("heading", { name: "Implement retry policy", exact: true }).waitFor();
+	await page.getByRole("button", { name: /Bounded retry policy.*Published revision/ }).waitFor();
+	await page.getByRole("button", { name: /Retry policy test report.*Evidence/ }).waitFor();
+});
+test("changes exclude stale and unrelated reports while preserving explicitly linked evidence and unproposed reports", async () => {
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		const data = await (await route.fetch()).json();
+		const report = data.artifacts.find((a) => a.kind === "evidence"),
+			proposal = data.proposals[0];
+		data.artifacts.push(
+			{ ...report, id: "stale", title: "Earlier revision report", revision: proposal.base },
+			{ ...report, id: "unrelated", title: "Unrelated workspace report", workspaceId: data.workspaces[0].id },
+			{ ...report, id: "linked", title: "Explicitly linked report", workspaceId: data.workspaces[0].id },
+		);
+		data.verifications.push({
+			id: "linked-check",
+			proposalId: proposal.id,
+			revision: proposal.revision,
+			artifactId: "linked",
+			kind: "tests",
+			outcome: "pass",
+			trust: "reported",
+			summary: "Linked reported check",
+		});
+		await route.fulfill({ json: data });
+	});
+	await openRepo();
+	await page.getByRole("button", { name: /#1.*Bounded retry policy/ }).click();
+	await page.getByRole("button", { name: /Explicitly linked report/ }).waitFor();
+	assert.equal(await page.getByRole("button", { name: /Earlier revision report|Unrelated workspace report/ }).count(), 0);
+	await page.getByRole("button", { name: /Explicitly linked report/ }).click();
+	await page.getByRole("button", { name: "View change #1 →", exact: true }).waitFor();
+	await page.getByRole("button", { name: "← All work", exact: true }).click();
+	await page.getByRole("button", { name: /Earlier revision report/ }).click();
+	assert.equal(await page.getByRole("button", { name: "View change #1 →", exact: true }).count(), 0);
+	await page.route("**/command", async (route) =>
+		route.request().postDataJSON().tool === "read_artifact" ? route.fulfill({ json: {} }) : route.continue(),
+	);
+	await page.getByRole("button", { name: "Read evidence", exact: true }).click();
+	await page.getByText("Evidence content is unavailable.", { exact: true }).waitFor();
+});
+test("late evidence responses cannot appear after navigating to a published revision", async () => {
+	await page.goto(`${server.origin}/?namespace=fernloop&repository=payments#/work/test-report`);
+	await page.getByRole("heading", { name: "Retry policy test report", exact: true }).waitFor();
+	let release, received;
+	const gate = new Promise((resolve) => {
+		release = resolve;
+	});
+	const ready = new Promise((resolve) => {
+		received = resolve;
+	});
+	await page.route("**/command", async (route) => {
+		if (route.request().postDataJSON().tool !== "read_artifact") return route.continue();
+		received();
+		await gate;
+		await route.fulfill({ json: { content: "STALE EVIDENCE RESPONSE" } });
+	});
+	await page.getByRole("button", { name: "Read evidence", exact: true }).click();
+	await ready;
+	await page.getByRole("button", { name: "View revision →", exact: true }).click();
+	await page.getByRole("heading", { name: "Code", exact: true }).waitFor();
+	const response = page.waitForResponse((r) => r.request().postData()?.includes("read_artifact"));
+	release();
+	await response;
+	await page.getByRole("button", { name: "Trace lineage", exact: true }).click();
+	await page.locator(".lineage").waitFor();
+	assert.equal(await page.getByText("STALE EVIDENCE RESPONSE", { exact: true }).count(), 0);
 });
 test("teams and invitation links are functional", async () => {
 	await page.goto(`${server.origin}/?namespace=fernloop`);
@@ -210,7 +345,7 @@ test("repository clone uses normal Git and workspace fork cleanup is unavailable
 	await page.keyboard.press("Escape");
 	await page.getByRole("button", { name: /Codex.*Implement retry policy/ }).click();
 	await page.getByText("Execution details", { exact: true }).click();
-	await page.getByText("Artifacts fork · ready", { exact: true }).waitFor();
+	await page.getByText("Workspace fork · ready", { exact: true }).waitFor();
 	assert.equal(await page.getByRole("button", { name: "Clean up retained fork" }).isDisabled(), true);
 });
 
@@ -359,7 +494,8 @@ test("screen families remain readable across desktop, tablet, mobile and 200 per
 		["work", `${root}#/work`, "Work"],
 		["review", `${root}#/work/${data.proposals[0].id}`, "Bounded retry policy"],
 		["workspace", `${root}#/work/${data.workspaces[0].id}`, data.workspaces[0].title],
-		["artifact", `${root}#/artifacts/${data.artifacts[0].id}`, "Bounded retry policy"],
+		["revision", `${root}#/code/${data.artifacts[0].id}`, "Bounded retry policy"],
+		["evidence", `${root}#/work/test-report`, "Retry policy test report"],
 		["code", `${root}#/code`, "Code"],
 		["repository-settings", `${root}#/settings`, "Repository settings"],
 		["members", `${server.origin}/?namespace=fernloop#/members`, "Members"],
@@ -376,7 +512,7 @@ test("screen families remain readable across desktop, tablet, mobile and 200 per
 				await page.getByRole("button", { name: "Browse source", exact: true }).click();
 				await page.locator(".source-browser").waitFor();
 			}
-			if (name === "artifact") {
+			if (name === "revision") {
 				await page.getByRole("button", { name: "Trace lineage", exact: true }).click();
 				await page.locator(".lineage").waitFor();
 			}

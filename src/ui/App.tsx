@@ -9,11 +9,10 @@ import { RepositoryOverview, WorkScreen } from "./repository.tsx";
 import { request } from "./request.ts";
 import { Shell } from "./shell.tsx";
 import type { NamespaceView } from "./types.ts";
-import { ArtifactDetail, ArtifactRow } from "./work.tsx";
 import "./styles.css";
 
 const namespaceTabs = ["repositories", "members", "teams", "settings"];
-const tabs = ["overview", "code", "work", "artifacts", "settings"];
+const tabs = ["overview", "code", "work", "settings"];
 function readRoute() {
 	const query = new URLSearchParams(location.search),
 		[tab, id] = location.hash.replace(/^#\/?/, "").split("/");
@@ -26,7 +25,7 @@ function readRoute() {
 					? "namespaces"
 					: "namespace",
 		repositoryId: query.get("repository") ?? "",
-		tab: [...tabs, ...namespaceTabs].includes(tab) ? tab : "overview",
+		tab: query.get("repository") && tab === "artifacts" ? tab : [...tabs, ...namespaceTabs].includes(tab) ? tab : "overview",
 		id: id ?? "",
 	};
 }
@@ -89,6 +88,16 @@ export function App() {
 		},
 		[route.namespaceId],
 	);
+
+	useEffect(() => {
+		if (route.tab !== "artifacts" || view?.repository.id !== route.repositoryId || view.repository.namespaceId !== route.namespaceId)
+			return;
+		const record = view.artifacts.find((a) => a.id === route.id);
+		const url = new URL(location.href);
+		url.hash = `/${record?.kind === "evidence" ? "work" : "code"}${route.id ? `/${route.id}` : ""}`;
+		history.replaceState(null, "", url);
+		setRoute(readRoute());
+	}, [route, view]);
 
 	useEffect(() => {
 		void route;
@@ -448,41 +457,19 @@ export function App() {
 									/>
 								)}
 								{route.tab === "code" && (
-									<Code key={`${view.repository.id}-${route.id}`} view={view} execute={execute} proposalId={route.id} />
-								)}
-								{route.tab === "artifacts" && (
-									<>
-										<h1>Artifacts</h1>
-										{!view.artifacts.length && (
-											<Empty>No artifacts yet. Publish exact committed source or evidence from your workspace.</Empty>
-										)}
-										{!route.id &&
-											view.artifacts.map((a) => (
-												<ArtifactRow
-													key={a.id}
-													artifact={a}
-													open={(id) => navigate(route.namespaceId, route.repositoryId, "artifacts", id)}
-												/>
-											))}
-										{route.id && (
-											<>
-												<button
-													type="button"
-													className="text-button"
-													onClick={() => navigate(route.namespaceId, route.repositoryId, "artifacts")}
-												>
-													← All artifacts
-												</button>
-												<ArtifactDetail key={route.id} id={route.id} view={view} execute={execute} />
-											</>
-										)}
-									</>
+									<Code
+										key={`${view.repository.id}-${route.id}`}
+										view={view}
+										execute={execute}
+										id={route.id}
+										open={(tab, id) => navigate(route.namespaceId, route.repositoryId, tab, id)}
+									/>
 								)}
 								{route.tab === "settings" && (
 									<>
 										<h1>Repository settings</h1>
 										<p>
-											<code>{view.repository.id}</code> · Artifacts
+											<code>{view.repository.id}</code> · Cloudflare Artifacts
 										</p>
 										<h2>Connect your checkout</h2>
 										<pre>{`node /path/to/cruce/runner/cruce.mjs connect --namespace ${route.namespaceId} --repository ${route.repositoryId} --server ${location.origin} --client codex`}</pre>
@@ -628,7 +615,7 @@ export function App() {
 												</span>
 												<strong>{r.name}</strong>
 												<span>
-													Artifacts · {r.defaultBranch}
+													Cloudflare Artifacts · {r.defaultBranch}
 													{namespace.repositorySummaries?.find((s) => s.id === r.id) && (
 														<small>
 															{namespace.repositorySummaries.find((s) => s.id === r.id)!.active} active workspaces ·{" "}
@@ -786,7 +773,7 @@ export function App() {
 								<p>
 									{namespace.account
 										? `${namespace.account.label} · ${namespace.account.accountId}`
-										: "Not connected. Connect an Artifacts account to create repositories and workspaces."}
+										: "Not connected. Connect a Cloudflare account to create repositories and workspaces."}
 								</p>
 								{namespace.permissions.owner && (
 									<Form

@@ -43,7 +43,7 @@ pnpm dev:fixture
 
 Open the printed loopback URL. The fixed-clock fixture uses the real console and controllers with deterministic Git source; identity and provider behavior are simulated. It does not connect to live namespaces or consume cloud resources.
 
-Follow the [local console walkthrough](docs/local-demo.md) for screenshots and a guided tour of the sample workspaces, review and artifact views.
+Follow the [local console walkthrough](docs/local-demo.md) for screenshots and a guided tour of the sample workspaces, review, published revisions and evidence views.
 
 To use Cruce with real repositories, follow [Git and bridge setup](docs/native-setup.md). Hosted repositories require a namespace's explicitly connected Cloudflare account and consume resources. Cloud hosting does not imply cloud execution of agents.
 

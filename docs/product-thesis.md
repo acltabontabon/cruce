@@ -47,7 +47,7 @@ Normal Git does not mean unrestricted writes to every remote. The current archit
 5. A human reviews that revision and advances canonical source when ready.
 6. Other writers explicitly fetch, integrate, verify and publish a fresh result. Earlier artifacts and reviews remain intact.
 
-The console supports understanding work and making decisions: Overview, Code, Work, Artifacts and Settings. Namespace membership and account configuration have their own scope. Coding chat, an editor and intake forms do not belong in this flow.
+The console supports understanding work and making decisions: Overview, Code, Work and Settings. Published revisions live in Code; revision evidence accompanies changes and workspaces in Work. Namespace membership and account configuration have their own scope. Coding chat, an editor and intake forms do not belong in this flow.
 
 ## What must be proven
 

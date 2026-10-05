@@ -4,7 +4,7 @@
 
 Use this walkthrough to explore Cruce while it is in development. Screenshots were captured on 2026-10-05 from the local browser fixture. They illustrate the current console, not a stable UI contract or evidence of a live deployment.
 
-The fixture runs the real console and controllers with fixed time and deterministic Git objects. All names, account details and workspaces below are sample data. Authentication and Cloudflare storage are simulated; no cloud resources are used. Storage identifiers and content hashes shown in artifact details are fixture placeholders.
+The fixture runs the real console and controllers with fixed time and deterministic Git objects. All names, account details and workspaces below are sample data. Authentication and Cloudflare storage are simulated; no cloud resources are used. Storage identifiers and content hashes shown in published revision and evidence details are fixture placeholders.
 
 ## Start the demo
 
@@ -41,13 +41,15 @@ Review decisions concern this exact revision. An authenticated human attestation
 
 ![Focused change with pinned revisions, readiness reasons, evidence and separate human decisions](images/local-demo/review.jpg)
 
-## 4. Follow the source artifact
+## 4. Follow the published revision and evidence
 
-The **Artifacts** area collects Cruce source and evidence records; it is not a browser for the Cloudflare Artifacts provider. Open **Artifacts**, then **Bounded retry policy**. Its details identify the exact revision, producing workspace, storage reference and content hash. **Trace lineage** provides provenance context. Here the storage and hash values are simulated placeholders, and the artifact is marked **reported**.
+Repository navigation has four tabs: **Overview**, **Code**, **Work** and **Settings**. Open **Code**, then **Bounded retry policy** under **Published revisions**. Its details identify the exact revision, pinned review base, producing workspace, storage reference and content hash. **Trace lineage** provides provenance context; **Browse source**, **Commit history** and **Change diff** inspect the retained Git revision. **Storage details** reveals the retained storage reference and content hash. Here storage and hash values are simulated placeholders, and trust is **reported**.
+
+Open **Work**, then the change to see **Retry policy test report** alongside verification for that exact revision. **Read evidence** displays the stored fixture report; its reported results do not satisfy the trusted passing test requirement. The **Revision evidence** collection in Work also exposes reports before a change is proposed.
 
 Cruce’s coordination boundary ends at reviewed reconciliation into canonical Git. External systems own subsequent builds, releases, deployments and runtime operation.
 
-![Source artifact details identifying its revision, workspace and fixture storage](images/local-demo/artifact.jpg)
+![Published revision in Code identifying its review base, workspace and provenance](images/local-demo/revision.jpg)
 
 ## 5. Keep account and namespace access distinct
 

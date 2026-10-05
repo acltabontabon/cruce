@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { gitRemotePath } from "../shared/git-access.ts";
-import type { Artifact, Command, RepositorySnapshot } from "../shared/platform.ts";
-import { count, Empty, Form, short, time, value } from "./controls.tsx";
-import { ArtifactInspection, WorkspaceUpdateInspection } from "./inspect.tsx";
+import type { Command, RepositorySnapshot } from "../shared/platform.ts";
+import { count, Empty, short, time } from "./controls.tsx";
+import { WorkspaceUpdateInspection } from "./inspect.tsx";
+import { RetainedRecordRow } from "./records.tsx";
 export function Workspaces({ view, open, all = false }: { view: RepositorySnapshot; open: (id: string) => void; all?: boolean }) {
 	const workspaces = view.workspaces
 		.filter((s) => all || ["active", "preparing", "disconnected"].includes(s.state))
@@ -34,7 +35,17 @@ export function Workspaces({ view, open, all = false }: { view: RepositorySnapsh
 		<Empty>No active workspaces. Workspaces appear when you or an agent begins work through the local bridge.</Empty>
 	);
 }
-export function WorkspaceDetail({ view, id, execute }: { view: RepositorySnapshot; id: string; execute: Execute }) {
+export function WorkspaceDetail({
+	view,
+	id,
+	execute,
+	open,
+}: {
+	view: RepositorySnapshot;
+	id: string;
+	execute: Execute;
+	open: (tab: string, id?: string) => void;
+}) {
 	const s = view.workspaces.find((s) => s.id === id)!;
 	const updates = view.workspaceUpdates[id];
 	const [cleanupError, setCleanupError] = useState("");
@@ -89,11 +100,24 @@ export function WorkspaceDetail({ view, id, execute }: { view: RepositorySnapsho
 					</li>
 				))}
 			</ul>
+			{(["source", "evidence"] as const).map((kind) => (
+				<section key={kind}>
+					<h2>{kind === "source" ? "Published revisions" : "Revision evidence"}</h2>
+					{view.artifacts
+						.filter((a) => a.workspaceId === id && a.kind === kind)
+						.map((a) => (
+							<RetainedRecordRow key={a.id} record={a} open={(id) => open(kind === "source" ? "code" : "work", id)} />
+						))}
+					{!view.artifacts.some((a) => a.workspaceId === id && a.kind === kind) && (
+						<p className="empty">{kind === "source" ? "No published revisions yet." : "No revision evidence stored yet."}</p>
+					)}
+				</section>
+			))}
 			<details>
 				<summary>Execution details</summary>
 				{s.fork ? (
 					<>
-						<p>Artifacts fork · {s.fork.state}</p>
+						<p>Workspace fork · {s.fork.state}</p>
 						{s.fork.state === "ready" && (
 							<pre>
 								<code>{`git fetch ${location.origin}${gitRemotePath(view.repository.namespaceId, view.repository.id, s.id)}`}</code>
@@ -153,61 +177,4 @@ export function Activity({ view }: { view: RepositorySnapshot }) {
 		</section>
 	);
 }
-export function ArtifactRow({ artifact: a, open }: { artifact: Artifact; open: (id: string) => void }) {
-	return (
-		<button type="button" className="artifact-row" onClick={() => open(a.id)}>
-			<strong>{a.title}</strong>
-			<span>
-				{a.kind} · <code>{short(a.revision)}</code>
-			</span>
-			<small>
-				{a.actor.name} · {a.trust.replaceAll("_", " ")}
-			</small>
-		</button>
-	);
-}
 export type Execute = (cmd: Partial<Command> & { tool: string }) => Promise<unknown>;
-export function ArtifactDetail({ id, view, execute }: { id: string; view: RepositorySnapshot; execute: Execute }) {
-	const a = view.artifacts.find((a) => a.id === id);
-
-	if (!a) return <p className="empty">Artifact unavailable.</p>;
-	return (
-		<section>
-			<p className="eyebrow">
-				{a.kind} artifact · {a.trust.replaceAll("_", " ")}
-			</p>
-			<h2 className="detail-title">{a.title}</h2>
-			<dl>
-				<dt>Revision</dt>
-				<dd>
-					<code>{a.revision}</code>
-				</dd>
-				<dt>Workspace</dt>
-				<dd>{view.workspaces.find((s) => s.id === a.workspaceId)?.title}</dd>
-				{a.baseRevision && (
-					<>
-						<dt>Review base</dt>
-						<dd>
-							<code>{a.baseRevision}</code>
-						</dd>
-					</>
-				)}
-				<dt>Storage</dt>
-				<dd>{a.storage.repository}</dd>
-				<dt>Content hash</dt>
-				<dd>
-					<code>{a.contentHash}</code>
-				</dd>
-			</dl>
-			<ArtifactInspection key={id} id={id} execute={execute} />
-			{view.permissions.write && a.kind === "source" && (
-				<Form label="Propose change" submit={(d) => execute({ tool: "create_proposal", artifactId: a.id, title: value(d, "title") })}>
-					<label>
-						Change title
-						<input name="title" defaultValue={a.title} required />
-					</label>
-				</Form>
-			)}
-		</section>
-	);
-}

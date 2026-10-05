@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChangesResponse } from "../shared/api.ts";
 import type { Command, RepositorySnapshot, WorkspaceUpdateDetails } from "../shared/platform.ts";
+import { RetainedRecordDetail, RetainedRecordRow } from "./records.tsx";
 export type Execute = (cmd: Partial<Command> & { tool: string }) => Promise<unknown>;
 const short = (s?: string) => s?.slice(0, 8) ?? "—";
 export function WorkspaceUpdateInspection({ id, execute }: { id: string; execute: Execute }) {
@@ -59,78 +60,22 @@ export function WorkspaceUpdateInspection({ id, execute }: { id: string; execute
 		</>
 	);
 }
-export function ArtifactInspection({ id, execute }: { id: string; execute: Execute }) {
-	const [content, setContent] = useState<string>(),
-		[lineage, setLineage] =
-			useState<
-				{
-					type: string;
-					record: {
-						id: string;
-						title?: string;
-						revision?: string;
-						headRevision?: string;
-						actor?: { name: string };
-						state?: string;
-						summary?: string;
-					};
-				}[]
-			>(),
-		[error, setError] = useState("");
-	const ticket = useRef(0);
-	useEffect(
-		() => () => {
-			ticket.current++;
-		},
-		[],
-	);
-	const load = async (kind: "artifact" | "lineage") => {
-		const current = ++ticket.current;
-		setError("");
-		try {
-			const result = await execute(kind === "lineage" ? { tool: "get_lineage", subjectId: id } : { tool: "read_artifact", artifactId: id });
-			if (current !== ticket.current) return;
-			if (kind === "lineage") setLineage(result as NonNullable<typeof lineage>);
-			else
-				setContent(
-					(result as { content?: string }).content ?? "This source artifact contains exact Git objects. Inspect its revision in Code.",
-				);
-		} catch (e) {
-			if (current === ticket.current) setError((e as Error).message);
-		}
-	};
-	return (
-		<>
-			<div className="actions">
-				<button type="button" onClick={() => void load("lineage")}>
-					Trace lineage
-				</button>
-				<button type="button" onClick={() => void load("artifact")}>
-					Read artifact
-				</button>
-			</div>
-			{error && <p role="alert">{error}</p>}
-			{content && <pre>{content}</pre>}
-			{lineage && (
-				<ol className="lineage">
-					{lineage.map(({ type, record }) => (
-						<li key={`${type}:${record.id}`}>
-							<span className="eyebrow">{type}</span>
-							<strong>{record.title ?? record.summary ?? record.state ?? record.id}</strong>
-							<p>
-								{record.actor?.name} · <code>{short(record.revision ?? record.headRevision)}</code>
-							</p>
-						</li>
-					))}
-				</ol>
-			)}
-		</>
-	);
-}
-export function Code({ view, execute, proposalId }: { view: RepositorySnapshot; execute: Execute; proposalId: string }) {
-	const proposal = view.proposals.find((p) => p.id === proposalId),
+export function Code({
+	view,
+	execute,
+	id,
+	open,
+}: {
+	view: RepositorySnapshot;
+	execute: Execute;
+	id: string;
+	open: (tab: string, id?: string) => void;
+}) {
+	const publication = view.artifacts.find((a) => a.kind === "source" && a.id === id),
+		publications = view.artifacts.filter((a) => a.kind === "source"),
+		proposal = view.proposals.find((p) => p.id === id || p.artifactId === publication?.id),
 		[revision, setRevision] = useState(
-			proposal?.revision ?? view.sourceHead ?? view.artifacts.find((a) => a.kind === "source")?.revision ?? "",
+			publication?.revision ?? proposal?.revision ?? view.sourceHead ?? view.artifacts.find((a) => a.kind === "source")?.revision ?? "",
 		);
 	const [files, setFiles] = useState<Record<string, string>>(),
 		[selected, setSelected] = useState(""),
@@ -182,6 +127,35 @@ export function Code({ view, execute, proposalId }: { view: RepositorySnapshot; 
 	return (
 		<>
 			<h1>Code</h1>
+			{publication ? (
+				<>
+					<button type="button" className="text-button" onClick={() => open("code")}>
+						← All published revisions
+					</button>
+					<RetainedRecordDetail id={publication.id} view={view} execute={execute} open={open} />
+				</>
+			) : proposal ? (
+				<>
+					<button type="button" className="text-button" onClick={() => open("work", proposal.id)}>
+						← Back to change
+					</button>
+					<p className="muted">
+						Change #{proposal.number} · {proposal.title}
+					</p>
+				</>
+			) : (
+				<section>
+					<h2>Published revisions</h2>
+					{id && <p role="status">This revision is unavailable.</p>}
+					{publications.length ? (
+						publications.map((a) => <RetainedRecordRow key={a.id} record={a} open={(id) => open("code", id)} />)
+					) : (
+						<p className="empty">
+							No published revisions yet. Push committed source from your workspace, then publish its exact revision for review.
+						</p>
+					)}
+				</section>
+			)}
 			{!view.sourceAvailable ? (
 				<p className="empty">
 					Source unavailable. Local registration preserves your remote and does not upload source. Publish a committed revision to inspect

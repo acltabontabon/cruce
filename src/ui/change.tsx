@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { RepositorySnapshot } from "../shared/platform.ts";
 import { Form, short, value } from "./controls.tsx";
+import { RetainedRecordRow } from "./records.tsx";
 import type { Execute } from "./work.tsx";
 
 export function ChangeDetail({
@@ -20,6 +21,12 @@ export function ChangeDetail({
 	const [error, setError] = useState("");
 	if (!p) return <p className="empty">Change unavailable.</p>;
 	const evidence = view.verifications.filter((v) => v.proposalId === p.id && v.revision === p.revision);
+	const reports = view.artifacts.filter(
+		(a) =>
+			a.kind === "evidence" &&
+			a.revision === p.revision &&
+			(a.workspaceId === p.workspaceId || evidence.some((v) => v.artifactId === a.id)),
+	);
 	return (
 		<section className="change-detail">
 			<button type="button" className="text-button" onClick={() => open("work")}>
@@ -51,8 +58,8 @@ export function ChangeDetail({
 				<button type="button" onClick={() => open("code", p.id)}>
 					Inspect diff
 				</button>
-				<button type="button" className="text-button" onClick={() => open("artifacts", p.artifactId)}>
-					Source artifact →
+				<button type="button" className="text-button" onClick={() => open("code", p.artifactId)}>
+					View revision →
 				</button>
 			</div>
 			<section className="evidence-summary">
@@ -67,6 +74,9 @@ export function ChangeDetail({
 					</div>
 				))}
 				{!evidence.length && <p className="muted">No verification recorded for this revision.</p>}
+				{reports.map((a) => (
+					<RetainedRecordRow key={a.id} record={a} open={(id) => open("work", id)} />
+				))}
 			</section>
 			<h2>Reviews & concerns</h2>
 			{!p.reviews.length && <p className="muted">No reviews for this revision yet.</p>}

@@ -2,7 +2,7 @@
 
 [Contributor guide](../CONTRIBUTING.md) · [Architecture](architecture.md) · [Local walkthrough](local-demo.md)
 
-Cruce's interface describes independent work around exact source revisions. Repository work is the center of the console; the namespace home is a compact way into it. “Agent work. Shared direction.” remains the brand line. Product language stays Namespace, Repository, Workspace, revision, artifact, review and promotion.
+Cruce's interface describes independent work around exact source revisions. Repository work is the center of the console; the namespace home is a compact way into it. “Agent work. Shared direction.” remains the brand line. Product language stays Namespace, Repository, Workspace, published revision, evidence, review and promotion.
 
 ## Identity
 
@@ -46,9 +46,9 @@ Namespace summary topology is a minimal projection of already-authorized reposit
 
 ## Screens and interaction
 
-Desktop keeps namespace/repository selection grouped in the forest sidebar. Repository navigation remains Overview, Code, Work, Artifacts and Settings. Namespace Members/Teams are shared-namespace controls; account settings remain separate. The repository finder retains Command/Ctrl K and keyboard selection.
+Desktop keeps namespace/repository selection grouped in the forest sidebar. Repository navigation remains Overview, Code, Work and Settings. Namespace Members/Teams are shared-namespace controls; account settings remain separate. The repository finder retains Command/Ctrl K and keyboard selection.
 
-Work separates Changes and Workspaces. Their existing deep links open focused details. Change detail presents pinned source, controller readiness, diff/artifact access, exact-revision evidence, reviews/concerns and the human decision area. Source approval, attestation and explicit promotion remain distinct actions. Artifacts separates the collection from focused provenance inspection; Code remains a read-only inspector.
+Work separates Changes, Workspaces and Revision evidence. Deep links open focused change, workspace and evidence details. Change detail presents pinned source, controller readiness, diff/revision access, exact-revision evidence, reviews/concerns and the human decision area. Stored evidence is associated by workspace and exact revision, or an explicit revision-matched verification link; unrelated or stale reports do not appear on a change. Work also lists evidence stored before a change is proposed. Code lists Published revisions and provides focused provenance inspection plus read-only source, history and diff controls. Overview highlights the latest published source revision, independently of evidence publication. Source approval, attestation and explicit promotion remain distinct actions.
 
 Layout breakpoints use the available root container width, including reflow at 200% zoom. At narrow widths the sidebar becomes a modal navigation drawer with focus containment, Escape dismissal and trigger restoration. Repository tabs stay visible. At intermediate widths the decision queue follows topology; wider screens place them side by side. Forms, settings, empty states and account views use the same type, surface and control system.
 

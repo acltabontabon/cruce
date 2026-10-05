@@ -12,6 +12,8 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Changed
 
+- Simplify repository navigation to Overview, Code, Work and Settings. Browse published revisions and provenance in Code, and inspect stored revision evidence alongside changes and workspaces in Work; reserve Cloudflare Artifacts naming for infrastructure.
+
 - Redesign the console around independent workspace paths, exact-revision review and human decisions: interlaced Cruce identity, compact namespace home, truthful shared-surface topology, focused work/artifact inspection and accessible mobile navigation. Add local-checkout guidance and preserve canonical authority, permissions and retry behavior.
 
 - Tidy console home hierarchy, compact spacing, readable namespace details, aligned search controls and subtle rounded account/sidebar hover states; correct singular repository/workspace counts.

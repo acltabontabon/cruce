@@ -82,6 +82,7 @@ export async function fixture() {
 		workspaceId: workspace.id,
 		actor: agent,
 		revision: head,
+		baseRevision: base,
 		kind: "source",
 		title: "Bounded retry policy",
 		contentHash: "fixture-content-hash",
@@ -90,6 +91,20 @@ export async function fixture() {
 		at: FIXED_TIME,
 	});
 	run("create_proposal", { artifactId: "source" }, agent);
+	c.addArtifact({
+		id: "test-report",
+		namespaceId: shared.id,
+		repositoryId: repository.id,
+		workspaceId: workspace.id,
+		actor: agent,
+		revision: head,
+		kind: "evidence",
+		title: "Retry policy test report",
+		contentHash: "fixture-evidence-hash",
+		trust: "reported",
+		storage: { repository: "fixture-evidence", revision: head, path: "tests.txt" },
+		at: FIXED_TIME,
+	});
 	const runtimes = new Map([[repository.id, c]]),
 		calls: unknown[] = [];
 	const json = (res: ServerResponse, data: unknown, status = 200) => {
@@ -181,7 +196,14 @@ export async function fixture() {
 			if (cmd.tool === "get_source") return json(res, { revision: cmd.revision, files: await git.readFiles(cmd.revision ?? head) });
 			if (cmd.tool === "get_history") return json(res, await git.log(cmd.revision ?? head));
 			if (cmd.tool === "get_diff") return json(res, await git.reviewChanges(cmd.baseRevision ?? base, cmd.revision ?? head, cmd.path));
-			if (cmd.tool === "read_artifact") return json(res, { artifact: runtime.artifact(cmd.artifactId) });
+			if (cmd.tool === "read_artifact")
+				return json(res, {
+					artifact: runtime.artifact(cmd.artifactId),
+					content:
+						cmd.artifactId === "test-report"
+							? "Reported tests: 12 passed for the bounded retry revision. Fixture evidence only."
+							: undefined,
+				});
 			return json(res, runtime.command(cmd, authority));
 		} catch (e) {
 			return json(res, { error: (e as Error).message }, 400);
