@@ -2,7 +2,7 @@
 
 [Documentation map](../README.md#documentation-map) · [Changelog](../CHANGELOG.md) · [Verification](local-verification.md)
 
-Cruce's second alpha, **0.1.0-alpha.2**, is dated 2026-10-06. Releases are deployed by pushing a checked release tag. This is experimental software; alpha interfaces may change.
+Cruce's second alpha, **[0.1.0-alpha.2](https://github.com/acltabontabon/cruce/releases/tag/v0.1.0-alpha.2)**, was released on 2026-10-06. Its [checked tag deployment](https://github.com/acltabontabon/cruce/actions/runs/37390389317) passed; [test environment](test-environment.md) records the deployed revision and verification limits. Releases are deployed by pushing a checked release tag. This is experimental software; alpha interfaces may change.
 
 ## Versioning and changelog
 
