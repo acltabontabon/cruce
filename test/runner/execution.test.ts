@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanupExecution, context, createExecution, observeChanges, releaseCheckout, reserveCheckout } from "../../runner/execution.ts";
-import { configureFork } from "../../runner/git-remotes.ts";
+import { configureFork, continueFromFork } from "../../runner/git-remotes.ts";
 import { git, pipeGit } from "../../runner/local-git.ts";
 import { MemoryFs } from "../../src/worker/git/memory-fs.ts";
 import { GitWorkspace } from "../../src/worker/git/workspace.ts";
@@ -76,6 +76,33 @@ describe("local workspace execution", () => {
 		expect(await git(a.directory, ["status", "--porcelain"])).toBe(status);
 		expect(await readFile(join(a.directory, "code.txt"), "utf8")).toBe("unstaged\n");
 		expect(await git(a.directory, ["remote", "get-url", "origin"])).toBe("https://example.invalid/repo.git");
+	});
+	it("continues a workspace on another machine from its pushed fork head, never from local claims", async () => {
+		const first = await repository();
+		const fork = join(first.root, "..", `${first.root.split("/").at(-1)}-fork.git`);
+		paths.push(fork);
+		execFileSync("git", ["init", "--bare", fork], { stdio: "pipe" });
+		const a = await createExecution(first.root, "ws", first.base);
+		await writeFile(join(a.directory, "code.txt"), "pushed work\n");
+		first.run(["-C", a.directory, "commit", "-am", "Pushed work"]);
+		const pushed = first.run(["-C", a.directory, "rev-parse", "HEAD"]);
+		first.run(["-C", a.directory, "push", fork, "HEAD:refs/heads/cruce/workspace-ws"]);
+		await writeFile(join(a.directory, "code.txt"), "unpushed work\n");
+
+		const second = await mkdtemp(join(tmpdir(), "cruce-second-machine-"));
+		paths.push(second);
+		execFileSync("git", ["clone", "--quiet", first.root, second], { stdio: "pipe" });
+		const b = await createExecution(second, "ws", first.base);
+		await git(b.directory, ["remote", "add", "cruce-ws", fork]);
+		expect(await continueFromFork(b.directory, "cruce-ws", "ws")).toBe(pushed);
+		expect(await git(b.directory, ["rev-parse", "HEAD"])).toBe(pushed);
+		expect(await readFile(join(b.directory, "code.txt"), "utf8")).toBe("pushed work\n");
+		expect(await git(second, ["rev-parse", "HEAD"])).toBe(first.base);
+
+		await git(b.directory, ["-c", "user.name=Fixture", "-c", "user.email=f@example.com", "commit", "--allow-empty", "-m", "Local"]);
+		first.run(["-C", a.directory, "commit", "--amend", "-am", "Rewritten"]);
+		first.run(["-C", a.directory, "push", "--force", fork, "HEAD:refs/heads/cruce/workspace-ws"]);
+		await expect(continueFromFork(b.directory, "cruce-ws", "ws")).rejects.toThrow("does not fast-forward");
 	});
 	it("creates separate worktrees while preserving local remotes and uncommitted work", async () => {
 		const { root, base } = await repository();

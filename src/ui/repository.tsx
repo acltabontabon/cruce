@@ -65,7 +65,6 @@ export function RepositoryOverview({ view, open }: { view: RepositorySnapshot; o
 			</div>
 			<div className="status-strip">
 				<span>{count(active.length, "active workspace")}</span>
-				<span>{count(active.filter((w) => w.actor.kind === "agent").length, "agent")} working</span>
 				<span>{count(publications.length, "published revision")}</span>
 				<span>Reported activity</span>
 			</div>

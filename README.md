@@ -1,38 +1,34 @@
 # Cruce
 
-Cruce is a **Git-native coordination and convergence layer for concurrent coding agents**.
+**Git coordination for parallel agentic development.**
 
-**Git records what happened. Cruce coordinates what is happening.** Independent agents keep their own tools and local environments. Cruce connects their durable workspaces through shared awareness, exact source provenance, intentional reconciliation and human-governed canonical promotion.
+Cruce is the durable coordination plane for Git work produced by many independent actors: Claude Code, Codex, Cursor, other agents, scripts, orchestrators and human developers. It lets them work in parallel without Git itself becoming the coordination problem.
 
-Branches, worktrees and forks already provide isolation. Cruce must earn its place by helping independent participants understand interacting work and canonical movement early enough to reduce avoidable rework. The complete lifecycle is the product, not a conflict warning or an agent launcher.
+Agents, sessions, terminals, worktrees and machines are transient, and agent vendors are interchangeable. The work is not. Cruce gives each stream of work a durable **workspace** with an exact baseline, its own Git fork, pushed and published revisions, and provenance. It shows how concurrent workspaces relate (overlap, divergence, staleness) and carries exact revisions through review and human approval into canonical Git.
 
-The implemented foundation provides cooperative path reports, accepted-source comparisons, durable workspace forks, exact-revision retention, review and promotion. Observed push events, independently fresh convergence evidence and proven context consumption across tools are gaps. Automatic sequencing and supported pause/resume are exploratory. See the [product thesis and competitive assessment](docs/product-thesis.md) and [implementation audit](docs/architecture.md#implementation-audit).
+> Cruce coordinates durable concurrent Git work; other systems execute the work.
 
 ```mermaid
 flowchart TB
-    A[Agent in tool A] --> WA[Durable workspace A and isolated checkout]
-    B[Agent in tool B] --> WB[Durable workspace B and isolated checkout]
-    WA <-->|Git and MCP| C[Cruce control plane]
-    WB <-->|Git and MCP| C
-    C --> O[Current: shared reports and canonical context]
-    O -.-> E[Proposed: observed activity and convergence evidence]
-    C --> R[Exact source retention and human review]
-    R -->|Readiness and explicit promotion| G[Canonical Git in Cloudflare Artifacts]
-    G --> F[Continuing writers incorporate and verify]
-    F --> C
+    X[Any tool or human: Claude Code, Codex, Cursor, scripts, orchestrators] -->|normal Git and MCP/API| WA[Workspace A: baseline, fork, revisions]
+    X -->|normal Git and MCP/API| WB[Workspace B: baseline, fork, revisions]
+    WA --> C[Cruce: overlap, divergence, proposals, provenance]
+    WB --> C
+    C -->|exact revision, human approval, non-forced update| G[Canonical Git in Cloudflare Artifacts]
+    G -. explicit import / publication, roadmap .-> U[GitHub / GitLab upstream]
 ```
 
-Solid links show implemented mechanisms, subject to the [audit's correctness gaps](docs/architecture.md#architecture-contradictions-and-correctness-gaps); dashed links are proposed. Overlap is advisory, not a semantic conflict or compatibility guarantee. Cruce does not launch agents or require scheduling clearance for local edits.
+## What Cruce is not
+
+One developer running a few agents on one machine is already well served by Git worktrees and local agent tools; Cruce does not compete there. Its value grows with agents × developers × machines × concurrent workstreams × duration.
+
+Cruce is **not** an agent runtime, agent scheduler, conversation manager, multi-agent messaging bus, IDE, Git replacement, GitHub/GitLab replacement, CI/CD system, cloud development environment or agent vendor platform. Orchestrators and relays can sit above it and use it through MCP or the API. See [product boundaries](docs/product.md#non-goals-and-product-boundaries).
 
 ## Git stays Git
 
-> If Git already has a primitive for something, Cruce should use Git instead of inventing another one.
+Keep using `git clone`, `fetch`, `pull`, `push`, `commit`, `branch`, `merge`, `diff` and `log`. The hierarchy is **Namespace → Repository → Workspace**. Every repository has a canonical Git repository in Cloudflare Artifacts. Each writer workspace owns one reusable direct fork of it and an immutable baseline. A workspace is owned by a user, not by an agent session. Its local worktree or checkout is a replaceable execution attachment, so the same workspace can be continued in another session, tool or machine. Attaching a checkout never rewrites existing remotes such as `origin` and never uploads history implicitly.
 
-Keep using `git clone`, `git fetch`, `git pull`, `git push`, `git commit`, `git branch`, `git diff` and `git log`. Cruce adds participation, authorization, shared observations and revision-bound decisions. It does not add a replacement Git command language.
-
-The ownership model is **Namespace → Repository → Workspace**. A namespace owns access and budgets. Every repository has an authoritative canonical Git repository backed by Cloudflare Artifacts. Each writer workspace owns one reusable direct fork of canonical and records an actor, task and immutable starting commit. An agent may participate in many workspaces; the workspace owns its fork, not the vendor. A worktree or clone is its local execution context, not its durable identity. Existing checkout attachment preserves remotes and never silently uploads history.
-
-Normal pushes go to the writer's fork. Publication retains an exact pushed revision as a Cruce source artifact, distinct from the Cloudflare Artifacts provider. Evidence records revision-linked claims/results separately. Publication proves which source was retained, not that it is correct; human-approved, controller-gated promotion advances canonical source. Cruce’s responsibility ends when isolated concurrent work is safely reviewed and reconciled into the canonical Git repository. CI, build/release orchestration, deployment, environment management, rollback and runtime operation belong to external systems. See the [architecture](docs/architecture.md) for the complete flow and its trust boundaries.
+Writers push to their fork. Publication retains an exact pushed revision for review; it proves which source was retained, not that it is correct. Canonical advances only through an authenticated human approval of an exact revision and a non-forced Git update against the approved base. See the [domain model](docs/domain-model.md).
 
 ## Try the local console
 
@@ -43,36 +39,27 @@ pnpm install --frozen-lockfile
 pnpm dev:fixture
 ```
 
-Open the printed loopback URL. The fixed-clock fixture uses the real console and controllers with deterministic Git source; identity and provider behavior are simulated. It does not connect to live namespaces or consume cloud resources.
-
-Follow the [local console walkthrough](docs/local-demo.md) for screenshots and a guided tour of the sample workspaces, review, published revisions and evidence views.
-
-To use Cruce with real repositories, follow [Git and bridge setup](docs/native-setup.md). Hosted repositories require a namespace's explicitly connected Cloudflare account and consume resources. Cloud hosting does not imply cloud execution of agents.
+Open the printed loopback URL. The fixed-clock fixture uses the real console and controllers with deterministic Git source; identity and provider behavior are simulated, and it consumes no cloud resources. The [local console walkthrough](docs/local-demo.md) has screenshots. To use real repositories, follow [Git and bridge setup](docs/native-setup.md). Hosted repositories require a namespace's explicitly connected Cloudflare account. Cloud hosting of Git does not mean cloud execution of agents.
 
 ## Status
 
-Cruce is early, experimental software, and its name remains provisional. Local controller, Git, bridge and browser evidence exists. A real-Artifacts two-writer convergence scenario passed with fixture authority; newer deployed checks exercised owner setup, canonical provisioning and a repaired consent form. Authenticated publication/promotion and actual two-tool participation remain unverified. [Verification](docs/local-verification.md) records the precise revisions and limits; these separate checks were not performed by the documentation audit.
-
-The [architecture audit](docs/architecture.md#implementation-audit) identifies expected-base promotion races, incomplete provider identity checks and account-binding recovery as corrections needed before a credible end-to-end proof. This documentation pass does not fix those runtime gaps.
-
-The proposed first pilot uses one developer, one repository, Codex and Claude Code, subject to demonstrated integration support. It must show reduced routine intervention, duplicated effort and integration rework against ordinary worktrees and Git review, within predeclared limits on delay, reporting effort, cost and quality. The [roadmap](ROADMAP.md#how-we-choose-what-to-build) includes failure and simplification criteria; product value and cross-tool context consumption remain unproven.
-
-Cruce is not a Git/Git-worktree replacement, a Claude Code worktree manager, a GitHub/GitLab clone, a remote IDE, a cloud coding environment, an agent runtime, a general agent orchestrator or a CI/CD replacement. Its scope is coordination of concurrent repository work. See [product boundaries](docs/product-thesis.md).
+Cruce is early, experimental software, and its name is provisional. Backward compatibility is not a goal yet. Local controller, Git, bridge and browser evidence exists. A real-Artifacts two-writer convergence scenario passed with fixture authority, and deployed checks covered owner setup, canonical provisioning and one OAuth writer. Multi-tool, multi-session deployed participation remains unverified ([roadmap D2](ROADMAP.md#developer-workflow)). The [architecture audit](docs/architecture.md#implementation-audit) lists the remaining provider-identity, read-purity and recovery gaps, and [verification](docs/local-verification.md) records the exact evidence.
 
 ## Documentation map
 
 | I want to… | Read |
 | --- | --- |
-| Understand the problem, audience and scope | [Product thesis](docs/product-thesis.md) |
-| Explore the development console with screenshots | [Local console walkthrough](docs/local-demo.md) |
-| Make or review an architectural decision | [Principles and guardrails](docs/principles.md) |
-| Understand ownership, source convergence, implementation gaps and Cloudflare fit | [Architecture and audit](docs/architecture.md) |
+| Understand what Cruce is, why, and what it will not do | [Product](docs/product.md) |
+| Learn the concepts: workspace, baseline, revisions, lifecycle, authority | [Domain model](docs/domain-model.md) |
+| Make or review a design decision | [Principles and guardrails](docs/principles.md), [decision records](docs/decisions/README.md) |
+| Understand the implementation, its gaps and Cloudflare fit | [Architecture and audit](docs/architecture.md) |
+| See what comes next | [Roadmap](ROADMAP.md) |
 | Connect a checkout and participate | [Git and bridge setup](docs/native-setup.md) |
-| Integrate an agent or change the tool surface | [MCP and agent participation](docs/mcp.md) |
+| Integrate an agent, orchestrator or script | [MCP participation](docs/mcp.md) |
+| Explore the console | [Local console walkthrough](docs/local-demo.md), [design guide](docs/design.md) |
 | Develop and verify a contribution | [Contributing](CONTRIBUTING.md), [verification](docs/local-verification.md) |
 | Configure hosted resources | [Cloudflare setup](docs/cloudflare-setup.md), [test environment](docs/test-environment.md) |
-| Explore future ideas | [Future direction and ideas](ROADMAP.md) |
 | Work as a coding agent in this repository | [AGENTS.md](AGENTS.md) |
 | Inspect change history or release procedures | [Changelog](CHANGELOG.md), [releases](docs/releases.md) |
 
-Principles state the constraints; architecture describes the current design; the roadmap contains future candidates; verification records evidence; the changelog summarizes changes. Git history preserves implementation history. A historical success or future plan is not evidence of a current capability.
+Each kind of information has one home: product and boundaries in the product document, concepts in the domain model, constraints in the principles, the current design in the architecture, future candidates in the roadmap, evidence in verification and changes in the changelog. A historical success or a future plan is not evidence of a current capability.

@@ -23,3 +23,16 @@ export async function configureFork(cwd: string, workspaceId: string, server: st
 	await git(cwd, ["config", `credential.${url.href}.helper`, credentialHelper(server, client)]);
 	return { remote, url: url.href };
 }
+/** Continue a workspace from its pushed fork head. Only pushed revisions travel; divergence is left to Git. */
+export async function continueFromFork(cwd: string, remote: string, workspaceId: string) {
+	const branch = `cruce/workspace-${workspaceId}`;
+	await git(cwd, ["fetch", remote]);
+	const pushed = await git(cwd, ["rev-parse", "--verify", "--quiet", `refs/remotes/${remote}/${branch}^{commit}`]).catch(() => undefined);
+	if (!pushed) return undefined;
+	try {
+		await git(cwd, ["merge", "--ff-only", pushed]);
+	} catch {
+		throw new Error(`Local history does not fast-forward to the pushed workspace head ${pushed}; reconcile with Git in ${cwd}`);
+	}
+	return pushed;
+}

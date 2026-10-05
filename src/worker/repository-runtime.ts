@@ -1,7 +1,6 @@
 import { humanMaintain, writeAccess } from "../core/capabilities.ts";
 import { DomainError, requireValue, stable } from "../core/errors.ts";
 import { initialRepository, RepositoryController } from "../core/platform.ts";
-import { buildIndex } from "../intelligence/structural-index.ts";
 import { gitRemotePath, parseGitRoute } from "../shared/git-access.ts";
 import type { Artifact, Command, Repository, RepositoryState, ResourceAction, WorkspaceUpdateDetails } from "../shared/platform.ts";
 import { authorizeMachine, HUMAN_TOOLS, toolByName } from "../shared/tools.ts";
@@ -262,26 +261,6 @@ export class RepositoryRuntime {
 				await this.known(c, base);
 				await this.known(c, head);
 				result = await this.git.reviewChanges(base, head, cmd.path);
-			} else if (cmd.tool === "get_context") {
-				const s = c.workspace(cmd.workspaceId);
-				let available = false;
-				try {
-					await this.known(c, s.baseRevision);
-					available = !!(await this.git.log(s.baseRevision, 1)).length;
-				} catch (e) {
-					if (!(e instanceof DomainError)) throw e;
-				}
-				result = {
-					revision: s.baseRevision,
-					available,
-					files: available
-						? await this.git.readFiles(s.baseRevision, (p) => p === "AGENTS.md" || p.endsWith("/AGENTS.md") || p === "README.md")
-						: {},
-					structure: available ? buildIndex(await this.git.readFiles(s.baseRevision), s.baseRevision) : null,
-					repositoryPolicy: repo.policy,
-					namespacePolicy: (await this.namespace.resourceConfiguration()).policy,
-					note: available ? undefined : "Instructions unavailable until committed source is published",
-				};
 			} else if (cmd.tool === "read_artifact") {
 				const artifact = c.artifact(cmd.artifactId);
 				result = {
@@ -293,7 +272,7 @@ export class RepositoryRuntime {
 			} else if (cmd.tool === "attach_workspace") {
 				result = c.command(cmd, a);
 				const s = c.workspace(cmd.workspaceId);
-				if (s.mode === "write" && !s.fork) {
+				if (!s.fork) {
 					await this.known(c, s.baseRevision);
 					await this.gate(grant, cmd, "workspace.fork", async (host) => {
 						const canonical = requireValue(repo.storageName, "Canonical storage missing");
@@ -311,8 +290,8 @@ export class RepositoryRuntime {
 			} else if (cmd.tool === "cleanup_workspace") {
 				const workspace = c.workspace(cmd.workspaceId);
 				writeAccess(a);
-				if (a.actor.kind === "agent" && (workspace.actor.id !== a.actor.id || workspace.actor.connectionId !== a.actor.connectionId))
-					throw new DomainError(403, "Workspace belongs to another connection");
+				if (a.actor.kind === "agent" && workspace.ownerId !== a.actor.userId)
+					throw new DomainError(403, "Workspace belongs to another user");
 				if (a.actor.kind === "human") humanMaintain(a);
 				const ready = c.forkCleanup(workspace);
 				if (!ready.ready) throw new DomainError(409, ready.reasons.join("; "));
@@ -341,9 +320,9 @@ export class RepositoryRuntime {
 					return { workspaceId: workspace.id, state: fork.state };
 				});
 			} else if (cmd.tool === "publish_revision" || cmd.tool === "publish_artifact") {
+				// Publication reads the pushed fork, so any authorized connection of the owner may publish.
 				const s = c.owned(a, cmd.workspaceId),
 					revision = requireValue(cmd.revision, "Revision required");
-				if (!s.execution) throw new DomainError(409, "Attach an execution context first");
 				result = await this.gate(grant, cmd, cmd.tool === "publish_revision" ? "revision.publish" : "artifact.publish", async (host) => {
 					const artifactId = `${op.slice(0, 24)}-artifact`;
 					let storage: Artifact["storage"], contentHash: string, baseRevision: string | undefined;

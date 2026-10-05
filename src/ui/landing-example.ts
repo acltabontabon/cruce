@@ -29,30 +29,41 @@ const writers: [string, string, string, string, string, string[]][] = [
 		["package.json", "pnpm-lock.yaml"],
 	],
 ];
-export const exampleWorkspaces: Workspace[] = writers.map(([id, name, title, head, branch, paths], index) => ({
-	id,
-	repositoryId: "example-payment-api",
-	actor: { id: `example-${id}`, userId: "example-developer", name, kind: "agent", connectionId: `example-connection-${id}` },
-	title,
-	baseRevision: exampleBase,
-	headRevision: head,
-	branch: `work/${branch}`,
-	mode: "write",
-	state: "active",
-	startedAt: at + index,
-	lastActivity: at,
-	execution: {
-		id: `local-${id}`,
-		checkoutId: `checkout-${id}`,
-		machineId: "example-local",
-		kind: "worktree",
-		owned: true,
+export const exampleWorkspaces: Workspace[] = writers.map(([id, name, title, head, branch, paths], index) => {
+	const actor = {
+		id: `example-${id}`,
+		userId: "example-developer",
+		name,
+		kind: "agent" as const,
+		connectionId: `example-connection-${id}`,
+	};
+	return {
+		id,
+		repositoryId: "example-payment-api",
+		ownerId: "example-developer",
+		createdBy: actor,
+		title,
+		baseRevision: exampleBase,
+		headRevision: head,
 		branch: `work/${branch}`,
-	},
-	fork: { id: `fork-${id}`, name: `workspace-${id}`, remote: `https://example.invalid/${id}.git`, state: "ready" },
-	changes: paths.map((path) => ({ path, status: "modified" })),
-	commits: [head],
-}));
+		state: "active",
+		startedAt: at + index,
+		lastActivity: at,
+		execution: {
+			id: `local-${id}`,
+			checkoutId: `checkout-${id}`,
+			machineId: "example-local",
+			kind: "worktree",
+			owned: true,
+			branch: `work/${branch}`,
+			attachedBy: actor,
+			attachedAt: at,
+		},
+		fork: { id: `fork-${id}`, name: `workspace-${id}`, remote: `https://example.invalid/${id}.git`, state: "ready" },
+		changes: paths.map((path) => ({ path, status: "modified" })),
+		commits: [head],
+	};
+});
 // Each accepted head preserves its workspace identity. Later writers incorporate accepted source before publishing.
 export const exampleContributions = [
 	{ id: "claude", baseRevision: exampleBase, integratedRevision: exampleBase, headRevision: exampleWorkspaces[0].headRevision },

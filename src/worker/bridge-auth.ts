@@ -66,14 +66,15 @@ export async function bridgeRoute(request: Request, env: PlatformEnv, ctx: Execu
 				{ tool: "get_workspace", namespaceId: pair.namespaceId, repositoryId: repo.id, workspaceId: pair.workspaceId },
 				{ actor: { id: user.id, userId: user.id, name: user.name, kind: "human" } },
 			)) as import("../shared/platform.ts").Workspace;
+			// Renewal reuses the terminal connection that started the workspace, keeping its single-workspace binding.
 			if (
-				workspace.actor.kind !== "human" ||
-				workspace.actor.userId !== user.id ||
-				!workspace.actor.connectionId ||
+				workspace.ownerId !== user.id ||
+				workspace.createdBy.kind !== "human" ||
+				!workspace.createdBy.connectionId ||
 				["completed", "cancelled"].includes(workspace.state)
 			)
 				throw new DomainError(403, "Only your own unfinished terminal workspace can be renewed");
-			connectionId = workspace.actor.connectionId;
+			connectionId = workspace.createdBy.connectionId;
 		}
 		const token = crypto.randomUUID() + crypto.randomUUID(),
 			key = `bridge:${await hash(token)}`;

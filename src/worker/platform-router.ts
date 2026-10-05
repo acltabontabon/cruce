@@ -32,7 +32,6 @@ const repositoryInput = z.object({
 });
 const humanBridgeTools = new Set([
 	"get_repository",
-	"get_context",
 	"get_workspace",
 	"list_active_workspaces",
 	"inspect_overlap",
@@ -47,7 +46,7 @@ const humanBridgeTools = new Set([
 	"attach_workspace",
 	"heartbeat",
 	"report_change",
-	"report_ref",
+	"detach_workspace",
 	"end_workspace",
 	"publish_revision",
 	"publish_artifact",

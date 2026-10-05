@@ -50,24 +50,24 @@ test("public homepage explains independent work without requesting private repos
 	assert.equal(await page.locator(".product-preview, .revision-preview, .reality-tools").count(), 0);
 	assert.deepEqual(privateRequests, []);
 });
-test("coordination vision aligns routine work and accepts three distinct revisions in a clean sequence", async () => {
+test("illustration reviews exact revisions and accepts three distinct revisions in a clean sequence", async () => {
 	await page.clock.install();
 	await openHomepage();
 	const story = page.getByRole("group", { name: "Development story stages" });
 	const canonical = page.locator(".graph-canonical-head");
 	await page.getByText("Coordination vision · illustrative", { exact: true }).waitFor();
-	for (const stage of ["Independent work", "Shared awareness", "Align together"]) {
+	for (const stage of ["Independent work", "Shared awareness", "Human review"]) {
 		await story.getByRole("button", { name: stage, exact: true }).click();
 		assert.equal(await canonical.textContent(), "");
 		assert.equal((await page.locator(".crossing-graph").getAttribute("data-canonical")).slice(0, 8), "71d94e2a");
 		assert.equal(await page.locator(".graph-convergence.is-visible").count(), 0);
 	}
-	assert.equal(await page.locator(".graph-alignment.is-visible").count(), 1);
+	assert.equal(await page.locator(".graph-alignment, .graph-message").count(), 0);
 	assert.equal(await page.locator(".graph-decision.is-visible").count(), 1);
 	assert.equal(await page.locator(".lane-2.graph-lane path").evaluate((el) => getComputedStyle(el).strokeOpacity), "0.3");
-	assert.match(await page.locator(".sequence-description").textContent(), /unresolved disagreement branch to the developer/);
+	assert.match(await page.locator(".sequence-description").textContent(), /only an authenticated human approval/);
 	assert.equal(await page.locator(".sequence-explanation, .sequence-footer, .hero-sequence details").count(), 0);
-	await page.screenshot({ path: "dist/ui-checks/homepage-alignment.png", fullPage: true });
+	await page.screenshot({ path: "dist/ui-checks/homepage-review.png", fullPage: true });
 	await story.getByRole("button", { name: "Sequential convergence", exact: true }).click();
 	assert.equal(await canonical.textContent(), "bc811af0");
 	assert.equal(await page.locator(".graph-convergence.is-visible").count(), 1);
@@ -278,22 +278,21 @@ test("hero draws native SVG paths smoothly and Pause holds a partially drawn pro
 	await openHomepage();
 	await page.emulateMedia({ reducedMotion: "no-preference" });
 	await page.getByRole("button", { name: "Play", exact: true }).waitFor();
-	await page.getByRole("button", { name: "Align together", exact: true }).click();
+	await page.getByRole("button", { name: "Human review", exact: true }).click();
 	await page.getByRole("button", { name: "Play", exact: true }).click();
 	await page.waitForTimeout(300);
 	const independentWorker = page.locator(".lane-2 .graph-worker");
-	const message = page.locator(".message-down");
 	assert.equal(await independentWorker.evaluate((element) => element.getAnimations()[0].playState), "running");
-	assert.equal(await message.evaluate((element) => element.getAnimations()[0].playState), "running");
+	assert.equal(await page.locator(".graph-message").count(), 0);
 	assert.equal(await page.locator(".graph-canonical-head").textContent(), "");
 	await page.getByRole("button", { name: "Pause", exact: true }).click();
-	await page.waitForFunction(() => document.querySelector(".graph-message").getAnimations()[0].playState === "paused");
+	await page.waitForFunction(() => document.querySelector(".lane-2 .graph-worker").getAnimations()[0].playState === "paused");
 	await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-	const messagePausedAt = await message.evaluate((element) => element.getAnimations()[0].currentTime);
-	assert.equal(messagePausedAt > 100, true);
-	assert.equal(await page.locator(".graph-alignment").evaluate((element) => getComputedStyle(element).opacity), "1");
+	const workerPausedAt = await independentWorker.evaluate((element) => element.getAnimations()[0].currentTime);
+	assert.equal(workerPausedAt > 100, true);
+	assert.equal(await page.locator(".graph-decision").evaluate((element) => getComputedStyle(element).opacity), "1");
 	await page.waitForTimeout(100);
-	assert.equal(await message.evaluate((element) => element.getAnimations()[0].currentTime), messagePausedAt);
+	assert.equal(await independentWorker.evaluate((element) => element.getAnimations()[0].currentTime), workerPausedAt);
 	await page.screenshot({ path: "dist/ui-checks/homepage-coordination-paused.png", fullPage: true });
 	await page
 		.getByRole("group", { name: "Development story stages" })
@@ -388,14 +387,14 @@ test("hero draws native SVG paths smoothly and Pause holds a partially drawn pro
 
 	assert.equal(await curve.evaluate((element) => element.getAnimations()[0].currentTime > 0), true);
 });
-test("moving dots stay on their own paths and advisory exchange uses one distinct signal", async () => {
+test("moving dots stay on their own paths and no message passes between workspaces", async () => {
 	await openHomepage();
 	await page.emulateMedia({ reducedMotion: "no-preference" });
-	await page.getByRole("button", { name: "Align together", exact: true }).click();
+	await page.getByRole("button", { name: "Human review", exact: true }).click();
 	await page.getByRole("button", { name: "Play", exact: true }).click();
 	await page.waitForTimeout(150);
 	await page.getByRole("button", { name: "Pause", exact: true }).click();
-	assert.equal(await page.locator(".graph-message").count(), 1);
+	assert.equal(await page.locator(".graph-message").count(), 0);
 	const failures = await page.evaluate(async () => {
 		const failures = [];
 		for (const fraction of [0, 0.125, 0.5, 0.9, 1]) {
@@ -646,7 +645,6 @@ test("overview shows human and agent workspaces, reported overlap and published 
 	await openRepo();
 	await page.getByRole("heading", { name: "Shared surfaces" }).waitFor();
 	await page.getByRole("heading", { name: "Review queue", exact: true }).waitFor();
-	await page.getByText("1 agent working", { exact: true }).waitFor();
 	await page.getByText("2 active workspaces", { exact: true }).waitFor();
 	await page.getByText("Overlap is awareness, not a Git conflict.").waitFor();
 	await page.screenshot({ path: "dist/ui-checks/repository.png", fullPage: true });
@@ -822,13 +820,18 @@ test("dismissed search requests cannot replace a newer search and shortcuts leav
 	await panel.getByRole("option", { name: "fernloop/payment-service", exact: true }).waitFor();
 	assert.equal(await panel.getByRole("option", { name: /stale-repository/ }).count(), 0);
 });
-test("workspace detail preserves base, actor and execution provenance", async () => {
+test("workspace detail preserves base, actor and execution provenance, and the owner can release the execution", async () => {
 	await openRepo();
 	await page.getByRole("button", { name: /Codex.*Implement retry policy/ }).click();
 	await page.getByRole("heading", { name: "Implement retry policy", exact: true }).waitFor();
 	await page.getByText("Started from", { exact: false }).waitFor();
+	await page.getByText("started by Codex · attached through Codex", { exact: false }).waitFor();
 	await page.getByText("Execution details", { exact: true }).click();
-	await page.getByText(/worktree · fixture-/).waitFor();
+	await page.getByText(/worktree attached/).waitFor();
+	await page.getByRole("button", { name: "Release execution", exact: true }).click();
+	await page.getByText("Detached · continue from another checkout", { exact: false }).waitFor();
+	assert.equal(await page.getByRole("button", { name: "Release execution", exact: true }).count(), 0);
+	assert.match(await page.getByText("Started from", { exact: false }).textContent(), /[0-9a-f]{40}/);
 });
 test("workspaces disclose upstream updates and inspect advisory overlap without changing their starting revision", async () => {
 	await page.request.post(`${server.origin}/__fixture/upstream`);
@@ -1124,27 +1127,22 @@ test("interrupted promotion can reconcile after reload with its persisted operat
 	assert.deepEqual(sent, command);
 });
 
-test("unknown canonical and disconnected writers stay distinct from accepted source", async () => {
+test("unknown canonical, disconnected and detached workspaces stay distinct from accepted source", async () => {
 	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
 		const response = await route.fetch(),
 			data = await response.json();
 		delete data.sourceHead;
-		data.refs = [{ ref: "main", revision: "d".repeat(40), trust: "reported" }];
 		data.workspaces[0].state = "disconnected";
-		data.workspaces.push({
-			...data.workspaces[0],
-			id: "observer",
-			mode: "read",
-			state: "active",
-			actor: { ...data.workspaces[0].actor, name: "Read-only participant" },
-		});
+		const { execution: _, ...detached } = data.workspaces[0];
+		data.workspaces.push({ ...detached, id: "detached", state: "detached" });
 		await route.fulfill({ json: data });
 	});
 	await openRepo();
 	await page.locator(".canonical-track").getByText("Unavailable", { exact: true }).waitFor();
 	assert.equal(await page.locator(".topology-lane.disconnected").count(), 1);
-	assert.equal(await page.locator(".topology-lane").count(), 2);
-	await page.locator(".observers").getByText("Observers · Read-only participant").waitFor();
+	assert.equal(await page.locator(".topology-lane.detached").count(), 1);
+	assert.equal(await page.locator(".topology-lane").count(), 3);
+	assert.equal(await page.locator(".observers").count(), 0);
 	assert.equal(await page.getByRole("button", { name: "Clone", exact: true }).isDisabled(), true);
 });
 

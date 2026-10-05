@@ -57,17 +57,11 @@ export async function fixture() {
 			{ title: a.kind === "human" ? "Inspect payment timeout" : "Implement retry policy", baseRevision: base },
 			a,
 		) as { id: string };
-		run(
-			"attach_workspace",
-			{
-				workspaceId: s.id,
-				execution: { id: s.id, checkoutId: s.id, machineId: "fixture", kind: "worktree", owned: true, branch: `cruce/${s.id}` },
-			},
-			a,
-		);
+		const execution = { id: s.id, checkoutId: s.id, machineId: "fixture", kind: "worktree" as const, owned: true, branch: `cruce/${s.id}` };
+		run("attach_workspace", { workspaceId: s.id, execution }, a);
 		run(
 			"report_change",
-			{ workspaceId: s.id, revision: head, changes: [{ path: "src/retry.ts", status: "modified" }], commits: [head] },
+			{ workspaceId: s.id, execution, revision: head, changes: [{ path: "src/retry.ts", status: "modified" }], commits: [head] },
 			a,
 		);
 	}

@@ -23,7 +23,6 @@ export const initialRepository = (repository: Repository): RepositoryState => ({
 	proposals: [],
 	verifications: [],
 	promotions: [],
-	refs: [],
 	activity: [],
 	receipts: {},
 });
@@ -52,17 +51,32 @@ export class RepositoryController {
 		if (!a) throw new DomainError(404, "Artifact unavailable");
 		return a;
 	}
-	owned(a: Authority, id?: string, write = true) {
-		if (write) writeAccess(a);
+	/** Workspace authority belongs to its owning user through any authorized connection, never to one session. */
+	owned(a: Authority, id?: string) {
+		writeAccess(a);
 		const s = this.workspace(id);
-		if (s.actor.id !== a.actor.id || s.actor.connectionId !== a.actor.connectionId)
-			throw new DomainError(403, "Workspace belongs to another actor connection");
+		if (s.ownerId !== a.actor.userId) throw new DomainError(403, "Workspace belongs to another user");
 		if (["completed", "cancelled"].includes(s.state)) throw new DomainError(409, "Workspace has ended");
-		if (write && s.mode !== "write") throw new DomainError(403, "Read-only workspace");
+		return s;
+	}
+	/** Reports describe one checkout; only the attached execution may supply them. */
+	attached(a: Authority, cmd: Command) {
+		const s = this.owned(a, cmd.workspaceId),
+			execution = requireValue(cmd.execution, "Attached execution context required");
+		if (!s.execution) throw new DomainError(409, "Attach an execution context first");
+		if (s.execution.id !== execution.id || s.execution.checkoutId !== execution.checkoutId || s.execution.machineId !== execution.machineId)
+			throw new DomainError(409, "Workspace is attached to a different execution context");
 		return s;
 	}
 	live(s: Workspace) {
 		return s.state === "active" && s.lastActivity + WORKSPACE_TTL > this.now;
+	}
+	executionRelease(s: Workspace, a: Authority) {
+		const reasons: string[] = [];
+		if (!s.execution) reasons.push("No execution is attached");
+		if (["completed", "cancelled"].includes(s.state)) reasons.push("Workspace has ended");
+		if (s.ownerId !== a.actor.userId || a.repositoryRole === "read") reasons.push("Only the workspace owner can release its execution");
+		return { ready: reasons.length === 0, reasons };
 	}
 	upstream() {
 		return this.state.sourceHead;
@@ -79,7 +93,7 @@ export class RepositoryController {
 	}
 	overlaps(): Overlap[] {
 		const byPath = new Map<string, Workspace[]>();
-		for (const s of this.state.workspaces.filter((s) => this.live(s) && s.mode === "write")) {
+		for (const s of this.state.workspaces.filter((s) => this.live(s))) {
 			for (const p of new Set(s.changes.flatMap((c) => [c.path, ...(c.previousPath ? [c.previousPath] : [])])))
 				byPath.set(p, [...(byPath.get(p) ?? []), s]);
 		}
@@ -143,6 +157,7 @@ export class RepositoryController {
 			permissions: { write: a.repositoryRole !== "read", maintain: a.repositoryRole === "maintain", human: a.actor.kind === "human" },
 			sourceAvailable: !!this.state.sourceHead || !!this.state.artifacts.find((a) => a.kind === "source"),
 			forkCleanup: Object.fromEntries(this.state.workspaces.map((s) => [s.id, this.forkCleanup(s)])),
+			executionRelease: Object.fromEntries(this.state.workspaces.map((s) => [s.id, this.executionRelease(s, a)])),
 			readiness: Object.fromEntries(this.state.proposals.map((p) => [p.id, this.readiness(p)])),
 			promotionRecovery: Object.fromEntries(
 				this.state.promotions
@@ -170,14 +185,18 @@ export class RepositoryController {
 		const ids = new Set([subject]);
 		let changed = true;
 		const records = [
-			...this.state.workspaces.map((s) => ({ type: "workspace", record: s, ids: [s.id, s.baseRevision, s.headRevision, s.actor.id] })),
+			...this.state.workspaces.map((s) => ({
+				type: "workspace",
+				record: s,
+				ids: [s.id, s.baseRevision, s.headRevision, s.createdBy.id, s.ownerId],
+			})),
 			...this.state.artifacts.map((a) => ({ type: "artifact", record: a, ids: [a.id, a.workspaceId, a.revision, a.actor.id] })),
 			...this.state.proposals.map((p) => ({ type: "change", record: p, ids: [p.id, p.workspaceId, p.artifactId, p.revision] })),
 			...this.state.verifications.map((v) => ({ type: "verification", record: v, ids: [v.id, v.proposalId, v.revision] })),
 			...this.state.promotions.map((p) => ({ type: "promotion", record: p, ids: [p.id, p.proposalId, p.to] })),
 		];
 		// Actor identities are leaves, never edges that join every unrelated action by the same person.
-		const actors = new Set(this.state.workspaces.map((s) => s.actor.id));
+		const actors = new Set(this.state.workspaces.flatMap((s) => [s.createdBy.id, s.ownerId]));
 		while (changed) {
 			changed = false;
 			for (const r of records)
@@ -207,19 +226,19 @@ export class RepositoryController {
 			case "get_lineage":
 				return this.trace(requireValue(cmd.subjectId, "Subject required"));
 			case "start_workspace": {
-				if (cmd.mode !== "read") writeAccess(a);
+				writeAccess(a);
 				const base = requireValue(cmd.baseRevision, "Exact base revision required");
 				const s: Workspace = {
 					id: this.nextId(),
 					repositoryId: this.state.repository.id,
-					actor: a.actor,
+					ownerId: a.actor.userId,
+					createdBy: a.actor,
 					title: requireValue(cmd.title, "Workspace title required"),
+					description: cmd.description,
 					baseRevision: base,
 					headRevision: base,
 					branch: cmd.branch,
-					mode: cmd.mode ?? "write",
-					context: cmd.context,
-					state: cmd.mode === "read" ? "active" : "preparing",
+					state: "preparing",
 					startedAt: this.now,
 					lastActivity: this.now,
 					changes: [],
@@ -230,42 +249,50 @@ export class RepositoryController {
 				return s;
 			}
 			case "attach_workspace": {
-				const s = this.owned(a, cmd.workspaceId, false),
+				const s = this.owned(a, cmd.workspaceId),
 					execution = requireValue(cmd.execution, "Execution context required");
-				if (s.mode === "write") {
-					writeAccess(a);
-					if (a.actor.kind === "agent" && (!["worktree", "clone"].includes(execution.kind) || !execution.owned))
-						throw new DomainError(403, "Agent writers require a dedicated Cruce worktree or clone");
-					if (
-						this.state.workspaces.some(
-							(other) =>
-								other.id !== s.id &&
-								other.mode === "write" &&
-								!["completed", "cancelled"].includes(other.state) &&
-								other.execution?.checkoutId === execution.checkoutId &&
-								other.execution.machineId === execution.machineId,
-						)
+				if (a.actor.kind === "agent" && (!["worktree", "clone"].includes(execution.kind) || !execution.owned))
+					throw new DomainError(403, "Agent writers require a dedicated Cruce worktree or clone");
+				if (
+					this.state.workspaces.some(
+						(other) =>
+							other.id !== s.id &&
+							!["completed", "cancelled"].includes(other.state) &&
+							other.execution?.checkoutId === execution.checkoutId &&
+							other.execution.machineId === execution.machineId,
 					)
-						throw new DomainError(409, "Checkout already reserved by another writer; end that workspace first");
+				)
+					throw new DomainError(409, "Checkout already reserved by another workspace; end or detach that workspace first");
+				if (s.execution) {
+					const { attachedBy: _, attachedAt: __, ...current } = s.execution;
+					if (stable(current) !== stable(execution))
+						throw new DomainError(409, "Workspace is attached to another execution context; detach it first");
+				} else {
+					s.execution = { ...execution, attachedBy: a.actor, attachedAt: this.now };
+					this.event(a.actor, "execution_attached", `${a.actor.name} attached ${s.title}`, [s.id]);
 				}
-				if (s.execution && stable(s.execution) !== stable(execution))
-					throw new DomainError(409, "Workspace execution context is immutable");
-				s.execution = { ...execution };
 				s.branch = execution.branch ?? s.branch;
 				s.state = "active";
 				s.lastActivity = this.now;
 				return s;
 			}
+			case "detach_workspace": {
+				const s = this.owned(a, cmd.workspaceId);
+				if (!s.execution) throw new DomainError(409, "No execution is attached");
+				s.execution = undefined;
+				s.state = "detached";
+				s.changes = [];
+				this.event(a.actor, "execution_detached", `${a.actor.name} detached ${s.title}`, [s.id, s.headRevision]);
+				return s;
+			}
 			case "heartbeat": {
-				const s = this.owned(a, cmd.workspaceId, false);
-				if (s.mode === "write" && !s.execution) throw new DomainError(409, "Attach an isolated execution context first");
+				const s = this.attached(a, cmd);
 				s.state = "active";
 				s.lastActivity = this.now;
 				return s;
 			}
 			case "report_change": {
-				const s = this.owned(a, cmd.workspaceId);
-				if (!s.execution) throw new DomainError(409, "Attach an execution context first");
+				const s = this.attached(a, cmd);
 				const changes = requireValue(cmd.changes, "Changes required");
 				const before = stable(s.changes);
 				s.changes = changes;
@@ -279,27 +306,18 @@ export class RepositoryController {
 				return s;
 			}
 			case "end_workspace": {
-				const s = this.owned(a, cmd.workspaceId, false);
+				const s = this.owned(a, cmd.workspaceId);
 				s.state = cmd.cancelled ? "cancelled" : "completed";
 				s.endedAt = this.now;
 				this.event(a.actor, "workspace_ended", `${a.actor.name} ${s.state} ${s.title}`, [s.id]);
 				return s;
 			}
-			case "report_ref": {
-				const s = this.owned(a, cmd.workspaceId);
-				const ref = requireValue(cmd.ref, "Ref required"),
-					revision = requireValue(cmd.revision, "Revision required");
-				const observation = { ref, revision, workspaceId: s.id, actorId: a.actor.id, at: this.now, trust: "reported" as const };
-				this.state.refs.push(observation);
-				this.event(a.actor, "ref_observed", `${a.actor.name} reported ${ref} at ${revision.slice(0, 7)}`, [s.id, revision]);
-				return observation;
-			}
 			case "create_proposal": {
 				writeAccess(a);
 				const artifact = this.artifact(cmd.artifactId),
 					s = this.workspace(artifact.workspaceId);
-				if (artifact.kind !== "source" || s.actor.id !== a.actor.id)
-					throw new DomainError(403, "Propose a source artifact produced by your workspace");
+				if (artifact.kind !== "source" || s.ownerId !== a.actor.userId)
+					throw new DomainError(403, "Propose a published revision from your own workspace");
 				const p: Proposal = {
 					id: this.nextId(),
 					number: this.state.proposals.length + 1,

@@ -926,6 +926,7 @@ strong {
 	box-shadow: 0 0 0 3px #e3edcf;
 }
 .presence.disconnected,
+.presence.detached,
 .presence.preparing {
 	background: transparent;
 	border: 1px solid #8a5128;
@@ -1034,11 +1035,6 @@ strong {
 }
 .topology-all {
 	margin-top: 16px;
-}
-.observers {
-	padding-top: 12px;
-	color: var(--muted);
-	font-size: 12px;
 }
 .review-queue {
 	padding: 24px 0;
@@ -2179,7 +2175,8 @@ main[data-screen="members"] > form {
 .revision-rule::after {
 	right: 0;
 }
-.disconnected .revision-rule {
+.disconnected .revision-rule,
+.detached .revision-rule {
 	background-image: repeating-linear-gradient(to right, #64775e 0 4px, transparent 4px 7px);
 }
 .lane-state {

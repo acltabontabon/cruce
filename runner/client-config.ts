@@ -29,7 +29,7 @@ export async function configureClient(cwd: string, client: "codex" | "claude" | 
 	const original = await read(instructionPath),
 		start = "<!-- Cruce participation -->",
 		end = "<!-- End Cruce participation -->",
-		block = `${start}\n${CRUCE_INSTRUCTIONS}\nUse the Cruce MCP tools at task start (start_workspace, then get_context), on scope changes, and to publish commits (publish_revision) and evidence.\n${end}`;
+		block = `${start}\n${CRUCE_INSTRUCTIONS}\nUse the Cruce MCP tools at task start (start_workspace, or continue the workspace already attached to this directory), when scope changes (list_active_workspaces, inspect_overlap, get_workspace_updates), and to publish pushed revisions (publish_revision), evidence and proposals.\n${end}`;
 	const next =
 		original.includes(start) && original.includes(end)
 			? `${original.slice(0, original.indexOf(start))}${block}${original.slice(original.indexOf(end) + end.length)}`

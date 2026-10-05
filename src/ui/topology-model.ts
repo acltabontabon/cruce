@@ -1,15 +1,16 @@
-import type { RepositorySnapshot } from "../shared/platform.ts";
+import type { RepositorySnapshot, Workspace } from "../shared/platform.ts";
+
+/** Who is advancing the workspace now: the attached execution's actor, else its creator. A label, not an identity claim. */
+export const workingActor = (w: Workspace) => w.execution?.attachedBy ?? w.createdBy;
 
 /** Lanes describe recorded work, not a reconstructed Git DAG. */
 export function topologyModel(view: RepositorySnapshot, limit = 6) {
 	const ordered = [...view.workspaces].sort((a, b) => a.startedAt - b.startedAt || a.id.localeCompare(b.id));
-	const writers = ordered.filter((w) => w.mode === "write");
-	const current = writers.filter((w) => !["completed", "cancelled"].includes(w.state));
+	const current = ordered.filter((w) => !["completed", "cancelled"].includes(w.state));
 	const visible = current.slice(0, limit);
 	return {
 		canonical: view.sourceHead,
 		total: current.length,
-		observers: ordered.filter((w) => w.mode === "read" && !["completed", "cancelled"].includes(w.state)),
 		lanes: visible.map((workspace) => ({
 			workspace,
 			publications: view.artifacts.filter((a) => a.kind === "source" && a.workspaceId === workspace.id),

@@ -305,20 +305,6 @@
 	fill: var(--lane-color);
 	stroke: none;
 }
-.graph-alignment path,
-.graph-alignment circle {
-	stroke: var(--green);
-	stroke-width: 1.5;
-}
-.graph-alignment circle {
-	fill: var(--paper);
-}
-.graph-alignment text {
-	fill: var(--green);
-}
-.graph-alignment .graph-signal {
-	stroke-dasharray: 3 5;
-}
 .graph-decision path,
 .graph-decision circle {
 	stroke: var(--attention);
@@ -329,6 +315,11 @@
 }
 .graph-decision circle {
 	fill: var(--paper);
+}
+.graph-decision .graph-check {
+	fill: none;
+	stroke-dasharray: none;
+	stroke-width: 1.5;
 }
 .graph-decision text {
 	fill: var(--attention);
@@ -626,16 +617,6 @@
 	50% {
 		background: var(--lane-color);
 	}
-}
-
-.graph-alignment .graph-message {
-	fill: var(--green);
-	stroke: none;
-}
-
-.hero-sequence[data-motion="static"] .graph-message,
-.graph-alignment:not(.is-current) .graph-message {
-	display: none;
 }
 
 .graph-lane path,

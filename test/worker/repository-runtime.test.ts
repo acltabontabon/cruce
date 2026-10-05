@@ -121,12 +121,10 @@ async function fixture(_hosted = true) {
 		return runtime.command({ tool, namespaceId: repo.namespaceId, repositoryId: repo.id, idempotencyKey: `key-${++n}`, ...fields }, g);
 	};
 	const s = (await call("start_workspace", { title: "Retry", baseRevision: base })) as Workspace;
-	await call("attach_workspace", {
-		workspaceId: s.id,
-		execution: { id: s.id, checkoutId: "checkout", machineId: "machine", kind: "worktree", owned: true },
-	});
+	const execution = { id: s.id, checkoutId: "checkout", machineId: "machine", kind: "worktree" as const, owned: true };
+	await call("attach_workspace", { workspaceId: s.id, execution });
 	const pack = Buffer.from(await git.exportPack(head)).toString("base64");
-	return { w, git, host, push, store, port, runtime, call, workspace: s, base, head, pack };
+	return { w, git, host, push, store, port, runtime, call, workspace: s, execution, base, head, pack };
 }
 describe("repository runtime", () => {
 	it("forks canonical directly and keeps hosted identity out of local execution metadata", async () => {
@@ -142,9 +140,14 @@ describe("repository runtime", () => {
 			new Request(`https://cruce.example/mcp/git/namespace/repo/${id}.git/info/refs?service=git-${write ? "receive" : "upload"}-pack`);
 		await expect(f.runtime.gitRequest(request("canonical", true), grant)).rejects.toThrow("human promotion");
 		expect(await (await f.runtime.gitRequest(request("canonical"), grant)).text()).toBe("git");
+		f.w.member(f.w.authority(owner), "dev", "developer");
+		f.w.state.repositories[0].grants = [{ subject: "user", id: "dev", role: "write" }];
 		await expect(
-			f.runtime.gitRequest(request(f.workspace.id, true), { ...grant, actor: { ...agent, connectionId: "other" } }),
-		).rejects.toThrow("connection");
+			f.runtime.gitRequest(request(f.workspace.id, true), {
+				...grant,
+				actor: { ...agent, id: "dev-agent", userId: "dev", connectionId: "dev" },
+			}),
+		).rejects.toThrow("another user");
 		await expect(
 			f.runtime.gitRequest(request(f.workspace.id, true), { ...grant, scopes: ["cruce:read", "workspace:write"] }),
 		).rejects.toThrow("scopes");
@@ -300,6 +303,7 @@ describe("repository runtime", () => {
 		await f.call("promote_proposal", { proposalId: proposal.id }, human);
 		await f.call("report_change", {
 			workspaceId: f.workspace.id,
+			execution: f.execution,
 			revision: f.head,
 			changes: [{ path: "renamed.md", previousPath: "AGENTS.md", status: "renamed" }],
 		});
@@ -381,13 +385,13 @@ describe("repository runtime", () => {
 			changes: [],
 		});
 		expect(f.runtime.state()).toEqual(before);
-		await f.call("heartbeat", { workspaceId: f.workspace.id });
+		await f.call("heartbeat", { workspaceId: f.workspace.id, execution: f.execution });
 		expect(f.host.ensure).not.toHaveBeenCalled();
 		expect(f.w.state.reservations).toHaveLength(1);
 	});
-	it("keeps reported refs separate from authoritative canonical source", async () => {
+	it("keeps reported heads separate from authoritative canonical source", async () => {
 		const f = await fixture();
-		await f.call("report_ref", { workspaceId: f.workspace.id, ref: "trunk", revision: "e".repeat(40) });
+		await f.call("report_change", { workspaceId: f.workspace.id, execution: f.execution, revision: "e".repeat(40), changes: [] });
 		expect(await f.call("get_workspace_updates", { workspaceId: f.workspace.id })).toMatchObject({
 			status: "current",
 			trust: "accepted",
@@ -469,16 +473,30 @@ describe("terminal recovery and pinned context", () => {
 		const s = await f.call("start_workspace", fields, human);
 		expect(await f.call("start_workspace", fields, human)).toEqual(s);
 		await expect(f.call("start_workspace", { ...fields, idempotencyKey: "other-start" }, human)).rejects.toThrow("bound");
-		await expect(f.call("heartbeat", { workspaceId: f.workspace.id }, human)).rejects.toThrow("scope");
+		await expect(f.call("heartbeat", { workspaceId: f.workspace.id, execution: f.execution }, human)).rejects.toThrow("scope");
 	});
-	it("provides pinned canonical instructions before and after workspace publication", async () => {
-		const f = await fixture();
-		expect(await f.call("get_context", { workspaceId: f.workspace.id })).toMatchObject({ available: true });
-		await f.call("publish_revision", { workspaceId: f.workspace.id, revision: f.head, pack: f.pack });
-		expect(await f.call("get_context", { workspaceId: f.workspace.id })).toMatchObject({
-			available: true,
-			structure: { revision: f.base, indexer: "babel-typescript" },
-		});
+	it("continues a workspace from another checkout and tool without reprovisioning its fork", async () => {
+		const f = await fixture(true);
+		const claude = { ...grant, actor: { ...agent, id: "agent-claude", name: "Claude Code", connectionId: "oauth-claude" } };
+		const elsewhere = { id: f.workspace.id, checkoutId: "laptop-2", machineId: "machine-2", kind: "worktree" as const, owned: true };
+		const fork = f.runtime.state().workspaces[0].fork;
+		await expect(f.call("attach_workspace", { workspaceId: f.workspace.id, execution: elsewhere }, claude)).rejects.toThrow(
+			"detach it first",
+		);
+		await f.call("detach_workspace", { workspaceId: f.workspace.id }, { actor: owner, scopes: [], repositories: [repo.id] });
+		expect(f.runtime.state().workspaces[0]).toMatchObject({ state: "detached", fork });
+		await f.call("attach_workspace", { workspaceId: f.workspace.id, execution: elsewhere }, claude);
+		await expect(f.call("heartbeat", { workspaceId: f.workspace.id, execution: f.execution })).rejects.toThrow("different execution");
+		await f.call("heartbeat", { workspaceId: f.workspace.id, execution: elsewhere });
+		const published = (await f.call("publish_revision", { workspaceId: f.workspace.id, revision: f.head, pack: f.pack }, claude)) as {
+			actor: { id: string };
+		};
+		expect(published.actor.id).toBe("agent-claude");
+		const continued = f.runtime.state().workspaces[0];
+		expect(continued).toMatchObject({ state: "active", baseRevision: f.base, fork, createdBy: { id: "agent" } });
+		expect(continued.execution).toMatchObject({ checkoutId: "laptop-2", attachedBy: { id: "agent-claude" } });
+		expect(f.host.fork).toHaveBeenCalledTimes(1);
+		expect(f.w.state.reservations.filter((r) => r.action === "workspace.fork")).toHaveLength(1);
 	});
 });
 

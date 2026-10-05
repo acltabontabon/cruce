@@ -4,18 +4,19 @@ import type { Command, RepositorySnapshot } from "../shared/platform.ts";
 import { count, Empty, short, time } from "./controls.tsx";
 import { WorkspaceUpdateInspection } from "./inspect.tsx";
 import { RetainedRecordRow } from "./records.tsx";
+import { workingActor } from "./topology-model.ts";
 export function Workspaces({ view, open, all = false }: { view: RepositorySnapshot; open: (id: string) => void; all?: boolean }) {
 	const workspaces = view.workspaces
-		.filter((s) => all || ["active", "preparing", "disconnected"].includes(s.state))
-		.sort((a, b) => Number(b.actor.kind === "agent") - Number(a.actor.kind === "agent"));
+		.filter((s) => all || !["completed", "cancelled"].includes(s.state))
+		.sort((a, b) => b.lastActivity - a.lastActivity || a.id.localeCompare(b.id));
 	return workspaces.length ? (
 		<div className="workspace-list">
 			{workspaces.map((s) => (
 				<button type="button" key={s.id} onClick={() => open(s.id)}>
 					<span className={`presence ${s.state}`} />
 					<span>
-						<strong>{s.actor.name}</strong>
-						<small className={`actor-kind ${s.actor.kind}`}>{s.actor.kind}</small>
+						<strong>{workingActor(s).name}</strong>
+						<small className={`actor-kind ${workingActor(s).kind}`}>{workingActor(s).kind}</small>
 					</span>
 					<span>
 						{s.title}
@@ -49,12 +50,14 @@ export function WorkspaceDetail({
 	const s = view.workspaces.find((s) => s.id === id)!;
 	const updates = view.workspaceUpdates[id];
 	const [cleanupError, setCleanupError] = useState("");
+	const release = view.executionRelease[id];
 	return (
 		<section>
 			<p className="eyebrow">Workspace · independent work</p>
 			<h1>{s.title}</h1>
 			<p>
-				{s.actor.name} · {s.mode} · {s.state}
+				{s.state} · started by {s.createdBy.name}
+				{s.execution && <> · attached through {s.execution.attachedBy.name}</>}
 			</p>
 			<p className="provenance-origin">
 				Started from <code>{s.baseRevision}</code>
@@ -85,7 +88,7 @@ export function WorkspaceDetail({
 				</p>
 			)}
 
-			{s.context && <p>{s.context}</p>}
+			{s.description && <p>{s.description}</p>}
 			<h2>Reported changes</h2>
 			{!s.changes.length && <p className="muted">No file changes reported.</p>}
 			<ul>
@@ -141,8 +144,20 @@ export function WorkspaceDetail({
 				)}
 				{cleanupError && <p role="alert">{cleanupError}</p>}
 				<p>
-					{s.execution?.kind ?? "Awaiting attachment"} · {s.execution?.id ?? ""}
+					{s.execution
+						? `${s.execution.kind} attached ${time(s.execution.attachedAt)}`
+						: s.state === "detached"
+							? "Detached · continue from another checkout with cruce resume --workspace"
+							: "Awaiting attachment"}
 				</p>
+				{release?.ready && (
+					<button
+						type="button"
+						onClick={() => void execute({ tool: "detach_workspace", workspaceId: s.id }).catch((error) => setCleanupError(error.message))}
+					>
+						Release execution
+					</button>
+				)}
 				{s.fork?.name && (
 					<p>
 						Hosted storage <code>{s.fork.name}</code>

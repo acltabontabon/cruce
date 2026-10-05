@@ -60,6 +60,11 @@ function controller(now = 100) {
 	let id = 0;
 	return new RepositoryController(initialRepository(repo), now, () => `record-${++id}`);
 }
+/** The local execution descriptor a bridge sends with its reports. */
+function exec(s: Workspace) {
+	const { attachedBy: _, attachedAt: __, ...execution } = s.execution!;
+	return execution;
+}
 function start(c: RepositoryController, actor = agent, checkout = "checkout") {
 	const a = authority(actor);
 	const s = c.command(
@@ -175,7 +180,7 @@ describe("actor-neutral workspaces", () => {
 		const c = controller(),
 			s = start(c);
 		expect(c.workspaceUpdates(s)).toMatchObject({ status: "unknown", baselineRevision: base });
-		c.state.refs.push({ ref: "trunk", revision: head, workspaceId: s.id, actorId: agent.id, at: 100, trust: "reported" });
+		s.headRevision = head;
 		expect(c.workspaceUpdates(s).status).toBe("unknown");
 		c.state.sourceHead = head;
 		const before = structuredClone(c.state);
@@ -189,7 +194,7 @@ describe("actor-neutral workspaces", () => {
 		expect(c.workspaceUpdates(s).status).toBe("current");
 		expect(s.baseRevision).toBe(base);
 	});
-	it("isolates writers even after presence expiry; observer shares context safely", () => {
+	it("isolates writers even after presence expiry", () => {
 		const c = controller(),
 			s = start(c);
 		const later = new RepositoryController(c.state, WORKSPACE_TTL + 101, () => "second");
@@ -197,28 +202,62 @@ describe("actor-neutral workspaces", () => {
 		expect(() => start(later, { ...agent, id: "agent-b", connectionId: "oauth-b" })).toThrow("already reserved");
 		expect(s.baseRevision).toBe(base);
 	});
-	it("reconnects a disconnected writer and permits a read-only observer without releasing ownership", () => {
+	it("reconnects a disconnected writer without releasing ownership", () => {
 		const c = controller(),
 			s = start(c);
-		const later = new RepositoryController(c.state, WORKSPACE_TTL + 101, () => "observer");
+		const later = new RepositoryController(c.state, WORKSPACE_TTL + 101, () => "later");
 		expect(later.snapshot(authority()).workspaces[0].state).toBe("disconnected");
-		later.command(cmd("heartbeat", { workspaceId: s.id }), authority(agent));
+		expect(s.execution).toBeDefined();
+		later.command(cmd("heartbeat", { workspaceId: s.id, execution: exec(s) }), authority(agent));
 		expect(later.snapshot(authority()).workspaces[0].state).toBe("active");
-		const observer = later.command(
-			cmd("start_workspace", { mode: "read", title: "Inspect", baseRevision: base }),
-			authority(human),
-		) as Workspace;
-		later.command(
-			cmd("attach_workspace", {
-				workspaceId: observer.id,
-				execution: { id: "observer", checkoutId: "checkout", machineId: "machine", kind: "checkout", owned: false },
-			}),
-			authority(human),
-		);
-		expect(observer.state).toBe("active");
+		expect(CommandInput.safeParse({ tool: "start_workspace", mode: "read" }).success).toBe(false);
+	});
+	it("belongs to its owner across connections and tools, never to one session", () => {
+		const c = controller(),
+			s = start(c);
+		const claude: Actor = { id: "agent-c", userId: "owner", name: "Claude Code", kind: "agent", connectionId: "oauth-c" };
+		const stranger: Actor = { id: "agent-x", userId: "someone-else", name: "Codex", kind: "agent", connectionId: "oauth-x" };
+		expect(s).toMatchObject({ ownerId: "owner", createdBy: { id: agent.id } });
+		expect(s).not.toHaveProperty("actor");
+		c.command(cmd("heartbeat", { workspaceId: s.id, execution: exec(s) }), authority(claude));
+		c.command(cmd("report_change", { workspaceId: s.id, execution: exec(s), revision: head, changes: [] }), authority(human));
+		expect(() => c.command(cmd("heartbeat", { workspaceId: s.id, execution: exec(s) }), authority(stranger))).toThrow("another user");
 		expect(() =>
-			later.command(cmd("report_change", { workspaceId: observer.id, revision: base, changes: [] }), authority(human)),
-		).toThrow();
+			c.command(cmd("heartbeat", { workspaceId: s.id, execution: { ...exec(s), checkoutId: "elsewhere" } }), authority(agent)),
+		).toThrow("different execution");
+		expect(() => c.command(cmd("report_change", { workspaceId: s.id, revision: head, changes: [] }), authority(agent))).toThrow(
+			"execution context required",
+		);
+	});
+	it("detaches explicitly and continues from another checkout, tool and machine", () => {
+		const c = controller(),
+			s = start(c);
+		const claude: Actor = { id: "agent-c", userId: "owner", name: "Claude Code", kind: "agent", connectionId: "oauth-c" };
+		s.fork = { name: "fork", id: "fork-id", remote: "remote", state: "ready" };
+		const elsewhere = { id: s.id, checkoutId: "laptop-2", machineId: "machine-2", kind: "worktree" as const, owned: true };
+		expect(() => c.command(cmd("attach_workspace", { workspaceId: s.id, execution: elsewhere }), authority(claude))).toThrow(
+			"detach it first",
+		);
+		c.command(
+			cmd("report_change", { workspaceId: s.id, execution: exec(s), revision: head, changes: [{ path: "a.ts", status: "modified" }] }),
+			authority(agent),
+		);
+		expect(c.snapshot(authority()).executionRelease[s.id]).toEqual({ ready: true, reasons: [] });
+		c.command(cmd("detach_workspace", { workspaceId: s.id }), authority(human));
+		expect(s).toMatchObject({ state: "detached", headRevision: head, baseRevision: base, changes: [] });
+		expect(s.execution).toBeUndefined();
+		expect(c.snapshot(authority()).executionRelease[s.id].ready).toBe(false);
+		expect(() => c.command(cmd("heartbeat", { workspaceId: s.id, execution: elsewhere }), authority(agent))).toThrow("Attach");
+		c.command(cmd("attach_workspace", { workspaceId: s.id, execution: elsewhere }), authority(claude));
+		expect(s).toMatchObject({
+			state: "active",
+			fork: { id: "fork-id" },
+			execution: { checkoutId: "laptop-2", attachedBy: { id: "agent-c" } },
+		});
+		expect(c.state.activity.map((e) => e.kind)).toEqual(expect.arrayContaining(["execution_attached", "execution_detached"]));
+		expect(() => c.command(cmd("detach_workspace", { workspaceId: s.id }), authority({ ...human, userId: "someone-else" }))).toThrow(
+			"another user",
+		);
 	});
 	it("human and agent work overlap without blocking; renames and binary paths count", () => {
 		const c = controller(),
@@ -227,23 +266,34 @@ describe("actor-neutral workspaces", () => {
 		c.command(
 			cmd("report_change", {
 				workspaceId: s.id,
+				execution: exec(s),
 				revision: head,
 				changes: [{ path: "new.bin", previousPath: "old.bin", status: "renamed", binary: true }],
 			}),
 			authority(agent),
 		);
 		c.command(
-			cmd("report_change", { workspaceId: h.id, revision: base, changes: [{ path: "old.bin", status: "modified", binary: true }] }),
+			cmd("report_change", {
+				workspaceId: h.id,
+				execution: exec(h),
+				revision: base,
+				changes: [{ path: "old.bin", status: "modified", binary: true }],
+			}),
 			authority(),
 		);
 		expect(c.overlaps()).toMatchObject([{ surface: "old.bin", kind: "file", evidence: "reported" }]);
 		expect(s.state).toBe("active");
 		expect(s.baseRevision).toBe(base);
 	});
-	it("cannot impersonate a workspace owner or attach an agent to a shared checkout", () => {
+	it("cannot act for another user's workspace or attach an agent to a shared checkout", () => {
 		const c = controller(),
 			s = start(c);
-		expect(() => c.command(cmd("heartbeat", { workspaceId: s.id }), authority({ ...agent, connectionId: "other" }))).toThrow("connection");
+		expect(() =>
+			c.command(
+				cmd("heartbeat", { workspaceId: s.id, execution: exec(s) }),
+				authority({ ...agent, userId: "other", connectionId: "other" }),
+			),
+		).toThrow("another user");
 		const next = c.command(cmd("start_workspace", { title: "Other", baseRevision: base }), authority(agent)) as Workspace;
 		expect(() =>
 			c.command(
@@ -277,7 +327,7 @@ describe("actor-neutral workspaces", () => {
 		expect(c.state.artifacts).toHaveLength(1);
 		expect(s.commits).toEqual([head]);
 		expect(s.baseRevision).toBe(base);
-		expect(() => c.command(cmd("heartbeat", { workspaceId: s.id }), authority(agent))).toThrow("ended");
+		expect(() => c.command(cmd("heartbeat", { workspaceId: s.id, execution: exec(s) }), authority(agent))).toThrow("ended");
 	});
 	it("does not expose heartbeat as a pure MCP read or allow human-only machine actions", () => {
 		expect(CRUCE_TOOLS.find((t) => t.name === "heartbeat")?.mutation).toBe(true);

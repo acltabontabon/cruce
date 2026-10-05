@@ -2,7 +2,7 @@ import type { Scope } from "../core/capabilities.ts";
 import { DomainError } from "../core/errors.ts";
 import { type Authority, type Command, CommandInput, type CostClass, type ResourceAction } from "./platform.ts";
 export const CRUCE_INSTRUCTIONS =
-	"Cruce coordinates developers and agents through Namespace → Repository → Workspace. Start a workspace at an exact Git revision. Writers attach an exclusive execution context; agent writers work in the dedicated directory returned by the bridge. Hosted writers use normal Git to push into their own workspace fork; publish_revision seals an exact pushed revision for review. Report changes and inspect advisory overlap and get_workspace_updates. Use get_git_access for canonical and fork remotes. Fetch and merge with normal Git when ready, verify, then publish exact revisions and artifacts. Keep the original starting revision and previous published commits reachable. Local reports are not runtime verification. Source promotion requires a human decision. Cruce coordination ends at canonical Git; CI, release, deployment and runtime management remain external. Never discard working changes to refresh a workspace.";
+	"Cruce is the durable Git coordination plane for this repository: Namespace → Repository → Workspace. A workspace is a durable stream of Git work owned by a user, not by this session; it has an immutable baseline and its own fork, and may be continued later from another session, tool or machine. Start a workspace at an exact Git revision and work only in the dedicated directory the bridge returns. Use normal Git to commit and push to the workspace fork; publish_revision retains an exact pushed revision for review. Inspect list_active_workspaces, inspect_overlap and get_workspace_updates at the start and when scope changes: overlap is advisory, not a conflict verdict, and canonical movement means you must fetch, merge, verify and publish a reconciled revision. Propose exact revisions and record evidence for them; reported evidence is not verification. Canonical promotion is a human decision. Cruce does not run, schedule or message agents, and its responsibility ends at canonical Git; CI, release, deployment and runtime management are external. Never discard working changes to refresh a workspace.";
 export interface Tool {
 	name: string;
 	description: string;
@@ -42,14 +42,13 @@ export const CRUCE_TOOLS: Tool[] = [
 	read("list_namespaces", "List your authorized namespaces."),
 	read("list_repositories", "List repositories authorized for this connection.", ["namespaceId"]),
 	read("get_repository", "Repository state, current workspaces, changes, artifacts and observation freshness."),
-	read("get_context", "Instructions at a workspace's immutable base revision, with namespace and repository policies.", ["workspaceId"]),
-	read("get_workspace", "Inspect a workspace and its execution context.", ["workspaceId"]),
+	read("get_workspace", "Inspect a workspace: owner, baseline, fork, current execution attachment and revisions.", ["workspaceId"]),
 	read(
 		"get_workspace_updates",
 		"Inspect upstream changes and advisory path overlap since the workspace's last integrated revision. Reads never fetch or provision.",
 		["workspaceId"],
 	),
-	read("list_active_workspaces", "Active and disconnected workspaces."),
+	read("list_active_workspaces", "Unended workspaces, including disconnected and detached ones."),
 	read("inspect_overlap", "Advisory overlap based on current reported paths."),
 	read("get_git_access", "Inspect canonical and workspace Git remote paths. Authenticate Git with your Cruce OAuth connection.", [
 		"workspaceId",
@@ -59,29 +58,33 @@ export const CRUCE_TOOLS: Tool[] = [
 	read("get_diff", "Exact Git diff between uploaded revisions.", ["baseRevision", "revision", "path"]),
 	read("read_artifact", "Read immutable artifact metadata and stored content.", ["artifactId"]),
 	read("get_lineage", "Trace workspace, actor, commit, artifact, review and source promotion provenance.", ["subjectId"]),
-	write("start_workspace", "Register bounded work from an exact Git revision; use the local bridge for isolated execution.", [
+	write("start_workspace", "Start a durable workspace at an exact baseline revision; use the local bridge for an isolated checkout.", [
 		"title",
 		"baseRevision",
 		"branch",
-		"mode",
-		"context",
+		"description",
 	]),
 	write(
 		"attach_workspace",
-		"Attach an exclusive local execution context and provision the workspace-owned Cloudflare Artifacts fork of canonical once.",
+		"Attach this exclusive local execution to your workspace, provisioning its Cloudflare Artifacts fork of canonical once. Fails while another execution is attached.",
 		["workspaceId", "execution"],
 		"workspace:write",
 		"workspace.fork",
 	),
-	write("heartbeat", "Renew workspace presence without changing its starting revision.", ["workspaceId"]),
-	write("report_change", "Report local changed paths and commits; this is cooperative observation, not runtime verification.", [
+	write(
+		"detach_workspace",
+		"Release the current execution attachment so the workspace can continue elsewhere. Keeps the fork, revisions and provenance.",
+		["workspaceId"],
+	),
+	write("heartbeat", "Renew presence of the attached execution.", ["workspaceId", "execution"]),
+	write("report_change", "Report changed paths and commits in the attached execution; cooperative observation, not verification.", [
 		"workspaceId",
+		"execution",
 		"revision",
 		"branch",
 		"changes",
 		"commits",
 	]),
-	write("report_ref", "Report a locally observed ref without claiming remote push verification.", ["workspaceId", "ref", "revision"]),
 	write(
 		"cleanup_workspace",
 		"Delete an ended workspace fork only after every remote ref is retained. Local files are unaffected.",

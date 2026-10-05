@@ -20,11 +20,11 @@ function workspace(id: string, overrides: Partial<Workspace> = {}): Workspace {
 	return {
 		id,
 		repositoryId: "repo",
-		actor: { id: "actor", userId: "user", kind: "agent", name: "Agent" },
+		ownerId: "user",
+		createdBy: { id: "actor", userId: "user", kind: "agent", name: "Agent" },
 		title: id,
 		baseRevision: base,
 		headRevision: head,
-		mode: "write",
 		state: "active",
 		startedAt: 0,
 		lastActivity: 1,
@@ -43,24 +43,35 @@ function snapshot(workspaces: Workspace[] = []): RepositorySnapshot {
 		sourceAvailable: false,
 		readiness: {},
 		forkCleanup: {},
+		executionRelease: {},
 		promotionRecovery: {},
 	};
 }
 describe("coordination presentation", () => {
 	it("keeps summaries minimal and preserves exact intersection membership", () => {
 		const view = snapshot([
-			workspace("a", { execution: { id: "local", checkoutId: "private", machineId: "private", kind: "worktree", owned: true } }),
+			workspace("a", {
+				execution: {
+					id: "local",
+					checkoutId: "private",
+					machineId: "private",
+					kind: "worktree",
+					owned: true,
+					attachedBy: { id: "actor", userId: "user", kind: "agent", name: "Agent" },
+					attachedAt: 1,
+				},
+			}),
 			workspace("b"),
-			workspace("observer", { mode: "read" }),
+			workspace("detached", { state: "detached" }),
 		]);
 		view.overlaps = [{ id: "surface", kind: "file", surface: "private/path", workspaces: ["a", "b"], evidence: "reported", observedAt: 1 }];
 		const summary = repositorySummary(view);
-		expect(summary.active).toBe(3);
+		expect(summary.active).toBe(2);
 		expect(summary.topology).toEqual({
 			workspaces: [
-				{ id: "a", mode: "write", state: "active" },
-				{ id: "b", mode: "write", state: "active" },
-				{ id: "observer", mode: "read", state: "active" },
+				{ id: "a", state: "active" },
+				{ id: "b", state: "active" },
+				{ id: "detached", state: "detached" },
 			],
 			intersections: [{ id: "surface", workspaces: ["a", "b"] }],
 		});
@@ -68,24 +79,22 @@ describe("coordination presentation", () => {
 		summary.topology.intersections[0].workspaces.push("other");
 		expect(view.overlaps[0].workspaces).toEqual(["a", "b"]);
 	});
-	it("uses canonical source only, never reported refs", () => {
-		const view = snapshot();
-		view.refs = [{ ref: "main", revision: head, workspaceId: "a", actorId: "actor", at: 1, trust: "reported" }];
+	it("uses canonical source only, never reported heads", () => {
+		const view = snapshot([workspace("a")]);
 		expect(topologyModel(view).canonical).toBeUndefined();
 		view.sourceHead = base;
 		expect(topologyModel(view).canonical).toBe(base);
 	});
-	it("limits stable writer lanes, keeps disconnected identity and separates observers", () => {
+	it("limits stable workspace lanes and keeps disconnected and detached identity", () => {
 		const view = snapshot([
 			workspace("ended", { state: "completed" }),
-			workspace("observer", { mode: "read" }),
+			workspace("detached", { state: "detached", startedAt: 100 }),
 			...Array.from({ length: 8 }, (_, i) => workspace(`writer-${i}`, { startedAt: i, state: i === 0 ? "disconnected" : "active" })),
 		]);
 		const model = topologyModel(view);
-		expect(model.total).toBe(8);
+		expect(model.total).toBe(9);
 		expect(model.lanes).toHaveLength(6);
 		expect(model.lanes[0].workspace.state).toBe("disconnected");
-		expect(model.observers.map((w) => w.id)).toEqual(["observer"]);
 		expect(topologyModel({ ...view, workspaces: [...view.workspaces].reverse() }).lanes.map((l) => l.workspace.id)).toEqual(
 			model.lanes.map((l) => l.workspace.id),
 		);

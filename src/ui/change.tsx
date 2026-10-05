@@ -37,7 +37,7 @@ export function ChangeDetail({
 				Change #{p.number} · {p.state}
 			</p>
 			<h1>{p.title}</h1>
-			<p className="muted">Exact revision · {view.workspaces.find((w) => w.id === p.workspaceId)?.actor.name ?? "Workspace"}</p>
+			<p className="muted">Exact revision · {view.workspaces.find((w) => w.id === p.workspaceId)?.title ?? "Workspace"}</p>
 			<p className="revision-pair">
 				Base <code title={p.base}>{short(p.base)}</code> → <code title={p.revision}>{short(p.revision)}</code>
 			</p>

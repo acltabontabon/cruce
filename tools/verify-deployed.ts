@@ -120,7 +120,8 @@ async function main() {
 		await record("authenticated writer attached and canonical cloned", {
 			writer,
 			workspaceId: workspace.id,
-			actor: attached.actor,
+			ownerId: attached.ownerId,
+			attachedBy: attached.execution?.attachedBy,
 			baseRevision,
 			fork: attached.fork,
 		});

@@ -108,26 +108,37 @@ export interface ExecutionContext {
 	owned: boolean;
 	branch?: string;
 }
+/** The single current execution of a workspace; replaceable only through an explicit detach. */
+export interface ExecutionAttachment extends ExecutionContext {
+	attachedBy: Actor;
+	attachedAt: number;
+}
 export interface WorkspaceChange {
 	path: string;
 	previousPath?: string;
 	status: "added" | "modified" | "deleted" | "renamed";
 	binary?: boolean;
 }
-/** Durable repository work: actor + task + immutable base + fork, independent of client presence. */
+/**
+ * Durable unit of concurrent Git work: owner + immutable baseline + fork + revisions.
+ * Independent of agent sessions, processes, checkouts and machines; the execution is replaceable.
+ */
 export interface Workspace {
 	id: string;
 	repositoryId: string;
-	actor: Actor;
+	/** User who owns the workspace; any of their authorized connections may act on it. */
+	ownerId: string;
+	/** Provenance only: the actor that started the workspace. */
+	createdBy: Actor;
 	title: string;
+	description?: string;
 	baseRevision: string;
 	headRevision: string;
 	branch?: string;
-	mode: "read" | "write";
-	context?: string;
-	execution?: ExecutionContext;
+	execution?: ExecutionAttachment;
 	fork?: { name: string; id: string; remote: string; state: "ready" | "deleting" | "deleted" };
-	state: "preparing" | "active" | "disconnected" | "completed" | "cancelled";
+	/** `disconnected` is derived presence for snapshots, never stored. */
+	state: "preparing" | "active" | "detached" | "disconnected" | "completed" | "cancelled";
 	startedAt: number;
 	lastActivity: number;
 	endedAt?: number;
@@ -156,14 +167,6 @@ export interface Overlap {
 	surface: string;
 	evidence: "reported";
 	observedAt: number;
-}
-export interface RefObservation {
-	ref: string;
-	revision: string;
-	workspaceId: string;
-	actorId: string;
-	at: number;
-	trust: "reported" | "verified";
 }
 /** Cruce retained source/evidence record, not the Cloudflare Artifacts provider; retention does not imply correctness. */
 export interface Artifact {
@@ -248,7 +251,6 @@ export interface RepositoryState {
 	proposals: Proposal[];
 	verifications: Verification[];
 	promotions: Promotion[];
-	refs: RefObservation[];
 	activity: ActivityEvent[];
 	receipts: Record<string, { fingerprint: string; result: unknown }>;
 	sourceHead?: string;
@@ -262,7 +264,7 @@ export interface RepositorySnapshot extends Omit<RepositoryState, "receipts"> {
 	readiness: Record<string, { ready: boolean; reasons: string[] }>;
 	promotionRecovery: Record<string, { command: Command; ready: boolean; reasons: string[] }>;
 	forkCleanup: Record<string, { ready: boolean; reasons: string[] }>;
-	context?: { available: boolean; files: Record<string, string> };
+	executionRelease: Record<string, { ready: boolean; reasons: string[] }>;
 }
 
 export const id = z.string().min(1).max(160);
@@ -318,11 +320,10 @@ export const CommandInput = z
 		workspaceId: id.optional(),
 		idempotencyKey: id.optional(),
 		title: z.string().min(1).max(200).optional(),
-		context: z.string().max(10000).optional(),
+		description: z.string().max(10000).optional(),
 		baseRevision: revision.optional(),
 		revision: revision.optional(),
 		branch: branch.optional(),
-		mode: z.enum(["read", "write"]).optional(),
 		execution: ExecutionInput.optional(),
 		changes: z.array(ChangeInput).max(5000).optional(),
 		commits: z.array(revision).max(1000).optional(),

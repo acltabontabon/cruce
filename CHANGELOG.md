@@ -26,6 +26,12 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Changed
 
+- Reset the product direction: Cruce is Git coordination for parallel agentic development, the durable coordination plane for Git work by independent humans and agents. New authoritative [product](docs/product.md) and [domain model](docs/domain-model.md) documents, rewritten principles, MCP guide and roadmap, and [decision records](docs/decisions/README.md) that state what was superseded. Agent execution, scheduling, pause/resume, messaging and acknowledgement protocols are explicitly out of scope.
+- **Breaking:** a workspace is owned by a user, not by the agent connection that started it. Any of the owner's authorized connections and tools may continue it. Workspaces record `ownerId` and `createdBy` (provenance) instead of `actor`, and the free-text `context` field is now `description`.
+- **Breaking:** the execution attachment is replaceable. `detach_workspace` (MCP), `cruce detach` and the console's **Release execution** free a workspace without losing its fork, revisions or provenance. `cruce resume --workspace ID` continues it in another checkout or on another machine from its pushed fork head. Workspaces gain a `detached` state, and `heartbeat`/`report_change` must name the attached execution.
+- Publication no longer requires a local execution to be attached; it reads the pushed fork.
+- The homepage illustration shows exact-revision human review instead of agents exchanging messages. Console workspace lists no longer rank agents first or count "agents working."
+
 - Host the public homepage at `cruce.acltabontabon.com` with protected sign-in and private API routes; direct test deployment leaves the alpha release version unchanged.
 
 - Show each illustration note subtly beneath its active progress dot, replacing that step’s label and keeping the diagram clear. Narrow layouts show only the note title.
@@ -57,6 +63,11 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 - Consolidate product and architecture documentation around coordination across independent coding agents.
 
 ### Removed
+
+- Read-only "observer" workspaces and the `--read` start option. Reading a repository needs a Read grant, not a workspace.
+- `report_ref`, the stored reported-ref claims, the console's Observed refs panel and `cruce report-ref`.
+- `get_context` and the Babel structural index (`src/intelligence`, `@babel/parser`).
+- Roadmap items for automatic sequencing, agent pause/resume, decision acknowledgement, intent reports, business analytics and infrastructure-as-product items.
 
 - Repository Deployments capability, environment configuration, preview/production operations, rollback, Workers Builds observation and deployment workflows, including their APIs, scopes, budgets and state.
 - Unused build-artifact and runtime-verification abstractions; source artifacts, reported evidence and human attestation remain.

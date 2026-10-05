@@ -1,69 +1,62 @@
-# MCP and agent participation
+# MCP participation
 
-[Documentation map](../README.md#documentation-map) · [Git and bridge setup](native-setup.md) · [Principles](principles.md)
+[Documentation map](../README.md#documentation-map) · [Git and bridge setup](native-setup.md) · [Domain model](domain-model.md) · [Principles](principles.md)
 
-MCP exposes Cruce coordination to independently running agents. It is neither Git transport nor an agent runtime. The single executable catalog is [src/shared/tools.ts](../src/shared/tools.ts); its descriptions, scopes, mutation flags, resource classes and input fields drive both the remote server and local bridge. Shared schemas live in [src/shared/platform.ts](../src/shared/platform.ts). Consult those files for exact arguments instead of maintaining a second schema in documentation.
+Cruce's MCP interface exposes the Cruce coordination model: repositories, workspaces, baselines, revisions, overlap, divergence, proposals, promotion state and provenance. It is not Git transport, not an agent runtime and not a messaging channel between agents. It does not duplicate generic Git, forge, Cloudflare or agent-framework functionality because that would be easy to expose.
+
+Any MCP client can use it: Claude Code, Codex, Cursor, another agent, an orchestration framework, a relay or a script. Cruce treats them identically. The client name is a label recorded as provenance, never an identity or an authority.
+
+The single executable catalog is [src/shared/tools.ts](../src/shared/tools.ts). Its descriptions, scopes, mutation flags, resource classes and input fields drive both the hosted server and the local bridge. Shared schemas live in [src/shared/platform.ts](../src/shared/platform.ts). Consult those files for exact arguments rather than a copy here.
 
 ## Connection paths
 
-| Path | What it does | Adapter responsibilities |
+| Path | What it does | Client responsibilities |
 | --- | --- | --- |
-| Local stdio bridge: `node /absolute/path/to/cruce/runner/cruce.mjs mcp --cwd /absolute/path/to/checkout --client NAME` | Connects to the hosted `/mcp` endpoint using OAuth; creates isolated worktrees and reports local Git state | Agent must work in the returned directory and consume coordination context |
-| Direct hosted MCP: `https://YOUR_HOST/mcp` | Exposes repository-scoped coordination through OAuth | Client must provide local isolation, persistent locks, attachment, heartbeat and Git observation itself |
-| Git smart HTTP | Normal clone/fetch/pull/push authenticated with a Cruce credential helper | Use Git, not MCP commands, to transfer source |
+| Local stdio bridge: `node /absolute/path/to/cruce/runner/cruce.mjs mcp --cwd /absolute/path/to/checkout --client NAME` | Connects to hosted `/mcp` with OAuth. Creates isolated worktrees, attaches them and reports local Git state | Work in the returned directory |
+| Direct hosted MCP: `https://YOUR_HOST/mcp` | Repository-scoped coordination through OAuth | Provide local isolation, locks, attachment, heartbeats and change reports yourself, naming the attached execution on every report |
+| Git smart HTTP | Normal clone/fetch/pull/push with the Cruce credential helper | Use Git, not MCP, to move source |
 
-The bridge supplies namespace/repository/workspace IDs and mutation identities from local connection state. It handles `start_workspace` by creating and attaching a dedicated directory for an agent writer. A direct remote call only registers the workspace; it does not create local files or launch an agent.
+The bridge supplies namespace, repository, workspace and execution identities, plus mutation idempotency keys, from local connection state. It handles `start_workspace` by creating and attaching a dedicated worktree for agent writers. A direct remote call only registers the workspace; it creates no local files and launches nothing.
 
-`connect --client codex|claude|cursor` currently writes client configuration and a bounded participation-instruction block through [runner/client-config.ts](../runner/client-config.ts). The corresponding files are `.codex/config.toml` and `AGENTS.md`, `.mcp.json` and `CLAUDE.md`, or `.cursor/mcp.json` and `.cursor/rules/cruce.mdc`. Existing surrounding content is preserved. Review these explicit local setup changes before committing them.
+`connect --client codex|claude|cursor` writes that client's MCP configuration and a short participation block through [runner/client-config.ts](../runner/client-config.ts): `.codex/config.toml` and `AGENTS.md`, `.mcp.json` and `CLAUDE.md`, or `.cursor/mcp.json` and `.cursor/rules/cruce.mdc`. Surrounding content is preserved. This is a convenience. Any MCP-capable tool can connect without it, and generated instructions do not prove an agent uses the context.
 
-The configuration writer reports Git observation and coordination MCP capabilities, with `hooksInstalled: false` and `adaptiveVerified: false`. It does not install decision-delivery or pause/resume hooks. Generated instructions do not prove an agent consumes updates or follows recommendations; the proposed Codex/Claude Code pilot must establish that with actual independent connections.
-
-Gemini CLI, future tools and internal agents are within the product model, but no dedicated configuration writer or end-to-end compatibility claim exists for them here. A compatible adapter must obey the same authority and isolation rules. A tool name is only a label; independent authorization comes from OAuth connections. One authorized agent may participate in many workspaces; each writer workspace owns and reuses its own fork. Reusing a cached connection is not evidence of distinct participant identity.
-
-## Current command families
+## Command families
 
 | Purpose | Commands | Scope / resource boundary |
 | --- | --- | --- |
-| Discover authorized ownership | `list_namespaces`, `list_repositories`, `get_repository` | `cruce:read`; recorded state only |
-| Inspect work and context | `get_context`, `get_workspace`, `get_workspace_updates`, `list_active_workspaces`, `inspect_overlap` | `cruce:read`; instructions at immutable base, current observations labelled separately |
-| Inspect source and provenance | `get_git_access`, `get_source`, `get_history`, `get_diff`, `read_artifact`, `get_lineage` | `cruce:read`; source requires available retained objects |
-| Participate | `start_workspace`, `heartbeat`, `report_change`, `report_ref`, `end_workspace` | `workspace:write`; control mutations |
-| Attach or clean up a hosted fork | `attach_workspace`, `cleanup_workspace` | `workspace:write`; Artifacts resource operations |
-| Retain source or evidence | `publish_revision`, `publish_artifact` | `revision:publish` / `artifact:publish`; Artifacts resource operations |
-| Propose, review and report checks | `create_proposal`, `review_proposal`, `record_verification` | `change:write`; agent evidence stays reported |
-| Request source acceptance | `request_promotion` | `promotion:request`; requests a human decision |
+| Discover | `list_namespaces`, `list_repositories`, `get_repository` | `cruce:read`; recorded state only |
+| Inspect workspaces and concurrency | `get_workspace`, `list_active_workspaces`, `get_workspace_updates`, `inspect_overlap` | `cruce:read`; overlap is advisory; divergence uses available objects only |
+| Inspect source and provenance | `get_git_access`, `get_source`, `get_history`, `get_diff`, `read_artifact`, `get_lineage` | `cruce:read`; source requires retained objects |
+| Workspace lifecycle | `start_workspace`, `detach_workspace`, `end_workspace` | `workspace:write`; owner only for existing workspaces |
+| Execution reports | `heartbeat`, `report_change` | `workspace:write`; must name the attached execution |
+| Attach or clean up a fork | `attach_workspace`, `cleanup_workspace` | `workspace:write`; Artifacts resource operations |
+| Retain revisions or evidence | `publish_revision`, `publish_artifact` | `revision:publish` / `artifact:publish`; Artifacts resource operations |
+| Propose and review | `create_proposal`, `review_proposal`, `record_verification` | `change:write`; agent evidence stays `reported` |
+| Ask for a human decision | `request_promotion` | `promotion:request`; not an approval |
 
-Hosted discovery filters tools by granted scope. Scope does not replace current membership, approved-repository checks, writer ownership or namespace resource policy. Human concern resolution and source promotion are absent from the agent catalog. Deployment and environment orchestration are outside Cruce entirely. A promotion request is not an approval, and an agent review with outcome `approve` cannot satisfy human approval. Publication, the product term change (`Proposal` in contracts), evidence and promotion are distinguished in the [architecture vocabulary](architecture.md#domain-vocabulary-and-ownership).
+Hosted discovery filters tools by granted scope. Scope never replaces current membership, approved repositories, workspace ownership or namespace resource policy. Human concern resolution, rejection, attestation and promotion are absent from the agent catalog. An agent review with outcome `approve` never satisfies human approval.
+
+There is deliberately no tool to launch, pause, resume, message or schedule an agent. There is no acknowledgement protocol, no ref-claim store, and no `clone`/`fetch`/`push` replacement.
 
 ## Participation protocol
 
-1. Start a workspace from the exact intended commit. Use the bridge's returned directory for all edits and read `get_context` for base-revision instructions/policy.
-2. At task start and scope changes, inspect active work, overlap and workspace updates. The MCP bridge maintains heartbeat/reporting while running; standalone CLI work needs `watch` in a separate terminal for continued presence.
-3. Make commits and push the workspace branch with ordinary Git. `publish_revision` seals the exact pushed revision; it cannot upload uncommitted local changes.
-4. Create a proposal from that source artifact and report verification for the exact revision. Request human promotion when ready.
-5. After canonical advances, inspect updates, fetch and integrate with Git, verify again, then push/publish and propose the new revision. Receiving or fetching an update is not integration or acceptance.
-6. End participation when finished. Choose local or hosted cleanup explicitly after retention checks; end does not promote source.
+1. **Start or continue.** Start a workspace at an exact baseline. Through the bridge, work only in the returned directory. To continue an existing workspace in a new session, point the bridge at that workspace's worktree. To continue from another checkout or machine, run `cruce resume --workspace ID` there first (after `detach` on the old machine).
+2. **Stay oriented.** At the start and whenever scope changes, inspect active workspaces, overlap and `get_workspace_updates`. The bridge renews presence and reports changes every 30 s while it runs.
+3. **Use Git.** Commit and push to the workspace fork with ordinary Git. `publish_revision` retains the exact pushed revision; it cannot upload uncommitted changes.
+4. **Propose an exact revision.** Create a proposal from the published revision, record evidence for that exact revision, and request human promotion when ready.
+5. **Reconcile when canonical moves.** Fetch canonical, merge with Git, verify, push, publish and propose the reconciled revision for fresh review. Fetching or receiving an update is not reconciliation.
+6. **Detach or end deliberately.** `detach_workspace` frees the workspace for another checkout. `end_workspace` completes it without promoting anything. Fork cleanup is a separate, retention-checked step.
 
-These checkpoints are cooperative guidance, not scheduling gates. Cruce cannot guarantee an agent reads updates, monitor unconnected participants or recreate an agent conversation. A compact recorded coordination view is proposed in the [roadmap](../ROADMAP.md), without committing a new command name. A normal push does not currently refresh an independently observed remote-head record; `report_ref` is a claim, and publication verifies a specific pushed revision later. Timely observations and actual two-tool context consumption remain gaps.
-
-`start_workspace` accepts a title and optional context, not structured intent/dependency reports. `report_change` reports observed changes, not a planned scope or decision response. Heartbeat activity does not prove these reports remain accurate. The current catalog has no coordination decision, acknowledgement or agent pause/resume commands; source review outcomes and promotion requests are separate concepts.
-
-## Proposed coordination integrations
-
-Convergence-first means fresh recorded evidence and deliberate incorporation precede execution controls. The [roadmap interaction contract](../ROADMAP.md#proposed-interaction-contract) constrains future reports and responses; it is not an available protocol. If decisions are introduced, a supported adapter must deliver them at demonstrated checkpoints and let agents acknowledge, decline with reasons or report inability to comply. Reading must not record a response; that requires an explicit authorized mutation. Delivery, acknowledgement, reported action and observed enforcement remain distinct.
-
-Begin with cooperative checkpoint reads and explainable canonical/path evidence. Automatic sequencing and targeted pause/resume remain exploratory; any control requires opt-in, demonstrated client support, a precise constrained action, safe pause/release behavior and a human override. Unsupported clients remain advisory. A client label or MCP connection cannot establish that Cruce can interrupt an agent. Scope changes and stale reports require reassessment; reconnecting participants need refreshed context rather than replaying obsolete advice. Missing acknowledgement is unknown compliance, not success.
-
-The current command table remains the available interface. New schemas, tool names, scopes and client hook choices require implementation design and evidence. The roadmap's [open integration questions](../ROADMAP.md#open-questions-and-integration-requirements) track those gaps; do not instruct participants to call proposed tools.
+These steps are cooperative guidance, not scheduling gates. Cruce cannot make an agent read context, cannot see unconnected participants, and never reconstructs an agent conversation. A push is observed only when publication reads the fork today; [roadmap C1](../ROADMAP.md#coordination-intelligence) adds observed pushes.
 
 ## Failures and retries
 
-Mutations require an idempotency key. Direct clients reuse the same key and exact request after an uncertain outcome; the bridge retains pending operation state for this purpose. Changed input needs a new operation after the prior outcome is known. Access is checked again on retry, so a stored receipt cannot authorize a revoked connection.
+Mutations require an idempotency key. Retry with the same key and the exact same request after an uncertain outcome; the bridge keeps pending operation state for this. Changed input needs a new operation once the earlier outcome is known. Access is checked again on every retry, so a stored receipt cannot authorize a revoked connection.
 
-Unavailable source requires explicit publication or Git transport, not a read that silently provisions/fetches. A preparing workspace can be resumed after attachment failure. A lost heartbeat leaves locks intact. An asynchronous cleanup can return `deleting`; retry its original operation until the provider confirms deletion. Report these states honestly instead of inventing successful completion.
+Unavailable source requires explicit publication or Git transport, never a read that silently provisions or fetches. A `preparing` workspace can be re-attached after a failed first attachment. Attaching a workspace that is attached elsewhere fails until that execution is detached. A lost heartbeat leaves locks and the attachment intact. Cleanup can return `deleting`; repeat the original operation until `deleted`. Report these states honestly.
 
-The [implementation audit](architecture.md#architecture-contradictions-and-correctness-gaps) identifies remaining interruption, provider-identity and promotion-race gaps. Existing idempotency receipts do not prove every remote-success/restart window is recovered. Coordination tools avoid provider fetches, but routing/initialization still persists metadata on some read paths; the strict read-only contract remains normative until that gap is corrected.
+The [implementation audit](architecture.md#architecture-contradictions-and-correctness-gaps) lists remaining provider-identity, publication-recovery and read-purity gaps.
 
 ## Extending the surface
 
-Add a tool once in the shared catalog, define its contract and pure decision, and implement necessary I/O in the runtime. Every resource action declares scope/cost and uses the namespace gate. Reads must remain free of mutation/provisioning. Add behavioral checks for authority, exact revision, retry and ownership boundaries, then update this guide only when a new concept or family needs explanation. Do not add `cruce clone`, `cruce fetch`, `cruce push` or agent-launch tools.
+A new tool must pass the [boundary test](product.md#the-boundary-test) and express a Cruce concept, not a Git, forge or agent-framework primitive. Add it once in the shared catalog, define its contract and pure decision, and implement any I/O in the runtime. Resource actions declare scope and cost and use the namespace gate. Reads stay free of mutation and provisioning. Add behavioral tests for authority, exact revisions, retries and ownership.

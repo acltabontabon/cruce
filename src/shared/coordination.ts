@@ -2,7 +2,7 @@ import type { Artifact, Overlap, RepositorySnapshot, Workspace } from "./platfor
 
 /** Presentation-only projection of an already-authorized snapshot. Never fetches source. */
 export interface CoordinationTopology {
-	workspaces: Pick<Workspace, "id" | "mode" | "state">[];
+	workspaces: Pick<Workspace, "id" | "state">[];
 	intersections: Pick<Overlap, "id" | "workspaces">[];
 }
 export interface RepositorySummary {
@@ -19,7 +19,7 @@ export function repositorySummary(snapshot: RepositorySnapshot): RepositorySumma
 		overlaps: snapshot.overlaps.length,
 		latestArtifact: snapshot.artifacts.at(-1),
 		topology: {
-			workspaces: snapshot.workspaces.map(({ id, mode, state }) => ({ id, mode, state })),
+			workspaces: snapshot.workspaces.map(({ id, state }) => ({ id, state })),
 			intersections: snapshot.overlaps.map(({ id, workspaces }) => ({ id, workspaces: [...workspaces] })),
 		},
 	};

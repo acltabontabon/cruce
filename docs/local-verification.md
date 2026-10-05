@@ -22,9 +22,17 @@ The scenario scripts fix commit timestamps and isolate signing/hooks for their d
 
 The [timeout fixture](../demo/convergence/README.md) uses injected delay capture without timers or network calls. A shared driver exercises ordinary Git against disposable bare repositories served over loopback HTTP and the real in-process Cruce runtime. Only the provider adapter is substituted; Git fetch/push, publication, retained source/evidence, readiness and non-forced promotion run normally. Fixture grants and human attestations do not establish actual authenticated participation. `pnpm verify:scenario` replays the driver twice and checks identical revisions and behavioral outcomes, then writes non-secret results to ignored `dist/scenario-verification/result.json`, including the tested Cruce commit and working-tree-dirty flag.
 
+## Product boundary reset verification
+
+On **2026-10-06** the [product boundary reset](decisions/0001-product-boundary-reset.md) and [workspace ownership change](decisions/0002-workspace-ownership-and-execution-attachment.md) were verified locally against a working tree based on `c783295`. Typecheck, lint, **127 unit/integration tests**, **49 browser journeys**, deterministic scenario replay, the offline build (with the existing unavailable-Docker notice) and release metadata passed. A local check resolved 286 documentation links and anchors.
+
+New controller and runtime tests cover owner authority across connections and tools, rejection of another user's connection, reports bound to the attached execution, explicit detach, re-attachment from another checkout and tool without reprovisioning the fork, and publication by a different connection with its actor recorded. A native Git runner test continues a workspace in a second clone from its pushed fork head, keeps unpushed work on the first machine, and refuses non-fast-forward history. A browser journey releases an execution from the console.
+
+This is **local evidence only**. No provider resources were provisioned and nothing was deployed. Hosted continuation across machines and tools is part of [roadmap D2](../ROADMAP.md#developer-workflow).
+
 ## Exact-base promotion verification
 
-On **2026-10-06**, P0.1 was implemented and locally verified against the working tree based on `59434eeb3fc89e37cade1893620da2d93d579464`. The [native Git fixture](../test/git/http-fixture.ts) serves real smart HTTP receive-pack and independently reads the bare remote with native `git rev-parse`; its refs are separate from the runtime cache. The [runtime tests](../test/worker/repository-runtime.test.ts) exercise the installed `isomorphic-git@1.42.6` pre-push hook, non-forced old/new ref comparison, durable repository journal and namespace reservations.
+On **2026-10-06**, exact-base promotion (roadmap F1, formerly P0.1) was implemented and locally verified against the working tree based on `59434eeb3fc89e37cade1893620da2d93d579464`. The [native Git fixture](../test/git/http-fixture.ts) serves real smart HTTP receive-pack and independently reads the bare remote with native `git rev-parse`; its refs are separate from the runtime cache. The [runtime tests](../test/worker/repository-runtime.test.ts) exercise the installed `isomorphic-git@1.42.6` pre-push hook, non-forced old/new ref comparison, durable repository journal and namespace reservations.
 
 Acceptance coverage includes:
 
@@ -36,7 +44,7 @@ Acceptance coverage includes:
 
 Typecheck, lint, **127 unit/integration tests**, **49 browser journeys**, deterministic scenario replay and the offline Worker build passed. The scenario's exact source revisions remained unchanged. Loopback Git/browser fixtures required local socket access. Lint retained the existing Biome deprecation notice; the offline build completed with the existing unavailable-Docker notice.
 
-This is **local native Git / in-process authority evidence**, not a new hosted Artifacts or deployed Worker verification. Explicit source-account credentials were not present in the invoking environment or `.env.test`, so no provider resources were provisioned and no deployment was performed. Earlier hosted receipts retain their original implementation scope. P0.3 owns new hosted/deployed validation; P0.2 still owns remaining provider/account binding gaps. Reconciliation proves the intended exact remote source effect, not exclusive authorship of an indistinguishable external write or recovery of transient remote ref history. Changed/unobservable outcomes preserve charged uncertainty rather than inventing promotion provenance.
+This is **local native Git / in-process authority evidence**, not a new hosted Artifacts or deployed Worker verification. Explicit source-account credentials were not present in the invoking environment or `.env.test`, so no provider resources were provisioned and no deployment was performed. Earlier hosted receipts retain their original implementation scope. Roadmap D2 owns new hosted/deployed validation; F2 still owns remaining provider/account binding gaps. Reconciliation proves the intended exact remote source effect, not exclusive authorship of an indistinguishable external write or recovery of transient remote ref history. Changed/unobservable outcomes preserve charged uncertainty rather than inventing promotion provenance.
 
 ## Architecture audit validation
 
@@ -157,7 +165,7 @@ Earlier local evidence recorded 88 unit/integration tests and 13 browser journey
 | Native Git, local protocol fixture | Clone canonical, push/fetch isolated fork, reject canonical push | Does not prove live Access routing or deployed OAuth |
 | Earlier real Artifacts adapter | Revision `3e72f788d0e6a8f4b1851277e6ae296c7fbbab78`, namespace `cruce-check-muuga1hc`; isolated fork, exact publication, independent fetch and retention | Preceded current namespace/native-Git refactor; does not verify the current gateway or reconciliation flow |
 | Earlier live control plane | Version `2d7cbe7d-bdcd-48f1-b21e-4cd7324d9314`; owner sign-in/provisioning and authentication rejection checks | Older model; current code and Git transport exception not recorded as deployed |
-| Heterogeneous-agent participation | Pending | Two real authorized tool connections and context consumption need verification |
+| Multi-tool, multi-session participation | Pending | Roadmap D2: real tools in separate workspaces, a workspace continued from a second checkout or machine, deployed |
 
 The provider-backed convergence check passed with explicitly authorized test-account credentials as recorded above. Historical counts describe their tested revision, not a promise about every future checkout.
 

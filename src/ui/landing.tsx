@@ -8,7 +8,7 @@ import "./landing.css";
 const chapters = [
 	{ name: "Independent work", label: "Work", stage: 0 },
 	{ name: "Shared awareness", label: "Notice", stage: 1 },
-	{ name: "Align together", label: "Align", stage: 2 },
+	{ name: "Human review", label: "Review", stage: 2 },
 	{ name: "Sequential convergence", label: "Converge", stage: 3 },
 	{ name: "Common ground", label: "Together", stage: 8 },
 ];
@@ -16,20 +16,20 @@ const durations = [4200, 4800, 5600, 3600, 4600, 3600, 4600, 3600, 3200];
 const notes = [
 	{ title: "Room to work", detail: "One shared repository" },
 	{ title: "Shared advisory", detail: "Look closer. Keep moving." },
-	{ title: "Agents align", detail: "Routine work moves forward." },
+	{ title: "Human review", detail: "One exact revision." },
 	{ title: "Claude joins main", detail: "Exact revision accepted" },
-	{ title: "Shared context", detail: "Fetch · merge · verify" },
+	{ title: "Canonical moved", detail: "Fetch · merge · verify" },
 	{ title: "Codex joins main", detail: "Exact revision accepted" },
-	{ title: "Context refreshed", detail: "Cursor brings main forward." },
+	{ title: "Reconciled", detail: "Cursor merges the accepted main." },
 	{ title: "Cursor joins main", detail: "Exact revision accepted" },
 	{ title: "Common ground", detail: "Three contributions. One main." },
 ];
 const stageDescriptions = [
-	"Three independent writers start at 71d94e2a in separate workspaces. Cruce does not launch or own their tools.",
+	"Three independent tools start at 71d94e2a in separate durable workspaces, each with its own fork. Cruce does not launch, schedule or own the tools.",
 	"Claude Code and Codex report changes to src/auth/session.ts. Shared paths are advisory, not proof of a conflict or a reason to stop independent work.",
-	"The coordination vision is for agents to inspect relevant context, adjust routine work and keep independent work moving. Ambiguous requirements, competing designs and unresolved disagreement branch to the developer. Proactive decisions and acknowledgements are proposed capabilities, not implemented controls.",
-	"Claude Code's exact revision bc811af0 is accepted first. Canonical advances only after human approval, controller readiness and a completed non-forced Git update. Routine coordination does not require human supervision.",
-	"Codex and Cursor receive accepted source. Codex explicitly fetches and incorporates bc811af0, verifies locally, then pushes b2c4e718. Its workspace starting revision remains 71d94e2a. Receiving an update alone does not integrate it or advance canonical.",
+	"Claude Code publishes and proposes the exact revision bc811af0. Reviews and evidence name that revision, and only an authenticated human approval lets it reach canonical. Cruce records the decision; it does not relay messages between agents or decide what they run.",
+	"Claude Code's exact revision bc811af0 is accepted first. Canonical advances only after human approval, controller readiness and a completed non-forced Git update.",
+	"Canonical has moved past the baseline of Codex and Cursor. Codex explicitly fetches and incorporates bc811af0, verifies locally, then pushes b2c4e718. Its workspace starting revision remains 71d94e2a. Fetching an update alone does not reconcile it or advance canonical.",
 	"Codex's reconciled revision b2c4e718 is accepted at the second dot after fresh exact-revision review, readiness and completed promotion. Claude's earlier accepted revision stays in canonical history.",
 	"Cursor explicitly fetches and incorporates the accepted b2c4e718, verifies locally and pushes c3d8a902. Its starting revision remains 71d94e2a; canonical remains b2c4e718 until completed promotion.",
 	"Cursor's reconciled revision c3d8a902 is accepted at the third dot after fresh review, readiness and completed promotion. Each dot represents a distinct accepted revision and originating workspace.",
@@ -82,24 +82,8 @@ function CrossingGraph({ stage, motion }: { stage: number; motion: Motion }) {
 				{ duration: 3200, delay: stage === 0 ? 600 : 0, easing: "cubic-bezier(.35,0,.25,1)" },
 			);
 		}
-		if (stage === 2) {
-			const message = svg.querySelector(".graph-message");
-			if (message)
-				animate(
-					message,
-					[
-						{ transform: "translateY(0)", opacity: 0, offset: 0 },
-						{ opacity: 1, offset: 0.1 },
-						{ transform: "translateY(112px)", opacity: 1, offset: 0.45 },
-						{ transform: "translateY(112px)", opacity: 1, offset: 0.55 },
-						{ transform: "translateY(0)", opacity: 1, offset: 0.9 },
-						{ transform: "translateY(0)", opacity: 0, offset: 1 },
-					],
-					{ duration: 3600, easing: "cubic-bezier(.35,0,.25,1)" },
-				);
-		}
-		for (const path of svg.querySelectorAll(".graph-alignment.is-current .graph-signal, .graph-upstream.is-current .graph-feed"))
-			animate(path, [{ strokeDashoffset: "8" }, { strokeDashoffset: "0" }], { duration: 1100, iterations: stage === 2 ? 3 : 2 });
+		for (const path of svg.querySelectorAll(".graph-upstream.is-current .graph-feed"))
+			animate(path, [{ strokeDashoffset: "8" }, { strokeDashoffset: "0" }], { duration: 1100, iterations: 2 });
 		animations.current = active;
 		return () => {
 			for (const animation of active) animation.cancel();
@@ -144,7 +128,7 @@ function CrossingGraph({ stage, motion }: { stage: number; motion: Motion }) {
 							<circle className="graph-tip" cx={laneEnd(i)} cy={laneY(i)} r="4" />
 							{i >= accepted && <circle key={stage} className="graph-worker" cx="138" cy={laneY(i)} r="3" />}
 							<text x="155" y={122 + i * 112} className="graph-actor">
-								{w.actor.name}
+								{w.createdBy.name}
 							</text>
 							<text x="155" y={171 + i * 112} className="graph-task">
 								{w.title}
@@ -154,20 +138,15 @@ function CrossingGraph({ stage, motion }: { stage: number; motion: Motion }) {
 					<g className={reveal("graph-overlap", stage === 1, 1)}>
 						<path d="M321 139H310V265H321" />
 					</g>
-					<g className={reveal("graph-alignment", stage === 2, 2)}>
-						<path className="graph-signal" d="M310 146V258" />
-						<circle className="graph-message message-down" cx="310" cy="146" r="3" />
-						<circle cx="310" cy="202" r="11" />
-						<path className="graph-check" d="m305 202 4 4 6-8" />
-					</g>
 					<g className={reveal("graph-decision", stage === 2, 2)}>
-						<path d="M321 202H426" />
-						<circle cx="430" cy="202" r="4" />
-						<text x="342" y="222" className="graph-metadata">
-							if unresolved
+						<path d="M426 146H462" />
+						<circle cx="474" cy="146" r="11" />
+						<path className="graph-check" d="m469 146 4 4 6-8" />
+						<text x="429" y="168" className="graph-metadata">
+							exact revision
 						</text>
-						<text x="444" y="206" className="graph-metadata">
-							developer
+						<text x="491" y="150" className="graph-metadata">
+							human review
 						</text>
 					</g>
 					{exampleContributions.map((contribution, i) => {
@@ -222,7 +201,7 @@ function CrossingGraph({ stage, motion }: { stage: number; motion: Motion }) {
 						key={w.id}
 						className={`mobile-graph-lane lane-${i}${i < accepted ? " is-accepted" : ""}${focused.includes(i) ? " is-focused" : ""}`}
 					>
-						<span>{w.actor.name}</span>
+						<span>{w.createdBy.name}</span>
 						<strong>{w.title}</strong>
 					</div>
 				))}
@@ -370,7 +349,7 @@ function HeroSequence() {
 
 export function Landing() {
 	useEffect(() => {
-		document.title = `${BRAND.name} · Common ground for coding agents`;
+		document.title = `${BRAND.name} · Git coordination for parallel agentic development`;
 	}, []);
 	return (
 		<div
@@ -412,8 +391,8 @@ export function Landing() {
 							<em>Common ground.</em>
 						</h1>
 						<p className="hero-description">
-							Keep your tools. {BRAND.name} gives concurrent coding agents shared context, exact revisions, and a deliberate path into
-							canonical Git.
+							Keep your agents, editors and Git. {BRAND.name} gives concurrent work durable workspaces, exact revisions and a human-approved
+							path into canonical Git.
 						</p>
 						<p className="hero-aside">Independent paths. Shared direction.</p>
 					</div>

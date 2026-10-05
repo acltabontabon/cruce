@@ -235,19 +235,6 @@ export function Code({
 					)}
 				</>
 			)}
-			<h2>Observed refs</h2>
-			{view.refs.length ? (
-				view.refs.slice(-20).map((r) => (
-					<p key={`${r.ref}:${r.revision}:${r.at}`}>
-						<code>
-							{r.ref} · {short(r.revision)}
-						</code>{" "}
-						· {r.trust} · {new Date(r.at).toLocaleString()}
-					</p>
-				))
-			) : (
-				<p className="empty">No external refs reported.</p>
-			)}
 		</>
 	);
 }

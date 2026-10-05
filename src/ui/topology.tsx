@@ -3,11 +3,11 @@ import type { CoordinationTopology } from "../shared/coordination.ts";
 import type { RepositorySnapshot } from "../shared/platform.ts";
 import { count, short } from "./controls.tsx";
 import { Icon } from "./design.tsx";
-import { topologyModel } from "./topology-model.ts";
+import { topologyModel, workingActor } from "./topology-model.ts";
 
 export function MiniTopology({ topology }: { topology?: CoordinationTopology }) {
 	if (!topology) return <span className="muted">Activity unavailable</span>;
-	const writers = topology.workspaces.filter((w) => w.mode === "write" && w.state === "active");
+	const writers = topology.workspaces.filter((w) => w.state === "active");
 	const shown = writers.slice(0, 4);
 	return (
 		<span className="mini-topology" aria-hidden="true">
@@ -96,8 +96,8 @@ export function Topology({ view, open, all }: { view: RepositorySnapshot; open: 
 							<span className="lane-heading">
 								<span>
 									<span className={`presence ${w.state}`} />
-									<strong>{w.actor.name}</strong>
-									<span className="actor-kind">{w.actor.kind}</span>
+									<strong>{workingActor(w).name}</strong>
+									<span className="actor-kind">{workingActor(w).kind}</span>
 								</span>
 								<span className="lane-state">
 									<Observation at={w.lastActivity} />
@@ -134,7 +134,6 @@ export function Topology({ view, open, all }: { view: RepositorySnapshot; open: 
 				})}
 				{!model.total && <p className="empty">No active workspaces. Attach a local checkout to begin reporting work.</p>}
 			</div>
-			{model.observers.length > 0 && <p className="observers">Observers · {model.observers.map((w) => w.actor.name).join(", ")}</p>}
 			<div className="surface-section">
 				<div className="section-heading">
 					<h3>Shared surfaces</h3>
