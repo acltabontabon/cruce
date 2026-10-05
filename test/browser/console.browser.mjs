@@ -22,11 +22,12 @@ beforeEach(async () => {
 	await page.request.post(`${server.origin}/__fixture/reset`);
 });
 async function openRepo() {
-	await page.goto(`${server.origin}/?workspace=maya&repository=payments`);
+	await page.goto(`${server.origin}/?workspace=fernloop&repository=payments`);
 	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
 }
 test("first login lands in a personal workspace with honest repository creation", async () => {
 	await page.goto(server.origin);
+	await page.getByRole("button", { name: "Alex Morgan", exact: true }).click();
 	await page.getByText("No repositories yet.", { exact: false }).waitFor();
 	await page.getByText("New repository", { exact: true }).click();
 	await page.getByLabel("Repository name", { exact: true }).fill("local-tools");
@@ -35,9 +36,60 @@ test("first login lands in a personal workspace with honest repository creation"
 	await page.getByText("No active sessions.", { exact: false }).waitFor();
 	assert.equal(await page.getByText("Production Healthy").count(), 0);
 });
+test("workspace home filters repositories and account navigation survives Back and reload", async () => {
+	await page.goto(server.origin);
+	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
+	await page.locator(".home-repo").filter({ hasText: "payment-service" }).waitFor();
+	await page.getByRole("heading", { name: "Work in motion", exact: true }).waitFor();
+	await page.locator(".motion-row").getByText("2 active sessions", { exact: true }).waitFor();
+	await page.screenshot({ path: "dist/ui-checks/workspaces.png", fullPage: true });
+	await page.getByLabel("Filter workspaces").fill("payment-service");
+	assert.equal(await page.locator(".workspace-card").count(), 1);
+	await page.getByRole("button", { name: "Your account", exact: true }).click();
+	await page.getByRole("heading", { name: "Your account", exact: true }).waitFor();
+	await page.screenshot({ path: "dist/ui-checks/account.png", fullPage: true });
+	await page.reload();
+	await page.getByRole("heading", { name: "Your account", exact: true }).waitFor();
+	await page.goBack();
+	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
+	await page.getByRole("button", { name: "Fernloop", exact: true }).click();
+	await page.getByRole("navigation", { name: "Workspace navigation" }).getByRole("button", { name: "teams", exact: true }).click();
+	await page.reload();
+	await page.getByRole("heading", { name: "Teams", exact: true, level: 1 }).waitFor();
+	await page.goBack();
+	await page.getByRole("heading", { name: "Repositories", exact: true }).waitFor();
+});
+test("creation dialogs keep focus contained and explain unavailable cloud setup", async () => {
+	await page.goto(server.origin);
+	await page.getByRole("button", { name: "Alex Morgan", exact: true }).click();
+	await page.screenshot({ path: "dist/ui-checks/empty-workspace.png", fullPage: true });
+	const trigger = page.getByRole("button", { name: "New repository", exact: true });
+	await trigger.click();
+	const dialog = page.getByRole("dialog", { name: "New repository", exact: true });
+	assert.equal(await dialog.getByRole("radio", { name: /Open local repository/ }).isChecked(), true);
+	assert.equal(await dialog.getByRole("radio", { name: /Create Artifacts repository/ }).isDisabled(), true);
+	await dialog.getByText("To use Artifacts, connect Cloudflare in workspace settings first.").waitFor();
+	await page.screenshot({ path: "dist/ui-checks/create-repository.png", fullPage: true });
+	for (let i = 0; i < 10; i++) {
+		await page.keyboard.press("Tab");
+		assert.equal(await page.evaluate(() => !!document.activeElement?.closest("dialog")), true);
+	}
+	await page.keyboard.press("Escape");
+	assert.equal(await dialog.count(), 0);
+	assert.equal(await trigger.evaluate((element) => element === document.activeElement), true);
+	await page.getByRole("button", { name: "Switch workspace", exact: true }).click();
+	await page.getByRole("button", { name: "Create workspace", exact: true }).click();
+	await page.getByRole("dialog").getByLabel("Name", { exact: true }).fill("Design team");
+	await page.getByLabel("Workspace handle").fill("design-team");
+	await page.getByRole("button", { name: "Create workspace", exact: true }).click();
+	await page.getByRole("button", { name: "Switch workspace" }).filter({ hasText: "Design team" }).waitFor();
+	await page.getByRole("navigation", { name: "Workspace navigation" }).getByRole("button", { name: "members", exact: true }).waitFor();
+});
 test("overview shows human and agent sessions, reported overlap and source artifact", async () => {
 	await openRepo();
 	await page.getByRole("heading", { name: "Shared surfaces" }).waitFor();
+	await page.getByRole("heading", { name: "Review queue", exact: true }).waitFor();
+	await page.getByText("1 agent working", { exact: true }).waitFor();
 	await page.getByText("2 active sessions", { exact: true }).waitFor();
 	await page.getByText("Overlap is awareness, not a Git conflict.").waitFor();
 	await page.screenshot({ path: "dist/ui-checks/repository.png", fullPage: true });
@@ -46,7 +98,9 @@ test("repository switcher supports keyboard selection and Back navigation", asyn
 	await openRepo();
 	await page.keyboard.press("Meta+k");
 	const dialog = page.getByRole("dialog");
-	await dialog.getByRole("textbox").fill("maya/payment");
+	await dialog.getByRole("textbox").fill("fernloop/payment");
+	await dialog.getByRole("button", { name: "fernloop/payment-service", exact: true }).waitFor();
+	await page.screenshot({ path: "dist/ui-checks/finder.png", fullPage: true });
 	await page.keyboard.press("ArrowDown");
 	await page.keyboard.press("Enter");
 	await page.getByRole("navigation", { name: "Repository navigation" }).getByRole("button", { name: "work", exact: true }).click();
@@ -80,21 +134,40 @@ test("artifact lineage links the exact commit and originating session", async ()
 	await page.locator(".lineage").filter({ hasText: "Implement retry policy" }).waitFor();
 });
 test("teams and invitation links are functional", async () => {
-	await page.goto(`${server.origin}/?workspace=maya`);
+	await page.goto(`${server.origin}/?workspace=fernloop`);
 	await page.getByRole("navigation", { name: "Workspace navigation" }).getByRole("button", { name: "teams", exact: true }).click();
 	await page.locator("summary").filter({ hasText: "Create team" }).click();
 	await page.getByLabel("Team name").fill("Platform");
-	await page.getByRole("checkbox", { name: "Cris" }).check();
+	await page.getByRole("checkbox", { name: "Alex Morgan" }).check();
 	await page.getByRole("button", { name: "Create team", exact: true }).click();
 	await page.locator("summary").filter({ hasText: "Platform" }).waitFor();
 	await page.getByRole("navigation", { name: "Workspace navigation" }).getByRole("button", { name: "members", exact: true }).click();
-	await page.getByLabel("Email", { exact: true }).fill("maya@example.com");
+	await page.getByLabel("Email", { exact: true }).fill("alex@example.com");
 	await page.getByRole("button", { name: "Create invitation link" }).click();
-	await page.getByRole("status").filter({ hasText: "/invite/maya" }).waitFor();
+	await page.getByRole("status").filter({ hasText: "/invite/fernloop" }).waitFor();
 });
 test("mobile view has no horizontal page overflow", async () => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	await openRepo();
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
 	await page.screenshot({ path: "dist/ui-checks/mobile.png", fullPage: true });
+});
+
+test("workspace home, account and creation remain usable on mobile", async () => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto(server.origin);
+	await page.getByRole("button", { name: "Fernloop", exact: true }).waitFor();
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+	await page.screenshot({ path: "dist/ui-checks/workspaces-mobile.png", fullPage: true });
+	await page.getByRole("button", { name: "Your account", exact: true }).click();
+	await page.getByRole("heading", { name: "Your account", exact: true }).waitFor();
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+	await page.getByRole("button", { name: "Switch workspace" }).click();
+	await page.getByRole("dialog").getByRole("button", { name: "Alex Morgan", exact: false }).click();
+	await page.getByRole("button", { name: "New repository", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "New repository" });
+	await dialog.getByLabel("Repository name", { exact: true }).fill("mobile-tools");
+	await page.screenshot({ path: "dist/ui-checks/create-mobile.png", fullPage: true });
+	await dialog.getByRole("button", { name: "Add repository", exact: true }).click();
+	await page.getByRole("heading", { name: "mobile-tools", exact: true }).waitFor();
 });

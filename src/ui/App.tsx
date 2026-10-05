@@ -10,11 +10,14 @@ import type {
 	Workspace,
 	WorkspaceRole,
 } from "../shared/platform.ts";
+import { BranchArt, Dialog, Icon, SourceChoice } from "./design.tsx";
 import { ArtifactInspection, Code } from "./inspect.tsx";
 import "./styles.css";
 
+const count = (n: number, label: string) => `${n} ${label}${n === 1 ? "" : "s"}`;
 const short = (s?: string) => s?.slice(0, 8) ?? "—";
 const time = (n: number) => new Date(n).toLocaleString();
+const workspaceTabs = ["repositories", "members", "teams", "settings"];
 const tabs = ["overview", "code", "work", "artifacts", "deployments", "settings"];
 type WorkspaceView = {
 	repositorySummaries?: { id: string; active: number; overlaps: number; latestArtifact?: Artifact }[];
@@ -54,8 +57,14 @@ function readRoute() {
 		[tab, id] = location.hash.replace(/^#\/?/, "").split("/");
 	return {
 		workspaceId: query.get("workspace") ?? "",
+		screen:
+			query.get("page") === "account"
+				? "account"
+				: query.get("page") === "workspaces" || !query.has("workspace")
+					? "workspaces"
+					: "workspace",
 		repositoryId: query.get("repository") ?? "",
-		tab: tabs.includes(tab) ? tab : "overview",
+		tab: [...tabs, ...workspaceTabs].includes(tab) ? tab : "overview",
 		id: id ?? "",
 	};
 }
@@ -100,8 +109,13 @@ export function App() {
 		[refresh, setRefresh] = useState(0),
 		[finder, setFinder] = useState(false),
 		[search, setSearch] = useState(""),
+		[finderLoading, setFinderLoading] = useState(false),
+		[finderError, setFinderError] = useState(""),
 		[catalog, setCatalog] = useState<{ workspace: Workspace; repository: Repository }[]>([]),
-		[workspaceTab, setWorkspaceTab] = useState("repositories");
+		[overlay, setOverlay] = useState<"workspace" | "create-workspace" | "repository">();
+	const workspaceTab = workspaceTabs.includes(route.tab) ? route.tab : "repositories";
+	const routeRef = useRef(route);
+	routeRef.current = route;
 	const retries = useRef(new Map<string, string>()),
 		generation = useRef(0),
 		[busy, setBusy] = useState(false);
@@ -123,12 +137,44 @@ export function App() {
 		setError(undefined);
 		setRoute(readRoute());
 		setFinder(false);
+		setOverlay(undefined);
 	}, []);
+	const navigatePage = useCallback(
+		(screen: "workspaces" | "account") => {
+			const url = new URL(location.href);
+			url.pathname = "/";
+			url.search = "";
+			url.hash = "";
+			url.searchParams.set("page", screen);
+			if (route.workspaceId) url.searchParams.set("workspace", route.workspaceId);
+			history.pushState(null, "", url);
+			generation.current++;
+			setView(undefined);
+			setNotice("");
+			setError(undefined);
+			setFinder(false);
+			setOverlay(undefined);
+			setRoute(readRoute());
+		},
+		[route.workspaceId],
+	);
+
+	useEffect(() => {
+		void route;
+		document.getElementById("content")?.focus({ preventScroll: true });
+	}, [route]);
+
 	useEffect(() => {
 		const change = () => {
-			generation.current++;
-			setRoute(readRoute());
+			const next = readRoute();
+			if (next.workspaceId !== routeRef.current.workspaceId || next.repositoryId !== routeRef.current.repositoryId) {
+				generation.current++;
+				setView(undefined);
+			}
+			setRoute(next);
 			setNotice("");
+			setOverlay(undefined);
+			setFinder(false);
 		};
 		const key = (e: KeyboardEvent) => {
 			if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -158,6 +204,10 @@ export function App() {
 			});
 		return () => controller.abort();
 	}, []);
+	useEffect(() => {
+		if (me && !route.workspaceId) setRoute((current) => ({ ...current, workspaceId: me.user.personalWorkspaceId }));
+	}, [me, route.workspaceId]);
+
 	useEffect(() => {
 		if (!route.workspaceId) return;
 		void refresh; // Explicit invalidation after a successful mutation.
@@ -214,22 +264,31 @@ export function App() {
 	}, [route.workspaceId, route.repositoryId, refresh]);
 	useEffect(() => {
 		if (!finder || !me) return;
-		let active = true;
+		void refresh;
+		const controller = new AbortController();
+		setFinderLoading(true);
+		setFinderError("");
+		setCatalog([]);
 		void Promise.all(
 			me.workspaces.map(async (w) => {
 				try {
-					return (await request<Repository[]>(`/api/workspaces/${w.id}/repositories`)).map((repository) => ({ workspace: w, repository }));
-				} catch {
+					return (await request<Repository[]>(`/api/workspaces/${w.id}/repositories`, undefined, "GET", controller.signal)).map(
+						(repository) => ({ workspace: w, repository }),
+					);
+				} catch (e) {
+					if (!controller.signal.aborted) setFinderError((e as Error).message);
 					return [];
 				}
 			}),
 		).then((rows) => {
-			if (active) setCatalog(rows.flat());
+			if (!controller.signal.aborted) {
+				setCatalog(rows.flat());
+				setFinderLoading(false);
+			}
 		});
-		return () => {
-			active = false;
-		};
-	}, [finder, me]);
+		return () => controller.abort();
+	}, [finder, me, refresh]);
+
 	const mutate = async <T,>(url: string, body: Record<string, unknown>, method = "POST") => {
 		const fingerprint = JSON.stringify({ url, body, method }),
 			key = retries.current.get(fingerprint) ?? crypto.randomUUID();
@@ -291,83 +350,113 @@ export function App() {
 		);
 	return (
 		<div className="shell">
-			<a className="skip" href="#content">
+			<button type="button" className="skip" onClick={() => document.getElementById("content")?.focus()}>
 				Skip to content
-			</a>
+			</button>
 			<aside>
-				<a className="brand" href="/">
-					Cruce <span>α</span>
+				<a
+					className="brand"
+					href="/?page=workspaces"
+					onClick={(e) => {
+						if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+							e.preventDefault();
+							navigatePage("workspaces");
+						}
+					}}
+				>
+					<span className="brand-mark">
+						<Icon name="branch" />
+					</span>
+					Cruce <span className="alpha">ALPHA</span>
 				</a>
-				<label>
-					Workspace
-					<select
-						aria-label="Workspace"
-						value={route.workspaceId}
-						onChange={(e) => {
-							setWorkspaceTab("repositories");
-							navigate(e.target.value);
-						}}
-					>
-						{me.workspaces.map((w) => (
-							<option key={w.id} value={w.id}>
-								{w.name}
-								{w.kind === "personal" ? " · Personal" : ""}
-							</option>
-						))}
-					</select>
-				</label>
+				<button
+					type="button"
+					className="workspace-switcher"
+					aria-label="Switch workspace"
+					aria-haspopup="dialog"
+					onClick={() => setOverlay("workspace")}
+				>
+					<span className="workspace-avatar">{(workspace?.workspace.name ?? "W").slice(0, 1).toUpperCase()}</span>
+					<span>
+						<strong>{workspace?.workspace.name ?? "Workspace"}</strong>
+						<small>{workspace?.workspace.kind === "shared" ? "Shared workspace" : "Personal workspace"}</small>
+					</span>
+					<Icon name="chevron" />
+				</button>
 				<button type="button" className="finder-trigger" onClick={() => setFinder(true)}>
+					<Icon name="search" />
 					Find repository <kbd>⌘K</kbd>
 				</button>
-				<nav aria-label="Workspace navigation">
-					{["repositories", ...(workspace?.workspace.kind === "shared" ? ["members", "teams"] : []), "settings"].map((tab) => (
-						<button
-							type="button"
-							key={tab}
-							className={!route.repositoryId && workspaceTab === tab ? "selected" : ""}
-							onClick={() => {
-								setWorkspaceTab(tab);
-								navigate(route.workspaceId);
-							}}
-						>
-							{tab}
+				<button
+					type="button"
+					className={`all-workspaces ${route.screen === "workspaces" ? "selected" : ""}`}
+					onClick={() => navigatePage("workspaces")}
+				>
+					<Icon name="repositories" />
+					All workspaces
+					<Icon name="arrow" />
+				</button>
+				{route.screen === "workspace" && (
+					<>
+						<p className="nav-label">Workspace</p>
+						<nav aria-label="Workspace navigation">
+							{["repositories", ...(workspace?.workspace.kind === "shared" ? ["members", "teams"] : []), "settings"].map((tab) => (
+								<button
+									type="button"
+									key={tab}
+									className={route.screen === "workspace" && !route.repositoryId && workspaceTab === tab ? "selected" : ""}
+									aria-current={route.screen === "workspace" && !route.repositoryId && workspaceTab === tab ? "page" : undefined}
+									onClick={() => navigate(route.workspaceId, "", tab)}
+								>
+									<Icon name={tab} />
+									{tab}
+									{tab === "repositories" && <span className="nav-count">{workspace?.repositories.length ?? "—"}</span>}
+								</button>
+							))}
+						</nav>
+					</>
+				)}
+				{view && (
+					<div className="current-repository">
+						<p className="nav-label">Current repository</p>
+						<button type="button" onClick={() => setFinder(true)}>
+							<Icon name="branch" />
+							<span>{view.repository.name}</span>
+							<Icon name="chevron" />
 						</button>
-					))}
-				</nav>
+						<small>{view.repository.source.kind === "local" ? "Local Git" : "Artifacts hosted Git"}</small>
+					</div>
+				)}
 				<div className="sidebar-bottom">
-					<details>
-						<summary>Create workspace</summary>
-						<Form
-							label="Create workspace"
-							submit={async (d) => {
-								const w = await mutate<Workspace>("/api/workspaces", { name: value(d, "name"), handle: value(d, "handle") });
-								setMe({ ...me, workspaces: [...me.workspaces, w] });
-								navigate(w.id);
-							}}
-						>
-							<label>
-								Name
-								<input name="name" required />
-							</label>
-							<label>
-								Workspace handle
-								<input name="handle" required pattern="[a-z0-9-]+" />
-							</label>
-						</Form>
-					</details>
-					<details>
-						<summary>{me.user.name} · Account</summary>
-						<p>{me.user.email}</p>
-						<p>Authentication: Cloudflare Access</p>
-						<a href="/auth/logout">Sign out</a>
-					</details>
+					<p className="sidebar-note">
+						Independent work.
+						<br />
+						<span>Shared direction.</span>
+					</p>
+					<button type="button" className="account-trigger" aria-label="Your account" onClick={() => navigatePage("account")}>
+						<span className="account-avatar">{me.user.name.slice(0, 1).toUpperCase()}</span>
+						<span>
+							<strong>{me.user.name}</strong>
+							<small>Account</small>
+						</span>
+						<Icon name="chevron" />
+					</button>
 				</div>
 			</aside>
 			<main id="content" tabIndex={-1}>
 				<header>
 					<div className="breadcrumb">
-						<button type="button" onClick={() => navigate(route.workspaceId)}>
-							{workspace?.workspace.handle ?? "Workspace"}
+						<button
+							type="button"
+							onClick={() =>
+								route.screen === "workspace" ? navigate(route.workspaceId) : navigatePage(route.screen as "workspaces" | "account")
+							}
+						>
+							{route.screen === "workspaces"
+								? "All workspaces"
+								: route.screen === "account"
+									? "Your account"
+									: (workspace?.workspace.handle ?? "Workspace")}
 						</button>
 						{view && (
 							<>
@@ -376,12 +465,15 @@ export function App() {
 							</>
 						)}
 					</div>
-					<span className="muted">
+					<span className="context-badge">
+						<Icon name={view ? "branch" : "lock"} />
 						{view
 							? view.repository.source.kind === "local"
 								? "Local Git · reported observations"
 								: "Artifacts hosted Git"
-							: "Private workspace"}
+							: route.screen === "workspace"
+								? "Private workspace"
+								: "Your Cruce"}
 					</span>
 				</header>
 				{error && (
@@ -393,7 +485,11 @@ export function App() {
 					</div>
 				)}
 				{notice && <p role="status">{notice}</p>}
-				{route.repositoryId ? (
+				{route.screen === "workspaces" ? (
+					<WorkspaceHome me={me} refresh={refresh} open={navigate} create={() => setOverlay("create-workspace")} />
+				) : route.screen === "account" ? (
+					<AccountPage me={me} open={navigate} />
+				) : route.repositoryId ? (
 					<>
 						<nav className="tabs" aria-label="Repository navigation">
 							{tabs.map((tab) => (
@@ -401,6 +497,7 @@ export function App() {
 									type="button"
 									key={tab}
 									className={route.tab === tab ? "selected" : ""}
+									aria-current={route.tab === tab ? "page" : undefined}
 									onClick={() => navigate(route.workspaceId, route.repositoryId, tab)}
 								>
 									{tab}
@@ -419,10 +516,50 @@ export function App() {
 										</div>
 										<div className="status-strip">
 											<span>{view.sessions.filter((s) => s.state === "active").length} active sessions</span>
-											<span>{view.overlaps.length} overlaps</span>
-											<span>{view.artifacts.length} artifacts</span>
+											<span>{count(view.overlaps.length, "overlap")}</span>
+											<span>{count(view.artifacts.length, "artifact")}</span>
+											<span>
+												{count(
+													view.sessions.filter((session) => session.actor.kind === "agent" && session.state === "active").length,
+													"agent",
+												)}{" "}
+												working
+											</span>
 										</div>
-										<h2>Active work</h2>
+										{view.proposals.some((p) => p.state === "open") && (
+											<section className="review-queue">
+												<div className="section-heading">
+													<h2>Review queue</h2>
+													<span>Exact revisions · human decisions</span>
+												</div>
+												{view.proposals
+													.filter((p) => p.state === "open")
+													.map((p) => (
+														<button
+															type="button"
+															className="review-row"
+															key={p.id}
+															onClick={() => navigate(route.workspaceId, route.repositoryId, "work", p.id)}
+														>
+															<span className="review-number">#{p.number}</span>
+															<span>
+																<strong>{p.title}</strong>
+																<small>
+																	{view.sessions.find((session) => session.id === p.sessionId)?.actor.name ?? "Session"} ·{" "}
+																	<code>{short(p.revision)}</code>
+																</small>
+															</span>
+															<span className={`readiness-badge ${view.readiness[p.id]?.ready ? "ready" : ""}`}>
+																{view.readiness[p.id]?.ready
+																	? "Ready for promotion"
+																	: (view.readiness[p.id]?.reasons[0] ?? "Readiness unavailable")}
+															</span>
+															<Icon name="arrow" />
+														</button>
+													))}
+											</section>
+										)}
+										<h2>Sessions in motion</h2>
 										<Sessions view={view} open={(id) => navigate(route.workspaceId, route.repositoryId, "work", id)} />
 										<Overlaps view={view} />
 										<div className="columns">
@@ -847,19 +984,32 @@ export function App() {
 					</>
 				) : workspace ? (
 					<>
-						<div className="page-title">
+						<div className="page-title workspace-title">
 							<div>
-								<p className="eyebrow">{workspace.workspace.kind} workspace</p>
-								<h1>{workspace.workspace.name}</h1>
+								<p className="eyebrow">Your workspace, connected</p>
+								<h1>{workspaceTab === "repositories" ? "Repositories" : workspaceTab[0].toUpperCase() + workspaceTab.slice(1)}</h1>
+								<p className="page-description">
+									{workspaceTab === "repositories"
+										? "Repositories, agent sessions, and the changes ready for your attention."
+										: `Manage ${workspaceTab} for ${workspace.workspace.name}.`}
+								</p>
 							</div>
+							{workspaceTab === "repositories" && workspace.permissions.maintain && workspace.repositories.length > 0 && (
+								<button className="primary" type="button" onClick={() => setOverlay("repository")}>
+									<Icon name="plus" />
+									New repository
+								</button>
+							)}
 						</div>
 						{workspaceTab === "repositories" && (
 							<>
-								<h2>Repositories</h2>
 								{workspace.repositories.length ? (
 									<div className="repo-list">
 										{workspace.repositories.map((r) => (
 											<button type="button" key={r.id} onClick={() => navigate(workspace.workspace.id, r.id)}>
+												<span className="repo-symbol">
+													<Icon name={r.source.kind === "local" ? "local" : "cloud"} />
+												</span>
 												<strong>{r.name}</strong>
 												<span>
 													{r.source.kind === "local" ? "Local Git" : "Artifacts"} · {r.defaultBranch}
@@ -870,12 +1020,33 @@ export function App() {
 														</small>
 													)}
 												</span>
-												<span>→</span>
+												<Icon name="arrow" />
 											</button>
 										))}
 									</div>
 								) : (
-									<Empty>No repositories yet. Open local Git to coordinate developers and agents.</Empty>
+									<section className="repository-empty">
+										<BranchArt />
+										<div className="empty-copy">
+											<span className="eyebrow">Great work starts here</span>
+											<h2>
+												Independent agents.
+												<br />
+												Connected work.
+											</h2>
+											<p>
+												No repositories yet. Bring your local Git into Cruce to coordinate developers and agents, with context that follows
+												the commit.
+											</p>
+											{workspace.permissions.maintain && (
+												<button type="button" className="primary" onClick={() => setOverlay("repository")}>
+													<Icon name="plus" />
+													New repository
+													<Icon name="arrow" />
+												</button>
+											)}
+										</div>
+									</section>
 								)}
 								{workspace.activity?.length ? (
 									<section>
@@ -895,47 +1066,27 @@ export function App() {
 										</ol>
 									</section>
 								) : null}
-								{workspace.permissions.maintain && (
-									<details>
-										<summary>New repository</summary>
-										<Form
-											label="Add repository"
-											submit={async (d) => {
-												const repo = await mutate<Repository>(`${base}/repositories`, {
-													name: value(d, "name"),
-													source: value(d, "source"),
-													defaultBranch: value(d, "branch"),
-												});
-												navigate(workspace.workspace.id, repo.id);
-											}}
-										>
-											<label>
-												Repository name
-												<input name="name" required pattern="[a-z0-9-]+" />
-											</label>
-											<label>
-												Source
-												<select name="source">
-													<option value="local">Open local repository</option>
-													<option value="artifacts">Create Artifacts repository</option>
-												</select>
-											</label>
-											<label>
-												Default branch
-												<input name="branch" defaultValue="main" required />
-											</label>
-											<p className="muted">
-												Local Git keeps its existing remote. Artifacts creation requires a connected workspace account and consumes storage
-												resources.
-											</p>
-										</Form>
-									</details>
-								)}
+								<div className="workspace-guide">
+									<div>
+										<span className="guide-number">01</span>
+										<h3>Bring your Git</h3>
+										<p>Connect a local repository or create one with Artifacts.</p>
+									</div>
+									<div>
+										<span className="guide-number">02</span>
+										<h3>Connect your agents</h3>
+										<p>Authorize a local agent connection. Each writer gets its own worktree and session.</p>
+									</div>
+									<div>
+										<span className="guide-number">03</span>
+										<h3>Review the exact change</h3>
+										<p>Inspect agent commits and evidence. Human approval controls promotion.</p>
+									</div>
+								</div>
 							</>
 						)}
 						{workspaceTab === "members" && (
 							<>
-								<h2>Members</h2>
 								{workspace.people.map((p) => (
 									<div className="record" key={p.id}>
 										<strong>{p.name}</strong> {p.email} · {workspace.members[p.id]}
@@ -988,7 +1139,6 @@ export function App() {
 						)}
 						{workspaceTab === "teams" && (
 							<>
-								<h2>Teams</h2>
 								{!workspace.teams.length && <Empty>No teams yet. Teams group workspace members for repository access.</Empty>}
 								{[...workspace.teams, { id: "", name: "", members: [] }].map((t) => (
 									<TeamForm key={t.id || "new"} team={t} workspace={workspace} save={(body) => mutate(`${base}/teams`, body)} />
@@ -1089,13 +1239,84 @@ export function App() {
 					<Empty>Loading workspace…</Empty>
 				)}
 			</main>
+			{overlay === "workspace" && (
+				<Dialog title="Switch workspace" close={() => setOverlay(undefined)} className="workspace-picker">
+					<p className="muted">Choose where you work.</p>
+					<button type="button" className="workspace-option all-option" onClick={() => navigatePage("workspaces")}>
+						<Icon name="repositories" />
+						<span>View all workspaces</span>
+						<Icon name="arrow" />
+					</button>
+					{me.workspaces.map((w) => (
+						<button className="workspace-option" type="button" key={w.id} onClick={() => navigate(w.id)}>
+							<span className="workspace-avatar">{w.name.slice(0, 1).toUpperCase()}</span>
+							<span>
+								<strong>{w.name}</strong>
+								<small>{w.kind === "personal" ? "Personal workspace" : "Shared workspace"}</small>
+							</span>
+							{route.workspaceId === w.id && <Icon name="check" />}
+						</button>
+					))}
+					<button type="button" className="create-workspace-trigger" onClick={() => setOverlay("create-workspace")}>
+						<Icon name="plus" />
+						Create workspace
+					</button>
+				</Dialog>
+			)}
+			{overlay === "create-workspace" && (
+				<Dialog title="Create workspace" close={() => setOverlay(undefined)}>
+					<p className="muted">A shared place for your team's repositories.</p>
+					<Form
+						label="Create workspace"
+						submit={async (d) => {
+							const w = await mutate<Workspace>("/api/workspaces", { name: value(d, "name"), handle: value(d, "handle") });
+							setMe({ ...me, workspaces: [...me.workspaces, w] });
+							navigate(w.id);
+						}}
+					>
+						<label>
+							Name
+							<input name="name" required placeholder="e.g. Acme engineering" />
+						</label>
+						<label>
+							Workspace handle
+							<input name="handle" required pattern="[a-z0-9-]+" placeholder="acme" />
+						</label>
+					</Form>
+				</Dialog>
+			)}
+			{overlay === "repository" && workspace?.permissions.maintain && (
+				<Dialog title="New repository" close={() => setOverlay(undefined)} className="repository-dialog">
+					<p className="muted">Add a repository to {workspace.workspace.name}.</p>
+					<Form
+						label="Add repository"
+						submit={async (d) => {
+							const repo = await mutate<Repository>(`${base}/repositories`, {
+								name: value(d, "name"),
+								source: value(d, "source"),
+								defaultBranch: value(d, "branch"),
+							});
+							navigate(workspace.workspace.id, repo.id);
+						}}
+					>
+						<SourceChoice connected={Boolean(workspace.account)} />
+						<div className="form-fields">
+							<label>
+								Repository name
+								<input name="name" required pattern="[a-z0-9-]+" placeholder="e.g. auth-service" />
+							</label>
+							<label>
+								Default branch
+								<input name="branch" defaultValue="main" required />
+							</label>
+						</div>
+					</Form>
+				</Dialog>
+			)}
+
 			{finder && (
-				<div className="modal-backdrop">
-					<section
-						role="dialog"
-						aria-modal="true"
-						aria-label="Find repository"
-						className="finder"
+				<Dialog title="Find repository" close={() => setFinder(false)} className="finder">
+					<fieldset
 						onKeyDown={(e) => {
 							if (e.key === "ArrowDown" || e.key === "ArrowUp") {
 								e.preventDefault();
@@ -1116,24 +1337,289 @@ export function App() {
 								placeholder="workspace/repository"
 							/>
 						</label>
+						{finderLoading && <p className="muted">Finding repositories…</p>}
+						{finderError && (
+							<div role="alert">
+								{finderError}
+								<button type="button" onClick={reload}>
+									Retry
+								</button>
+							</div>
+						)}
+						{!finderLoading &&
+							!finderError &&
+							!catalog.some((r) => `${r.workspace.handle}/${r.repository.name}`.toLowerCase().includes(search.toLowerCase())) && (
+								<p className="muted">No matching repositories.</p>
+							)}
 						{catalog
-							.filter((r) => `${r.workspace.handle}/${r.repository.name}`.includes(search.toLowerCase()))
+							.filter((r) => `${r.workspace.handle}/${r.repository.name}`.toLowerCase().includes(search.toLowerCase()))
 							.map((r) => (
 								<button type="button" key={r.repository.id} onClick={() => navigate(r.workspace.id, r.repository.id)}>
 									{r.workspace.handle}/{r.repository.name}
 								</button>
 							))}
-						<button type="button" onClick={() => setFinder(false)}>
-							Close
-						</button>
-					</section>
-				</div>
+					</fieldset>
+				</Dialog>
 			)}
 		</div>
 	);
 }
+function WorkspaceHome({
+	me,
+	refresh,
+	open,
+	create,
+}: {
+	me: { user: User; workspaces: Workspace[] };
+	refresh: number;
+	open: (workspaceId: string, repositoryId?: string) => void;
+	create: () => void;
+}) {
+	const [spaces, setSpaces] = useState<Record<string, WorkspaceView>>({}),
+		[failures, setFailures] = useState<Record<string, string>>({}),
+		[loading, setLoading] = useState(true),
+		[retry, setRetry] = useState(0),
+		[filter, setFilter] = useState("");
+	useEffect(() => {
+		void refresh;
+		void retry;
+		const controller = new AbortController();
+		setLoading(true);
+		setSpaces({});
+		setFailures({});
+		let sequence = 0;
+		const load = async () => {
+			const ticket = ++sequence;
+			await Promise.all(
+				me.workspaces.map(async (w) => {
+					try {
+						const result = await request<WorkspaceView>(`/api/workspaces/${w.id}`, undefined, "GET", controller.signal);
+						if (!controller.signal.aborted && ticket === sequence) {
+							setSpaces((current) => ({ ...current, [w.id]: result }));
+							setFailures((current) => {
+								const next = { ...current };
+								delete next[w.id];
+								return next;
+							});
+						}
+					} catch (e) {
+						if (!controller.signal.aborted && ticket === sequence) {
+							setFailures((current) => ({ ...current, [w.id]: (e as Error).message }));
+							setSpaces((current) => {
+								const next = { ...current };
+								delete next[w.id];
+								return next;
+							});
+						}
+					}
+				}),
+			);
+			if (!controller.signal.aborted && ticket === sequence) setLoading(false);
+		};
+		void load();
+		const timer = setInterval(() => void load(), 15000);
+		return () => {
+			controller.abort();
+			clearInterval(timer);
+		};
+	}, [me.workspaces, refresh, retry]);
+	const motion = Object.values(spaces)
+		.flatMap((w) =>
+			(w.repositorySummaries ?? [])
+				.filter((summary) => summary.active > 0 || summary.overlaps > 0)
+				.map((summary) => ({ ...summary, workspace: w.workspace, repository: w.repositories.find((r) => r.id === summary.id) })),
+		)
+		.filter((row) => row.repository);
+
+	const matches = me.workspaces.filter((w) =>
+		`${w.name} ${w.handle} ${spaces[w.id]?.repositories.map((r) => r.name).join(" ") ?? ""}`.toLowerCase().includes(filter.toLowerCase()),
+	);
+	return (
+		<>
+			<div className="page-title home-title">
+				<div>
+					<p className="eyebrow">All workspaces</p>
+					<h1>
+						Agent work.
+						<br />
+						<span>Shared direction.</span>
+					</h1>
+					<p className="page-description">Follow agent sessions across repositories. Inspect the commit. Decide what moves forward.</p>
+				</div>
+				<button type="button" className="primary" onClick={create}>
+					<Icon name="plus" />
+					Create workspace
+				</button>
+			</div>
+			<div className="home-toolbar">
+				<p>
+					<strong>{me.workspaces.length}</strong> workspaces <span className="toolbar-dot">/</span>{" "}
+					<strong>{loading ? "—" : Object.values(spaces).reduce((n, w) => n + w.repositories.length, 0)}</strong> repositories
+					{Object.keys(failures).length > 0 && <small>Counts include available workspaces.</small>}
+				</p>
+				<label className="workspace-search">
+					<Icon name="search" />
+					<input
+						aria-label="Filter workspaces"
+						placeholder="Find a workspace or repository…"
+						value={filter}
+						onChange={(e) => setFilter(e.target.value)}
+					/>
+				</label>
+			</div>
+			{!filter && motion.length > 0 && (
+				<section className="motion-panel">
+					<div className="section-heading">
+						<div>
+							<p className="eyebrow">Across your workspaces</p>
+							<h2>Work in motion</h2>
+						</div>
+						<span className="observed-label">
+							<span className="presence active" />
+							Reported activity
+						</span>
+					</div>
+					{motion.map((row) => (
+						<button
+							type="button"
+							key={`${row.workspace.id}/${row.id}`}
+							className="motion-row"
+							onClick={() => open(row.workspace.id, row.id)}
+						>
+							<Icon name="branch" />
+							<span>
+								<strong>{row.repository!.name}</strong>
+								<small>{row.workspace.name}</small>
+							</span>
+							<span className="motion-count">{row.active} active sessions</span>
+							<span className="surface-count">{count(row.overlaps, "shared surface")}</span>
+							<Icon name="arrow" />
+						</button>
+					))}
+				</section>
+			)}
+			<div className="workspace-grid">
+				{matches.map((w, index) => {
+					const data = spaces[w.id];
+					return (
+						<section className={`workspace-card ${w.kind}`} key={w.id}>
+							<div className="workspace-card-top">
+								<span className="workspace-avatar">{w.name.slice(0, 1).toUpperCase()}</span>
+								<span className="space-kind">{w.kind === "personal" ? "Personal" : "Shared"}</span>
+								<span className="space-index">{String(index + 1).padStart(2, "0")}</span>
+							</div>
+							<button className="workspace-card-title" type="button" onClick={() => open(w.id)}>
+								<h2>{w.name}</h2>
+								<Icon name="arrow" />
+							</button>
+							<p className="workspace-handle">/{w.handle}</p>
+							<div className="workspace-card-body">
+								{failures[w.id] ? (
+									<div role="alert">
+										<p>{failures[w.id]}</p>
+										<button type="button" onClick={() => setRetry((n) => n + 1)}>
+											Retry
+										</button>
+									</div>
+								) : data ? (
+									<>
+										<p className="workspace-card-meta">
+											{data.repositories.length} repositories <span>· {data.role}</span>
+										</p>
+										{data.repositories.length ? (
+											data.repositories.slice(0, 3).map((r) => (
+												<button className="home-repo" key={r.id} type="button" onClick={() => open(w.id, r.id)}>
+													<Icon name={r.source.kind === "local" ? "local" : "cloud"} />
+													<span>{r.name}</span>
+													<Icon name="arrow" />
+												</button>
+											))
+										) : (
+											<p className="workspace-card-empty">
+												A clean slate for your agents.
+												<br />
+												Open this workspace to add your first repository.
+											</p>
+										)}
+									</>
+								) : (
+									<p className="muted">Loading repositories…</p>
+								)}
+							</div>
+							<button className="open-workspace" type="button" onClick={() => open(w.id)}>
+								Open workspace
+								<Icon name="arrow" />
+							</button>
+						</section>
+					);
+				})}
+			</div>
+			{!matches.length && <Empty>No matching workspaces. Try a workspace name, handle, or repository.</Empty>}
+			<div className="home-footer">
+				<Icon name="branch" />
+				<p>
+					Agents work independently. Context stays connected.<span>Isolated worktrees. Exact revisions. Human decisions.</span>
+				</p>
+			</div>
+		</>
+	);
+}
+function AccountPage({ me, open }: { me: { user: User; workspaces: Workspace[] }; open: (workspaceId: string) => void }) {
+	return (
+		<>
+			<div className="page-title workspace-title">
+				<div>
+					<p className="eyebrow">Your corner of Cruce</p>
+					<h1>Your account</h1>
+					<p className="page-description">Your identity and the places you belong.</p>
+				</div>
+			</div>
+			<div className="account-layout">
+				<section className="profile-panel">
+					<div className="profile-cover">
+						<Icon name="branch" />
+					</div>
+					<div className="profile-content">
+						<span className="account-avatar">{me.user.name.slice(0, 1).toUpperCase()}</span>
+						<h2>{me.user.name}</h2>
+						<p>{me.user.email}</p>
+						<span className="identity-badge">
+							<Icon name="check" />
+							Authenticated with Cloudflare Access
+						</span>
+						<p className="muted">
+							Your account identity is managed by your sign-in provider. Workspace access is managed separately in each workspace.
+						</p>
+						<a className="sign-out" href="/auth/logout">
+							Sign out
+							<Icon name="arrow" />
+						</a>
+					</div>
+				</section>
+				<section className="account-memberships">
+					<p className="eyebrow">Workspace access</p>
+					<h2>A place in every workspace.</h2>
+					<p className="muted">Repository permissions follow your current workspace membership and repository grants.</p>
+					{me.workspaces.map((w) => (
+						<button className="membership-row" type="button" key={w.id} onClick={() => open(w.id)}>
+							<span className="workspace-avatar">{w.name.slice(0, 1).toUpperCase()}</span>
+							<span>
+								<strong>{w.name}</strong>
+								<small>{w.kind === "personal" ? "Personal workspace" : "Shared workspace"}</small>
+							</span>
+							<Icon name="arrow" />
+						</button>
+					))}
+				</section>
+			</div>
+		</>
+	);
+}
+
 function Sessions({ view, open, all = false }: { view: RepositorySnapshot; open: (id: string) => void; all?: boolean }) {
-	const sessions = view.sessions.filter((s) => all || ["active", "preparing", "disconnected"].includes(s.state));
+	const sessions = view.sessions
+		.filter((s) => all || ["active", "preparing", "disconnected"].includes(s.state))
+		.sort((a, b) => Number(b.actor.kind === "agent") - Number(a.actor.kind === "agent"));
 	return sessions.length ? (
 		<div className="session-list">
 			{sessions.map((s) => (
@@ -1141,7 +1627,7 @@ function Sessions({ view, open, all = false }: { view: RepositorySnapshot; open:
 					<span className={`presence ${s.state}`} />
 					<span>
 						<strong>{s.actor.name}</strong>
-						<small>{s.actor.kind}</small>
+						<small className={`actor-kind ${s.actor.kind}`}>{s.actor.kind}</small>
 					</span>
 					<span>
 						{s.title}

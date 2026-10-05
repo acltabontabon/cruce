@@ -26,11 +26,13 @@ export async function fixture() {
 	let counter = 0;
 	const next = () => `fixture-${++counter}`;
 	const directory = new DirectoryController({ users: [], workspaces: [] }, FIXED_TIME, next),
-		user = directory.login("fixture", "cris", "cris@example.com"),
-		actor: Actor = { id: user.id, userId: user.id, name: "Cris", kind: "human" };
+		user = directory.login("fixture", "alex", "alex@example.com"),
+		actor: Actor = { id: user.id, userId: user.id, name: "Alex Morgan", kind: "human" };
+	user.name = "Alex Morgan";
 	const personal = directory.state.workspaces[0],
-		shared = directory.create(user, { handle: "maya", name: "Maya" }, "maya"),
+		shared = directory.create(user, { handle: "fernloop", name: "Fernloop" }, "fernloop"),
 		workspaces = new Map([personal, shared].map((w) => [w.id, new WorkspaceController(initialWorkspace(w), FIXED_TIME)]));
+	personal.name = "Alex Morgan";
 	const repository: Repository = {
 		id: "payments",
 		workspaceId: shared.id,
@@ -109,7 +111,16 @@ export async function fixture() {
 					Object.assign(w.state.workspace, directory.rename(w.state.workspace.id, body));
 					return json(res, w.state.workspace);
 				}
-				return json(res, { ...w.state, role: a.role, people: [user], permissions: { maintain: true, owner: true } });
+				const repositorySummaries = w.state.repositories.map((r) => {
+					const snapshot = runtimes.get(r.id)!.snapshot({ ...a, repositoryId: r.id, repositoryRole: "maintain" });
+					return {
+						id: r.id,
+						active: snapshot.sessions.filter((session) => session.state === "active").length,
+						overlaps: snapshot.overlaps.length,
+						latestArtifact: snapshot.artifacts.at(-1),
+					};
+				});
+				return json(res, { ...w.state, repositorySummaries, role: a.role, people: [user], permissions: { maintain: true, owner: true } });
 			}
 			if (parts[3] === "teams") {
 				w.team(a, body.id, body.name, body.members);

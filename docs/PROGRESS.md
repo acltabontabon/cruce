@@ -196,3 +196,20 @@ Short, dated entries so another agent can continue. Newest last.
 - Deployed the foundation test Worker (`efdce200-c1de-4d68-a8a6-6b98c3850ba5`), retired ProjectDirectory and detached the obsolete queue consumer. Verified Access personal provisioning in the live console. Real Artifacts publication/fork/fetch/retention passed in `cruce-check-muuga1hc`, exact commit `3e72f788d0e6a8f4b1851277e6ae296c7fbbab78`. Successful Workers Builds deployment remains unverified pending a test Worker/build connection; no production deployment was performed.
 
 - Final test deployment: `2d7cbe7d-bdcd-48f1-b21e-4cd7324d9314`. Final suite: 69 unit/integration tests, eight browser journeys, typecheck/lint and deterministic scenario passed. Live discovery/authentication checks confirm public metadata and denial of unsigned MCP/forged human bridge requests. Removed the completed namespace-retirement marker; changes remain uncommitted.
+
+### 2026-10-05 — agent-native console redesign
+
+- Reimagined the console with a dark navigation rail, warm canvas, lime accents, a Git branch motif, and a consistent responsive component vocabulary. Added a separate all-workspaces home with search, repository shortcuts and reported activity across workspaces, plus a dedicated account page.
+- Brought agent sessions, isolated work and exact-revision human decisions forward. Repository overview now includes controller-derived review readiness and distinguishes agent actors; global activity refreshes with cancellation and late-response protection.
+- Replaced the workspace/source dropdowns and persistent sidebar creation forms with a workspace chooser and focused, keyboard-accessible dialogs. Retained cloud setup/cost disclosure, controller permissions, repository tabs, deep links and Back navigation. Previews use fictional Fernloop and Alex Morgan identities.
+- Validation passed: typecheck, lint, 69 unit/integration tests, 11 browser journeys, deterministic scenario verification and offline production build. Visually checked desktop/mobile home, repository, account and creation flows. Existing working changes preserved; no cloud deployment or commit performed.
+
+### 2026-10-05 — repository finder close-button fix
+
+- Removed an obsolete finder selector that applied full-width result-row styling to the dialog's close button. Result styles remain scoped to the finder fieldset; the close control renders at 38 × 38 px beside the title.
+- Verified the visible dialog in the browser; formatting/lint, diff checks and all 11 browser journeys passed. No deployment or commit performed.
+
+### 2026-10-05 — console redesign commit verification
+
+- Isolated the console redesign and finder fix from concurrent session-update work, including overlapping UI edits. Prepared only the six console, fixture and progress files against the committed foundation.
+- Typecheck, lint, 69 unit/integration tests, 11 browser journeys, deterministic scenario verification and offline build passed for the isolated snapshot.
