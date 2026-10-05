@@ -1,102 +1,99 @@
 # Product thesis
 
-[Documentation map](../README.md#documentation-map) · [Principles](principles.md) · [Architecture](architecture.md)
+[Documentation map](../README.md#documentation-map) · [Principles](principles.md) · [Architecture and audit](architecture.md)
 
-Cruce's product goal is to act as air traffic control for multiple coding agents from different vendors working on one repository: proactively coordinate their work to reduce avoidable conflicts, duplicated effort and routine human intervention. Agents keep using their own tools; Cruce provides shared repository context and coordination across them.
+Cruce is a **Git-native coordination and convergence layer for concurrent coding agents**.
 
-This is a direction to validate, not a claim that proactive control exists today. The implemented foundation provides isolated workspaces, cooperative observations and exact-revision review and convergence. Intent tracking, coordination decisions, acknowledgements and supported pause/resume controls are proposed in the [roadmap](../ROADMAP.md).
+**Git records what happened. Cruce coordinates what is happening.** This describes the intended division of responsibility, not a claim that Git lacks collaboration features or that Cruce already observes every participant.
 
-The initial evaluation setting is one developer, one repository and two agents: Codex and Claude Code, subject to demonstrated integration support. Cursor and other clients fit the same model. Shared namespaces and multiple repositories remain supported; neither is a prerequisite for proving the coordination benefit.
+Developers keep Claude Code, Codex, Cursor, Copilot or other Git-aware agents wherever those tools already run. Cruce gives their independent workspaces shared awareness, preserves exact Git provenance, surfaces convergence risks while work is happening, and provides a human-governed path into canonical source. Cruce never launches those agents or owns their conversations.
+
+The first audience is one developer using Codex and Claude Code on one repository. Configuration writers exist for Codex, Claude Code and Cursor; actual heterogeneous participation and useful context consumption remain unverified. The working name remains provisional.
 
 ## The problem above isolation
 
-An individual agent can use worktrees to separate its own tasks. That protects working files, but it does not establish a common record of intended outcomes, dependencies, changing assumptions or accepted source across independently authorized tools, machines and successive participants. A developer still has to discover what is happening, prevent duplicate effort, relay upstream changes, reconstruct what was tested and decide what can converge safely. Cruce is useful only if sharing this context changes agents' work early enough to save more effort than participation costs.
+Branches, worktrees and forks already isolate changes. They do not, by themselves, tell independent participants which current assumptions, uncommitted changes or intended outcomes interact. The developer can still become a relay for upstream movement, duplicated work, review evidence and reconciliation decisions.
 
-Cruce starts where individual-agent isolation ends. Its useful unit is concurrent repository work, independent of which agent vendor performs it. An authorized agent can participate in several workspaces; each workspace belongs to one actor, and each writer workspace owns one reusable direct fork of canonical. Local execution contexts materialize that durable work in worktrees or clones. There is no permanent fork per vendor and no privileged coordinating agent.
+Cruce must save more effort than participation costs. Its value is the complete lifecycle: durable workspace identity → in-flight awareness → exact source → intentional reconciliation → revision-bound review → human-approved canonical promotion → continuing writers incorporating accepted source.
 
-File overlap is only one clue. Two agents can change independent functions in the same file and both continue. Conversely, a Codex participant can change an authentication contract while a Claude Code participant updates a caller against the previous contract: the patches may share no paths and merge cleanly while behavior is wrong. Two agents can also implement the same outcome in different places, wasting effort without a textual conflict. An explicit dependency on another agent's result may justify sequencing only the dependent activity, while useful independent work continues.
+Shared paths are advisory evidence. Two agents can safely edit different functions in the same file; changes to an API and its caller can be incompatible without sharing a path. A clean merge does not prove correct behavior. Deterministic Git evidence comes first; declared intent and structural context can enrich it without claiming perfect semantic detection.
 
-Cruce currently exposes reported path overlap, accepted-source updates and exact source/evidence under review. It does not classify these examples reliably, infer every dependency or force an agent to consume context. No future classifier can guarantee prevention of every conflict or prove behavioral compatibility.
+## What exists today
 
-| Need | Implemented mechanism | Evidence boundary | Gap / proposed capability |
-| --- | --- | --- | --- |
-| Know who is working and where | Actor-bound workspaces, title/context, presence and reported paths | Local controller/bridge coverage; real heterogeneous participation remains unverified | Titles/context are not structured intent, dependency or progress tracking; heartbeat freshness does not prove report freshness |
-| Recognize meaningful interference early | Advisory changed-path overlap and upstream revision inspection | Local coverage includes renames and binary paths; active overlap excludes disconnected writers | Intent, assumptions and dependency context; distinguish independent edits, duplication and incompatible work, with uncertainty |
-| Keep useful work moving | Participants inspect context and choose their next action | Configuration writers exist for Codex, Claude Code and Cursor; useful context consumption is unproven | Decision delivery, acknowledgement and scoped sequencing; no current pause/resume control |
-| Reconcile independent results | Normal Git fetch/merge, retained source and fresh publication | Local Git/controller checks; current hosted reconciliation and two-agent journey remain pending | Visible follow-through on incorporation and verification; receiving or fetching an update proves neither |
-| Decide what lands | Exact-revision reviews, evidence, readiness and human-authorized promotion | Local checks; current live gateway/promotion remains unverified | Preserve deliberate human review while reducing routine coordination; passing checks do not guarantee correctness |
-| Recover published work | Retained commits, source artifacts and provenance | Local coverage and historical provider evidence for an older implementation | Improve discovery/handoff; uncommitted files and full agent conversations are not retained |
+| Capability | Current implementation | Important limit |
+| --- | --- | --- |
+| Durable participation | Actor-owned workspaces, immutable starting revisions, dedicated local execution contexts and reusable direct canonical forks | Process presence is separate from durable ownership; attachment is not arbitrary repository import |
+| Shared awareness | Cooperative path/commit reports, active presence, path overlap and accepted-source comparison | Report freshness shares an activity clock with heartbeats; no independently observed latest-push field or event ingestion |
+| Source convergence | Standard Git, exact pushed-revision retention, ancestry checks and fresh proposals after integration | Reconciliation is performed by participants; no structured multi-input reconciliation record |
+| Review and promotion | Exact candidate reviews, reasoned concerns, evidence readiness and human-only promotion | Expected-base race and provider-identity gaps remain; see the [architecture findings](architecture.md#architecture-contradictions-and-correctness-gaps) |
+| Provenance and retention | Workspace, source/evidence artifact, proposal and promotion lineage; guarded fork cleanup | Retention proves recoverable source, not correctness; cache recovery and complete interruption recovery need work |
 
-The [verification guide](local-verification.md) owns dated evidence and limits. Implementation, local verification, historical provider checks and current live interoperability are separate claims.
-
-## Boundaries
-
-Cruce’s responsibility ends when isolated concurrent work is safely reviewed and reconciled into the canonical Git repository. CI, build/release orchestration, deployment, environment management, rollback and runtime operation belong to external systems.
-
-| Cruce is not… | Consequence for the design |
-| --- | --- |
-| A replacement for Git or Git worktrees | Reuse Git commits, branches, history, diffs, merges and checkout isolation |
-| A Claude Code worktree manager | Coordinate independent tools through a common repository model; client-specific setup is an adapter |
-| A GitHub or GitLab clone | Hosting exists to support isolated work and exact source; do not expand into a general forge |
-| A remote IDE or cloud coding environment | Editing and agent execution remain in participants' existing environments |
-| An AI agent runtime | Do not launch agents, select their models or own their conversations |
-| A generalized agent orchestration platform | Limit coordination to interacting repository work; no general task scheduler, mandatory plans, autonomous delegation or workflow engine |
-| A CI/CD, deployment or runtime platform | Record revision-linked review evidence; external systems own builds, releases, environments, deployment, rollback and runtime operation |
-| Another command language over Git | Use Git for source transport and manipulation; Cruce operations add coordination meaning |
-| A requirement to abandon normal Git workflows | Preserve existing remotes and require explicit publication; ordinary local editing needs no Cruce clearance |
-
-Normal Git does not mean unrestricted writes to every remote. The current architecture requires authoritative canonical Git storage backed by Cloudflare Artifacts and protects its accepted branch through human-reviewed promotion. Writers push normally into their own forks. GitHub/GitLab integrations and local-only canonical hosting are outside the current foundation. An arbitrary existing checkout is not automatically imported or identified by its remote URL.
-
-Repository-specific sequencing recommendations and opt-in scoped pause/resume through supported integrations fit the intended boundary. They do not grant Cruce ownership of an agent runtime or require scheduling clearance for ordinary local edits. Current overlap remains advisory. Existing enforced controls concern authority, checkout isolation, resources, publication and promotion; they do not stop arbitrary agent execution. Future controls must state which client actions they can actually constrain and how that is observed. Unsupported clients remain advisory.
+The strongest implemented distinction is this combination across independently authorized participants, rather than any individual Git feature. The real-Artifacts convergence scenario demonstrates exact retention and repaired convergence with fixture authority. It does not establish deployed OAuth publication, authenticated browser approval, actual two-tool consumption or saved human effort. The [verification record](local-verification.md) distinguishes these claims, including the newer consent defect and provider-token replay evidence.
 
 ## The coordination loop
 
-The intended loop builds on the current foundation; the proposed steps below are not available behavior today.
-
 ```mermaid
 flowchart TB
-    W[Current: authorized isolated workspaces] --> I
-    subgraph Proposed[Proposed proactive coordination]
-        I[Report fresh intent, dependencies and progress] --> A[Assess meaningful interference]
-        A -->|Independent work| C[Continue useful work]
-        A -->|Clear interference or dependency| D[Deliver scoped decision and release condition]
-        A -->|Ambiguous requirements or competing designs| H[Developer decision]
-        D --> R[Acknowledge, decline with reasons or report inability]
-        R -->|Agreed action| C
-        R -->|Unresolved or consequential nonresponse| H
-        H -->|Resolved direction| I
-        R -.->|Opt-in supported integration only| P[Observe scoped pause and resume]
-        P -->|Release condition met| C
-        C -->|Progress, scope change or reconnect| I
-    end
-    C --> V[Current: publish exact source and evidence]
-    V --> G[Current: human review, readiness and canonical recheck]
-    G -->|Explicit non-forced promotion| K[Accepted canonical revision]
-    K --> F[Other continuing writers: fetch, incorporate and verify]
-    F -->|Fresh publication and review| V
-    F -.->|Proposed incorporation follow-through| I
+    W[Independent agents in durable writer workspaces] --> O[Current: reported work and canonical context]
+    O -.-> E[Proposed: observed pushes and fresh convergence evidence]
+    E -.-> I[Participants inspect reasons and choose how to proceed]
+    O --> G[Normal Git commits, push and explicit reconciliation]
+    I -.-> G
+    G --> P[Current: retain exact revision and evidence]
+    P --> R[Current: human review and readiness]
+    R --> C[Current: explicit non-forced canonical promotion]
+    C --> F[Continuing writers fetch, incorporate and verify]
+    F --> G
 ```
 
-The proposed response loop does not establish enforcement by itself. Only a demonstrated, opted-in integration can constrain a specified action; unsupported clients remain advisory. Source review and promotion retain their current authority requirements.
+Solid arrows describe implemented mechanisms, subject to the audit's correctness and verification limits. Dashed arrows describe the next product capabilities. Neither reading nor fetching proves incorporation. A changed candidate needs fresh evidence and review; approval concerns a revision, not an entire moving workspace.
 
-1. **Implemented — join and isolate.** A human authorizes independent participants against a stable repository ID. Writers start from exact commits in dedicated worktrees or clones, keeping the immutable starting revision and durable workspace identity.
-2. **Proposed — report intent and progress.** Participants describe intended outcomes, relevant code areas, assumptions, dependencies and useful independent work. Refresh bounded reports when scope or progress changes; ordinary editing does not require a mandatory plan or clearance.
-3. **Implemented observation; proposed assessment.** Participants can inspect other work, advisory paths and upstream changes. Cruce would combine fresh intent and available source context to flag meaningful interference before avoidable work accumulates, without treating every shared file as a conflict.
-4. **Proposed — decide, deliver and acknowledge.** Cruce would automatically recommend continuing, sequencing, a targeted pause or already identified independent work when the evidence and agreed policy are clear. An agent would receive decisions through a supported checkpoint/integration, acknowledge the applicable decision, decline with reasons or report inability to comply. Ambiguous requirements, competing design choices and unresolved conflicts go to the developer. Delivery, acknowledgement, reported action and observed enforcement remain distinct.
-5. **Proposed — adapt while work continues.** Reassess affected advice after scope changes. Stale reports reduce confidence; a live connection alone cannot refresh intent. A missing acknowledgement or disconnect cannot be treated as compliance or permission to reuse a locked checkout. Reconnection requires refreshed context. A dependent activity may wait while independent work continues. The [roadmap interaction contract](../ROADMAP.md#proposed-interaction-contract) defines the required limits.
-6. **Implemented — publish, review and promote.** Writers commit and push with Git, then publish exact retained source and revision-specific evidence. Human approval, controller readiness, checks against current canonical source and an explicit non-forced Git update are required for promotion. Cruce does not execute the reported tests or automate all review.
-7. **Implemented participant responsibility; proposed follow-through tracking.** Other continuing writers explicitly fetch and incorporate accepted source with Git, resolve incompatibilities, verify the resulting revision and publish a fresh result for review. Receiving, acknowledging or fetching an update is insufficient. Preserve original workspace bases, published ancestry, earlier artifacts and reviews; a new revision requires fresh evidence and review.
+Convergence-first means timely, explainable awareness and deliberate integration are the proof of product. Structured intent and explicit responses should reduce ambiguity when useful. Automatic sequencing and opt-in pause/resume are exploratory, not prerequisites. Any later controls need meaningful interference, a supported action boundary, opt-in, safe release and a human override. Delivery, acknowledgement and observed action remain separate facts.
 
-The console supports understanding work and making decisions: Overview, Code, Work and Settings. Published revisions live in Code; revision evidence accompanies changes and workspaces in Work. Namespace membership and account configuration have their own scope. Coding chat, an editor and intake forms do not belong in this flow.
+## Why Git/GitHub alone may be enough
 
-## What must be proven
+Git supplies source history, transport, ancestry, diffs and integration. GitHub adds review, policy, checks and agent management. For independent tasks or a developer already satisfied with worktrees and PR review, Cruce may add more setup and reporting than value.
 
-The hypothesis is fewer routine human interventions, less duplicated work and less integration rework, without excessive delay, reporting burden or loss of quality. Deliberate review and design decisions remain valuable human work. More agents, status panels, acknowledgements or hosted forks are not evidence of value. A developer whose tasks are already independent, or whose tools already coordinate adequately, may gain little.
+Cruce's hypothesis is narrower: a durable cross-tool account of in-flight work and accepted-source movement can prevent avoidable rework before integration, while preserving inspectable review provenance afterward. This must be measured against existing workflows. Heterogeneous agents alone are not a moat.
 
-Compare matched tasks with Codex and Claude Code using ordinary isolated worktrees and Git review against Cruce. Include independent same-file edits, duplicated outcomes, cross-file incompatibility, explicit dependencies, scope drift, disconnect/recovery, ignored advice and canonical advancement. Measure routine intervention count/time separately from review, duplicated effort, integration rework, completion time, unnecessary waiting, report effort, setup/resource cost, missed interference, false alarms and quality.
+## Why Cloudflare and Artifacts
 
-Predeclare improvement targets and acceptable overhead before evaluating results. Agents must demonstrably consume and act on relevant context; generated configuration or successful MCP registration is insufficient. If useful coordination depends on a human relaying every notice, the automation hypothesis has not passed. If overhead outweighs saved effort, simplify, narrow the product or stop expansion. Required Cloudflare canonical setup is part of that cost, not a free prerequisite. The [roadmap evaluation criteria](../ROADMAP.md#how-we-choose-what-to-build) own the pilot requirements.
+Cloudflare is the intentional primary deployment platform. Workers host authentication, API/MCP and the Git gateway. Existing SQLite Durable Objects own identity, namespace authority/budgets and repository coordination. Artifacts supplies canonical Git, direct workspace forks, scoped credentials and retained source; Cruce supplies their coordination meaning. This avoids operating a custom Git hosting service.
 
-## Open questions and integration requirements
+Artifacts is already foundational to isolation and retention, but underused for activity observation and lightweight inspection. The next advantage would be verified event-driven observations feeding explainable coordination, with recovery when delivery is incomplete. APIs/bindings can reduce unnecessary object-cache work where their semantics and connected-account authority fit. [Architecture decisions](architecture.md#cloudflare-capability-fit) explain why neither every Cloudflare service nor an immediate binding migration is justified.
 
-The [roadmap](../ROADMAP.md#open-questions-and-integration-requirements) owns the unresolved decisions: reliable delivery and safe checkpoints in each client, evidence of enforcement, minimum useful reporting, policy for automatic decisions and human overrides, pilot thresholds, and adoption friction from mandatory canonical hosting. These must be resolved through implementation design and actual participant evidence before claiming proactive cross-vendor control. They do not relax existing review, identity or retention requirements.
+Using Cloudflare or Artifacts is not exclusive differentiation. Requiring a connected resource account and a new canonical remote is an adoption cost. Cruce must earn that cost through the complete lifecycle.
+
+## Competitive risks
+
+Primary documentation checked on **2026-10-06**. These are documented capabilities, not hands-on comparative verification or proof that a competitor lacks an undocumented feature. The implications are Cruce's assessment.
+
+| Alternative | Documented capability | Implication for Cruce |
+| --- | --- | --- |
+| Git and GitHub | [Git worktrees](https://git-scm.com/docs/git-worktree) provide separate working trees; [GitHub merge queues](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/managing-a-merge-queue) validate changes against the latest target and queued work | Isolation, review and integration checks are a strong baseline with less hosting change |
+| GitHub agents | [Third-party coding agents](https://docs.github.com/en/copilot/concepts/agents/about-third-party-coding-agents) include Claude and Codex alongside Copilot | “Multiple vendors” is already available in an established forge; independent native-tool participation must add measurable value |
+| Codex | [Worktrees](https://learn.chatgpt.com/docs/environments/git-worktrees) support parallel chats on the project's computer or remote environment; [remote engineering](https://developers.openai.com/blog/mastering-codex-remote-for-engineering) includes steering and review | Native isolation and supervision already exist; Cruce must justify an additional shared repository layer |
+| Cursor | [Worktrees](https://cursor.com/docs/configuration/worktrees) isolate agent tasks and support review, commits and PRs | Parallel work and its review path are not differentiation |
+| Claude Code Agent Teams | [Experimental teams](https://code.claude.com/docs/en/agent-teams) support shared tasks, messaging and a coordinating lead | Coordination itself is not unique; Cruce should preserve independence from runtime ownership and show value across tools |
+| Conductor | [Conductor](https://www.conductor.build/docs) runs Claude Code, Codex, Cursor and OpenCode with task workspaces and review/PR/merge flows | A particularly close substitute; workspaces plus multiple agents plus review is insufficient positioning |
+| GitButler | [Parallel agents](https://docs.gitbutler.com/ai-agents/parallel-agents) organize independent branches within one shared working directory, with explicit dependency handling | Lower local setup overhead competes with Cruce's isolation cost; the shared-filesystem tradeoff differs from Cruce's writer model |
+| Graphite / merge queues | [Graphite's queue](https://graphite.com/docs/graphite-merge-queue) handles stacked PR integration and validation | Cruce should focus on earlier awareness; do not duplicate integration queues or imply passing checks guarantee semantic correctness |
+| MCP/file-claim tools | [MCP Agent Mail](https://github.com/Dicklesworthstone/mcp_agent_mail) documents messaging, acknowledgements, advisory path leases and optional commit guards | Lightweight cross-tool coordination already exists without moving canonical storage; a generic inbox or file claim is not a moat |
+
+The largest risks are adoption friction, agents ignoring context, sparse/noisy observations, platform limits and incumbents bundling enough coordination. Better provenance without earlier saved work may justify a narrower product, but not the full thesis by itself.
+
+## Boundaries
+
+Cruce is not a Git replacement, general forge, IDE, coding chat, agent runtime/launcher, agent scheduler, CI/CD system, deployment platform or perfect semantic-conflict detector. Its responsibility ends at reviewed canonical Git. Participants and external systems run tests, builds, releases and applications. Analysis never grants authority, and ordinary editing needs no scheduling clearance.
+
+The hierarchy remains **Namespace → Repository → Workspace**. ExecutionContext is local materialization, not workspace identity. Git authors, labels and remote URLs do not establish authority. Human approval remains required before promotion; automated acceptance is outside this target.
+
+GitHub is a possible connected external provider, not a second canonical authority. Onboarding, external fetch, divergence inspection, reconciliation and publishing must be explicit. The roadmap gates this integration on adoption evidence and a documented authority model; it is not implemented.
+
+## Proof before expansion
+
+Run matched trials with one developer, one repository and real independently authorized Codex and Claude Code clients. Compare ordinary worktrees/Git review against Cruce, keeping tasks, tools and checks comparable. Include independent overlap, stale canonical, cross-file assumptions, behavioral merge failure, fresh review and retention after cleanup.
+
+Predeclare trial counts, numerical benefit thresholds and overhead limits. Measure routine coordination time, manual relays, duplicated work, integration rework, delay, setup/reporting effort, false alarms, misses, hosting/agent cost and resulting quality. Count deliberate review separately. A manually relayed demo can test advice quality but cannot prove automated awareness or reduced intervention.
+
+Continue only when repeated trials show net benefit. Narrow the product if value concentrates in upstream awareness or recovery; simplify if reporting or hosting costs dominate. The [roadmap](../ROADMAP.md#how-we-choose-what-to-build) owns acceptance priorities. The current recommendation is **CONTINUE WITH ARCHITECTURAL CORRECTIONS**: a credible convergence foundation, with safety gaps and an unproven in-flight value proposition.

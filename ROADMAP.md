@@ -1,100 +1,130 @@
 # Roadmap
 
-[Documentation map](README.md#documentation-map) · [Product thesis](docs/product-thesis.md) · [Principles](docs/principles.md)
+[Documentation map](README.md#documentation-map) · [Product thesis](docs/product-thesis.md) · [Architecture audit](docs/architecture.md#implementation-audit)
 
-Cruce's direction is proactive coordination across independent coding agents working on one repository: reduce avoidable conflicts, duplicated effort and routine human intervention while preserving controlled integration. The milestones below describe the missing capabilities needed to test that goal. They are proposals, not shipped behavior, a delivery schedule or a record of work underway. There are no promised dates; priorities depend on measured value and integration feasibility.
+Cruce's direction is Git-native coordination and convergence across independently running coding agents. Prioritize useful in-flight awareness and a trustworthy exact-revision convergence loop. Automatic sequencing and supported pause/resume are exploratory. These are evidence-backed candidates, not shipped behavior, dates or work instructions.
 
-Current behavior belongs in the [architecture](docs/architecture.md); local and live evidence belongs in [verification](docs/local-verification.md). This roadmap replaces the former implementation plan so there is one place for future direction.
+**P0** is required to prove the thesis; **P1** materially strengthens coordination/convergence; **P2** addresses scale, ecosystem and operations; **Exploratory** requires validation before commitment. Current behavior belongs in architecture, test results in verification, and implementation history in Git. Stable item IDs connect this roadmap to the audit.
+
+## P0 — prove the complete loop
+
+### P0.1 Promotion against the exact approved base
+
+**Problem:** Promotion fetches canonical, then performs a separate non-forced push whose advertisement can observe a different base. Repository serialization does not cover external provider writers. A successful remote push can also precede failure to persist its provenance.
+
+**Target:** Bind the remote update to the approved expected old revision and exact candidate, with durable operation identity and explicit interrupted-outcome reconciliation. **Invariants:** No forced update, silent approval reinterpretation, inferred acceptance from local refs or duplicate promotion. Recheck authority on retries; an unexpected remote movement requires reconciliation and fresh review.
+
+**Cloudflare/Git:** Existing Repository DO, Namespace reservations and Git receive-pack old/new revision semantics. Consider the installed Git library's pre-push hook before custom transport; Workflows alone cannot make Git and metadata atomic.
+
+**Acceptance:** Inject canonical movement before advertisement and before ref update, including an ancestor of the candidate; every unexpected movement fails closed. Interrupt after remote success and before metadata/settlement, restart, then reconcile one operation without re-pushing or relabeling unrelated history. Exercise concurrent promotions, revoked retries and missing source. Verify the resulting remote revision independently.
+
+### P0.2 Durable provider ownership and identity
+
+**Problem:** Publication/promotion do not consistently compare recorded provider IDs; disconnect removes the account record used to prevent rebinding retained resources.
+
+**Target:** Preserve account/namespace/repository identity independently of credentials and validate it for every provider operation. **Invariants:** Credential removal cannot transfer storage ownership; name/description/remote matching cannot substitute for stable identity; retained artifact repositories remain protected.
+
+**Cloudflare:** Artifacts repository IDs and scoped credentials; Namespace DO owns the persistent resource binding. **Acceptance:** Disconnect then connect another account, recreate canonical/fork/retention names with different IDs, and retry an interrupted operation. Each mismatch is rejected before source access or mutation; reconnecting credentials for the original binding works without losing provenance or reservation state.
+
+### P0.3 Deployed and heterogeneous participation proof — verification gap
+
+**Problem:** Provider-backed convergence used fixture authority. The [deployed evidence recorded at audit time](docs/local-verification.md#architecture-audit-validation) found a consent-page rendering defect; the separate repair was deployed and its form rendered, but authenticated consent and reconciliation remain pending. Explicitly revoked provider Git tokens were rejected before expiry, which does not establish OAuth connection revocation.
+
+**Target:** Complete authenticated publication/reconciliation through the real Worker and then actual Codex/Claude Code connections. **Invariants:** Browser human review, separate OAuth actors, unchanged fixture history, declared resource budget, no operator-account fallback. **Cloudflare:** Existing Access, OAuth, Worker, DOs and Artifacts; no new service required.
+
+**Acceptance:** One developer creates/connects a Cruce repository, establishes canonical, attaches two direct-fork writers at exact bases, commits/pushes independently, inspects awareness, reconciles, records exact evidence, approves/promotes and retrieves retained provenance. Include response loss, membership/scope revocation and independently checked canonical/retained refs. Demonstrate agents consume relevant context without manual relays. Preserve the existing 20-reservation test ceiling unless explicitly revised before resource use. The staged verifier's client labels do not count as real tool participation.
+
+### P0.4 Observed Git activity and explainable convergence
+
+**Problem:** A successful Git push does not update an independently observed workspace head. Canonical awareness reflects Cruce's recorded promotions; external movement is not continuously reconciled. Reports and heartbeats share a freshness clock.
+
+**Target:** Observe pushed refs and canonical movement, derive exact commit/path evidence, and expose a compact read-only coordination view through the existing tool boundary. Record report freshness separately from presence; keep local uncommitted reports alongside remote evidence. **Invariants:** Stable provider identity, immutable starting revisions, events as signals, no inferred approval, no provider fetch or acknowledgement during ordinary context reads.
+
+**Cloudflare:** Artifacts event subscriptions → Queues → authenticated ingestion → existing Repository DO, with explicit bounded provider reconciliation. First validate namespace-account queue permissions, routing and cost; the operator account cannot silently stand in for a connected account.
+
+**Acceptance:** Two independently authorized clients see ordinary pushes without `publish_revision` being required for awareness. Duplicate/reordered messages, unknown schema, branch deletion/rewind, truncated commit lists and missed delivery never regress or falsely approve state. A bounded backfill restores observation after a gap. Every warning names its workspace, exact evidence, freshness and limitations; independent overlapping edits can continue. UI and clients expose degraded observation honestly. No event starts an agent or promotes code.
+
+## P1 — strengthen coordination and recovery
+
+### P1.1 Bounded source inspection and recoverable caches
+
+**Problem:** A persistent SQLite Git cache supports inspection, ancestry and transport, but has no integrated eviction or explicit retained-source rehydration path. Small reads can walk substantial trees; source hashing exports complete reachable packs.
+
+**Target:** Use Artifacts file/object/history APIs where equivalent; retain bounded derived Git data only where ancestry, diff, pack transfer or source retention needs it. **Invariants:** Artifacts remains source authority; cache loss cannot redefine review, bypass retention or turn a coordination read into provider I/O. First-parent history is not complete ancestry.
+
+**Cloudflare:** Artifacts REST for connected accounts, binding where account scope is proven; DO metadata and explicitly bounded cache. **Acceptance:** Cold-cache recovery of canonical and retained source/evidence after fork deletion; comparisons across merge parents; unavailable source reported honestly; measured memory, storage and request bounds on representative repositories; no returned credentials. Preserve hash meaning and exact identities when changing inspection implementation.
+
+### P1.2 Fresh intent, evidence and explicit follow-through
+
+**Problem:** Titles/context and path overlap cannot express dependencies, duplicate outcomes or whether a continuing writer incorporated and verified accepted source.
+
+**Target:** Add bounded, versioned intent/dependency reports and explicit responses where the pilot shows value. Explain canonical/path evidence first, enriching it with pinned structural context for missed interactions. Track outstanding incorporation and verification against exact revisions. **Invariants:** Heartbeats do not renew report content; reading, receiving, acknowledging and fetching are distinct from acting; structural/semantic signals never authorize changes or prove compatibility.
+
+**Cloudflare:** Existing Repository DO and MCP catalog; asynchronous analysis only when its cost warrants a queue. **Acceptance:** Scope drift supersedes old reports, disconnect preserves ownership, dependency cycles and disagreement reach a human, and stale approvals/evidence cannot carry forward. Measure false alarms and missed cross-file interactions. Receiving source alone cannot satisfy follow-through; fresh resulting revision, evidence and review do.
+
+### P1.3 Pure reads and timely delivery
+
+**Problem:** UI snapshots poll every 15 seconds, and nominal read routes still write Directory/Repository initialization metadata. Polling does not ensure an agent consumes context.
+
+**Target:** Remove avoidable persistence from established read paths, then use repository-version notifications if measured latency or fan-out justifies them. **Invariants:** Authorization on read/reconnect, read-only coordination, no implicit acknowledgements, no claim that delivery proves attention. **Cloudflare:** Existing DO snapshots; hibernating WebSockets for UI only when justified, demonstrated MCP/client mechanisms for agents.
+
+**Acceptance:** Repeated established coordination reads cause no domain/storage mutation or provider calls. Reconnect obtains an authorized current snapshot; missed/duplicate notifications and late responses cannot replace newer state. Compare update latency/cost with polling and verify actual client consumption.
+
+### P1.4 Diagnosable operations and safe errors
+
+**Problem:** Workers observability is enabled, but there is no consistent domain correlation, operation-phase tracing or unified redaction; MCP can return raw exception messages.
+
+**Target:** Add structured operational evidence and allowlisted public errors. **Invariants:** No credentials, OAuth payloads or source content in logs/errors; no monitoring service becomes correctness authority. **Cloudflare:** Workers Logs/Traces and existing durable operation IDs. **Acceptance:** Trace namespace/repository/workspace, proposal/promotion, revision and reservation through success, retries and uncertainty; injected provider errors are redacted across HTTP and MCP; failures remain actionable without exposing sensitive payloads.
+
+## P2 — adoption, scale and operational maturity
+
+### P2.1 Explicit external-provider onboarding and synchronization
+
+**Problem:** Creation starts a new canonical history; attaching an unrelated existing checkout is not import. Requiring users to relocate canonical storage can obstruct adoption.
+
+**Target:** If pilot evidence justifies it, add GitHub-first explicit import, external fetch/divergence inspection, reconciliation and exact approved-revision publication/PR links. **Invariants:** Artifacts canonical remains authoritative inside Cruce; no silent bidirectional sync, duplicate source authority or unapproved source transport. Stable provider repository identity and installation authorization are required.
+
+**Cloudflare:** Documented Artifacts public-HTTPS import; private GitHub repositories need a separately validated GitHub App/normal-Git transport path. Workflows are a candidate for long-running import/sync recovery. **Acceptance:** Public/private behavior is demonstrated separately; revoke installation access, move external refs and interrupt import/sync; retries preserve one resource identity and external divergence never becomes implicit approval. Architecture records authority and credential handling before integration becomes a core dependency.
+
+### P2.2 Bounded state, transfers and explicit retention operations
+
+**Problem:** Directory scans, repository-wide JSON records, growing receipts/activity/reservations, cache growth and the 32 MiB gateway limit constrain scale. Pending deletion currently needs caller retries.
+
+**Target:** Measure and bound hot state/transfer costs; make retention blockers and uncertain operations inspectable; recover explicitly authorized operations after interruption. **Invariants:** Retain referenced source/provenance; uncertainty blocks deletion; disconnect/heartbeat expiry never triggers cleanup. **Cloudflare:** DO SQLite/query projections and alarms for already-authorized reconciliation; streaming Git where safe; D1 only for a measured query need with a rebuildable index and one authority.
+
+**Acceptance:** Representative load and restart tests establish documented limits; retained source survives cleanup; pending deletion resumes without new reservation identity; no leaked token on a failed/oversized transfer. Query projections recover without becoming authoritative. No scheduled deletion is enabled merely to lower cost.
+
+## Exploratory — validate before commitment
+
+| Capability / problem | Target and invariants | Cloudflare relevance | Evidence required to proceed |
+| --- | --- | --- | --- |
+| Automatic sequencing and opt-in pause/resume | Reduce demonstrated interference while unrelated work continues; explicit scope, reason, release condition and override; unsupported clients stay advisory | Existing coordination DO; no agent runtime | Per-client/version proof of a safe action boundary, observed enforcement and release, recovery after disconnect, and net benefit beyond advice |
+| Durable multi-step execution | Recover long-running import/sync or operation phases without caller babysitting; preserve authority, idempotency and charged uncertainty | Workflows versus an existing DO operation record/alarm | A concrete selected flow, failure injection and cost comparison showing less recovery complexity; no blanket wrapping of reads, heartbeats or promotion |
+| Business analytics | Measure saved intervention, stale work and reconciliation outcomes; aggregate without source/secrets; metrics cannot approve work | Analytics Engine optional | Pilot data volume/query requirements that exceed simple exported evidence and justify another service |
+| ArtifactFS or portable Git-note provenance | Reduce measured checkout cost or improve external provenance discovery; mutable notes never replace review authority | ArtifactFS / Git notes | A demonstrated retrieval or handoff problem, secure credentials and a measured gain; neither is an initial dependency |
 
 ## Proposed coordination milestones
 
-The current foundation has isolated workspaces, cooperative path observations, source retention and exact-revision review/promotion. It has no structured intent/dependency protocol, coordination decision delivery, acknowledgements or pause/resume controls. The sequence below expresses capability dependencies, not a commitment to implement every milestone before evaluating value. Advisory coordination can be evaluated before controls exist.
-
-| Milestone | Proposed capability | Observable completion evidence |
-| --- | --- | --- |
-| 1. Intent and fresh context | Bounded reports of intended outcomes, code areas, assumptions, dependencies, progress, scope changes and available independent work; a compact checkpoint view | Two independently authorized clients report and consume relevant context. A scope change supersedes old intent; heartbeat alone cannot refresh it. Reporting effort is measured |
-| 2. Meaningful interference | Assess intent and available revision context to distinguish independent edits, overlapping edits, duplicate outcomes, incompatible assumptions and explicit dependencies | Examples allow independent same-file work to continue and identify reported cross-file dependencies and duplicate work; missed interactions and false alarms are recorded, with uncertainty visible |
-| 3. Decisions and acknowledgements | Automatically recommend continuing, sequencing, a targeted pause or already identified independent work under an agreed policy; escalate unresolved ambiguity | Two clients receive applicable decisions at supported checkpoints and acknowledge, decline with reasons or report inability. Useful work continues; nonresponse leaves compliance unknown |
-| 4. Supported controls | Opt-in scoped pause/resume through integrations with demonstrated capability; advisory behavior for unsupported clients | For each supported client/version, demonstrate the precise constrained action, a safe checkpoint, observed pause, release/resume and human override. Test loss of connection and unsupported capability without claiming a global stop |
-| 5. Accepted-source follow-through | Track outstanding incorporation and verification for continuing writers against exact accepted revisions | After promotion, a second writer incorporates accepted source, verifies its resulting revision and republishes for fresh review. Receipt or fetch alone cannot satisfy follow-through; trust remains explicit |
-
-A compact context read could become `get_coordination_context`, with a bridge `status` entry point; these names are proposals, not available commands. It should assemble recorded state without provider calls or acknowledgement mutations. Base-revision instructions remain separate from current observations. An acknowledgement is an explicit mutation, not a side effect of reading context. Any new commands and contracts must use the existing shared catalog and authority model; this roadmap does not define a new wire schema or capability scope.
+The proof order is **P0.1/P0.2 safety → P0.3 deployed participation → P0.4 observed activity and convergence → measured two-tool value**, with local P0.4 prototyping possible while deployment verification is pending. P1 work addresses demonstrated deficiencies. Completed forks, worktree isolation and revision-bound review are existing foundations, not new milestones. GitHub integration competes with the proof loop rather than blocking it automatically.
 
 ### Proposed interaction contract
 
-Decisions identify the affected workspaces/activity, reason and supporting observations, applicable scope and source revision, required response and release condition. A sequence or pause recommendation must explain what would allow the dependent activity to continue. Recommend existing independent work rather than inventing tasks or delegating new ones. An unresolved requirement or competing design choice needs a developer decision, not an automatic choice disguised as coordination.
-
-Start with explicit context reads at useful checkpoints: task start, progress and scope changes, before dependent work and before publication. Client adapters must demonstrate that agents actually consume this context. Timely notification or lifecycle hooks may improve delivery where supported, but MCP registration alone provides neither attention nor interruption. Duplicate or delayed delivery must not reapply obsolete decisions; acknowledgements must refer to the applicable decision/version and remain separate from reads. Exact API design is implementation work, not an available interface.
-
-An agent can acknowledge, decline with reasons or report inability to comply. Keep delivery, acknowledgement, reported action and observed enforcement separate. Acknowledgement does not prove the action occurred. Nonresponse leaves compliance unknown; escalate an unresolved consequential dependency to the developer without blocking unrelated work. Automatic recommendations are the first target. Scoped enforcement requires explicit opt-in, current authority and demonstrated client support; it cannot imply the ability to pause arbitrary agents or revoke human control. Routine coordination automation does not grant source approval or promotion authority.
-
-Scope changes invalidate affected advice and trigger reassessment. Stale reports reduce confidence even if heartbeats continue. Disconnects preserve workspaces, locks, source and provenance; they do not prove completion, cancellation or that an agent has stopped editing. Reconnection requires refreshed intent, canonical context and outstanding decisions before treating old advice as applicable. A dependent activity can remain blocked while independent work proceeds. Circular dependencies or an unavailable prerequisite with no clear resolution require escalation; do not leave agents waiting indefinitely on an unexplained condition.
-
-### Supporting participation work
-
-Make human attention views explain decisions, freshness, missing responses, unresolved concerns and next actions with links to exact source/evidence. Improve setup and retry explanations for grants, preparing workspaces, checkout ownership and uncertain operations. Preserve local changes and operation identity.
-
-Recovery should improve discovery and guidance around existing retained source, not add a Cruce checkout/fetch language or transfer ownership of an old workspace to a new actor. A successor locates the retained revision and continues in a new workspace using ordinary Git. Prioritize real Codex/Claude Code journeys before expanding client support; Cursor, Gemini CLI and custom clients must preserve the same authority/isolation model and demonstrate their own capabilities.
-
-## Promising ideas to validate
-
-These fit the product direction but need evidence that their benefit justifies the complexity.
-
-| Idea | Evidence that would justify it | Architectural boundary |
-| --- | --- | --- |
-| Structural context for interference assessment | Reported intent and path signals repeatedly miss relevant interactions or create too much noise | Enrich milestone 2 with symbol/dependency context from pinned source; label uncertainty and never claim semantic compatibility or grant authority |
-| More timely upstream awareness | Polling or delayed observations measurably cause stale work | Evaluate push/lifecycle event reconciliation; tolerate duplicates and reordered delivery; events do not approve changes or launch agents |
-| Focused source/context retrieval | Agents spend material time or tokens retrieving unrelated source | Evaluate pinned file/tree/history retrieval and caching; provider reconciliation is explicit and gated, while ordinary coordination reads remain on recorded state |
-| External CI/release handoff or provenance | Users repeatedly need to locate external results for an accepted revision | Explore links or externally reported provenance tied to exact canonical revisions; this is uncommitted and would not trigger builds, manage environments, deploy, roll back or operate runtimes |
-| Better review and evidence navigation | Humans repeatedly reconstruct what changed or which checks apply | Improve comparison and evidence-freshness explanations across publications; each artifact, review and attestation keeps its original exact revision |
-| Resource and retention visibility | Users cannot explain operation usage, uncertain reservations or cleanup blockers | Show ownership, budget and retention reasons; distinguish logical operations from provider billing and never delete referenced or unpublished source automatically |
-| Larger-transfer support | Representative repositories exceed the current gateway's transfer bound | Investigate bounded streaming while preserving credential isolation, retry safety and provider limits; do not promise unrestricted repository size |
-
-Git-note summaries are a later option if portable provenance becomes useful; mutable notes cannot replace authoritative identity or review records. ArtifactFS is worth considering only if measured checkout startup costs justify it and server-side credential handling can be preserved. Neither is a current setup requirement. Provider work follows the [Cloudflare references](docs/cloudflare-setup.md#platform-references).
+Future reports and responses identify the affected workspace, scope/version, exact source evidence and freshness. Advice explains uncertainty and an available next action; a pause additionally needs a release condition. Reads remain read-only. Duplicate or delayed delivery cannot reactivate obsolete advice. Explicit acknowledgement, reported incorporation and observed verification are separate records. Escalate competing designs and unresolved dependencies without inventing tasks or claiming authority over arbitrary local execution.
 
 ## Foundation validation still needed
 
-These are verification gaps in the existing foundation, not new feature promises:
-
-- Verify the deployed Git/publication gateway and authenticated reconciliation flow against the explicit test account, including lost-response recovery, authority revocation and rejection of revoked Git tokens. Provider-backed two-writer convergence, distinct reusable forks and retention are recorded in the [verification guide](docs/local-verification.md#hosted-two-writer-convergence); in-process grants do not establish deployed authentication. Declare the resource budget before running it.
-- Exercise actual browser consent and independent bridge processes with different tools. Adapter tests with in-memory grants do not establish client interoperability or that an agent consumes updates.
-
-The [verification guide](docs/local-verification.md) owns detailed status and costs. Keep required contributor checks and deterministic fixture history intact when extending these scenarios.
+P0.3 owns the remaining deployed/client verification. Existing [real-provider two-writer convergence](docs/local-verification.md#hosted-two-writer-convergence) proves a narrower foundation and must not be erased or described as entirely untested. Existing local tests do not cover all P0.1/P0.2 failure windows; targeted new tests belong with those future corrections.
 
 ## How we choose what to build
 
-Prefer improvements that reduce human coordination effort while preserving the [principles and guardrails](docs/principles.md). Before starting a candidate, define a concrete user problem, the smallest useful change, its authority/resource boundary and observable completion evidence. Track the implementation detail in an issue or review rather than turning this document into a task log.
+Use matched trials: one developer, one repository, Codex and Claude Code. Keep tasks, tools/models, instructions and checks comparable; repeat trials and vary order. Record Cruce/client versions and enabled capabilities. Predeclare the sample, numeric improvement targets and acceptable cost, delay and quality limits.
 
-Use a small matched pilot: one developer, one repository, Codex and Claude Code, subject to demonstrated integration support. Compare ordinary isolated worktrees and Git review with Cruce using comparable tasks, tools/models, instructions and checks. Repeat matched trials and vary their order so familiarity with a task does not masquerade as a coordination benefit. Record the Cruce revision, client versions and enabled capabilities. A manually relayed prototype can investigate advice quality, but cannot validate automated delivery or reduced human intervention.
+Include independent same-file edits, overlapping outcomes, cross-file assumptions, canonical advancement, a clean but behaviorally failing merge, scope drift and disconnect/recovery. Count routine interventions/manual relays separately from deliberate review/design decisions. Measure coordination time, duplication, integration rework, reporting/setup burden, false alarms, misses, completion delay, cloud/agent cost and quality. Registration or acknowledgement counts alone cannot prove value.
 
-| Scenario | What the pilot must examine |
-| --- | --- |
-| Independent edits in one file | Useful work continues without unnecessary waiting; a shared path is not sufficient reason to pause |
-| Duplicate outcomes | Early shared intent avoids redundant implementation even when paths differ |
-| Cross-file contract/assumption changes | Relevant incompatibility is surfaced before substantial avoidable work; clean Git merges do not establish correctness |
-| Explicit dependency | Only the dependent activity waits, with a clear release condition; identified independent work continues |
-| Scope drift, stale reports and disconnect/recovery | Old advice is reassessed; presence is not intent freshness; locks and retained source survive |
-| Ignored, declined or unsupported advice | Nonresponse is visible as unknown compliance; consequential unresolved decisions reach the developer |
-| Canonical advancement | Other continuing writers explicitly incorporate the accepted revision, verify the resulting source and obtain fresh review before promotion |
-
-Measure routine human intervention count and coordination time separately from deliberate review and design decisions. Count duplicated effort and integration rework, completion time, unnecessary waiting, reporting effort, setup and cloud/agent costs, missed interference, false alarms and resulting quality. Include required Cloudflare canonical setup and troubleshooting as adoption costs. Preserve exact revisions and revision-linked outcomes; distinguish reported checks from independently exercised verification.
-
-Before trials, define how interventions and rework will be counted, the matched sample, numeric improvement targets and acceptable overhead/quality limits. Proceed only if repeated trials show the agreed reduction in routine coordination, duplication and rework within those limits. Report inconclusive results as inconclusive; successful registration, more concurrent agents or more acknowledgements is not success. Agents must demonstrably consume and act on relevant context without the developer relaying every notice.
-
-If benefit concentrates in upstream awareness or recovery, narrow the product there. If reporting, false alarms, delays or hosting friction outweigh saved effort, simplify and repeat the comparison before expanding. If the simplified approach still misses the agreed targets, stop expansion and revisit the premise rather than adding more orchestration. Do not trade away human review or integration safeguards to improve the metrics.
-
-When an idea ships, update architecture/setup documentation and the changelog, record verification evidence, and remove or narrow its roadmap entry. Drop ideas when their premise no longer holds; Git history preserves the decision trail. Do not retain completed checklists here.
+Proceed only when repeated trials show net benefit. If value concentrates in upstream awareness or recovery, narrow the product there. If friction dominates, simplify before adding automation. If the simpler system still misses the predeclared targets, revisit the thesis. No metric justifies weakening human review or source safeguards.
 
 ## Open questions and integration requirements
 
-| Unresolved question | Evidence or decision required |
-| --- | --- |
-| How does each client receive and consume decisions? | Verify checkpoint reads and any notification/lifecycle hooks in actual Codex and Claude Code versions with independent OAuth connections; configuration writers alone are insufficient |
-| Where can work safely pause and resume? | Identify the supported action boundary, in-flight behavior, local work preservation and release/override path per adapter; do not claim an arbitrary process can be paused |
-| What proves enforcement? | Distinguish an agent's reported compliance from an adapter-observed constrained action; define timeout/disconnect behavior and test duplicate, stale and reordered decisions |
-| What is the minimum useful reporting burden? | Trial bounded intent, dependency and scope updates; determine which observations can be collected automatically without treating inferred intent as fact |
-| Which decisions can be automatic? | Define authorized opt-in policy, limits, decision expiry/reassessment, human override and escalation for disagreement, uncertainty and dependency cycles; preserve human promotion authority |
-| What improvement justifies adoption? | Set the matched trial size, numeric intervention/rework targets, delay/reporting/cost ceilings and quality floor before evaluating results |
-| Does mandatory canonical hosting cost too much to adopt? | Measure Cloudflare setup, resource cost and workflow friction against saved effort; any alternative source-hosting architecture needs a separate explicit decision |
+Account-scoped event subscription delivery into a separately hosted control plane, binding access to dynamically connected accounts, Artifacts event identity/replay guarantees and private-import transport remain feasibility questions. Resolve them using current primary documentation and bounded verification before choosing a production mechanism. Record an unknown rather than inferring a guarantee from an example.
 
-Repository-specific recommendations and future opt-in supported controls fit this direction; agent runtimes, remote IDEs, mandatory scheduling, automatic source acceptance, additional source-hosting/forge or delivery-provider integrations beyond the canonical Cloudflare Artifacts foundation, CI/build/release orchestration, deployments, environments, rollback, runtime management and a general workflow engine remain outside the current product boundary. A roadmap idea cannot silently override that boundary; introducing those integrations requires an explicit architectural decision, and automated promotion would change authority policy.
+Cruce remains outside agent execution, CI/CD, deployment, application hosting and runtime management. Cloudflare Workflows, if selected for Cruce's own durable operations, do not authorize a repository workflow engine. No new component is justified without the concrete capability lost if it disappeared.

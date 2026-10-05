@@ -12,13 +12,15 @@ Use commits, refs, worktrees, clone, fetch, merge and push directly. Publication
 
 ## 2. Coordinate across tools; leave execution with participants
 
-Worktrees isolate work. Cruce coordinates workers. The product goal is to surface meaningful interference early and reduce routine human coordination while useful independent work continues. Any adapter must use the same repository, workspace and authority model regardless of client brand. No client label confers identity or a special role. Cruce never launches agents, edits on their behalf through a hosted IDE, owns their conversation or acts as a general task scheduler.
+Worktrees isolate work. Cruce coordinates workers through a Git-native awareness and convergence loop. Prioritize timely evidence, deliberate reconciliation and exact-revision human review while useful independent work continues. Any adapter must use the same repository, workspace and authority model regardless of client brand. No client label confers identity or a special role. Cruce never launches agents, edits on their behalf through a hosted IDE, owns their conversation or acts as a general task scheduler.
 
-Repository-specific sequencing recommendations and future opt-in scoped controls through supported client integrations fit this boundary. They are proposed capabilities in the [roadmap](../ROADMAP.md), not current execution control. Their scope is coordinating interacting work, not choosing models, assigning arbitrary tasks or owning runtimes. Escalate ambiguous requirements, competing designs and unresolved disagreement to the developer; routine coordination automation cannot supply human approval.
+Automatic sequencing and opt-in scoped controls through supported client integrations are exploratory [roadmap](../ROADMAP.md) candidates, not prerequisites for convergence or current execution control. Their scope is coordinating interacting work, not choosing models, assigning arbitrary tasks or owning runtimes. Escalate ambiguous requirements, competing designs and unresolved disagreement to the developer; routine coordination automation cannot supply human approval.
 
 ## 3. Make ownership durable and addresses mutable
 
 Namespace → Repository → Workspace is the domain hierarchy. Stable IDs determine ownership and storage; handles, names, paths and remote URLs are addresses. A workspace owns the actor/task association, immutable starting revision and fork. An execution context records local materialization only. Disconnecting a process must not erase durable work or provenance.
+
+Provider resources must match their recorded account, namespace and repository identities before use. Removing a credential must not erase the resource-account binding or authorize migration. The [audit](architecture.md#architecture-contradictions-and-correctness-gaps) records incomplete enforcement today.
 
 Every repository has authoritative canonical Git storage backed by Cloudflare Artifacts. Each writer workspace owns one direct fork of canonical, reused across publications. An authorized agent may participate in many workspaces; the vendor never owns their forks. Local worktrees and hosted forks solve different isolation problems; neither substitutes for the other.
 
@@ -40,11 +42,11 @@ Future coordination decisions must distinguish notice, recommendation and enforc
 
 Retain exact source revisions, review bases, hashes, storage identity and producing actors. Review and verification concern a revision, not a moving branch label. Source changes require fresh evidence and review for the new revision. A stale proposal cannot be made current by rewriting its base metadata. Record reasons for disagreement and human resolution.
 
-Keep reported evidence, authenticated human attestation and independent verification distinct. Publication proves which source was retained, not that it is correct. A local ref report is not an independently verified remote push. Missing source or provider observations stay unavailable, rather than being inferred as success.
+Keep reported evidence, authenticated human attestation and independent verification distinct. Publication proves which source was retained, not that it is correct. Separate reported local heads, observed remote refs, published revisions and human-accepted canonical provenance. Events supply observations, never approval or proof of a completed promotion. Missing source or provider observations stay unavailable, rather than being inferred as success.
 
 ## 7. End coordination at canonical Git
 
-Hosted source promotion currently requires authenticated human approval, controller readiness and an explicit non-forced Git update checked against current canonical source. Approval alone does not integrate source. Any future automated promotion would be an authority-policy change requiring an explicit architectural decision. Receiving, acknowledging or fetching updates does not integrate or verify them; ending a workspace does not accept it. Continuing writers explicitly incorporate accepted source with Git, verify the resulting revision and obtain fresh review before promoting their next result. Proposed follow-through tracking cannot substitute for that evidence.
+Hosted source promotion requires authenticated human approval, controller readiness and an explicit non-forced Git update against the approved expected base. That expectation must hold at the remote update, not only an earlier fetch; non-force alone leaves the [audited race](architecture.md#architecture-contradictions-and-correctness-gaps). Approval alone does not integrate source. Any future automated promotion would be an authority-policy change requiring an explicit architectural decision. Receiving, acknowledging or fetching updates does not integrate or verify them; ending a workspace does not accept it. Continuing writers explicitly incorporate accepted source with Git, verify the resulting revision and obtain fresh review before promoting their next result. Proposed follow-through tracking cannot substitute for that evidence.
 
 Cruce’s responsibility ends when isolated concurrent work is safely reviewed and reconciled into the canonical Git repository. CI, build/release orchestration, deployment, environment management, rollback and runtime operation belong to external systems. Cruce records revision-linked evidence supplied by participants; it does not execute their builds or operate their applications. Cruce’s own hosting and release tooling remains necessary infrastructure.
 
@@ -52,7 +54,7 @@ Cruce’s responsibility ends when isolated concurrent work is safely reviewed a
 
 The namespace owns its connected Cloudflare account, policy and shared operation budgets. Resource operations declare scope/cost and pass the authoritative namespace gate before infrastructure calls. Repository policy can only narrow namespace policy. Never fall back to the operator account.
 
-Retries reuse operation identity, exact input and reservation. An uncertain outcome remains charged until reconciled. Coordination reads do not provision, fetch provider source or mutate state; explicit Git transport is a separate path. Operation budgets are policy limits, not complete dollar estimates or a meter of every provider request.
+Retries reuse operation identity, exact input and reservation. An uncertain outcome remains charged until reconciled. Coordination reads must not provision, fetch provider source or mutate state; existing initialization writes are an audit finding. Explicit Git transport is a separate path. Operation budgets are policy limits, not complete dollar estimates or a meter of every provider request.
 
 ## 9. Retain work; make cleanup explicit
 

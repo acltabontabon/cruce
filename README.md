@@ -1,34 +1,28 @@
 # Cruce
 
-Cruce aims to be air traffic control for multiple coding agents from different vendors working on one repository: proactively coordinate work to reduce avoidable conflicts, duplicated effort and routine human intervention. Agents keep their own tools and isolated checkouts. The current Git-native foundation provides shared observations, exact revisions, review and human-controlled convergence into canonical source.
+Cruce is a **Git-native coordination and convergence layer for concurrent coding agents**.
 
-Proactive intent/dependency tracking, coordination decisions, acknowledgements and opt-in controls through supported integrations are proposed in the [roadmap](ROADMAP.md), not implemented capabilities. The [product thesis](docs/product-thesis.md) explains the intended workflow, limits and hypothesis to validate.
+**Git records what happened. Cruce coordinates what is happening.** Independent agents keep their own tools and local environments. Cruce connects their durable workspaces through shared awareness, exact source provenance, intentional reconciliation and human-governed canonical promotion.
 
-**Cruce starts where individual-agent isolation ends.** An agent can already manage several of its own tasks with Git worktrees. Independent tools can still duplicate an outcome, change incompatible assumptions or miss a dependency. The goal is to surface these interactions while work is underway and keep independent work moving, then reconcile results under review. Two edits to the same file need not interfere; edits to different files can.
+Branches, worktrees and forks already provide isolation. Cruce must earn its place by helping independent participants understand interacting work and canonical movement early enough to reduce avoidable rework. The complete lifecycle is the product, not a conflict warning or an agent launcher.
 
-Codex, Claude Code, Cursor, Gemini CLI and internal or future agents belong in this model. That is a product boundary, not a claim of tested interoperability with every client. The current bridge writes configuration for Codex, Claude Code and Cursor; other clients need a compatible adapter. See [MCP and agent participation](docs/mcp.md).
-
-The implemented foundation and proposed coordination layer are separate below. Dashed links describe proposed interactions, not available controls.
+The implemented foundation provides cooperative path reports, accepted-source comparisons, durable workspace forks, exact-revision retention, review and promotion. Observed push events, independently fresh convergence evidence and proven context consumption across tools are gaps. Automatic sequencing and supported pause/resume are exploratory. See the [product thesis and competitive assessment](docs/product-thesis.md) and [implementation audit](docs/architecture.md#implementation-audit).
 
 ```mermaid
 flowchart TB
-    A[Agent in tool A] --> WA[Local checkout for workspace A]
-    B[Agent in tool B] --> WB[Local checkout for workspace B]
-    WA <-->|Git + MCP: context, reports, exact source| C[Current Cruce foundation]
-    WB <-->|Git + MCP: context, reports, exact source| C
-    subgraph Proposed[Proposed proactive coordination]
-        I[Fresh intent, assumptions and dependencies] --> M[Assess meaningful interference]
-        M --> Q[Scoped recommendations and explicit responses]
-    end
-    C -.->|Intent and current observations| I
-    Q -.->|Deliver through supported integrations| C
-    Q -.->|Ambiguity or unresolved disagreement| H[Developer decision]
-    C --> R[Human review of exact revisions]
-    R -->|Human approval, readiness, non-forced promotion| G[Canonical Git: Cloudflare Artifacts]
-    G --> X[Outside Cruce: CI, releases, deployment and runtime]
+    A[Agent in tool A] --> WA[Durable workspace A and isolated checkout]
+    B[Agent in tool B] --> WB[Durable workspace B and isolated checkout]
+    WA <-->|Git and MCP| C[Cruce control plane]
+    WB <-->|Git and MCP| C
+    C --> O[Current: shared reports and canonical context]
+    O -.-> E[Proposed: observed activity and convergence evidence]
+    C --> R[Exact source retention and human review]
+    R -->|Readiness and explicit promotion| G[Canonical Git in Cloudflare Artifacts]
+    G --> F[Continuing writers incorporate and verify]
+    F --> C
 ```
 
-Worktrees isolate work. Cruce coordinates workers. Cruce does not launch agents, host an editor or require scheduling clearance before local edits. Current overlap is advisory; it does not prove a semantic conflict or guarantee compatibility. Future targeted pause/resume controls require opt-in and demonstrated integration support; Cruce cannot reliably stop arbitrary agents.
+Solid links show implemented mechanisms, subject to the [audit's correctness gaps](docs/architecture.md#architecture-contradictions-and-correctness-gaps); dashed links are proposed. Overlap is advisory, not a semantic conflict or compatibility guarantee. Cruce does not launch agents or require scheduling clearance for local edits.
 
 ## Git stays Git
 
@@ -57,7 +51,9 @@ To use Cruce with real repositories, follow [Git and bridge setup](docs/native-s
 
 ## Status
 
-Cruce is early, experimental software, and its name remains provisional. The current foundation has local controller, Git, bridge and browser coverage. The native Git gateway and current namespace model have **not been verified in the configured live Worker**; earlier provider checks covered an older implementation. [Verification](docs/local-verification.md) records the evidence and limits.
+Cruce is early, experimental software, and its name remains provisional. Local controller, Git, bridge and browser evidence exists. A real-Artifacts two-writer convergence scenario passed with fixture authority; newer deployed checks exercised owner setup, canonical provisioning and a repaired consent form. Authenticated publication/promotion and actual two-tool participation remain unverified. [Verification](docs/local-verification.md) records the precise revisions and limits; these separate checks were not performed by the documentation audit.
+
+The [architecture audit](docs/architecture.md#implementation-audit) identifies expected-base promotion races, incomplete provider identity checks and account-binding recovery as corrections needed before a credible end-to-end proof. This documentation pass does not fix those runtime gaps.
 
 The proposed first pilot uses one developer, one repository, Codex and Claude Code, subject to demonstrated integration support. It must show reduced routine intervention, duplicated effort and integration rework against ordinary worktrees and Git review, within predeclared limits on delay, reporting effort, cost and quality. The [roadmap](ROADMAP.md#how-we-choose-what-to-build) includes failure and simplification criteria; product value and cross-tool context consumption remain unproven.
 
@@ -70,7 +66,7 @@ Cruce is not a Git/Git-worktree replacement, a Claude Code worktree manager, a G
 | Understand the problem, audience and scope | [Product thesis](docs/product-thesis.md) |
 | Explore the development console with screenshots | [Local console walkthrough](docs/local-demo.md) |
 | Make or review an architectural decision | [Principles and guardrails](docs/principles.md) |
-| Understand ownership, components and source convergence | [Architecture](docs/architecture.md) |
+| Understand ownership, source convergence, implementation gaps and Cloudflare fit | [Architecture and audit](docs/architecture.md) |
 | Connect a checkout and participate | [Git and bridge setup](docs/native-setup.md) |
 | Integrate an agent or change the tool surface | [MCP and agent participation](docs/mcp.md) |
 | Develop and verify a contribution | [Contributing](CONTRIBUTING.md), [verification](docs/local-verification.md) |

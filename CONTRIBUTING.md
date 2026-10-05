@@ -25,7 +25,7 @@ Offline mode avoids configured cloud provisioning; it does not bypass Access. Us
 
 ## Locate a change
 
-Use the product thesis for the proactive coordination goal and the roadmap for missing capabilities. Current behavior remains cooperative observation and controlled convergence. Repository-specific recommendations and future opt-in controls are within direction, but require demonstrated integration support; do not turn advisory path overlap into mandatory scheduling or claim acknowledgement proves enforcement. Keep human review and promotion authority separate from routine coordination automation. Evaluate proposed features against the two-vendor pilot's intervention, rework and overhead criteria.
+Use the product thesis for Git-native coordination and convergence, the architecture audit for current gaps, and the roadmap for prioritized corrections. Timely awareness and exact-revision convergence come first; automatic sequencing and supported pause/resume are exploratory. Do not turn advisory path overlap into mandatory scheduling or claim acknowledgement proves enforcement. Preserve human promotion authority, the exact expected base and provider identity through retries and remote updates. Evaluate features against the two-tool pilot's intervention, rework and overhead criteria.
 
 | Concern | Start here |
 | --- | --- |
@@ -64,7 +64,7 @@ The [README documentation map](README.md#documentation-map) is the entry point. 
 | --- | --- |
 | Product purpose and exclusions | [Product thesis](docs/product-thesis.md) |
 | Constraints and reasons to reject a design | [Principles](docs/principles.md) |
-| Current domain, components and lifecycles | [Architecture](docs/architecture.md) |
+| Current domain, components, lifecycles and evidence-backed gaps | [Architecture](docs/architecture.md) |
 | User/client setup | [Native setup](docs/native-setup.md), [MCP](docs/mcp.md) |
 | Provider configuration and live environment | [Cloudflare setup](docs/cloudflare-setup.md), [test environment](docs/test-environment.md) |
 | How to verify and what has been verified | [Verification](docs/local-verification.md) |
@@ -75,4 +75,4 @@ When architecture changes, update its owning document and corresponding behavior
 
 Use Namespace, Repository, Workspace and ExecutionContext consistently. Retired names may appear in clearly historical records or unchanged fixture paths, not current setup instructions. Label plans as proposed, distinguish local from live evidence, and link executable schemas instead of copying them. Prefer Mermaid for explanatory diagrams. Check relative links, section anchors and diagrams when moving or deleting documents; merge overlapping material rather than keeping placeholder pages.
 
-For documentation-only work without a commit, check links, diagrams, terminology and lint; report that runtime suites were not rerun. All pre-commit checks above still apply if committing. Release and control-plane deployment are covered in [releases](docs/releases.md).
+For documentation-only work without a commit, check links, diagrams, terminology and lint; run focused existing tests if needed to resolve behavior, and report exactly which suites ran or were omitted. All pre-commit checks above still apply if committing. Release and control-plane deployment are covered in [releases](docs/releases.md).

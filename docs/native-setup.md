@@ -2,7 +2,7 @@
 
 [Documentation map](../README.md#documentation-map) · [MCP participation](mcp.md) · [Cloudflare setup](cloudflare-setup.md)
 
-This is the workflow supported by the current implementation. The current Worker/Access Git configuration still needs live verification; check [environment status](test-environment.md) before using hosted URLs. For a no-cloud tour, use the [local fixture](../CONTRIBUTING.md#set-up-and-explore).
+This is the workflow supported by the current implementation. Real-provider convergence and some deployed setup/authentication boundaries have evidence, but authenticated deployed publication/promotion and actual Codex/Claude Code participation remain pending; check [verification status](local-verification.md). The [architecture audit](architecture.md#architecture-contradictions-and-correctness-gaps) records promotion and provider-identity gaps. For a no-cloud tour, use the [local fixture](../CONTRIBUTING.md#set-up-and-explore).
 
 Use Git, Node 22.18+ and installed Cruce dependencies. Sign in through Access, connect the namespace's Cloudflare account with Artifacts access, and create a repository. Cruce initializes its configured default branch. Repository creation and writer attachment consume Artifacts resources. CI, releases and deployments remain external.
 
@@ -62,6 +62,8 @@ node /absolute/path/to/cruce/runner/cruce.mjs publish --title "Bound retries"
 ```
 
 Publication seals the exact pushed branch revision into retained source storage. It validates ancestry/protected paths and pins a review base; it neither commits nor pushes local files. Through MCP, create a proposal from the returned artifact, record exact-revision evidence and request human promotion. The console supports review and the human decision. See [MCP command families](mcp.md#current-command-families).
+
+A push alone does not currently produce a fresh independently observed head in Cruce. Local `report_ref` claims, publication's verified pushed revision and recorded accepted canonical source are different facts. There is no event subscription delivering push notifications today; use the cooperative inspection checkpoints, and do not treat heartbeat presence as proof that change reports are current.
 
 When source advances, inspect `get_workspace_updates`, fetch canonical with Git and merge explicitly. Use the canonical helper options from above when fetching its URL; the worktree's automatic credential helper is scoped to its fork. Resolve conflicts, run relevant checks, then push/publish and propose the reconciled revision for fresh review. Published ancestry must remain reachable: rebasing away previously published commits will fail publication checks. The original workspace base and earlier artifacts never change.
 

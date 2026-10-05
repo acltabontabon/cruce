@@ -4,7 +4,7 @@
 
 This describes the current Namespace → Repository → Workspace design. It does not establish live verification. Cruce maintains shared repository state and exact-revision decisions across independently running agents; their execution remains outside the control plane.
 
-The [product goal](product-thesis.md) is proactive coordination that reduces avoidable interference, duplicated effort and routine human intervention. The current architecture supplies isolation, cooperative observations and controlled convergence. Structured intent/dependencies, coordination decisions and acknowledgements, opt-in supported controls and incorporation follow-through are [roadmap proposals](../ROADMAP.md#proposed-coordination-milestones), not current services or contracts.
+The [product goal](product-thesis.md) is a Git-native coordination and convergence layer for concurrent coding agents. The current architecture supplies isolation, cooperative observations and controlled convergence, with correctness gaps documented in the [implementation audit](#implementation-audit). Timely remote observations and explainable exact-revision convergence lead the [roadmap](../ROADMAP.md#proposed-coordination-milestones); automatic sequencing and supported pause/resume are exploratory. None of these proposals establishes a current service or contract.
 
 ## Domain vocabulary and ownership
 
@@ -34,7 +34,7 @@ flowchart TD
 | Review | A permitted participant evaluates an exact revision and its evidence; only authenticated human approval satisfies the current approval requirement |
 | Promotion | Human-authorized, controller-gated, non-forced canonical Git update; a `Promotion` records the transition. Local integration means reconciling with Git before publication and is not canonical acceptance |
 
-An authorized agent may participate in many workspaces; each workspace belongs to one actor, and each attached writer workspace owns one reusable hosted fork. The vendor/tool does not own the fork. Preparing writers may not yet have a fork; explicit cleanup can later delete it without deleting the workspace. Directory identities and provider repository IDs prevent mutable addresses from becoming proof of ownership. Full contracts are in [src/shared/platform.ts](../src/shared/platform.ts).
+An authorized agent may participate in many workspaces; each workspace belongs to one actor, and each attached writer workspace owns one reusable hosted fork. The vendor/tool does not own the fork. Preparing writers may not yet have a fork; explicit cleanup can later delete it without deleting the workspace. Directory identities and recorded provider IDs are intended to prevent mutable addresses from becoming proof of ownership; provider checks are incomplete on the audited publication/promotion paths. Full contracts are in [src/shared/platform.ts](../src/shared/platform.ts).
 
 Canonical does not mean a local clone, cached Git objects, a workspace fork, retained source storage or an arbitrary external remote. Publication retains source separately without advancing accepted history; promotion advances canonical history.
 
@@ -205,14 +205,204 @@ Every artifact identifies namespace, repository, workspace, actor, source revisi
 
 Publication records currently carry `reported` trust even when source retention succeeds. Source identity/retention checks and correctness claims are different facts. Missing source/provider observations remain unknown or unavailable, never inferred success.
 
-Changes bind an artifact, base and head. Controller readiness requires current base, human approval for the exact revision, reasoned resolution of concerns and policy-required trusted passing evidence without unresolved failures. Promotion rechecks canonical source and makes a non-forced Git push. A moved base requires reconciliation and a new proposal, not rewriting the existing review. Agents can publish, inspect, review, disagree, supply evidence and request promotion, but cannot supply human authority. Automatic promotion would change the authority policy, not merely add an auto-merge convenience; it is outside the current model.
+Changes bind an artifact, base and head. Controller readiness requires current base, human approval for the exact revision, reasoned resolution of concerns and policy-required trusted passing evidence without unresolved failures. Promotion rechecks canonical source and makes a non-forced Git push. The required invariant is that an unexpected moved base needs reconciliation and a new proposal, not rewriting the existing review; the separate check/push currently leaves a race described below. Agents can publish, inspect, review, disagree, supply evidence and request promotion, but cannot supply human authority. Automatic promotion would change the authority policy, not merely add an auto-merge convenience; it is outside the current model.
 
 Hosted cleanup requires an ended workspace. The runtime checks every fork ref against retained canonical/artifact history; unretained commits, annotated tags and non-commit refs conservatively block deletion. Deletion intent is persisted and asynchronous provider absence is reconciled on retry. Workspace records, source artifacts and lineage survive. Local cleanup separately requires Cruce ownership, clean files and a published or retained-base head.
 
 ## Resources and the canonical Git boundary
 
-Namespace reservations serialize operation budgets across repositories. Mutation IDs and exact input fingerprints prevent accidental identity reuse. Unknown provider outcomes retain their reservation and named resource identity until reconciliation. Coordination reads do not provision or mutate; explicit Git reads contact the provider and have provider costs even though Cruce's reservation model is not a meter of every request.
+Namespace reservations serialize operation budgets across repositories. Mutation IDs and exact input fingerprints prevent accidental identity reuse. Unknown provider outcomes retain their reservation and named resource identity until reconciliation. Coordination reads do not provision or fetch provider source, but initialization wrappers still write metadata; strict read purity is a correction, not an established guarantee. Explicit Git reads contact the provider and have provider costs even though Cruce's reservation model is not a meter of every request.
 
-Cruce’s responsibility ends when isolated concurrent work is safely reviewed and reconciled into the canonical Git repository. CI, build/release orchestration, deployment, environment management, rollback and runtime operation belong to external systems. No deployment environments, preview/rollback refs, build observers, runtime checks or workflow bindings belong to repository state. Artifacts and evidence remain inputs to source review. External handoff/provenance is only a roadmap candidate.
+Cruce’s responsibility ends when isolated concurrent work is safely reviewed and reconciled into the canonical Git repository. CI, build/release orchestration, deployment, environment management, rollback and runtime operation belong to external systems. No deployment environments, preview/rollback refs, build observers or runtime checks belong to repository state. A future durable runner for Cruce's own authorized operations would not introduce repository CI/CD. Artifacts and evidence remain inputs to source review. External handoff/provenance is only a roadmap candidate.
 
-See [Cloudflare setup](cloudflare-setup.md) for provider configuration and limits. Events, native file/history retrieval, Git-note mirroring and ArtifactFS are optional future evaluations in the [roadmap](../ROADMAP.md); no current event subscription or agent notification-delivery capability is implied.
+See [Cloudflare setup](cloudflare-setup.md) for provider configuration and limits. Event-backed observations are a P0 candidate, native file/history inspection is P1, and Git-note mirroring/ArtifactFS remain exploratory in the [roadmap](../ROADMAP.md). No current event subscription or agent notification-delivery capability is implied.
+
+## Implementation audit
+
+Audit date: **2026-10-06**. Committed baseline: `e57ee33498f06c29937522214d18f449bb7bde24`. Inspection also included pre-existing uncommitted consent-header repair/tests, deployed-verifier work and verification notes; these are not attributed to the committed baseline or this documentation pass. Separate deployed-consent evidence added during the audit is preserved in verification. The audit changes no runtime, API, schema or bindings. [Verification](local-verification.md#architecture-audit-validation) records checks performed here; earlier local/provider/deployed results retain their original scope.
+
+**IMPLEMENTED** means a traced code path exists, not that production behavior or product value is proved. **PARTIAL** means a useful mechanism exists but the named capability has a concrete gap. **NOT IMPLEMENTED** means the inspected contracts/routes/configuration contain no implementation. **CONTRADICTS TARGET** identifies a specific broken invariant. **UNCLEAR / NEEDS INVESTIGATION** identifies a guarantee that code, tests or provider documentation do not establish. Priorities refer to [roadmap item IDs](../ROADMAP.md), not deadlines. “Keep” means preserve an existing capability rather than invent a roadmap task.
+
+### Capability gap table
+
+| Capability | State | Evidence | Gap | Cloudflare leverage | Priority |
+| --- | --- | --- | --- | --- | --- |
+| Canonical creation | IMPLEMENTED | [Runtime][runtime] `provision_repository`; [router][router] repository POST; [provider][provider] `ensure` | New README baseline, not import; deployed provisioning evidence is narrower than full convergence | Artifacts create and normal Git | Keep; P0.3 validation |
+| Namespace/repository identity mapping | PARTIAL | [Ownership][ownership] IDs; [router][router] stable storage names; [types][types] `canonical`/`fork.id` | Account binding and provider checks incomplete; findings below | Artifacts IDs + Namespace DO | P0.2 |
+| Direct reusable writer forks | IMPLEMENTED | [Runtime][runtime] `attach_workspace` calls `host.fork(canonical, ...)`; [runtime tests][runtime-tests] direct/distinct fork cases | Recovery of an existing named fork trusts description rather than verified parent identity | Artifacts fork | Keep; P0.2 hardening |
+| Exact immutable starting revision | IMPLEMENTED | [Controller][controller] `start_workspace`; [runtime][runtime] baseline ref; [execution][execution] `createExecution`; [core tests][core-tests] | Fork API selects refs, not a historical commit; Cruce pins base separately | Git commit IDs and fork base ref | Keep |
+| Latest pushed revision | PARTIAL | [Runtime][runtime] `gitRequest`/`publish_revision`; [types][types] `headRevision` | Push forwarding does not update an observed remote-head record; reports are claims, publication is later | Artifacts push events and ref inspection | P0.4 |
+| Standard Git protocol | IMPLEMENTED | [Router][router] Git route; [provider][provider] `gitRequest`; [runtime tests][runtime-tests] native clone/push/fetch | Gateway buffers transfers and serializes them with commands; 32 MiB bound | Artifacts smart HTTP | Keep; P2.2 |
+| Scoped read/write Git tokens | IMPLEMENTED | [Provider][provider] `withToken`, `gitRequest`; [provider tests][provider-tests] | Agent writes confined to owned active fork; account control credential remains broader and server-side | Repo-scoped tokens | Keep |
+| Token TTL/revocation | IMPLEMENTED | [Provider][provider] `ttl: 60`, `finally` revoke, creation-token reconciliation; [provider tests][provider-tests] | Revocation failure makes outcome uncertain; recorded pre-expiry replay does not prove OAuth revocation | Artifacts token lifecycle | Keep; P0.3 validation |
+| Workers binding | NOT IMPLEMENTED | [Config][config]; [provider][provider] `ArtifactsRestHost` | Dynamic connected-account authority must fit before replacing REST; absence alone is not a defect | Binding or REST | P1.1 |
+| File/object/history inspection | PARTIAL | [Runtime][runtime] `get_source`, `get_history`, `get_diff`; [GitWorkspace][git] | Persistent local object inspection; no native provider file/history API use | REST/binding exact-source reads | P1.1 |
+| Event subscriptions and ingestion | NOT IMPLEMENTED | [Config][config] empty triggers; [Worker][worker] fetch handler; [catalog][catalog] | No queue consumer, observed push lifecycle or subscription provisioning | Artifacts events + Queues | P0.4 |
+| Event ordering, deduplication, recovery | NOT IMPLEMENTED | Same configuration and handlers | No inbox/checkpoint/backfill/DLQ path; provider event-ID guarantees unresolved | Queues + DO observation state | P0.4 |
+| Import | NOT IMPLEMENTED | [Provider][provider] interface; [router][router] create route; [catalog][catalog] | No existing public/private repository onboarding | Artifacts public HTTPS import; private transport needs validation | P2.1 |
+| Provider limits and errors | PARTIAL | [Provider][provider] `cloudflare`, `boundedBody`; [GitWorkspace][git] `exportPack`; [runner Git][local-git] | No general retry/backoff strategy; raw provider error messages can cross MCP; full reachable-pack hashing adds cost | Native errors/limits, Logs | P1.1/P1.4/P2.2 |
+| Workers API/auth/MCP boundary | IMPLEMENTED | [Worker][worker], [router][router], [auth][auth], [MCP][mcp], [catalog][catalog]; [route tests][route-tests] | Repaired deployed form is recorded; authenticated full flow and real clients still pending | Access, OAuth, Workers | P0.3 validation |
+| Directory and Namespace authority | IMPLEMENTED | [Directory][directory], [Namespace][namespace], [ownership][ownership]; [core tests][core-tests] | Cross-object copies of display metadata need refresh discipline; no second membership authority | SQLite DOs | Keep |
+| Repository coordination serialization | IMPLEMENTED | [ControlTower][tower] keyed by repo ID; [runtime][runtime] `Serial.run`; [store][store] | One in-memory queue per instance, including Git I/O; not a transaction with remote Git or a durable pending-operation journal | Repository DO | Keep; P0.1/P2.2 |
+| Metadata ownership | IMPLEMENTED | [Types][types], [store][store], [namespace][namespace], [runtime][runtime] | Growing whole-state JSON collections/receipts; no query projections | DO SQLite | Keep; P2.2 |
+| D1 | NOT IMPLEMENTED | [Config][config], storage adapters | No demonstrated query need justifies adding another authority | D1 only as future rebuildable index | Do not add now |
+| WebSockets and alarms | NOT IMPLEMENTED | [ControlTower][tower], [Worker][worker], [config][config] | UI polls; deletion retries require caller; presence is derived, not alarm-driven | Hibernating sockets / DO alarms | P1.3/P2.2 |
+| Workflows | NOT IMPLEMENTED | [Config][config], [runtime][runtime] synchronous operation branches | Some phases persist retry markers; no autonomous durable multi-step runner | Workflows candidate for selected long operations | Exploratory |
+| Queues/retry/DLQ | NOT IMPLEMENTED | [Config][config], [Worker][worker] | Needed if using documented Artifacts event delivery; not a promotion authority | Queues | P0.4 |
+| Operational logs/traces | PARTIAL | [Config][config] `observability.enabled`; [Worker][worker] `failure`; [MCP][mcp] catch | No explicit domain correlation/spans or consistent public-error redaction; enabled config is not evidence of effective production tracing | Workers Logs/Traces | P1.4 |
+| Product analytics | NOT IMPLEMENTED | [Config][config], domain activity records | Activity history is not an outcome-measurement pipeline | Analytics Engine optional | Exploratory |
+| Workspace versus execution context | IMPLEMENTED | [Types][types] separate records; [controller][controller]; [execution][execution]; [runner tests][runner-tests] | Durable workspace survives process loss; attached execution descriptor cannot be moved in place | DO state + local Git | Keep |
+| Writer locks, reservations, lifecycle | IMPLEMENTED | [Execution][execution] persistent lock; [controller][controller] checkout reservation/TTL/end; [runner tests][runner-tests] | Trusted cooperative clients report execution metadata; server cannot independently inspect local filesystem | Namespace/repository state; local exclusive files | Keep |
+| Activity/path overlap | PARTIAL | [Controller][controller] `live`, `overlaps`; [execution][execution] `observeChanges`; [core tests][core-tests] | Renames/binary paths supported; disconnected writers excluded; report content freshness shares heartbeat clock | Existing DO | P0.4 |
+| Intent, dependency and coordination response | NOT IMPLEMENTED | [Types][types] title/context only; [catalog][catalog] | No structured intent/dependency, decision acknowledgement or follow-through lifecycle | Existing DO/catalog | P1.2 |
+| Symbols/modules/dependency surfaces | PARTIAL | [Indexer][indexer] `buildIndex`; [runtime][runtime] `get_context`; [index tests][index-tests] | Pinned JS/TS context exists; no active cross-workspace symbol/dependency convergence engine | Bounded source inspection; queue only if needed | P1.2 |
+| Canonical movement/stale base | PARTIAL | [Controller][controller] `workspaceUpdates`/`readiness`; [runtime][runtime] `get_workspace_updates`; [runtime tests][runtime-tests] | Works for recorded accepted source; arbitrary remote movement not reconciled; missing objects stay unavailable | Artifacts observations + DO | P0.4 |
+| Candidate and ancestry validation | IMPLEMENTED | [Runtime][runtime] publication merge-base checks; [GitWorkspace][git]; [convergence test][convergence-test] | Preserves starting/previous published ancestry; no structured multi-workspace reconciliation-input record beyond Git ancestry/provenance | Standard Git | Keep; P1.2 |
+| Exact review/approval/evidence | IMPLEMENTED | [Controller][controller] `review_proposal`, `readiness`, `record_verification`; [core tests][core-tests] | Approval is a stored historical human decision; revoked approval-author policy is not separately defined; current promoter must be authorized | Existing DO | Keep; document policy before change |
+| Non-forced promotion / exact candidate | IMPLEMENTED | [Runtime][runtime] `promote_proposal`; [GitWorkspace][git] `push`; [convergence test][convergence-test] | Does not prove strict expected-base behavior through the entire update window | Git receive-pack | Keep; P0.1 |
+| Expected-base race exclusion | CONTRADICTS TARGET | Same promotion/push path; installed `isomorphic-git@1.42.6` `_push` discovers refs again | Changed remote ancestor can still accept candidate after Cruce's earlier base check | Expected-old validation + Git atomic ref update | P0.1 |
+| Publication and promotion recovery | PARTIAL | [Runtime][runtime] publication markers, receipts, `gate`; [runtime tests][runtime-tests] retry cases | Remote side effect, reservation settlement and metadata are separate; no exhaustive restart fault matrix/prepared promotion journal | DO operation state; selected durable runner if justified | P0.1 |
+| Provider identity on every operation | CONTRADICTS TARGET | [Provider][provider] gateway/delete compare IDs; [runtime][runtime] publication/promotion only look up names | Canonical/fork IDs not checked consistently; retained artifact storage omits provider ID | Stable Artifacts ID binding | P0.2 |
+| Account identity after disconnect | CONTRADICTS TARGET | [Namespace][namespace] `account`; [provider][provider] `disconnect` | Removing account record bypasses reconnect comparison with previous account despite retained resources | Durable binding separate from sealed credential | P0.2 |
+| Per-request authority | IMPLEMENTED | [Auth][auth], [ownership][ownership] `authority`, [runtime][runtime] receipt checks; [identity tests][identity-tests], [runtime tests][runtime-tests] | Checks are at request/reservation boundaries, not continuous cancellation; mid-flight revocation needs explicit tests/policy | Access/OAuth + Namespace DO | Keep; P0.3 |
+| Secret isolation | PARTIAL | [Sealing][sealing], [provider][provider], [credential helper][credential]; [provider tests][provider-tests] | No intentional provider-token output; raw exception text is not a proven redaction boundary; key rotation unspecified | Worker secret + AES-GCM + scoped tokens | P1.4 |
+| GitHub installation/selection/fetch/publish/PR/webhooks | NOT IMPLEMENTED | [Types][types], [router][router], [catalog][catalog], [config][config] | No provider mapping or private credential flow; Cruce's release workflow is unrelated infrastructure | Artifacts import; GitHub App; optional Workflows | P2.1 |
+| Retention, explicit fork deletion | IMPLEMENTED | [Runtime][runtime] cleanup ref checks/deletion marker; [execution][execution] dirty/ownership checks; [runtime tests][runtime-tests] | Retained repos and provenance survive; no general repository deletion API; out-of-band provider writers can race a ref scan | Artifacts retained refs | Keep; P2.2 |
+| Cache loss/restart recovery | PARTIAL | [SqlFs][sqlfs] persistent cache; [runtime][runtime] `known`/reads | Normal DO persistence exists; no integrated cold-cache rehydration/eviction/recovery test | Artifacts remains recoverable source authority | P1.1 |
+| Read-only coordination contract | CONTRADICTS TARGET | [Router][router] calls Directory login; [tower][tower] `open` calls [runtime][runtime] `initialize` | Reads avoid provider source fetch but still persist directory/repository metadata | Separate initialization from established reads | P1.3 |
+| UI and client interoperability | PARTIAL | [UI][ui], [change UI][change-ui], [client setup][client-setup], [browser tests][browser-tests] | Server readiness and exact evidence rendered; configuration writers do not prove real client context consumption | Existing Worker/DO snapshot | P0.3/P1.3 |
+| Account-crossing event/binding feasibility | UNCLEAR / NEEDS INVESTIGATION | [Config][config] operator account; [Namespace][namespace] connected resource accounts; provider docs below | No documented Cruce-tested path for arbitrary connected-account subscriptions/bindings | REST, queue pull/relay or supported binding | P0.4 feasibility |
+
+### State authority and the Git cache
+
+| State | Authority | Derived/cached representations |
+| --- | --- | --- |
+| Commits, trees, blobs and remote refs | Artifacts repositories | Repository DO `gitfs`; local worktrees/clones |
+| User/namespace IDs and mutable address directory | Directory DO | Namespace metadata and authorized UI projections |
+| Membership, repository registration/grants, resource binding and reservations | Namespace DO | Repository descriptor refreshed for commands; sealed credential passed internally |
+| Workspace identity/base, reports, artifacts, proposals, reviews, evidence records, promotions | Repository DO | UI snapshots and lineage views |
+| Accepted revision recorded by Cruce | Repository DO `sourceHead`, justified by initial provisioning/completed promotion | Not proof of the current remote ref after out-of-band writes; observed canonical state is a missing separate concern |
+| OAuth/pairing state | OAuth provider/KV | Client credentials scoped to Cruce, not Artifacts |
+| Source and evidence retention | Artifacts retained repositories plus repository-DO provenance | Cache is not the sole retention copy |
+
+There is no D1/DO dual authority and no external Git canonical implemented. Namespace/repository display metadata is copied, but authorization re-reads Namespace state. The single Directory DO and namespace enumeration may become scaling bottlenecks; that is a measured indexing question, not a reason to duplicate membership into D1 now.
+
+`ControlTower` constructs one `GitWorkspace(new SqlFs(...), "/repository.git")`. Fetches reuse a persisted bare object store; there is no temporary Worker clone for each metadata request and no remote shell/sandbox. The cache supports source/diff/history/context reads, merge-base checks, retention pushes, evidence commits and full-pack hashing/export. Ordinary source reads do not contact Artifacts. `get_context` can read all files to build its structural index even when only a small context is wanted.
+
+The cache is derived source data, not a competing canonical remote, but its size, lifetime and recovery are insufficiently bounded. `SqlFs.removeTree` is not a production eviction/recovery policy. Missing objects cannot automatically be repaired by a coordination read. The target is explicit identity-checked rehydration and bounded inspection; bulk source history should not be treated as required durable coordination state. Do not delete the cache before replacing the real ancestry/retention functions it serves. Public pack export uses standard Git objects, but its convenience endpoint still needs a demonstrated consumer before expansion.
+
+### Architecture contradictions and correctness gaps
+
+1. **Strict expected-base promotion is not enforced throughout the push.** `promote_proposal` fetches B and compares it to `p.base`, then `GitWorkspace.push` invokes a second receive-pack advertisement. In the installed Git library, `_push` chooses `oldoid` from that advertisement and checks ancestry. If an external writer moves B to X, where X is an ancestor of the approved C, before advertisement, C can still fast-forward from X. Git protects the advertised ref at update time, not Cruce's earlier B expectation. This is a static code-path finding, not a live exploit reproduction. Repository serialization protects Cruce commands, not independent provider writers. Add expected-old validation at the push boundary and preserve non-force semantics; the dependency already exposes an `onPrePush` hook worth evaluating.
+2. **Provider identity enforcement is incomplete.** Gateway and delete paths compare IDs, but publication fetch and promotion fetch/push use `info(name)` without comparing the stored fork/canonical ID. Retained storage records contain names/refs/revisions without a provider repository ID. A name recreated by an account administrator must not inherit the old identity. Retry adoption via matching description also cannot prove direct-fork parentage. Account/namespace/ID checks must cover every source and retention operation.
+3. **Disconnect forgets the resource-account binding.** `NamespaceRuntime.account` prevents changing account while an old account record and charged reservations exist; `ResourceBoundary.disconnect` deletes that record. A later connect has no old account to compare. Keep immutable resource ownership separately from replaceable credentials; do not interpret disconnect as migration authorization.
+4. **Remote success and metadata completion are not atomic.** Publication persists some phase markers; cleanup persists deletion intent. Promotion does not persist a prepared operation before remote I/O, despite the type allowing prepared state. A retry can recover when canonical equals the candidate, but after later external movement the original outcome may remain unresolved. Namespace settlement also occurs before final repository receipt save. Do not claim exactly-once execution or complete failure recovery from the existing response-loss tests.
+5. **“Coordination reads do not mutate” is too strong as a current implementation claim.** Pure controller inspection and provider-free reads exist, but HTTP/MCP routing calls `Directory.login`, which writes, and `ControlTower.open` initializes/saves repository metadata even for reads. Preserve the normative rule and correct these wrappers; do not hide the discrepancy behind read-only tool annotations.
+6. **Presence can overstate observation freshness.** Overlap timestamps use workspace activity, which a heartbeat refreshes without new changes. The bridge usually follows heartbeat with a report, but that report can fail and direct MCP clients need not report. No overlap is not evidence of no in-flight work, especially for disconnected writers.
+7. **The control plane has a source-cache dependency without a complete recovery contract.** Persisting Git blobs in DO SQLite is deliberate implementation reuse, but exceeds a metadata-only target and lacks a bounded lifecycle. Native provider reads can replace some work, not merge ancestry, remote-update correctness or the retained-source policy wholesale.
+
+No forced canonical update, mutable starting-base setter, second GitHub canonical, agent launcher, repository CI/CD execution or deployment domain was found in the inspected current surface. Existing broad account credentials are deliberate control-plane credentials sealed server-side; normal Git receives narrow 60-second tokens. Error redaction, mid-flight revocation, token-cleanup failure, remote ref changes during cleanup and cold-cache recovery remain areas needing stronger failure evidence. These limitations do not erase the narrower successful provider checks.
+
+### Artifacts capabilities and account boundaries
+
+Primary docs reviewed on 2026-10-06: [Artifacts index](https://developers.cloudflare.com/artifacts/llms.txt), [cf index](https://developers.cloudflare.com/cf/llms.txt), [REST](https://developers.cloudflare.com/artifacts/api/rest-api/) and [Workers binding](https://developers.cloudflare.com/artifacts/api/workers-binding/). Artifacts supplies lifecycle operations, forks, scoped tokens and direct commit/tree/blob/file/history inspection. Binding `get()` returns a disposable capability; `log()` follows first-parent history. These APIs can simplify exact-source inspection, but cannot be substituted blindly for full merge ancestry.
+
+Cruce uses REST because a namespace connects its own resource account, independently of the operator Worker account. The reviewed binding configuration selects a namespace; it does not establish a dynamically credentialed cross-account binding for this model. Keep REST until equivalent authority is demonstrated, using provider REST inspection where suitable. A provider binding is not worth weakening account isolation. Configuration remains `cf`/`cloudflare.config.ts`; provider examples using Wrangler do not change that convention.
+
+[Native import documentation](https://developers.cloudflare.com/artifacts/guides/import-repositories/) specifies public HTTPS repositories and warns that import may still be in progress after the response. Private native import is not established by that guide. A future private GitHub path should validate installation-scoped Git transport and record stable external identity, without putting tokens into persistent remotes. [GitHub App installation authentication](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation) documents HTTP Git access using an installation token and Contents permission. No such flow exists in Cruce today.
+
+### Event-driven observation target
+
+[Artifacts events](https://developers.cloudflare.com/artifacts/guides/event-subscriptions/) currently document account lifecycle events `repo.created`, `repo.deleted`, `repo.forked`, `repo.imported`, and repository events `pushed`, `cloned`, `fetched`, `token.created`, `token.revoked`. Push examples include ref/before/after, bounded commit data and truncation indicators; metadata includes account, subscription, schema version and timestamp. The example does not establish a stable unique domain-event ID, total ordering, replay cursor or end-to-end delivery latency. Push payload examples identify repository name/namespace rather than a repository ID, so authenticated subscription registration and provider identity validation matter.
+
+The documented delivery mechanism is [event subscriptions into Queues](https://developers.cloudflare.com/queues/event-subscriptions/), not an assumed direct webhook to Cruce. Queues provides [at-least-once delivery](https://developers.cloudflare.com/queues/reference/delivery-guarantees/) and [does not guarantee order](https://developers.cloudflare.com/queues/reference/how-queues-works/). Queue durability does not prove that every upstream provider event will arrive or that an event contains the complete Git history.
+
+**Proposed ingestion contract:** Subscribe to relevant push/lifecycle signals; ingest through an authenticated boundary mapped to the namespace's connected account and registered provider repository. Validate schema, record a durable processing identity, and reconcile exact current refs before changing observed state. A subscription ID is not an event ID; a queue message ID alone may not deduplicate provider re-emissions. Deduplicate transport delivery and make domain observation application idempotent independently. Do not infer actor identity from commit authors or activity from clone/fetch as if it were code incorporation.
+
+Keep observed remote state separate from human-accepted provenance. Delayed events cannot regress a newer observation or bless external canonical movement. Handle deleted/rewound refs and unknown versions explicitly. Fetch missing facts when payloads are truncated. A bounded reconciliation/backfill operation repairs gaps and reconnects, with freshness/degraded status visible to clients. A current-ref scan can recover current state, but cannot promise reconstruction of every transient or deleted ref without retained evidence. Reconciliation is explicit resource work; context reads remain on recorded state.
+
+Configure bounded retries and a [dead-letter queue](https://developers.cloudflare.com/queues/configuration/dead-letter-queues/) with inspect/replay ownership before adoption. Account-crossing queue delivery, subscription permissions, cost attribution, event identity and provider replay guarantees remain feasibility work. The current Artifacts-only connected credential must not silently gain Queues/Worker administration permissions. No event or queue consumer may approve/promote source or start an agent.
+
+Current UI polling reads snapshots every 15 seconds; bridge heartbeats/local reports run every 30 seconds. This is not evidence of a repeated provider Git poll to remove. Events fill missing pushed-state observation, while UI notification is a separate delivery question. Hibernating WebSockets can distribute authorized version changes if latency/fan-out measurements justify them; they do not ensure an agent reads or acts. [Cloudflare WebSocket guidance](https://developers.cloudflare.com/durable-objects/best-practices/websockets/) supports the mechanism, not Cruce client compatibility.
+
+### Cloudflare capability fit
+
+| Responsibility | Current solution | Cloudflare option | Decision | Rationale |
+| --- | --- | --- | --- | --- |
+| Git storage and retained source | Canonical, source and evidence Artifacts repos | Artifacts | KEEP CURRENT | Exact Git source remains outside authoritative coordination metadata |
+| Writer isolation | Direct workspace fork plus local worktree | Artifacts forks | KEEP CURRENT | Hosted durability and local writer isolation solve different problems |
+| Git credentials | Sealed namespace token; scoped short-lived repo tokens | Artifacts tokens + Worker secret | KEEP CURRENT | Correct authority shape; fix identity/rebinding gaps, not token exposure to agents |
+| Lightweight source inspection | SQLite-backed Git cache | Artifacts REST/binding | REMOVE DUPLICATION selectively | Replace equivalent inspection, preserve ancestry/transport and read/resource boundaries |
+| Git activity observation | Reports and publication checkpoints | Artifacts subscriptions + Queues | USE as proposed target | Native pushes should become observations; account routing/recovery must first be validated |
+| Repository coordination | Serialized repository DO | SQLite Durable Objects | KEEP CURRENT | Already the appropriate consistency boundary; no new coordination service needed |
+| Identity, memberships and budgets | Directory/Namespace DOs | DO SQLite | KEEP CURRENT | Stable authority and atomic reservations; fix account-binding lifecycle |
+| Real-time UI | 15-second snapshot polls | DO hibernating WebSockets | EXPLORE within P1.3 | Select on measured latency/fan-out, keep snapshot recovery and auth |
+| Async secondary analysis | Request-path inspection | Queues | EXPLORE | Event delivery justifies one queue; extra fan-out only for measured heavy work |
+| Durable operation recovery | Receipts, selected phase markers, caller retries | DO journal/alarm or Workflows | EXPLORE | Complete operation semantics first; Workflows retries do not make external effects exactly once |
+| Global queries | Directory enumeration and Namespace snapshots | D1 projections | DO NOT USE now | No measured query requirement; never duplicate mutable authorization authority |
+| Operational diagnosis | Workers observability enabled | Workers Logs/Traces | USE more deliberately | Add redacted correlation and operation phases before custom infrastructure |
+| Business analytics | Activity records and pilot evidence | Analytics Engine | DO NOT USE now | Validate useful measures first; never part of review/promotion correctness |
+| Secret management | `CRUCE_SECRET`, AES-GCM sealing | Worker secrets; separate secret service if needed | KEEP CURRENT | No demonstrated need for another store; rotation/recovery must be designed |
+| External-provider integration | None | Artifacts import; Workflows for long imports | EXPLORE through P2.1 | GitHub-first only when adoption evidence justifies it; one canonical authority |
+| Scheduled cleanup | Explicit end, proof and retry | DO alarm for authorized pending operation | EXPLORE | Recover deletion/reconciliation, never infer deletion authority from inactivity |
+| Builds, deployment and agent execution | External to coordinated repository | Builds, Previews, Sandboxes, runtime orchestration | DO NOT USE in core | These would expand product scope; Cruce's own release workflow is infrastructure |
+
+[Workflows guidance](https://developers.cloudflare.com/workflows/build/rules-of-workflows/) requires idempotent side effects even across durable steps. Long-running imports and selected interrupted-operation recovery are concrete candidates; routine reads, heartbeats and simple coordination commands are not. [Workers Logs](https://developers.cloudflare.com/workers/observability/logs/) and [Traces](https://developers.cloudflare.com/workers/observability/traces/) should carry allowlisted namespace/repository/workspace, proposal/promotion, operation/reservation and revision identifiers, outcome and latency. Source, credentials and OAuth payloads stay excluded. Provider/queue correlation is proposed, not already instrumented. No unnecessary D1, Workflow, Queue or Analytics Engine binding exists today.
+
+### Recommended target architecture
+
+Solid edges describe existing boundaries; dashed edges are proposed observation/recovery work. Optional GitHub, Workflows, WebSockets, D1 projections and analytics are deliberately absent from the minimum diagram until their product/feasibility gates pass.
+
+```mermaid
+flowchart TB
+    P[Independent agents, local Git and human console] --> W[Workers API, MCP and Git gateway]
+    W --> D[Directory DO: identity and addresses]
+    W --> N[Namespace DO: authority, resource binding and budgets]
+    W --> R[Repository DO: work, review and provenance]
+    R -->|Current authority and reservations| N
+    R -->|Scoped tokens and standard Git| A[Artifacts: canonical, direct forks and retained source]
+    A -.-> E[Proposed: account-scoped event subscription and Queue]
+    E -.-> I[Proposed: authenticated, idempotent observation ingestion]
+    I -.-> R
+    R -.-> B[Proposed: bounded provider reconciliation and cache recovery]
+    B -.-> A
+    R --> S[Authorized recorded snapshots]
+    S --> P
+```
+
+**Recommendation: CONTINUE WITH ARCHITECTURAL CORRECTIONS.** Keep Workers, the existing DO ownership split, OAuth KV and Artifacts; close promotion/identity/account-binding gaps, prove the deployed two-tool journey, then add reliable observations. Artifacts is already a foundational advantage for programmable isolation, credential scoping and source retention, not merely interchangeable Git storage. That advantage remains incomplete for in-flight coordination: event-driven observations, deliberate native inspection and measured useful cross-tool consumption are what would make it persuasive.
+
+[controller]: ../src/core/platform.ts
+[ownership]: ../src/core/ownership.ts
+[types]: ../src/shared/platform.ts
+[catalog]: ../src/shared/tools.ts
+[runtime]: ../src/worker/repository-runtime.ts
+[provider]: ../src/worker/artifacts.ts
+[router]: ../src/worker/platform-router.ts
+[worker]: ../src/worker/index.ts
+[auth]: ../src/worker/auth.ts
+[mcp]: ../src/worker/mcp.ts
+[directory]: ../src/worker/directory.ts
+[namespace]: ../src/worker/namespace-runtime.ts
+[tower]: ../src/worker/control-tower.ts
+[store]: ../src/worker/store.ts
+[sealing]: ../src/worker/sealing.ts
+[git]: ../src/worker/git/workspace.ts
+[sqlfs]: ../src/worker/git/sql-fs.ts
+[execution]: ../runner/execution.ts
+[local-git]: ../runner/local-git.ts
+[credential]: ../runner/git-credential.ts
+[client-setup]: ../runner/client-config.ts
+[indexer]: ../src/intelligence/structural-index.ts
+[ui]: ../src/ui/App.tsx
+[change-ui]: ../src/ui/change.tsx
+[config]: ../cloudflare.config.ts
+[core-tests]: ../test/core/foundation.test.ts
+[runtime-tests]: ../test/worker/repository-runtime.test.ts
+[provider-tests]: ../test/worker/artifacts.test.ts
+[identity-tests]: ../test/worker/identity.test.ts
+[route-tests]: ../test/worker/routes.test.ts
+[runner-tests]: ../test/runner/execution.test.ts
+[convergence-test]: ../test/worker/convergence.test.ts
+[index-tests]: ../test/intelligence/structural-index.test.ts
+[browser-tests]: ../test/browser/console.browser.mjs
