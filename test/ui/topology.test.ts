@@ -44,6 +44,7 @@ function snapshot(workspaces: Workspace[] = []): RepositorySnapshot {
 		readiness: {},
 		forkCleanup: {},
 		executionRelease: {},
+		canonicalSetup: { required: false, retry: false },
 		promotionRecovery: {},
 	};
 }

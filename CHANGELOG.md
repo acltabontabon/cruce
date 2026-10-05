@@ -6,6 +6,7 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Fixed
 
+- Recover repositories whose creation failed before canonical storage existed. The console explains the missing setup and lets maintainers retry the original setup operation, reusing its budget reservation instead of creating a duplicate.
 - Refresh OAuth credentials in later processes. The Git credential helper and long-running bridges now restore the registered callback, so the MCP SDK refreshes tokens instead of failing as a non-interactive client.
 - Trim pasted Cloudflare account IDs and API tokens before verifying them, and keep browsers from autofilling saved passwords into the API token field.
 - Bind canonical promotion to the exact approved old revision and candidate through the Git update. Persist promotion intent and reconcile interrupted outcomes without another push, recheck human authority on retries, preserve uncertain reservations, and allow console recovery after reload. Promotion provenance now saves before reservation settlement.

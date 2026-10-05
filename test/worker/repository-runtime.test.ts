@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
-import type { Actor, Command, Proposal, Repository, Workspace } from "../../src/shared/platform.ts";
+import type { Actor, Command, Proposal, Repository, RepositorySnapshot, Workspace } from "../../src/shared/platform.ts";
 import { type RepositoryHost, ResourceBoundary } from "../../src/worker/artifacts.ts";
 import { MemoryFs } from "../../src/worker/git/memory-fs.ts";
 import { GitWorkspace } from "../../src/worker/git/workspace.ts";
@@ -462,6 +462,44 @@ describe("repository runtime", () => {
 		await expect(f.call("publish_revision", { workspaceId: s.id, revision: f.head, pack: f.pack }, dev)).rejects.toThrow("Protected");
 		expect(f.push.mock.calls.every(([input]) => input.remoteRef === "refs/heads/cruce-base")).toBe(true);
 		await expect(f.call("get_source", { revision: f.head }, dev)).rejects.toThrow("unavailable");
+	});
+});
+
+describe("repository setup recovery", () => {
+	const human = { actor: owner, scopes: [], repositories: [repo.id] };
+	async function unprovisioned() {
+		const f = await fixture();
+		const state = f.runtime.state();
+		delete state.canonical;
+		delete state.sourceHead;
+		f.store.put("repository", state);
+		vi.spyOn(f.git, "fetch").mockResolvedValue(f.base as never);
+		const setup = (tool: string, key: string, g: typeof grant | typeof human = human) =>
+			f.runtime.command({ tool, namespaceId: repo.namespaceId, repositoryId: repo.id, idempotencyKey: key }, g);
+		const creations = () => f.w.state.reservations.filter((r) => r.action === "repository.create");
+		return { ...f, setup, creations };
+	}
+	it("retries a failed creation with its original operation and reservation, then refuses once canonical exists", async () => {
+		const f = await unprovisioned();
+		vi.mocked(f.host.ensure!).mockRejectedValueOnce(new Error("Cloudflare API: Authentication error"));
+		await expect(f.setup("provision_repository", "create-dialog-key")).rejects.toThrow("Authentication error");
+		expect(f.creations()).toMatchObject([{ state: "uncertain" }]);
+		const view = (await f.setup("get_repository", "", human)) as RepositorySnapshot;
+		expect(view.canonicalSetup).toEqual({ required: true, retry: true });
+		expect(((await f.setup("get_repository", "", grant)) as RepositorySnapshot).canonicalSetup).toEqual({ required: true, retry: false });
+		await expect(f.setup("retry_repository_setup", "retry", grant)).rejects.toThrow("capability denied");
+		await f.setup("retry_repository_setup", "console-retry");
+		expect(f.runtime.state()).toMatchObject({ sourceHead: f.base, canonical: { name: repo.storageName } });
+		expect(f.creations()).toMatchObject([{ state: "complete" }]);
+		expect(((await f.setup("get_repository", "", human)) as RepositorySnapshot).canonicalSetup).toEqual({ required: false, retry: false });
+		await expect(f.setup("retry_repository_setup", "again")).rejects.toThrow("already set up");
+	});
+	it("recovers repositories created before setup intent was recorded with one stable operation", async () => {
+		const f = await unprovisioned();
+		await f.setup("retry_repository_setup", "first-click");
+		expect(f.runtime.state().sourceHead).toBe(f.base);
+		expect(f.creations()).toHaveLength(1);
+		expect(f.creations()[0].id).toBe(`${owner.id}:provision-${repo.id}`);
 	});
 });
 

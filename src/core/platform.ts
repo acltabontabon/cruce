@@ -158,6 +158,10 @@ export class RepositoryController {
 			sourceAvailable: !!this.state.sourceHead || !!this.state.artifacts.find((a) => a.kind === "source"),
 			forkCleanup: Object.fromEntries(this.state.workspaces.map((s) => [s.id, this.forkCleanup(s)])),
 			executionRelease: Object.fromEntries(this.state.workspaces.map((s) => [s.id, this.executionRelease(s, a)])),
+			canonicalSetup: {
+				required: !this.state.canonical,
+				retry: !this.state.canonical && a.actor.kind === "human" && !a.actor.connectionId && a.repositoryRole === "maintain",
+			},
 			readiness: Object.fromEntries(this.state.proposals.map((p) => [p.id, this.readiness(p)])),
 			promotionRecovery: Object.fromEntries(
 				this.state.promotions

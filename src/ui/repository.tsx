@@ -37,7 +37,40 @@ function ChangeList({ view, open }: { view: RepositorySnapshot; open: Open }) {
 		</div>
 	);
 }
-export function RepositoryOverview({ view, open }: { view: RepositorySnapshot; open: Open }) {
+/** Shown when creation stopped before canonical Git existed; the retry replays the original setup operation. */
+function CanonicalSetup({ view, execute }: { view: RepositorySnapshot; execute: Execute }) {
+	const [error, setError] = useState(""),
+		[working, setWorking] = useState(false);
+	if (!view.canonicalSetup.required) return null;
+	return (
+		<div className="alert canonical-setup" role="status">
+			<p>
+				<strong>Canonical storage was not created.</strong> Repository creation stopped before Cruce could set up this repository's
+				canonical Git storage in the connected Cloudflare account, so cloning and workspaces are unavailable.{" "}
+				{view.canonicalSetup.retry
+					? "Retrying reuses the original setup operation and its budget reservation."
+					: "A repository maintainer can retry setup."}
+			</p>
+			{view.canonicalSetup.retry && (
+				<button
+					type="button"
+					disabled={working}
+					onClick={() => {
+						setWorking(true);
+						setError("");
+						void execute({ tool: "retry_repository_setup" })
+							.catch((e) => setError((e as Error).message))
+							.finally(() => setWorking(false));
+					}}
+				>
+					{working ? "Retrying setup…" : "Retry setup"}
+				</button>
+			)}
+			{error && <p role="alert">{error}</p>}
+		</div>
+	);
+}
+export function RepositoryOverview({ view, open, execute }: { view: RepositorySnapshot; open: Open; execute: Execute }) {
 	const [instructions, setInstructions] = useState<"clone" | "attach">();
 	const active = view.workspaces.filter((w) => w.state === "active");
 	const publications = view.artifacts.filter((a) => a.kind === "source");
@@ -63,6 +96,7 @@ export function RepositoryOverview({ view, open }: { view: RepositorySnapshot; o
 					</button>
 				</div>
 			</div>
+			<CanonicalSetup view={view} execute={execute} />
 			<div className="status-strip">
 				<span>{count(active.length, "active workspace")}</span>
 				<span>{count(publications.length, "published revision")}</span>

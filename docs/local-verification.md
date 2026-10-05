@@ -45,10 +45,10 @@ On **2026-10-06**, the participation journey ran end to end through the deployed
 
 **Defects found and fixed.**
 - *OAuth refresh outside login.* MCP SDK 2.3.0 treats a provider without a redirect URL as non-interactive and never uses its refresh token. Cruce set the redirect URL only during login, so the Git credential helper always failed, and the bridge would fail once its access token expired. `Credentials.load()` now restores the registered callback; a regression test was added.
+- *Half-created repositories.* A provider failure during creation left a registered repository with no canonical storage and no retry. Provisioning intent is now recorded, and maintainers can replay it from the console with the original operation and reservation (runtime and browser tests). Deployed as `502ec26c-db89-4fc7-a903-1268d231d37e`, the retry repaired the real `d2-participation` through the legacy fallback: canonical was created, and exactly one `provision-<repository>` reservation completed. The original failed attempt's reservation stays `uncertain` because its identity was never recorded. One console click produced no observable request and no error; network tracking was not active at the time, so the cause is unconfirmed.
 - *Pasted credentials.* Connecting an account did not trim the API token, and Chrome could autofill a saved password into the token field. Both are fixed and tested.
 
 **Defects found, not yet fixed.**
-- A provider failure during repository creation leaves a registered repository with no canonical storage, and the console has no retry (`d2-participation` remains in that state).
 - Provider errors show the raw Cloudflare API path, including the account ID, in the console (roadmap F5).
 - Codex does not load the project `.codex/config.toml` that `connect --client codex` writes, so the run used a per-launch `-c mcp_servers.cruce…` override.
 - The signed-in console still sets the tab title to "Common ground for coding agents".

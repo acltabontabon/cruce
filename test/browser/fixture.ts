@@ -66,6 +66,7 @@ export async function fixture() {
 		);
 	}
 	c.state.sourceHead = base;
+	c.state.canonical = { id: "canonical", name: repository.storageName, remote: "https://fixture.invalid/canonical.git" };
 	for (const w of c.state.workspaces)
 		w.fork = { id: w.id, name: `fork-${w.id}`, remote: `https://fixture.invalid/${w.id}.git`, state: "ready" };
 	const workspace = c.state.workspaces[1];

@@ -240,6 +240,18 @@ strong {
 	padding: 12px 16px;
 	margin: 16px 0;
 }
+.alert.canonical-setup {
+	display: grid;
+	gap: 10px;
+	justify-items: start;
+	border-left-color: #8a5128;
+	background: #fbf3ea;
+	color: var(--ink, #17251f);
+}
+.alert.canonical-setup p {
+	margin: 0;
+	max-width: 72ch;
+}
 [role="status"] {
 	padding: 10px 14px;
 	color: var(--green);

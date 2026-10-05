@@ -117,7 +117,7 @@ export const CRUCE_TOOLS: Tool[] = [
 	),
 	write("request_promotion", "Request human review and source promotion.", ["proposalId"], "promotion:request"),
 ];
-export const HUMAN_TOOLS = new Set(["resolve_review", "reject_proposal", "promote_proposal"]);
+export const HUMAN_TOOLS = new Set(["resolve_review", "reject_proposal", "promote_proposal", "retry_repository_setup"]);
 export function toolByName(name: string) {
 	return CRUCE_TOOLS.find((t) => t.name === name);
 }

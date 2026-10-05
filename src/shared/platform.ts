@@ -265,6 +265,8 @@ export interface RepositorySnapshot extends Omit<RepositoryState, "receipts"> {
 	promotionRecovery: Record<string, { command: Command; ready: boolean; reasons: string[] }>;
 	forkCleanup: Record<string, { ready: boolean; reasons: string[] }>;
 	executionRelease: Record<string, { ready: boolean; reasons: string[] }>;
+	/** Canonical storage is missing after a failed creation; `retry` says whether this viewer may replay setup. */
+	canonicalSetup: { required: boolean; retry: boolean };
 }
 
 export const id = z.string().min(1).max(160);

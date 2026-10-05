@@ -1127,6 +1127,49 @@ test("interrupted promotion can reconcile after reload with its persisted operat
 	assert.deepEqual(sent, command);
 });
 
+test("a repository whose creation stopped before canonical setup offers a maintainer retry of the original operation", async () => {
+	let retried = false;
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		const response = await route.fetch(),
+			data = await response.json();
+		if (!retried) {
+			delete data.sourceHead;
+			delete data.canonical;
+			data.canonicalSetup = { required: true, retry: true };
+		}
+		await route.fulfill({ json: data });
+	});
+	const sent = [];
+	await page.route("**/api/namespaces/fernloop/repositories/payments/command", async (route) => {
+		const body = route.request().postDataJSON();
+		sent.push(body.tool);
+		if (body.tool !== "retry_repository_setup") return route.continue();
+		retried = true;
+		await route.fulfill({ json: { revision: "a".repeat(40) } });
+	});
+	await openRepo();
+	const notice = page.locator(".canonical-setup");
+	await notice.getByText("Canonical storage was not created.").waitFor();
+	assert.equal(await page.getByRole("button", { name: "Clone", exact: true }).isDisabled(), true);
+	await page.screenshot({ path: "dist/ui-checks/repository-setup-retry.png", fullPage: true });
+	await notice.getByRole("button", { name: "Retry setup", exact: true }).click();
+	await page.getByRole("status").filter({ hasText: "Saved." }).waitFor();
+	assert.deepEqual(sent, ["retry_repository_setup"]);
+	await page.locator(".canonical-setup").waitFor({ state: "detached" });
+});
+test("viewers without maintain authority see why setup is missing but no retry control", async () => {
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		const response = await route.fetch(),
+			data = await response.json();
+		delete data.sourceHead;
+		delete data.canonical;
+		data.canonicalSetup = { required: true, retry: false };
+		await route.fulfill({ json: data });
+	});
+	await openRepo();
+	await page.locator(".canonical-setup").getByText("A repository maintainer can retry setup.").waitFor();
+	assert.equal(await page.getByRole("button", { name: "Retry setup", exact: true }).count(), 0);
+});
 test("unknown canonical, disconnected and detached workspaces stay distinct from accepted source", async () => {
 	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
 		const response = await route.fetch(),

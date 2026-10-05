@@ -323,7 +323,11 @@ export function App() {
 						{view ? (
 							<>
 								{route.tab === "overview" && (
-									<RepositoryOverview view={view} open={(tab, id) => navigate(route.namespaceId, route.repositoryId, tab, id)} />
+									<RepositoryOverview
+										view={view}
+										execute={execute}
+										open={(tab, id) => navigate(route.namespaceId, route.repositoryId, tab, id)}
+									/>
 								)}
 								{route.tab === "work" && (
 									<WorkScreen

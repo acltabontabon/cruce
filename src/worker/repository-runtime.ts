@@ -145,6 +145,18 @@ export class RepositoryRuntime {
 			authorizeMachine(a, cmd);
 			const state = structuredClone(this.state());
 			state.repository = await this.namespace.repository(grant, repoId);
+			if (cmd.tool === "retry_repository_setup") {
+				// Replay the original provisioning intent so a failed creation reuses its operation identity
+				// and charged reservation. Repositories created before intent was recorded use a stable key.
+				humanMaintain(a);
+				if (state.canonical) throw new DomainError(409, "Canonical repository is already set up");
+				cmd = this.store.get<Command>("provision-command") ?? {
+					tool: "provision_repository",
+					namespaceId: state.repository.namespaceId,
+					repositoryId: repoId,
+					idempotencyKey: `provision-${repoId}`,
+				};
+			}
 			const op = cmd.idempotencyKey ? await hash(`${a.actor.id}:${cmd.idempotencyKey}`) : "read";
 			let sequence = 0;
 			const c = new RepositoryController(state, this.now(), () => `${op.slice(0, 24)}-${sequence++}`);
@@ -172,6 +184,7 @@ export class RepositoryRuntime {
 			const repo = state.repository;
 			if (cmd.tool === "provision_repository") {
 				humanMaintain(a);
+				if (!this.store.get("provision-command")) this.store.put("provision-command", cmd);
 				result = await this.gate(grant, cmd, "repository.create", async (host) => {
 					const name = requireValue(repo.storageName, "Source storage missing"),
 						info = await host.ensure(name, `Cruce repository ${repo.id}`, repo.defaultBranch);
