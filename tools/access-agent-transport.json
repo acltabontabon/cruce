@@ -3,6 +3,7 @@
 	"type": "self_hosted",
 	"domain": "cruce.acltabontabon.workers.dev/mcp",
 	"destinations": [
+		{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/mcp/git/*" },
 		{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/mcp" },
 		{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/oauth/token" },
 		{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/oauth/register" },

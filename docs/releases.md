@@ -16,7 +16,7 @@ Cruce's first alpha, **0.1.0-alpha.1**, was released on 2026-10-05. Future relea
 
 The workflow in `.github/workflows/release.yml` deploys Cruce's own Worker, `cruce`, in the account already named in `cloudflare.config.ts`. It does not change the canonical Artifacts repositories or the product's repository deployment decisions.
 
-1. Configure the GitHub `production` environment. Add `CLOUDFLARE_API_TOKEN` as an environment secret, scoped to the existing Cloudflare account and the deployment permissions needed by this Worker and its bindings. Use a deployment token, not the workspace's connected-account credential or an Artifacts repository write token.
+1. Configure the GitHub `production` environment. Add `CLOUDFLARE_API_TOKEN` as an environment secret, scoped to the existing Cloudflare account and the deployment permissions needed by this Worker and its bindings. Use a deployment token, not the namespace's connected-account credential or an Artifacts repository write token.
 2. Set these environment variables in the GitHub `production` environment (Settings → Environments → production → Environment variables):
 
    | Variable | Value |

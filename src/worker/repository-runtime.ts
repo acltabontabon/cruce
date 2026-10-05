@@ -2,24 +2,25 @@ import { humanMaintain, writeAccess } from "../core/capabilities.ts";
 import { DomainError, requireValue, stable } from "../core/errors.ts";
 import { initialRepository, RepositoryController } from "../core/platform.ts";
 import { buildIndex } from "../intelligence/structural-index.ts";
-import type { Artifact, Command, Repository, RepositoryState, ResourceAction } from "../shared/platform.ts";
+import { gitRemotePath, parseGitRoute } from "../shared/git-access.ts";
+import type { Artifact, Command, Repository, RepositoryState, ResourceAction, WorkspaceUpdateDetails } from "../shared/platform.ts";
 import { authorizeMachine, HUMAN_TOOLS, toolByName } from "../shared/tools.ts";
-import { pushDeployment, type RepositoryHost, ResourceBoundary, runSmokeChecks } from "./deployments.ts";
+import { boundedBody, pushDeployment, type RepositoryHost, ResourceBoundary, runSmokeChecks } from "./deployments.ts";
 import type { GitWorkspace } from "./git/workspace.ts";
+import type { ConnectionGrant, NamespaceRuntime } from "./namespace-runtime.ts";
 import { hash, Serial, type Store } from "./store.ts";
-import type { ConnectionGrant, WorkspaceRuntime } from "./workspace-runtime.ts";
 
-type WorkspacePort = {
+type NamespacePort = {
 	[K in "authority" | "repository" | "reserve" | "settle" | "resourceConfiguration"]: (
-		...args: Parameters<WorkspaceRuntime[K]>
-	) => ReturnType<WorkspaceRuntime[K]> | Promise<ReturnType<WorkspaceRuntime[K]>>;
+		...args: Parameters<NamespaceRuntime[K]>
+	) => ReturnType<NamespaceRuntime[K]> | Promise<ReturnType<NamespaceRuntime[K]>>;
 };
 export class RepositoryRuntime {
 	private serial = new Serial();
 	constructor(
 		readonly store: Store,
 		readonly git: GitWorkspace,
-		readonly workspace: WorkspacePort,
+		readonly namespace: NamespacePort,
 		readonly env: { CRUCE_SECRET?: string },
 		readonly now = Date.now,
 		readonly orchestrate: (id: string) => Promise<void> = async () => {},
@@ -37,33 +38,36 @@ export class RepositoryRuntime {
 		this.store.put("repository", c.state);
 	}
 	private async resources() {
-		const config = await this.workspace.resourceConfiguration();
+		const config = await this.namespace.resourceConfiguration();
 		const local: Store = {
 			get: <T>() => config.account as T,
 			put: () => {
-				throw new Error("Credentials are owned by the workspace");
+				throw new Error("Credentials are owned by the namespace");
 			},
 			delete: () => {
-				throw new Error("Credentials are owned by the workspace");
+				throw new Error("Credentials are owned by the namespace");
 			},
 		};
 		return new ResourceBoundary(local, this.env, { namespace: config.namespace });
 	}
 	private async gate(grant: ConnectionGrant, cmd: Command, action: ResourceAction, run: (host: RepositoryHost) => Promise<unknown>) {
-		const r = await this.workspace.reserve(
+		const r = await this.namespace.reserve(
 			grant,
 			requireValue(cmd.repositoryId, "Repository required"),
 			requireValue(cmd.idempotencyKey, "Operation identity required"),
 			stable(cmd),
 			action,
-			cmd.sessionId,
+			cmd.workspaceId,
 		);
 		try {
 			const result = await run(await (await this.resources()).host());
-			await this.workspace.settle(r.id, "complete");
+			await this.namespace.settle(
+				r.id,
+				action === "workspace.cleanup" && (result as { state?: string }).state === "deleting" ? "uncertain" : "complete",
+			);
 			return result;
 		} catch (error) {
-			await this.workspace.settle(r.id, "uncertain");
+			await this.namespace.settle(r.id, "uncertain");
 			throw error;
 		}
 	}
@@ -80,23 +84,79 @@ export class RepositoryRuntime {
 		}
 		throw new DomainError(404, "Source unavailable; publish committed source first");
 	}
+	/** Standard Git transport; authorization is repeated for both advertisement and RPC. */
+	gitRequest(request: Request, grant: ConnectionGrant): Promise<Response> {
+		return this.serial.run(async () => {
+			const route = requireValue(parseGitRoute(new URL(request.url)), "Unsupported Git route");
+			const state = structuredClone(this.state());
+			if (route.repositoryId !== state.repository.id || route.namespaceId !== state.repository.namespaceId)
+				throw new DomainError(403, "Repository identity mismatch");
+			const a = await this.namespace.authority(grant, route.repositoryId);
+			if (a.actor.kind === "agent" && !a.scopes?.includes("cruce:read")) throw new DomainError(403, "Git read scope required");
+			if (!state.sourceHead) throw new DomainError(409, "Canonical repository unavailable");
+			const service = route.endpoint === "info/refs" ? new URL(request.url).searchParams.get("service") : route.endpoint;
+			if (
+				!["git-upload-pack", "git-receive-pack"].includes(service ?? "") ||
+				(route.endpoint === "info/refs" ? request.method !== "GET" : request.method !== "POST")
+			)
+				throw new DomainError(400, "Unsupported Git request");
+			const write = service === "git-receive-pack";
+			if (a.actor.kind === "human" && a.actor.connectionId && route.workspaceId) {
+				const bound = this.store.get<string>(`human-workspace:${a.actor.connectionId}`);
+				if (bound && bound !== route.workspaceId) throw new DomainError(403, "Terminal Git scope denied");
+			}
+			const c = new RepositoryController(state, this.now(), () => "git");
+			let name = requireValue(state.repository.storageName, "Canonical storage missing");
+			let providerId = state.canonical?.id;
+			if (route.workspaceId) {
+				const workspace = c.workspace(route.workspaceId);
+				if (workspace.fork?.state !== "ready") throw new DomainError(409, "Fork unavailable");
+				name = workspace.fork.name;
+				providerId = workspace.fork.id;
+				if (write) {
+					c.owned(a, workspace.id);
+					if (a.actor.kind === "agent" && (!a.scopes?.includes("revision:publish") || !a.scopes?.includes("workspace:write")))
+						throw new DomainError(403, "Git write scopes required");
+				}
+			} else if (write) throw new DomainError(403, "Canonical writes require reviewed human promotion");
+			const bytes = request.method === "POST" ? await boundedBody(request) : undefined;
+			const forward = () => new Request(request.url, { method: request.method, headers: request.headers, body: bytes });
+			if (write) {
+				// A push is content addressed for retry accounting, but always replays Git so
+				// the remote checks current refs. No success response is cached.
+				const digest = bytes
+					? Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("")
+					: "advertise";
+				const cmd: Command = {
+					tool: "git_receive_pack",
+					namespaceId: route.namespaceId,
+					repositoryId: route.repositoryId,
+					workspaceId: route.workspaceId,
+					idempotencyKey: `git-${route.workspaceId}-${digest}`,
+				};
+				return (await this.gate(grant, cmd, "revision.publish", (host) => host.gitRequest(name, forward(), providerId))) as Response;
+			}
+			return (await (await this.resources()).host()).gitRequest(name, forward(), providerId);
+		});
+	}
+
 	command(cmd: Command, grant: ConnectionGrant): Promise<unknown> {
 		return this.serial.run(async () => {
 			const repoId = requireValue(cmd.repositoryId, "Repository required"),
-				a = await this.workspace.authority(grant, repoId);
+				a = await this.namespace.authority(grant, repoId);
 			authorizeMachine(a, cmd);
 			const state = structuredClone(this.state());
-			state.repository = await this.workspace.repository(grant, repoId);
+			state.repository = await this.namespace.repository(grant, repoId);
 			const op = cmd.idempotencyKey ? await hash(`${a.actor.id}:${cmd.idempotencyKey}`) : "read";
 			let sequence = 0;
 			const c = new RepositoryController(state, this.now(), () => `${op.slice(0, 24)}-${sequence++}`);
 			const mutation = HUMAN_TOOLS.has(cmd.tool) || toolByName(cmd.tool)?.mutation || cmd.tool === "provision_repository";
 			if (mutation && !cmd.idempotencyKey) throw new DomainError(400, "Mutation requires an idempotency key");
 			if (a.actor.kind === "human" && a.actor.connectionId) {
-				const bound = this.store.get<string>(`human-session:${a.actor.connectionId}`);
-				if (bound && cmd.tool === "start_session" && !state.receipts[op])
-					throw new DomainError(409, "Terminal authorization is bound to an existing session");
-				if (bound && cmd.sessionId && bound !== cmd.sessionId) throw new DomainError(403, "Terminal session scope denied");
+				const bound = this.store.get<string>(`human-workspace:${a.actor.connectionId}`);
+				if (bound && cmd.tool === "start_workspace" && !state.receipts[op])
+					throw new DomainError(409, "Terminal authorization is bound to an existing workspace");
+				if (bound && cmd.workspaceId && bound !== cmd.workspaceId) throw new DomainError(403, "Terminal workspace scope denied");
 			}
 			const fingerprint = stable(cmd),
 				receipt = state.receipts[op];
@@ -104,14 +164,13 @@ export class RepositoryRuntime {
 				if (receipt.fingerprint !== fingerprint) throw new DomainError(409, "Operation identity reused");
 				return receipt.result;
 			}
-			await this.git.ensureInit();
+			if (mutation) await this.git.ensureInit();
 			let result: unknown;
 			const repo = state.repository;
 			if (cmd.tool === "provision_repository") {
 				humanMaintain(a);
-				if (repo.source.kind !== "artifacts") throw new DomainError(400, "Local repositories do not need provisioning");
 				result = await this.gate(grant, cmd, "repository.create", async (host) => {
-					const name = requireValue(repo.source.storageName, "Source storage missing"),
+					const name = requireValue(repo.storageName, "Source storage missing"),
 						info = await host.ensure(name, `Cruce repository ${repo.id}`, repo.defaultBranch);
 					const fetched = await host.withToken(name, "read", (token) =>
 						this.git.fetch({ url: info.remote, token, remoteBranch: repo.defaultBranch, localRef: "refs/cruce/source" }),
@@ -132,15 +191,60 @@ export class RepositoryRuntime {
 							this.git.push({ url: info.remote, token, localRef: "refs/cruce/source", remoteRef: `refs/heads/${repo.defaultBranch}` }),
 						);
 					}
+					state.canonical = { name: info.name, id: info.id, remote: info.remote };
 					state.sourceHead = head;
 					c.event(a.actor, "repository_created", `Created ${repo.name}`, [repo.id, head]);
 					return { revision: head, remote: info.remote };
 				});
-			} else if (cmd.tool === "export_revision") {
-				const revision = requireValue(cmd.revision, "Revision required");
-				await this.known(c, revision);
-				const pack = await this.git.exportPack(revision);
-				result = { revision, pack: btoa(Array.from(pack, (b) => String.fromCharCode(b)).join("")) };
+			} else if (cmd.tool === "get_workspace_updates") {
+				const s = c.workspace(cmd.workspaceId),
+					updates = c.workspaceUpdates(s);
+				let available = false;
+				let comparison: WorkspaceUpdateDetails["comparison"] = "unavailable";
+				let files: import("../shared/platform.ts").WorkspaceChange[] = [];
+				try {
+					await this.known(c, requireValue(updates.revision, "Upstream unavailable"));
+					available = true;
+					await this.known(c, updates.baselineRevision);
+					files = (await this.git.reviewChanges(updates.baselineRevision, updates.revision!)).files.map(({ path, status, binary }) => ({
+						path,
+						status,
+						binary,
+					}));
+					await this.known(c, s.headRevision);
+					const common = await this.git.mergeBase(s.headRevision, updates.revision!);
+					comparison =
+						s.headRevision === updates.revision
+							? "current"
+							: common === updates.revision
+								? "ahead"
+								: common === s.headRevision
+									? "behind"
+									: common
+										? "diverged"
+										: "unrelated";
+				} catch (error) {
+					if (!(error instanceof DomainError)) throw error;
+				}
+				const touched = new Set(s.changes.flatMap((f) => [f.path, ...(f.previousPath ? [f.previousPath] : [])]));
+				result = {
+					...updates,
+					available,
+					comparison,
+					changes: files,
+					overlappingPaths: files.map((f) => f.path).filter((p) => touched.has(p)),
+					overlapTrust: "reported",
+				} satisfies WorkspaceUpdateDetails;
+			} else if (cmd.tool === "get_git_access") {
+				if (!state.sourceHead) throw new DomainError(409, "Canonical Git repository is not ready");
+				const workspace = cmd.workspaceId ? c.workspace(cmd.workspaceId) : undefined;
+				result = {
+					canonical: gitRemotePath(repo.namespaceId, repo.id),
+					fork: workspace?.fork?.state === "ready" ? gitRemotePath(repo.namespaceId, repo.id, workspace.id) : undefined,
+					defaultBranch: repo.defaultBranch,
+					baseRevision: workspace?.baseRevision,
+					canonicalWrite: false,
+				};
 			} else if (cmd.tool === "get_source" || cmd.tool === "get_history") {
 				const revision = requireValue(cmd.revision ?? state.sourceHead, "Choose a published revision");
 				await this.known(c, revision);
@@ -155,7 +259,7 @@ export class RepositoryRuntime {
 				await this.known(c, head);
 				result = await this.git.reviewChanges(base, head, cmd.path);
 			} else if (cmd.tool === "get_context") {
-				const s = c.session(cmd.sessionId);
+				const s = c.workspace(cmd.workspaceId);
 				let available = false;
 				try {
 					await this.known(c, s.baseRevision);
@@ -171,7 +275,7 @@ export class RepositoryRuntime {
 						: {},
 					structure: available ? buildIndex(await this.git.readFiles(s.baseRevision), s.baseRevision) : null,
 					repositoryPolicy: repo.policy,
-					workspacePolicy: (await this.workspace.resourceConfiguration()).policy,
+					namespacePolicy: (await this.namespace.resourceConfiguration()).policy,
 					note: available ? undefined : "Instructions unavailable until committed source is published",
 				};
 			} else if (cmd.tool === "read_artifact") {
@@ -182,67 +286,135 @@ export class RepositoryRuntime {
 						? (await this.git.readFiles(artifact.storage.revision, (p) => p === artifact.storage.path))[artifact.storage.path]
 						: undefined,
 				};
-			} else if (cmd.tool === "attach_session") {
+			} else if (cmd.tool === "attach_workspace") {
 				result = c.command(cmd, a);
-				const s = c.session(cmd.sessionId);
-				if (repo.source.kind === "artifacts" && s.mode === "write" && !s.execution?.storageName) {
-					await this.gate(grant, cmd, "session.fork", async (host) => {
-						if (!host.fork) throw new DomainError(503, "Repository forks unavailable");
-						const baseline = `repo-${repo.id}-base-${s.baseRevision}`,
-							snapshot = await host.ensure(baseline, `Cruce baseline ${repo.id} ${s.baseRevision}`, repo.defaultBranch);
-						if (!(await this.git.log(s.baseRevision, 1)).length) throw new DomainError(409, "Refresh hosted source before attaching");
+				const s = c.workspace(cmd.workspaceId);
+				if (s.mode === "write" && !s.fork) {
+					await this.known(c, s.baseRevision);
+					await this.gate(grant, cmd, "workspace.fork", async (host) => {
+						const canonical = requireValue(repo.storageName, "Canonical storage missing");
+						const name = `repo-${repo.id}-workspace-${s.id}`;
+						const fork = await host.fork(canonical, name, `Cruce workspace ${s.id}`);
+						// The provider forks refs at request time, not at a requested SHA. Pin the
+						// exact base without rewriting inherited branches or canonical history.
 						await this.git.setRef("refs/cruce/baseline", s.baseRevision);
-						await host.withToken(baseline, "write", (token) =>
-							this.git.push({
-								url: snapshot.remote,
-								token,
-								localRef: "refs/cruce/baseline",
-								remoteRef: `refs/heads/${repo.defaultBranch}`,
-							}),
+						await host.withToken(name, "write", (token) =>
+							this.git.push({ url: fork.remote, token, localRef: "refs/cruce/baseline", remoteRef: "refs/heads/cruce-base" }),
 						);
-						const name = `repo-${repo.id}-session-${s.id}`;
-						await host.fork(baseline, name, `Cruce session ${s.id}`);
-						s.execution!.storageName = name;
+						s.fork = { name, id: fork.id, remote: fork.remote, state: "ready" };
 					});
 				}
+			} else if (cmd.tool === "cleanup_workspace") {
+				const workspace = c.workspace(cmd.workspaceId);
+				writeAccess(a);
+				if (a.actor.kind === "agent" && (workspace.actor.id !== a.actor.id || workspace.actor.connectionId !== a.actor.connectionId))
+					throw new DomainError(403, "Workspace belongs to another connection");
+				if (a.actor.kind === "human") humanMaintain(a);
+				const ready = c.forkCleanup(workspace);
+				if (!ready.ready) throw new DomainError(409, ready.reasons.join("; "));
+				result = await this.gate(grant, cmd, "workspace.cleanup", async (host) => {
+					const fork = workspace.fork!;
+					if (fork.state === "ready") {
+						const info = await host.info(fork.name);
+						if (info.id !== fork.id) throw new DomainError(409, "Fork identity changed; cleanup refused");
+						const { result: refs } = await host.withToken(fork.name, "read", (token) => this.git.remoteRefs({ url: info.remote, token }));
+						for (const ref of refs) {
+							if (ref.ref.endsWith("^{}")) continue;
+							// Annotated tags and non-commit refs are conservatively retained until removed explicitly with Git.
+							try {
+								await this.known(c, ref.oid);
+							} catch {
+								throw new DomainError(409, `Unretained fork ref ${ref.ref}; publish its commit before cleanup`);
+							}
+						}
+						fork.state = "deleting";
+						this.save(c);
+					}
+					if (await host.remove(fork.name, fork.id)) {
+						fork.state = "deleted";
+						c.event(a.actor, "fork_deleted", `Removed fork for ${workspace.title}`, [workspace.id]);
+					} else c.event(a.actor, "fork_deleting", `Fork deletion requested for ${workspace.title}`, [workspace.id]);
+					return { workspaceId: workspace.id, state: fork.state };
+				});
 			} else if (cmd.tool === "publish_revision" || cmd.tool === "publish_artifact") {
-				const s = c.owned(a, cmd.sessionId),
+				const s = c.owned(a, cmd.workspaceId),
 					revision = requireValue(cmd.revision, "Revision required");
 				if (!s.execution) throw new DomainError(409, "Attach an execution context first");
 				result = await this.gate(grant, cmd, cmd.tool === "publish_revision" ? "revision.publish" : "artifact.publish", async (host) => {
 					const artifactId = `${op.slice(0, 24)}-artifact`;
-					let storage: Artifact["storage"], contentHash: string;
+					let storage: Artifact["storage"], contentHash: string, baseRevision: string | undefined;
 					if (cmd.tool === "publish_revision") {
-						const bytes = Uint8Array.from(atob(requireValue(cmd.pack, "Git pack required")), (ch) => ch.charCodeAt(0));
-						await this.git.importPack(bytes);
+						const fork = requireValue(s.fork, "Attach a hosted fork first");
+						if (fork.state !== "ready") throw new DomainError(409, "Fork unavailable");
+						if (this.store.get<string>(`publication-revision:${op}`) !== revision) {
+							const forkInfo = await host.info(fork.name);
+							const { result: pushed } = await host.withToken(fork.name, "read", (token) =>
+								this.git.fetch({
+									url: forkInfo.remote,
+									token,
+									remoteBranch: requireValue(cmd.ref, "Pushed fork branch required"),
+									localRef: `refs/cruce/checkpoint/${s.id}`,
+								}),
+							);
+							if (pushed !== revision) throw new DomainError(409, "Fork ref moved; publish its exact current revision");
+						}
 						if (
 							!(await this.git.log(revision, 1)).length ||
 							(await this.git.mergeBase(s.publishedRevision ?? s.baseRevision, revision)) !== (s.publishedRevision ?? s.baseRevision)
 						)
-							throw new DomainError(409, "Published commits must descend from the session baseline and previous publication");
-						const diff = await this.git.reviewChanges(s.baseRevision, revision);
+							throw new DomainError(409, "Published commits must descend from the workspace baseline and previous publication");
+						const upstream = c.upstream();
+						const pinnedBase = this.store.get<string>(`publication-base:${op}`);
+						baseRevision =
+							pinnedBase ??
+							cmd.baseRevision ??
+							(upstream && (await this.git.log(upstream, 1)).length && (await this.git.mergeBase(upstream, revision)) === upstream
+								? upstream
+								: (s.integratedRevision ?? s.baseRevision));
+						if (!pinnedBase && baseRevision !== s.baseRevision && baseRevision !== s.integratedRevision && baseRevision !== upstream)
+							throw new DomainError(409, "Review base must name the workspace baseline or observed upstream revision");
+						if (!(await this.git.log(baseRevision, 1)).length)
+							throw new DomainError(409, "Review base objects unavailable; fetch upstream first");
+						if (
+							(await this.git.mergeBase(s.baseRevision, baseRevision)) !== s.baseRevision ||
+							(await this.git.mergeBase(baseRevision, revision)) !== baseRevision
+						)
+							throw new DomainError(409, "Integrate the review base with Git before publishing");
+						const diff = await this.git.reviewChanges(baseRevision, revision);
 						if (
 							a.repositoryRole !== "maintain" &&
 							diff.files.some((f) => repo.policy.protectedPaths.some((p) => f.path === p || f.path.startsWith(`${p}/`)))
 						)
 							throw new DomainError(403, "Protected paths require a repository maintainer");
-						const storageName = s.execution?.storageName ?? `repo-${repo.id}-session-${s.id}`;
-						const info = await host.ensure(storageName, `Cruce session ${s.id}`, repo.defaultBranch);
+						this.store.put(`publication-base:${op}`, baseRevision);
+						this.store.put(`publication-revision:${op}`, revision);
+						const storageName = `repo-${repo.id}-artifacts`;
+						const info = await host.ensure(storageName, `Cruce source artifacts ${repo.id}`, repo.defaultBranch);
 						const ref = `refs/heads/artifact-${artifactId}`;
 						await this.git.setRef(ref, revision);
 						await host.withToken(storageName, "write", (token) =>
 							this.git.push({ url: info.remote, token, localRef: ref, remoteRef: ref }),
 						);
 						storage = { repository: storageName, revision, ref };
-						contentHash = await hash(cmd.pack!);
+						contentHash = Array.from(
+							new Uint8Array(await crypto.subtle.digest("SHA-256", Uint8Array.from(await this.git.exportPack(revision)))),
+							(b) => b.toString(16).padStart(2, "0"),
+						).join("");
+						s.changes = diff.files.map(({ path, status, binary }) => ({ path, status, binary }));
+						s.commits = [];
+						for (const commit of await this.git.log(revision, 1000)) {
+							if (commit.oid === baseRevision) break;
+							s.commits.push(commit.oid);
+						}
 						s.publishedRevision = revision;
 						s.headRevision = revision;
+						s.integratedRevision = baseRevision;
 					} else {
 						if (
 							revision !== s.baseRevision &&
-							!state.artifacts.some((a) => a.kind === "source" && a.sessionId === s.id && a.revision === revision)
+							!state.artifacts.some((a) => a.kind === "source" && a.workspaceId === s.id && a.revision === revision)
 						)
-							throw new DomainError(409, "Evidence must name the base or a published session revision");
+							throw new DomainError(409, "Evidence must name the base or a published workspace revision");
 						const content = requireValue(cmd.content, "Artifact content required"),
 							path = `artifacts/${artifactId}.txt`,
 							name = `repo-${repo.id}-evidence`,
@@ -272,11 +444,12 @@ export class RepositoryRuntime {
 					}
 					return c.addArtifact({
 						id: artifactId,
-						workspaceId: repo.workspaceId,
+						namespaceId: repo.namespaceId,
 						repositoryId: repo.id,
-						sessionId: s.id,
+						workspaceId: s.id,
 						actor: a.actor,
 						revision,
+						baseRevision,
 						kind: cmd.tool === "publish_revision" ? "source" : "evidence",
 						title: cmd.title ?? s.title,
 						contentHash,
@@ -287,12 +460,11 @@ export class RepositoryRuntime {
 				});
 			} else if (cmd.tool === "promote_proposal") {
 				humanMaintain(a);
-				if (repo.source.kind !== "artifacts") throw new DomainError(409, "Merge and push with normal Git, then report the observed ref");
 				const p = c.proposal(cmd.proposalId),
 					ready = c.readiness(p);
 				if (!ready.ready) throw new DomainError(409, ready.reasons.join("; "));
 				result = await this.gate(grant, cmd, "revision.publish", async (host) => {
-					const name = requireValue(repo.source.storageName, "Source repository unavailable"),
+					const name = requireValue(repo.storageName, "Source repository unavailable"),
 						info = await host.info(name);
 					const { result: head } = await host.withToken(name, "read", (token) =>
 						this.git.fetch({ url: info.remote, token, remoteBranch: repo.defaultBranch, localRef: "refs/cruce/promotion-current" }),
@@ -336,7 +508,7 @@ export class RepositoryRuntime {
 				if (d.state === "superseded") throw new DomainError(409, "A newer deployment superseded this operation");
 				result = await this.gate(
 					grant,
-					{ ...cmd, sessionId: d.sessionId },
+					{ ...cmd, workspaceId: d.workspaceId },
 					environment.kind === "production" ? "production.deploy" : "preview.deploy",
 					async (host) => {
 						if (!existing) {
@@ -354,9 +526,10 @@ export class RepositoryRuntime {
 				);
 			} else result = c.command(cmd, a);
 			if (mutation) {
-				if (cmd.tool === "start_session" && a.actor.kind === "human" && a.actor.connectionId)
-					this.store.put(`human-session:${a.actor.connectionId}`, (result as { id: string }).id);
-				state.receipts[op] = { fingerprint, result };
+				if (cmd.tool === "start_workspace" && a.actor.kind === "human" && a.actor.connectionId)
+					this.store.put(`human-workspace:${a.actor.connectionId}`, (result as { id: string }).id);
+				if (cmd.tool !== "cleanup_workspace" || (result as { state: string }).state === "deleted")
+					state.receipts[op] = { fingerprint, result };
 				this.save(c);
 			}
 			return result;
@@ -365,7 +538,7 @@ export class RepositoryRuntime {
 	exportSource(revision: string, grant: ConnectionGrant) {
 		return this.serial.run(async () => {
 			const state = this.state();
-			await this.workspace.authority(grant, state.repository.id);
+			await this.namespace.authority(grant, state.repository.id);
 			await this.known(new RepositoryController(state, this.now(), () => "read"), revision);
 			return this.git.exportPack(revision);
 		});

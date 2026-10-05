@@ -3,12 +3,12 @@ import type { Command, Repository } from "../shared/platform.ts";
 import type { DeploymentParams } from "./deployment-workflow.ts";
 import { SqlFs } from "./git/sql-fs.ts";
 import { GitWorkspace } from "./git/workspace.ts";
+import type { ConnectionGrant, NamespaceRuntime } from "./namespace-runtime.ts";
 import { RepositoryRuntime } from "./repository-runtime.ts";
 import { sqlStore } from "./store.ts";
-import type { ConnectionGrant, WorkspaceRuntime } from "./workspace-runtime.ts";
 
 interface Env {
-	WORKSPACE: DurableObjectNamespace<WorkspaceRuntime>;
+	NAMESPACE: DurableObjectNamespace<NamespaceRuntime>;
 	CRUCE_SECRET?: string;
 	DEPLOYMENT_WORKFLOW?: Workflow<DeploymentParams>;
 }
@@ -23,7 +23,7 @@ export class ControlTower extends DurableObject<Env> {
 			this.runtime = new RepositoryRuntime(
 				this.store,
 				new GitWorkspace(new SqlFs(this.ctx.storage.sql), "/repository.git"),
-				this.env.WORKSPACE.getByName(repo.workspaceId),
+				this.env.NAMESPACE.getByName(repo.namespaceId),
 				this.env,
 				Date.now,
 				async (deploymentId) => {
@@ -42,6 +42,9 @@ export class ControlTower extends DurableObject<Env> {
 	}
 	command(repository: Repository, cmd: Command, grant: ConnectionGrant) {
 		return this.open(repository).command(cmd, grant);
+	}
+	gitRequest(repository: Repository, request: Request, grant: ConnectionGrant) {
+		return this.open(repository).gitRequest(request, grant);
 	}
 	exportSource(repository: Repository, revision: string, grant: ConnectionGrant) {
 		return this.open(repository).exportSource(revision, grant);

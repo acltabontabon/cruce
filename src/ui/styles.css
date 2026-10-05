@@ -210,7 +210,7 @@ aside button:hover {
 aside button:focus-visible {
 	outline-color: var(--accent);
 }
-.workspace-switcher {
+.namespace-switcher {
 	display: flex;
 	align-items: center;
 	gap: 10px;
@@ -220,12 +220,12 @@ aside button:focus-visible {
 	min-width: 0;
 	width: 100%;
 }
-.workspace-switcher > span:nth-child(2),
+.namespace-switcher > span:nth-child(2),
 .account-trigger > span:nth-child(2) {
 	flex: 1;
 	min-width: 0;
 }
-.workspace-switcher strong,
+.namespace-switcher strong,
 .account-trigger strong {
 	display: block;
 	font-size: 12px;
@@ -234,14 +234,14 @@ aside button:focus-visible {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
-.workspace-switcher small,
+.namespace-switcher small,
 .account-trigger small {
 	font-size: 10px;
 	color: #9fac96;
 	margin-top: 4px;
 	font-weight: 400;
 }
-.workspace-avatar {
+.namespace-avatar {
 	display: grid;
 	place-items: center;
 	width: 34px;
@@ -439,10 +439,10 @@ header {
 .page-title h1 {
 	margin: 0 0 12px;
 }
-.workspace-title {
+.namespace-title {
 	margin: 44px 0 32px;
 }
-.workspace-title h1 {
+.namespace-title h1 {
 	font-size: clamp(30px, 3vw, 40px);
 	letter-spacing: -1.6px;
 }
@@ -535,13 +535,13 @@ form button[type="submit"]:hover {
 	left: 61%;
 	top: 14%;
 }
-.workspace-guide {
+.namespace-guide {
 	display: grid;
 	grid-template-columns: repeat(3, 1fr);
 	gap: 32px;
 	margin-top: 38px;
 }
-.workspace-guide > div {
+.namespace-guide > div {
 	padding: 22px 0;
 	border-top: 1px solid var(--line);
 }
@@ -550,11 +550,11 @@ form button[type="submit"]:hover {
 	font-size: 10px;
 	color: #8b9c7e;
 }
-.workspace-guide h3 {
+.namespace-guide h3 {
 	margin: 17px 0 9px;
 	font-size: 12px;
 }
-.workspace-guide p {
+.namespace-guide p {
 	font-size: 11px;
 	color: #7b8574;
 	margin: 0;
@@ -608,13 +608,13 @@ form button[type="submit"]:hover {
 	border-radius: 10px;
 	color: #546e43;
 }
-.session-list {
+.workspace-list {
 	border: 1px solid var(--line);
 	border-radius: 12px;
 	overflow: hidden;
 	background: #fff;
 }
-.session-list > button {
+.workspace-list > button {
 	display: grid;
 	grid-template-columns: 10px 130px 1fr auto;
 	gap: 18px;
@@ -627,16 +627,16 @@ form button[type="submit"]:hover {
 	background: none;
 	font-size: 12px;
 }
-.session-list > button:last-child {
+.workspace-list > button:last-child {
 	border-bottom: 0;
 }
-.session-list > button:hover {
+.workspace-list > button:hover {
 	background: #f1f5eb;
 }
-.session-list strong {
+.workspace-list strong {
 	font-weight: 550;
 }
-.session-list small {
+.workspace-list small {
 	font-size: 10px;
 }
 .presence {
@@ -860,7 +860,7 @@ dd {
 .dialog > .muted {
 	margin: 8px 0 24px;
 }
-.workspace-option {
+.namespace-option {
 	display: flex;
 	gap: 12px;
 	align-items: center;
@@ -870,26 +870,26 @@ dd {
 	background: transparent;
 	border-color: transparent;
 }
-.workspace-option > span:nth-child(2) {
+.namespace-option > span:nth-child(2) {
 	flex: 1;
 	min-width: 0;
 	overflow-wrap: anywhere;
 }
-.workspace-option strong {
+.namespace-option strong {
 	font-size: 13px;
 }
-.workspace-option small {
+.namespace-option small {
 	font-size: 11px;
 }
-.workspace-option:hover {
+.namespace-option:hover {
 	background: #edf4e4;
 }
-.workspace-option .workspace-avatar {
+.namespace-option .namespace-avatar {
 	background: #e5efda;
 	color: var(--green);
 	border-color: #d1ddc3;
 }
-.create-workspace-trigger {
+.create-namespace-trigger {
 	display: flex;
 	gap: 10px;
 	align-items: center;
@@ -1082,11 +1082,11 @@ dd {
 		width: 52%;
 		top: 140px;
 	}
-	.session-list > button {
+	.workspace-list > button {
 		grid-template-columns: 8px 100px 1fr;
 		gap: 14px;
 	}
-	.session-list > button > span:last-child {
+	.workspace-list > button > span:last-child {
 		grid-column: 3;
 	}
 	.context-badge {
@@ -1131,12 +1131,12 @@ dd {
 	.repository-empty {
 		min-height: 340px;
 	}
-	.workspace-guide {
+	.namespace-guide {
 		grid-template-columns: 1fr;
 		gap: 0;
 		margin-top: 24px;
 	}
-	.workspace-guide > div {
+	.namespace-guide > div {
 		position: relative;
 		padding: 20px 0 20px 34px;
 	}
@@ -1145,10 +1145,10 @@ dd {
 		left: 0;
 		top: 22px;
 	}
-	.workspace-guide h3 {
+	.namespace-guide h3 {
 		margin: 0 0 6px;
 	}
-	.workspace-guide p {
+	.namespace-guide p {
 		max-width: none;
 	}
 	.status-strip {
@@ -1187,18 +1187,18 @@ dd {
 	.brand-mark .icon {
 		width: 17px;
 	}
-	.workspace-switcher {
+	.namespace-switcher {
 		padding: 6px 8px;
 		gap: 6px;
 		min-width: 0;
 	}
-	.workspace-switcher .workspace-avatar {
+	.namespace-switcher .namespace-avatar {
 		display: none;
 	}
-	.workspace-switcher small {
+	.namespace-switcher small {
 		font-size: 8px;
 	}
-	.workspace-switcher strong {
+	.namespace-switcher strong {
 		font-size: 10px;
 	}
 	.finder-trigger {
@@ -1261,13 +1261,13 @@ dd {
 	header {
 		min-height: 64px;
 	}
-	.workspace-title {
+	.namespace-title {
 		margin: 30px 0 24px;
 		align-items: flex-start;
 		flex-direction: column;
 		gap: 14px;
 	}
-	.workspace-title h1 {
+	.namespace-title h1 {
 		font-size: 32px;
 	}
 	.page-description {
@@ -1305,13 +1305,13 @@ dd {
 		overflow-wrap: anywhere;
 		font-size: 28px;
 	}
-	.session-list > button {
+	.workspace-list > button {
 		grid-template-columns: 7px 70px 1fr;
 		gap: 10px;
 		padding: 16px 12px;
 		font-size: 11px;
 	}
-	.session-list code {
+	.workspace-list code {
 		font-size: 9px;
 	}
 	.activity li {
@@ -1373,7 +1373,7 @@ dd {
 		scroll-behavior: auto;
 	}
 }
-.all-workspaces {
+.all-namespaces {
 	display: flex;
 	align-items: center;
 	gap: 10px;
@@ -1383,11 +1383,11 @@ dd {
 	margin-top: 10px;
 	color: #b1c5a5;
 }
-.all-workspaces > .icon:last-child {
+.all-namespaces > .icon:last-child {
 	margin-left: auto;
 	width: 14px;
 }
-.all-workspaces.selected {
+.all-namespaces.selected {
 	background: #35462e;
 	color: var(--accent);
 }
@@ -1439,7 +1439,7 @@ dd {
 	color: #c0c8b8;
 	margin: 0 15px;
 }
-.workspace-search {
+.namespace-search {
 	display: flex;
 	align-items: center;
 	gap: 9px;
@@ -1447,22 +1447,22 @@ dd {
 	min-width: min(310px, 100%);
 	color: #87937d;
 }
-.workspace-search .icon {
+.namespace-search .icon {
 	width: 16px;
 }
-.workspace-search input {
+.namespace-search input {
 	border: 0;
 	background: none;
 	min-height: 36px;
 	padding: 6px;
 	font-size: 11px;
 }
-.workspace-grid {
+.namespace-grid {
 	display: grid;
 	grid-template-columns: repeat(2, minmax(0, 1fr));
 	gap: 24px;
 }
-.workspace-card {
+.namespace-card {
 	display: flex;
 	flex-direction: column;
 	background: #fff;
@@ -1471,24 +1471,24 @@ dd {
 	padding: 28px;
 	min-width: 0;
 }
-.workspace-card.personal {
+.namespace-card.personal {
 	background: #eef3e7;
 	border-color: #dce5d2;
 }
-.workspace-card-top {
+.namespace-card-top {
 	display: flex;
 	align-items: center;
 	gap: 12px;
 	margin-bottom: 28px;
 }
-.workspace-card .workspace-avatar {
+.namespace-card .namespace-avatar {
 	background: #e6eedb;
 	color: #536c3e;
 	border: 0;
 	width: 36px;
 	height: 36px;
 }
-.workspace-card.shared .workspace-avatar {
+.namespace-card.shared .namespace-avatar {
 	background: #e6ece5;
 	color: #4b6151;
 }
@@ -1502,7 +1502,7 @@ dd {
 	font-size: 10px;
 	color: #b0bca5;
 }
-.workspace-card-title {
+.namespace-card-title {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
@@ -1513,41 +1513,41 @@ dd {
 	border-radius: 0;
 	gap: 12px;
 }
-.workspace-card-title h2 {
+.namespace-card-title h2 {
 	font-size: 26px;
 	letter-spacing: -1px;
 	font-weight: 550;
 	margin: 0;
 	overflow-wrap: anywhere;
 }
-.workspace-card-title > .icon {
+.namespace-card-title > .icon {
 	color: #8b9b7f;
 	width: 18px;
 }
-.workspace-card-title:hover {
+.namespace-card-title:hover {
 	background: transparent;
 	color: var(--green);
 }
-.workspace-handle {
+.namespace-handle {
 	font-family: "JetBrains Mono Variable", monospace;
 	font-size: 10px;
 	color: #8b997f;
 	margin: 10px 0 22px;
 	overflow-wrap: anywhere;
 }
-.workspace-card-body {
+.namespace-card-body {
 	min-height: 130px;
 }
-.workspace-card-meta {
+.namespace-card-meta {
 	font-size: 10px;
 	margin: 0 0 18px;
 	color: #6c7e5d;
 }
-.workspace-card-meta span {
+.namespace-card-meta span {
 	text-transform: capitalize;
 	color: #94a188;
 }
-.workspace-card-empty {
+.namespace-card-empty {
 	font-size: 11px;
 	color: #8a987d;
 	line-height: 1.8;
@@ -1578,7 +1578,7 @@ dd {
 .home-repo > .icon:last-child {
 	width: 12px;
 }
-.open-workspace {
+.open-namespace {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
@@ -1591,11 +1591,11 @@ dd {
 	font-size: 11px;
 	font-weight: 500;
 }
-.open-workspace:hover {
+.open-namespace:hover {
 	background: transparent;
 	color: var(--green);
 }
-.open-workspace .icon {
+.open-namespace .icon {
 	width: 16px;
 }
 .home-footer {
@@ -1721,7 +1721,7 @@ dd {
 .membership-row small {
 	font-size: 10px;
 }
-.membership-row .workspace-avatar {
+.membership-row .namespace-avatar {
 	background: #eaf1e1;
 	color: #567440;
 	border-color: #d4e0c7;
@@ -1744,7 +1744,7 @@ dd {
 	background: #eef4e6;
 }
 @media (min-width: 1500px) {
-	.workspace-grid {
+	.namespace-grid {
 		grid-template-columns: repeat(3, minmax(0, 1fr));
 	}
 }
@@ -1761,7 +1761,7 @@ dd {
 	}
 }
 @media (max-width: 800px) {
-	.workspace-grid {
+	.namespace-grid {
 		grid-template-columns: 1fr;
 	}
 	.home-title {
@@ -1774,7 +1774,7 @@ dd {
 	}
 }
 @media (max-width: 600px) {
-	.all-workspaces {
+	.all-namespaces {
 		display: none;
 	}
 	.home-title {
@@ -1787,13 +1787,13 @@ dd {
 	.home-toolbar {
 		gap: 14px;
 	}
-	.workspace-search {
+	.namespace-search {
 		width: 100%;
 	}
-	.workspace-search input {
+	.namespace-search input {
 		font-size: 11px;
 	}
-	.workspace-card {
+	.namespace-card {
 		padding: 24px;
 	}
 	.home-footer {
@@ -1916,7 +1916,7 @@ dd {
 	color: #59763f;
 	background: #eaf3df;
 }
-.session-list .actor-kind {
+.workspace-list .actor-kind {
 	display: inline-block;
 	text-transform: uppercase;
 	letter-spacing: 0.6px;
@@ -1926,7 +1926,7 @@ dd {
 	background: #f1f2ee;
 	color: #7a8573;
 }
-.session-list .actor-kind.agent {
+.workspace-list .actor-kind.agent {
 	background: #e9f1da;
 	color: #5a793d;
 }
@@ -1935,27 +1935,27 @@ dd {
 	font-size: 13px;
 	color: #6b795e;
 }
-.workspace-guide p {
+.namespace-guide p {
 	font-size: 12px;
 	color: #718166;
 }
 .home-toolbar p,
-.workspace-card-empty,
+.namespace-card-empty,
 .home-repo,
-.open-workspace {
+.open-namespace {
 	font-size: 12px;
 }
-.workspace-card-meta,
+.namespace-card-meta,
 .space-kind {
 	font-size: 11px;
 }
 aside nav button {
 	font-size: 13px;
 }
-.session-list > button {
+.workspace-list > button {
 	font-size: 13px;
 }
-.session-list small {
+.workspace-list small {
 	font-size: 11px;
 }
 @media (max-width: 800px) {
@@ -1993,10 +1993,10 @@ aside nav button {
 	.home-title h1 {
 		font-size: 42px;
 	}
-	.session-list > button {
+	.workspace-list > button {
 		font-size: 11px;
 	}
-	.session-list small {
+	.workspace-list small {
 		font-size: 10px;
 	}
 	.motion-count {
@@ -2023,6 +2023,6 @@ aside nav button {
 		padding: 4px;
 	}
 }
-.session-list .actor-kind {
+.workspace-list .actor-kind {
 	display: table;
 }

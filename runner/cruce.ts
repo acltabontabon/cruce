@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { DEFAULT_AGENT_SCOPES } from "../src/core/capabilities.ts";
-import type { Command, RepositorySnapshot, Session } from "../src/shared/platform.ts";
+import type { Command, Workspace } from "../src/shared/platform.ts";
 import { CRUCE_INSTRUCTIONS, CRUCE_TOOLS, toolByName, toolInputShape } from "../src/shared/tools.ts";
 import { CRUCE_VERSION } from "../src/shared/version.ts";
 import { configureClient } from "./client-config.ts";
@@ -20,21 +20,24 @@ import {
 	reserveCheckout,
 	stateDirectory,
 } from "./execution.ts";
-import { git, packRevision, pipeGit } from "./local-git.ts";
+import { configureFork } from "./git-remotes.ts";
+import { git } from "./local-git.ts";
 import { Credentials, login } from "./oauth.ts";
 
 interface Connection {
 	mode?: "read" | "write";
 	client?: string;
 	server: string;
-	workspaceId: string;
+	namespaceId: string;
 	repositoryId: string;
 	humanToken?: string;
-	sessionId?: string;
+	workspaceId?: string;
 	baseRevision?: string;
 	publishedRevision?: string;
+	integratedRevision?: string;
 	directory?: string;
 	owned?: boolean;
+	hosted?: boolean;
 	pending?: { fingerprint: string; command: Command };
 }
 const args = process.argv.slice(2),
@@ -47,19 +50,11 @@ async function main() {
 	const operation = args[0] ?? "help";
 	if (operation === "help" || args.includes("--help")) {
 		process.stdout.write(
-			"Cruce — Workspace → Repository → Session\n\ncruce connect --workspace ID --repository ID --server URL [--client codex|claude|cursor]\ncruce human --workspace ID --repository ID --server URL\ncruce start --title TEXT [--read]\ncruce mcp [--client TOOL]\ncruce watch\ncruce publish [--title TEXT]\ncruce refresh\ncruce resume   reattach a prepared session\ncruce report-ref --ref BRANCH\ncruce end [--cleanup]\ncruce checkout --workspace ID --repository ID --server URL --directory EMPTY_DIRECTORY\n",
+			"Cruce — Namespace → Repository → Workspace\n\ncruce connect --namespace ID --repository ID --server URL [--client codex|claude|cursor]\ncruce human --namespace ID --repository ID --server URL\ncruce start --title TEXT [--read]\ncruce mcp [--client TOOL]\ncruce watch\ncruce publish [--title TEXT]\ncruce resume   reattach a prepared workspace\ncruce report-ref --ref BRANCH\ncruce end [--cleanup]\n",
 		);
 		return;
 	}
-	const checkout = operation === "checkout";
-	if (checkout) {
-		const target = resolve(option("directory") ?? "");
-		if (!option("directory")) throw new Error("Choose an empty directory");
-		await mkdir(target, { recursive: true });
-		if ((await readdir(target)).length) throw new Error("Checkout requires an empty directory");
-		await git(target, ["init"]);
-	}
-	const root = checkout ? resolve(option("directory")!) : cwd;
+	const root = cwd;
 	let configFile = join(await stateDirectory(root), "connection.json");
 	const connection: Connection = await readFile(configFile, "utf8")
 		.then(JSON.parse)
@@ -67,14 +62,14 @@ async function main() {
 			if (e.code !== "ENOENT") throw e;
 			return {
 				server: option("server") ?? "https://cruce.acltabontabon.workers.dev",
-				workspaceId: option("workspace") ?? "",
+				namespaceId: option("namespace") ?? "",
 				repositoryId: option("repository") ?? "",
 			};
 		});
 	if (operation === "mcp" && !connection.owned) {
-		// Every bridge process owns its session state. The repository connection remains shareable.
+		// Every bridge process owns its workspace state. The repository connection remains shareable.
 		configFile = join(await stateDirectory(root), `agent-${randomUUID()}.json`);
-		delete connection.sessionId;
+		delete connection.workspaceId;
 		delete connection.directory;
 		delete connection.baseRevision;
 		delete connection.publishedRevision;
@@ -82,11 +77,11 @@ async function main() {
 	}
 	connection.client = option("client") ?? connection.client ?? "agent";
 	connection.server = (option("server") ?? connection.server).replace(/\/$/, "");
-	connection.workspaceId = option("workspace") ?? connection.workspaceId;
+	connection.namespaceId = option("namespace") ?? connection.namespaceId;
 	connection.repositoryId = option("repository") ?? connection.repositoryId;
 	const url = new URL(connection.server);
 	if (url.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(url.hostname)) throw new Error("Use HTTPS");
-	if (!connection.workspaceId || !connection.repositoryId) throw new Error("Choose a workspace and repository ID from Cruce");
+	if (!connection.namespaceId || !connection.repositoryId) throw new Error("Choose a namespace and repository ID from Cruce");
 	const save = async () => {
 		await writeFile(configFile, JSON.stringify(connection, null, 2), { mode: 0o600 });
 		if (connection.directory && connection.directory !== root)
@@ -106,11 +101,11 @@ async function main() {
 	};
 	if (operation === "human") {
 		const pair = await send("/mcp?terminal=start", {
-			workspaceId: connection.workspaceId,
+			namespaceId: connection.namespaceId,
 			repositoryId: connection.repositoryId,
-			sessionId: connection.sessionId,
+			workspaceId: connection.workspaceId,
 		});
-		process.stderr.write(`Authorize this terminal session in your browser:\n${pair.url}\n`);
+		process.stderr.write(`Authorize this terminal workspace in your browser:\n${pair.url}\n`);
 		for (let i = 0; i < 150; i++) {
 			const result = await send("/mcp?terminal=poll", { code: pair.code, proof: pair.proof });
 			if (result.token) {
@@ -127,7 +122,7 @@ async function main() {
 	const clientName = connection.client,
 		credentials = new Credentials(connection.server, clientName);
 	await credentials.load();
-	if (operation === "connect" || checkout) {
+	if (operation === "connect") {
 		delete connection.humanToken;
 		await login(connection.server, credentials, DEFAULT_AGENT_SCOPES);
 	}
@@ -152,29 +147,29 @@ async function main() {
 			const tool = toolByName(raw.tool);
 			if (!tool) throw new Error("Unknown Cruce tool");
 			const command: Command = {
-				workspaceId: connection.workspaceId,
+				namespaceId: connection.namespaceId,
 				repositoryId: connection.repositoryId,
-				sessionId: connection.sessionId,
+				workspaceId: connection.workspaceId,
 				...raw,
 			};
-			if (raw.tool === "start_session") {
-				if (connection.sessionId) throw new Error("End the current session before starting another");
+			if (raw.tool === "start_workspace") {
+				if (connection.workspaceId) throw new Error("End the current workspace before starting another");
 				command.baseRevision ??= await git(root, ["rev-parse", "HEAD"]);
 				command.title ??= option("title") ?? "Local work";
 				command.mode ??= args.includes("--read") ? "read" : "write";
-				delete command.sessionId;
+				delete command.workspaceId;
 			}
 			const directory = connection.directory ?? root;
 			if (raw.tool === "report_change") {
-				if (!connection.baseRevision) throw new Error("Start a session first");
-				Object.assign(command, await observeChanges(directory, connection.baseRevision));
+				if (!connection.baseRevision) throw new Error("Start a workspace first");
+				Object.assign(command, await observeChanges(directory, connection.integratedRevision ?? connection.baseRevision));
 			}
 			if (raw.tool === "publish_revision") {
-				if (!connection.baseRevision) throw new Error("Start a session first");
-				const packed = await packRevision(directory, connection.publishedRevision ?? connection.baseRevision);
-				command.revision = packed.revision;
-				command.pack = packed.pack;
+				if (!connection.baseRevision) throw new Error("Start a workspace first");
+				command.revision = await git(directory, ["rev-parse", "HEAD"]);
+				command.ref = await git(directory, ["symbolic-ref", "--short", "HEAD"]);
 			}
+
 			const fingerprint = JSON.stringify(command);
 			if (tool.mutation) {
 				if (connection.pending && connection.pending.command.tool !== command.tool)
@@ -200,47 +195,61 @@ async function main() {
 				delete connection.pending;
 				await save();
 			}
-			if (raw.tool === "start_session") {
-				const session = result as unknown as Session;
-				connection.sessionId = session.id;
-				connection.baseRevision = session.baseRevision;
-				connection.mode = session.mode;
+			if (raw.tool === "start_workspace") {
+				const workspace = result as unknown as Workspace;
+				connection.workspaceId = workspace.id;
+				connection.baseRevision = workspace.baseRevision;
+				connection.mode = workspace.mode;
 				await save();
-				if (session.mode === "write") {
+				if (workspace.mode === "write") {
 					const made = connection.humanToken
-						? { directory: root, execution: await context(root, session.id, false) }
-						: await createExecution(root, session.id, session.baseRevision);
-					await reserveCheckout(made.directory, session.id);
+						? { directory: root, execution: await context(root, workspace.id, false) }
+						: await createExecution(root, workspace.id, workspace.baseRevision);
+					await reserveCheckout(made.directory, workspace.id);
 					connection.directory = made.directory;
 					connection.owned = made.execution.owned;
 					await save();
 					const attach: Command = {
-						tool: "attach_session",
-						workspaceId: connection.workspaceId,
+						tool: "attach_workspace",
+						namespaceId: connection.namespaceId,
 						repositoryId: connection.repositoryId,
-						sessionId: session.id,
+						workspaceId: workspace.id,
 						execution: made.execution,
-						idempotencyKey: `attach-${session.id}`,
+						idempotencyKey: `attach-${workspace.id}`,
 					};
-					await call(attach);
-					return { ...result, directory: made.directory, instruction: "Use this isolated directory for all session work." };
+					const attached = (await call(attach)) as Workspace;
+					connection.hosted = !!attached.fork;
+					if (attached.fork && connection.owned) {
+						const access = (await call({
+							tool: "get_git_access",
+							namespaceId: connection.namespaceId,
+							repositoryId: connection.repositoryId,
+							workspaceId: workspace.id,
+						})) as { fork: string };
+						await configureFork(made.directory, workspace.id, connection.server, clientName, access.fork);
+					}
+					await save();
+					return { ...result, directory: made.directory, instruction: "Use this isolated directory for all workspace work." };
 				}
 			}
 			if (raw.tool === "publish_revision") {
 				connection.publishedRevision = String(result.revision);
+				connection.integratedRevision = result.baseRevision as string | undefined;
 				await save();
 			}
-			if (raw.tool === "end_session") {
-				const sessionId = connection.sessionId!;
-				await releaseCheckout(directory, sessionId);
+			if (raw.tool === "end_workspace") {
+				const workspaceId = connection.workspaceId!;
+				await releaseCheckout(directory, workspaceId);
 				const cleanup = args.includes("--cleanup") && connection.owned;
 				const retained = connection.publishedRevision ?? connection.baseRevision!;
-				delete connection.sessionId;
+				delete connection.workspaceId;
 				delete connection.baseRevision;
+				delete connection.publishedRevision;
+				delete connection.integratedRevision;
 				delete connection.directory;
 				delete connection.owned;
 				await save();
-				if (cleanup) await cleanupExecution(directory, sessionId, retained);
+				if (cleanup) await cleanupExecution(directory, workspaceId, retained);
 			}
 			return result;
 		});
@@ -249,7 +258,7 @@ async function main() {
 	};
 	try {
 		if (operation === "connect") {
-			await call({ tool: "get_repository", workspaceId: connection.workspaceId, repositoryId: connection.repositoryId });
+			await call({ tool: "get_repository", namespaceId: connection.namespaceId, repositoryId: connection.repositoryId });
 			await save();
 			const client = option("client");
 			if (client && ["codex", "claude", "cursor"].includes(client))
@@ -258,28 +267,39 @@ async function main() {
 			return;
 		}
 		if (operation === "resume") {
-			if (!connection.sessionId) throw new Error("No prepared session to resume");
+			if (!connection.workspaceId) throw new Error("No prepared workspace to resume");
 			let directory = connection.directory;
 			if (!directory) {
 				const made = connection.humanToken
-					? { directory: root, execution: await context(root, connection.sessionId, false) }
-					: await createExecution(root, connection.sessionId, connection.baseRevision!);
+					? { directory: root, execution: await context(root, connection.workspaceId, false) }
+					: await createExecution(root, connection.workspaceId, connection.baseRevision!);
 				directory = made.directory;
 				connection.directory = directory;
 				connection.owned = made.execution.owned;
 				await save();
 			}
-			await reserveCheckout(directory, connection.sessionId);
-			const execution = await context(directory, connection.sessionId, connection.owned ?? false);
-			await call({
-				tool: "attach_session",
-				workspaceId: connection.workspaceId,
+			await reserveCheckout(directory, connection.workspaceId);
+			const execution = await context(directory, connection.workspaceId, connection.owned ?? false);
+			const attached = await call({
+				tool: "attach_workspace",
+				namespaceId: connection.namespaceId,
 				repositoryId: connection.repositoryId,
-				sessionId: connection.sessionId,
+				workspaceId: connection.workspaceId,
 				execution,
-				idempotencyKey: `attach-${connection.sessionId}`,
+				idempotencyKey: `attach-${connection.workspaceId}`,
 			});
-			process.stdout.write(`Session attached at ${directory}\n`);
+			connection.hosted = !!(attached as Workspace).fork;
+			if (connection.hosted && connection.owned) {
+				const access = (await call({
+					tool: "get_git_access",
+					namespaceId: connection.namespaceId,
+					repositoryId: connection.repositoryId,
+					workspaceId: connection.workspaceId,
+				})) as { fork: string };
+				await configureFork(directory, connection.workspaceId, connection.server, clientName, access.fork);
+			}
+			await save();
+			process.stdout.write(`Workspace attached at ${directory}\n`);
 			return;
 		}
 		if (operation === "report-ref") {
@@ -289,35 +309,9 @@ async function main() {
 			process.stdout.write(`${JSON.stringify(await execute({ tool: "report_ref", ref, revision }))}\n`);
 			return;
 		}
-		if (operation === "refresh" || checkout) {
-			const snapshot = (await call({
-				tool: "get_repository",
-				workspaceId: connection.workspaceId,
-				repositoryId: connection.repositoryId,
-			})) as RepositorySnapshot;
-			if (snapshot.repository.source.kind === "local")
-				throw new Error("Fetch your existing remote with normal Git. Cruce does not manage that remote.");
-			const head = snapshot.sourceHead;
-			if (!head) throw new Error("Hosted source not provisioned");
-			const exported = (await call({
-				tool: "export_revision",
-				workspaceId: connection.workspaceId,
-				repositoryId: connection.repositoryId,
-				revision: head,
-			})) as { pack: string };
-			await pipeGit(root, ["index-pack", "--stdin"], Buffer.from(exported.pack, "base64"));
-			await git(root, ["update-ref", "refs/cruce/source", head]);
-			if (checkout) {
-				await git(root, ["update-ref", `refs/heads/${snapshot.repository.defaultBranch}`, head]);
-				await git(root, ["symbolic-ref", "HEAD", `refs/heads/${snapshot.repository.defaultBranch}`]);
-				await git(root, ["checkout", snapshot.repository.defaultBranch]);
-				await save();
-			}
-			process.stdout.write(`Source ${head} available at refs/cruce/source. Working changes preserved.\n`);
-			return;
-		}
+
 		const heartbeat = () => {
-			if (connection.sessionId)
+			if (connection.workspaceId)
 				void execute({ tool: "heartbeat" })
 					.then(() => (connection.mode === "read" ? undefined : execute({ tool: "report_change" })))
 					.catch((e) => process.stderr.write(`${(e as Error).message}\n`));
@@ -326,7 +320,7 @@ async function main() {
 			if (connection.humanToken) throw new Error("Agent MCP cannot use human terminal credentials; connect the agent separately");
 			const server = new McpServer({ name: "Cruce local bridge", version: CRUCE_VERSION }, { instructions: CRUCE_INSTRUCTIONS });
 			for (const tool of CRUCE_TOOLS) {
-				const { workspaceId: _, repositoryId: __, sessionId: ___, idempotencyKey: ____, ...shape } = toolInputShape(tool);
+				const { namespaceId: _, repositoryId: __, workspaceId: ___, idempotencyKey: ____, ...shape } = toolInputShape(tool);
 				server.registerTool(tool.name, { description: tool.description, inputSchema: shape }, async (values) => {
 					try {
 						const result = await execute({ ...values, tool: tool.name });
@@ -365,11 +359,11 @@ async function main() {
 		}
 		const tool =
 			operation === "start"
-				? "start_session"
+				? "start_workspace"
 				: operation === "publish"
 					? "publish_revision"
 					: operation === "end"
-						? "end_session"
+						? "end_workspace"
 						: operation === "check"
 							? "get_repository"
 							: undefined;

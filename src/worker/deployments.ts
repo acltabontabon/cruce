@@ -4,7 +4,7 @@ import type { GitWorkspace } from "./git/workspace.ts";
 import { type SealingEnv, seal, unseal } from "./sealing.ts";
 import type { Store } from "./store.ts";
 
-/** Resource calls use only the workspace's explicitly connected, sealed credential. */
+/** Resource calls use only the namespace's explicitly connected, sealed credential. */
 export interface RepoRef {
 	name: string;
 	id: string;
@@ -14,7 +14,9 @@ export interface RepoRef {
 
 export interface RepositoryHost {
 	ensure(name: string, description: string, defaultBranch?: string): Promise<RepoRef>;
-	fork?(source: string, target: string, description: string): Promise<RepoRef>;
+	fork(source: string, target: string, description: string): Promise<RepoRef>;
+	remove(name: string, expectedId?: string): Promise<boolean>;
+	gitRequest(name: string, request: Request, expectedId?: string): Promise<Response>;
 	info(name: string): Promise<{ name: string; description?: string | null; remote: string; id?: string }>;
 	withToken<T>(name: string, scope: "read" | "write", fn: (token: string) => Promise<T>): Promise<{ result: T; tokenId: string }>;
 }
@@ -65,7 +67,7 @@ export class ArtifactsRestHost implements RepositoryHost {
 					body: JSON.stringify({ namespace: this.namespace }),
 				});
 			} catch (createError) {
-				// Another repository in this workspace may have created the same namespace.
+				// Another repository in this namespace may have created the same namespace.
 				if (!(createError instanceof DomainError) || createError.status !== 409) throw createError;
 				await cloudflare(this.send, this.token, this.path());
 			}
@@ -123,6 +125,66 @@ export class ArtifactsRestHost implements RepositoryHost {
 		);
 		await this.revokeOutstanding(target);
 		return { ...created, created: true };
+	}
+
+	/** Deletion is asynchronous. A retry confirms absence before releasing ownership. */
+	async remove(name: string, expectedId?: string): Promise<boolean> {
+		try {
+			const info = await this.info(name);
+			if (expectedId && info.id !== expectedId) throw new DomainError(409, "Artifacts repository identity changed");
+			await cloudflare(this.send, this.token, this.path(`/repos/${name}`), { method: "DELETE" });
+			return false;
+		} catch (error) {
+			if (error instanceof DomainError && error.status === 404) return true;
+			throw error;
+		}
+	}
+	async gitRequest(name: string, request: Request, expectedId?: string): Promise<Response> {
+		const info = await this.info(name);
+		if (expectedId && info.id !== expectedId) throw new DomainError(409, "Artifacts repository identity changed");
+		const remote = new URL(info.remote);
+		if (
+			remote.protocol !== "https:" ||
+			remote.hostname !== `${this.accountId}.artifacts.cloudflare.net` ||
+			remote.username ||
+			remote.password ||
+			remote.search ||
+			remote.hash
+		)
+			throw new DomainError(502, "Invalid Artifacts Git remote");
+		const input = new URL(request.url);
+		const endpoint = input.pathname.endsWith("/info/refs") ? "info/refs" : input.pathname.split("/").at(-1)!;
+		const service = endpoint === "info/refs" ? input.searchParams.get("service") : endpoint;
+		if (
+			!["git-upload-pack", "git-receive-pack"].includes(service ?? "") ||
+			(endpoint === "info/refs" ? request.method !== "GET" : request.method !== "POST")
+		)
+			throw new DomainError(400, "Unsupported Git request");
+		const target = `${remote.href}/${endpoint}${endpoint === "info/refs" ? `?service=${service}` : ""}`;
+		return (
+			await this.withToken(name, service === "git-receive-pack" ? "write" : "read", async (token) => {
+				const headers = new Headers({ authorization: `Bearer ${token}` });
+				for (const key of ["content-type", "content-encoding", "git-protocol"]) {
+					const value = request.headers.get(key);
+					if (value) headers.set(key, value);
+				}
+				const response = await this.send(target, {
+					method: request.method,
+					headers,
+					body: request.method === "POST" ? await boundedBody(request) : undefined,
+					redirect: "manual",
+				});
+				// Consume before revoking the token; return only Git payload headers, never cookies or redirects.
+				if (!response.ok) {
+					await response.body?.cancel();
+					throw new DomainError(502, "Artifacts Git request failed");
+				}
+				const bytes = await boundedBody(response);
+				return new Response(bytes, {
+					headers: { "content-type": response.headers.get("content-type") ?? "application/octet-stream", "cache-control": "no-store" },
+				});
+			})
+		).result;
 	}
 
 	async withToken<T>(name: string, scope: "read" | "write", fn: (token: string) => Promise<T>) {
@@ -197,7 +259,7 @@ export class WorkersBuildsClient {
 interface StoredAccount extends ResourceAccount {
 	sealed?: string;
 }
-export interface WorkspaceResources {
+export interface NamespaceResources {
 	namespace: string;
 }
 
@@ -205,7 +267,7 @@ export class ResourceBoundary {
 	constructor(
 		readonly store: Store,
 		readonly env: SealingEnv,
-		readonly resources: WorkspaceResources,
+		readonly resources: NamespaceResources,
 		readonly send: Send = fetch,
 	) {}
 	/** Public view: never includes the credential. */
@@ -220,15 +282,17 @@ export class ResourceBoundary {
 	async connect(input: { accountId: string; token: string; label?: string }, actor: string): Promise<ResourceAccount> {
 		if (!/^[0-9a-f]{32}$/.test(input.accountId)) throw new DomainError(400, "Cloudflare account ID required");
 		if (input.token.length < 20 || input.token.length > 400) throw new DomainError(400, "Cloudflare API token required");
-		await new WorkersBuildsClient(input.accountId, input.token, this.send).verify().catch((error) => {
-			throw new DomainError(400, `Token cannot read Workers Builds for this account: ${(error as Error).message}`);
-		});
+		await cloudflare(this.send, input.token, `/accounts/${input.accountId}/artifacts/namespaces?limit=1`);
+		const builds = await new WorkersBuildsClient(input.accountId, input.token, this.send).verify().then(
+			() => true,
+			() => false,
+		);
 		const account: StoredAccount = {
 			mode: "connected",
 			accountId: input.accountId,
 			label: input.label?.slice(0, 80) || "Connected Cloudflare account",
 			credential: "stored",
-			capabilities: ["artifacts", "builds"],
+			capabilities: builds ? ["artifacts", "builds"] : ["artifacts"],
 			connectedBy: actor,
 			at: Date.now(),
 			sealed: await seal(this.env, { token: input.token }),
@@ -241,7 +305,7 @@ export class ResourceBoundary {
 	}
 	private async token(): Promise<string> {
 		const stored = this.store.get<StoredAccount>("resource-account");
-		if (!stored?.sealed) throw new DomainError(409, "Connect a Cloudflare account with a Workers Builds token first");
+		if (!stored?.sealed) throw new DomainError(409, "Connect a Cloudflare account with an Artifacts token first");
 		return (await unseal<{ token: string }>(this.env, stored.sealed)).token;
 	}
 	async builds(): Promise<WorkersBuildsClient> {
@@ -310,4 +374,29 @@ export async function runSmokeChecks(
 		}
 	}
 	return results;
+}
+
+/** Bounded transfer, including chunked requests. This is a Cruce limit, not an Artifacts repository limit. */
+export async function boundedBody(message: Request | Response, limit = 32 * 1024 * 1024): Promise<ArrayBuffer> {
+	const reader = message.body?.getReader();
+	if (!reader) return new ArrayBuffer(0);
+	const chunks: Uint8Array[] = [];
+	let size = 0;
+	for (;;) {
+		const { value, done } = await reader.read();
+		if (done) break;
+		size += value.length;
+		if (size > limit) {
+			await reader.cancel();
+			throw new DomainError(413, "Git transfer exceeds the 32 MiB gateway limit");
+		}
+		chunks.push(value);
+	}
+	const bytes = new Uint8Array(size);
+	let offset = 0;
+	for (const chunk of chunks) {
+		bytes.set(chunk, offset);
+		offset += chunk.length;
+	}
+	return bytes.buffer;
 }

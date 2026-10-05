@@ -20,7 +20,7 @@ Short, dated entries so another agent can continue. Newest last.
 - 45 unit tests (`pnpm test`) including the full demo story through the controller.
 - Control plane: `ControlTower` Durable Object (SQLite state + audit log, WebSocket hibernation, alarms)
   hosting a runtime-agnostic `Tower` (controller + Git). Git runs in the Worker with isomorphic-git on a
-  bare workspace persisted in DO SQLite (`SqlFs`); Artifacts repos are remotes; Cruce is the only writer
+  bare namespace persisted in DO SQLite (`SqlFs`); Artifacts repos are remotes; Cruce is the only writer
   (agents submit files → Cruce rebuilds the commit → publish gate → 60s write token → push → revoke).
 - Demo director (18 deterministic steps) ran end to end on real Artifacts: 3 forks, gated pushes,
   rejected publish, amendment, merges into canonical with Git notes, stale → refresh → re-plan → land.
@@ -54,7 +54,7 @@ Short, dated entries so another agent can continue. Newest last.
   details, contextual overrides, typed activity, URL/Back navigation, masked in-memory controller
   access, responsive layouts, and on-demand Git changes/history. Screenshots are in `docs/img/`.
 - Fresh demos idempotently prepare the real first seven steps and pause at partial clearance;
-  existing sessions remain intact. Continue, reset-to-overlap and complete replay preserve the story.
+  existing workspaces remain intact. Continue, reset-to-overlap and complete replay preserve the story.
 - Added accepted-head/merge-base and integration/first-parent Changes API; snapshots and realtime
   updates include controller-derived integration blockers. Obsolete sockets and reads are disposed,
   and semantic command errors surface without discarding task input.
@@ -102,7 +102,7 @@ Short, dated entries so another agent can continue. Newest last.
 
 ## 2026-10-05 — native platform direction
 
-- Superseded the GitHub-first implementation with native Systems, Cloudflare Access/MCP identity, Artifacts accepted source, isolated mission workspaces and immutable evidence outputs. Removed newly introduced GitHub authority code; preserved pre-existing cleanup changes and deterministic demo history.
+- Superseded the GitHub-first implementation with native Systems, Cloudflare Access/MCP identity, Artifacts accepted source, isolated mission namespaces and immutable evidence outputs. Removed newly introduced GitHub authority code; preserved pre-existing cleanup changes and deterministic demo history.
 - Added mission/proposal/verification/review/promotion/lineage controllers and shared adapters. Source publication verifies actual Git scope; human policy governs accepted-source promotion. Fixed unresolved-symbol fallback widening publication permissions.
 - Added native activity console, read-only evidence/source/diff inspection, human attestations, agent disagreement resolution and lineage. Legacy demo remains `/demo`; old live runner/Sandbox APIs are opt-in compatibility.
 - Native live Access/client adaptation, Artifacts/Jev smoke and labeled judgment-corpus gates remain outstanding. Automatic semantic constraints stay disabled; environment/release promotion and independently executed native verification are not represented as completed.
@@ -186,9 +186,9 @@ Short, dated entries so another agent can continue. Newest last.
 - Pushed `v0.1.0-alpha.1` at `2e855cc31cb35783f05f7c4203885270441df272` and published concise GitHub prerelease notes. Checks and deployment succeeded in Actions run `37239987345`.
 - Cloudflare version `14e9d014-f887-435b-b3e8-f0ef34df8d37` serves 100% of traffic with the matching tag and commit. Live checks confirmed console sign-in redirect (302), OAuth discovery (200) and unauthenticated MCP rejection (401). Marked the changelog as released; unrelated local work stays uncommitted.
 
-## 2026-10-05 — Workspace → Repository → Session foundation
+## 2026-10-05 — Namespace → Repository → Workspace foundation
 
-- Replaced project/mission/workstream ownership with stable workspace/repository IDs, Access-based personal provisioning, shared membership, teams, email-bound invitations, repository grants and OAuth repository scopes. Workspace policy and atomic reservations govern explicit connected-account resources.
+- Replaced project/mission/workstream ownership with stable namespace/repository IDs, Access-based personal provisioning, shared membership, teams, email-bound invitations, repository grants and OAuth repository scopes. Namespace policy and atomic reservations govern explicit connected-account resources.
 - Added local Git registration, isolated agent worktrees, persistent writer locks plus server reservations, human terminal pairing, 30-second presence, advisory overlap and pinned instruction/structural context. Preserved real commits and explicit Git-pack publication.
 - Rebuilt revision-bound changes/reviews/evidence, immutable artifacts, reverse lineage, hosted non-forced promotion and artifact-derived deployments. Added lost-response recovery, token reconciliation, build/runtime correlation, failure/timeout/supersession and rollback validation.
 - Replaced the console and fixed-clock demo; removed Flight/radar routes, compatibility controllers, graph dependencies and obsolete token-exporting tools. Preserved reusable source overlays and pre-existing work in `/private/tmp/cruce-before-foundation-20261005.tgz` before the pivot.
@@ -199,9 +199,9 @@ Short, dated entries so another agent can continue. Newest last.
 
 ### 2026-10-05 — agent-native console redesign
 
-- Reimagined the console with a dark navigation rail, warm canvas, lime accents, a Git branch motif, and a consistent responsive component vocabulary. Added a separate all-workspaces home with search, repository shortcuts and reported activity across workspaces, plus a dedicated account page.
-- Brought agent sessions, isolated work and exact-revision human decisions forward. Repository overview now includes controller-derived review readiness and distinguishes agent actors; global activity refreshes with cancellation and late-response protection.
-- Replaced the workspace/source dropdowns and persistent sidebar creation forms with a workspace chooser and focused, keyboard-accessible dialogs. Retained cloud setup/cost disclosure, controller permissions, repository tabs, deep links and Back navigation. Previews use fictional Fernloop and Alex Morgan identities.
+- Reimagined the console with a dark navigation rail, warm canvas, lime accents, a Git branch motif, and a consistent responsive component vocabulary. Added a separate all-namespaces home with search, repository shortcuts and reported activity across namespaces, plus a dedicated account page.
+- Brought agent workspaces, isolated work and exact-revision human decisions forward. Repository overview now includes controller-derived review readiness and distinguishes agent actors; global activity refreshes with cancellation and late-response protection.
+- Replaced the namespace/source dropdowns and persistent sidebar creation forms with a namespace chooser and focused, keyboard-accessible dialogs. Retained cloud setup/cost disclosure, controller permissions, repository tabs, deep links and Back navigation. Previews use fictional Fernloop and Alex Morgan identities.
 - Validation passed: typecheck, lint, 69 unit/integration tests, 11 browser journeys, deterministic scenario verification and offline production build. Visually checked desktop/mobile home, repository, account and creation flows. Existing working changes preserved; no cloud deployment or commit performed.
 
 ### 2026-10-05 — repository finder close-button fix
@@ -211,5 +211,35 @@ Short, dated entries so another agent can continue. Newest last.
 
 ### 2026-10-05 — console redesign commit verification
 
-- Isolated the console redesign and finder fix from concurrent session-update work, including overlapping UI edits. Prepared only the six console, fixture and progress files against the committed foundation.
+- Isolated the console redesign and finder fix from concurrent workspace-update work, including overlapping UI edits. Prepared only the six console, fixture and progress files against the committed foundation.
 - Typecheck, lint, 69 unit/integration tests, 11 browser journeys, deterministic scenario verification and offline build passed for the isolated snapshot.
+
+### 2026-10-05 — persistent Workspace forks and upstream reconciliation
+
+- Built on dedicated hosted writer forks: one fork is reused throughout each Workspace, owned by its namespace. Local-only work stays local until explicit publication; unknown hosted baselines fail before resource provisioning.
+- Added controller-derived upstream awareness, read-only Git/path comparison, console inspection and explicit bridge fetching into a Workspace ref. Fetching preserves HEAD, index, dirty/untracked files and remotes; integration remains an explicit Git decision.
+- Source artifacts now pin their validated review base independently of the immutable Workspace starting revision. Reconciled proposals use current source without rewriting older artifacts/reviews; uncertain publication retries retain the same base as upstream advances. Agent reports use the last published integration baseline.
+- Typecheck/lint, 78 unit/integration tests, 12 browser journeys, deterministic scenario verification and offline Cloudflare build passed. Preserved concurrent console work. No commit/deployment performed; this update has not been live-verified against Artifacts or Workers Builds.
+
+### 2026-10-05 — focused product thesis and validation plan
+
+- Set the initial use case to one developer coordinating several agents on one repository, with less manual relaying, stale/duplicated work and review effort as the outcomes to prove. Retained personal/shared namespaces and the Namespace → Repository → Workspace model.
+- Updated the README, product thesis, plan and architecture/artifact documentation. Distinguished existing worktree/review capabilities, implemented Cruce signals and unproven semantic coordination or market-adoption claims. Clarified one reusable hosted fork per writer Workspace.
+- Defined a matched-workflow pilot against ordinary worktrees and Git review, including human effort, rework, verification, delivery and setup/resource costs. No application code, infrastructure, deployment or commit changed in this documentation pass.
+- Reviewed current Artifacts docs and added a Cloudflare strategy mapping forks, Git transport, scoped access, source inspection, events, Git notes and ArtifactFS to the thesis. Prioritized live reconciliation and measured update awareness; documented connected-account boundaries, pricing/size constraints and which capabilities remain planned.
+- Documentation validation: lint and patch whitespace checks passed; all 23 local Markdown link targets across the nine updated documents exist. Application tests were not rerun for this documentation-only pass.
+
+### 2026-10-05 — implementation plan for multi-agent coordination
+
+- Expanded PLAN into sequenced implementation milestones: stabilize upstream reconciliation, add bounded checkpoint context, surface human attention, recover retained source into a new participant's Workspace, verify two independent hosted/OAuth participants and measure the developer workflow.
+- Identified concrete code areas and acceptance evidence, preserved immutable source/identity/lock/resource boundaries, and separated real provider checks from browser OAuth participation. Cloudflare events and focused retrieval remain conditional on measured pilot problems.
+- Planning-only update; existing implementation and unrelated working changes preserved. No platform resources, deployment or commit created.
+- Validation: lint and patch whitespace checks passed; all six local Markdown links in the plan/progress documents resolve. Runtime tests were not rerun for this planning-only change.
+
+### 2026-10-05 — canonical Git foundation and durable workspaces
+
+- Applied the requested Repository → Workspace → agent/task/fork identity. Renamed ownership to Namespace, replaced Session throughout contracts/routes/MCP/UI, and removed optional local-only repository hosting. Existing local execution and upstream-review work was carried forward without compatibility aliases.
+- Direct canonical Artifacts forks replace extra baseline repositories. Local worktrees/clones are separate execution contexts. Native HTTPS Git uses current grants, isolated fork write authority and server-only 60-second tokens; canonical writes require reviewed human promotion. Added a standard OAuth credential helper and independent worktree push destinations. Removed custom checkout/refresh and pack-transfer MCP operations.
+- Publication seals exact pushed fork revisions into separate immutable artifact storage. Explicit ended-workspace cleanup checks all remote refs, preserves source/provenance and reconciles asynchronous deletion. Artifacts-only account credentials no longer require Workers Builds permission. Added clone/fork controls and updated setup/architecture documentation.
+- Validation: typecheck, lint, 88 unit/integration tests (including native Git clone/push/fetch and canonical isolation), 13 browser journeys, reproducible scenario verification and offline cf build passed. Demo source fixtures and commit IDs remain unchanged.
+- Not deployed or live-provider-verified: explicit CRUCE_TEST_ACCOUNT_ID/CRUCE_TEST_TOKEN are absent. The updated live verifier is ready for an authorized test account. The narrow Access Git transport exception and renamed Durable Object configuration are unapplied. Gateway transfers are bounded to 32 MiB; Artifacts has no exact-commit fork selector, so base pinning is explicit.

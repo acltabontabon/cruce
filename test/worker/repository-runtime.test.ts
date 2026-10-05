@@ -1,6 +1,12 @@
+import { execFile, execFileSync } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { initialWorkspace, WorkspaceController } from "../../src/core/ownership.ts";
-import type { Actor, Command, Repository, Session } from "../../src/shared/platform.ts";
+import { initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
+import type { Actor, Command, Repository, Workspace } from "../../src/shared/platform.ts";
 import { type RepositoryHost, ResourceBoundary } from "../../src/worker/deployments.ts";
 import { MemoryFs } from "../../src/worker/git/memory-fs.ts";
 import { GitWorkspace } from "../../src/worker/git/workspace.ts";
@@ -11,17 +17,17 @@ const owner: Actor = { id: "human", userId: "owner", name: "Cris", kind: "human"
 const agent: Actor = { id: "agent", userId: "owner", name: "Codex", kind: "agent", connectionId: "oauth" };
 const repo: Repository = {
 	id: "repo",
-	workspaceId: "workspace",
+	namespaceId: "namespace",
 	name: "payments",
 	defaultBranch: "trunk",
 	createdAt: 1000,
-	source: { kind: "local" },
+	storageName: "repo-repo",
 	grants: [],
 	policy: { protectedPaths: [], requiredEvidence: [], resourceRules: {} },
 };
-const grant: import("../../src/worker/workspace-runtime.ts").ConnectionGrant = {
+const grant: import("../../src/worker/namespace-runtime.ts").ConnectionGrant = {
 	actor: agent,
-	scopes: ["cruce:read", "session:write", "revision:publish", "artifact:publish", "change:write", "preview:request"],
+	scopes: ["cruce:read", "workspace:write", "revision:publish", "artifact:publish", "change:write", "preview:request"],
 	repositories: [repo.id],
 };
 function memory(): Store {
@@ -37,12 +43,13 @@ function memory(): Store {
 	};
 }
 afterEach(() => vi.restoreAllMocks());
-async function fixture() {
-	const w = new WorkspaceController(
-		initialWorkspace({ id: "workspace", name: "Workspace", handle: "workspace", ownerId: "owner", kind: "shared", createdAt: 1 }),
+async function fixture(_hosted = true) {
+	const w = new NamespaceController(
+		initialNamespace({ id: "namespace", name: "Namespace", handle: "namespace", ownerId: "owner", kind: "shared", createdAt: 1 }),
 		1000,
 	);
-	w.repository(w.authority(owner), structuredClone(repo));
+	const repository = structuredClone(repo);
+	w.repository(w.authority(owner), repository);
 	const git = new GitWorkspace(new MemoryFs() as never);
 	await git.ensureInit();
 	const author = { name: "Agent", email: "agent@local", timestamp: 12345 };
@@ -54,13 +61,16 @@ async function fixture() {
 		author,
 	});
 	const head = await git.commit({
-		ref: "refs/heads/session",
+		ref: "refs/heads/workspace",
 		parent: base,
 		files: { "src/pay.ts": "export const retry=3;" },
 		message: "exact agent commit",
 		author,
 	});
 	const host: RepositoryHost = {
+		remove: vi.fn(async () => true),
+		gitRequest: vi.fn(async () => new Response("git")),
+		fork: vi.fn(async (_source, name) => ({ name, id: name, remote: `https://example.invalid/${name}`, created: true })),
 		ensure: vi.fn(async (name) => ({ name, id: name, remote: `https://example.invalid/${name}`, created: true })),
 		info: vi.fn(async (name) => ({ name, id: name, remote: `https://example.invalid/${name}` })),
 		withToken: async (_name, _scope, fn) => ({ result: await fn("short-lived-test-token"), tokenId: "token-id" }),
@@ -79,44 +89,312 @@ async function fixture() {
 				id: string,
 				key: string,
 				fingerprint: string,
-				action: Parameters<WorkspaceController["reserve"]>[3],
-				sessionId?: string,
-			) => w.reserve(w.authority(g.actor, id, g.scopes, g.repositories), key, fingerprint, action, sessionId),
+				action: Parameters<NamespaceController["reserve"]>[3],
+				workspaceId?: string,
+			) => w.reserve(w.authority(g.actor, id, g.scopes, g.repositories), key, fingerprint, action, workspaceId),
 			settle: (id: string, state: "complete" | "uncertain" | "released") => {
 				w.state.reservations.find((r) => r.id === id)!.state = state;
 			},
-			resourceConfiguration: () => ({ namespace: "workspace", account: {}, policy: w.state.policy }),
+			resourceConfiguration: () => ({ namespace: "namespace", account: {}, policy: w.state.policy }),
 		};
 	const runtime = new RepositoryRuntime(store, git, port, {}, () => 1000);
-	runtime.initialize(structuredClone(repo));
+	runtime.initialize(repository);
+	{
+		const state = runtime.state();
+		state.sourceHead = base;
+		store.put("repository", state);
+	}
 	let n = 0;
-	const call = (tool: string, extra: Partial<Command> = {}, g = grant) =>
-		runtime.command({ tool, workspaceId: repo.workspaceId, repositoryId: repo.id, idempotencyKey: `key-${++n}`, ...extra }, g);
-	const s = (await call("start_session", { title: "Retry", baseRevision: base })) as Session;
-	await call("attach_session", {
-		sessionId: s.id,
+	const call = async (tool: string, extra: Partial<Command> & { pack?: string } = {}, g = grant) => {
+		const { pack, ...fields } = extra;
+		if (pack) {
+			await git.importPack(Buffer.from(pack, "base64"));
+			vi.spyOn(git, "fetch").mockResolvedValueOnce(extra.revision!);
+			fields.ref = "work";
+		}
+		return runtime.command({ tool, namespaceId: repo.namespaceId, repositoryId: repo.id, idempotencyKey: `key-${++n}`, ...fields }, g);
+	};
+	const s = (await call("start_workspace", { title: "Retry", baseRevision: base })) as Workspace;
+	await call("attach_workspace", {
+		workspaceId: s.id,
 		execution: { id: s.id, checkoutId: "checkout", machineId: "machine", kind: "worktree", owned: true },
 	});
 	const pack = Buffer.from(await git.exportPack(head)).toString("base64");
-	return { w, git, host, push, store, runtime, call, session: s, base, head, pack };
+	return { w, git, host, push, store, runtime, call, workspace: s, base, head, pack };
 }
 describe("repository runtime", () => {
-	it("local sessions and read snapshots never provision cloud resources", async () => {
+	it("forks canonical directly and keeps hosted identity out of local execution metadata", async () => {
+		const f = await fixture(true);
+		expect(f.host.fork).toHaveBeenCalledWith("repo-repo", expect.any(String), expect.any(String));
+		expect(f.host.ensure).not.toHaveBeenCalled();
+		expect(f.runtime.state().workspaces[0].fork).toMatchObject({ state: "ready" });
+		expect(f.runtime.state().workspaces[0].execution).not.toHaveProperty("storageName");
+	});
+	it("authorizes each Git request and confines writes to the owning active fork", async () => {
+		const f = await fixture(true);
+		const request = (id: string, write = false) =>
+			new Request(`https://cruce.example/mcp/git/namespace/repo/${id}.git/info/refs?service=git-${write ? "receive" : "upload"}-pack`);
+		await expect(f.runtime.gitRequest(request("canonical", true), grant)).rejects.toThrow("human promotion");
+		expect(await (await f.runtime.gitRequest(request("canonical"), grant)).text()).toBe("git");
+		await expect(
+			f.runtime.gitRequest(request(f.workspace.id, true), { ...grant, actor: { ...agent, connectionId: "other" } }),
+		).rejects.toThrow("connection");
+		await expect(
+			f.runtime.gitRequest(request(f.workspace.id, true), { ...grant, scopes: ["cruce:read", "workspace:write"] }),
+		).rejects.toThrow("scopes");
+		const push = () =>
+			new Request(`https://cruce.example/mcp/git/namespace/repo/${f.workspace.id}.git/git-receive-pack`, {
+				method: "POST",
+				body: "same-push-bytes",
+			});
+		vi.mocked(f.host.gitRequest).mockRejectedValueOnce(new Error("lost response"));
+		await expect(f.runtime.gitRequest(push(), grant)).rejects.toThrow("lost response");
+		await f.runtime.gitRequest(push(), grant);
+		expect(f.w.state.reservations.filter((r) => r.action === "revision.publish")).toHaveLength(1);
+		f.w.state.policy.rules["revision.publish"] = "deny";
+		await expect(f.runtime.gitRequest(push(), grant)).rejects.toThrow("denies");
+		f.w.state.policy.rules["revision.publish"] = "allow";
+		await f.call("end_workspace", { workspaceId: f.workspace.id });
+		await expect(f.runtime.gitRequest(push(), grant)).rejects.toThrow("ended");
+		delete f.w.state.members.owner;
+		await expect(f.runtime.gitRequest(request("canonical"), grant)).rejects.toThrow("denied");
+	});
+	it("seals an exact pushed fork ref into separate immutable artifact storage", async () => {
+		const f = await fixture(true);
+		vi.spyOn(f.git, "fetch").mockResolvedValue(f.head);
+		const artifact = await f.call("publish_revision", { workspaceId: f.workspace.id, ref: "work", revision: f.head });
+		expect(artifact).toMatchObject({ revision: f.head, storage: { repository: "repo-repo-artifacts" } });
+		await expect(f.call("publish_revision", { workspaceId: f.workspace.id, ref: "work", revision: f.base })).rejects.toThrow("ref moved");
+	});
+	it("refuses cleanup of live or unretained work and reconciles asynchronous deletion with one operation", async () => {
+		const f = await fixture(true);
+		const fields = { workspaceId: f.workspace.id, idempotencyKey: "cleanup" };
+		await expect(f.call("cleanup_workspace", fields)).rejects.toThrow("End the workspace");
+		await f.call("end_workspace", { workspaceId: f.workspace.id });
+		const refs = vi.spyOn(f.git, "remoteRefs").mockResolvedValue([{ ref: "refs/heads/work", oid: f.head }]);
+		await expect(f.call("cleanup_workspace", fields)).rejects.toThrow("Unretained");
+		expect(f.host.remove).not.toHaveBeenCalled();
+		refs.mockResolvedValue([{ ref: "refs/heads/trunk", oid: f.base }]);
+		vi.mocked(f.host.remove).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+		expect(await f.call("cleanup_workspace", fields)).toMatchObject({ state: "deleting" });
+		expect(f.w.state.reservations.at(-1)?.state).toBe("uncertain");
+		expect(await f.call("cleanup_workspace", fields)).toMatchObject({ state: "deleted" });
+		expect(await f.call("cleanup_workspace", fields)).toMatchObject({ state: "deleted" });
+		expect(f.host.remove).toHaveBeenCalledTimes(2);
+		expect(f.w.state.reservations.filter((r) => r.action === "workspace.cleanup")).toHaveLength(1);
+		expect(f.runtime.state().workspaces[0].baseRevision).toBe(f.base);
+	});
+	it("rejects unavailable hosted baselines before provisioning any fork resources", async () => {
+		const f = await fixture(true);
+		const s = (await f.call("start_workspace", { title: "Missing base", baseRevision: "d".repeat(40) })) as Workspace;
+		const calls = vi.mocked(f.host.ensure).mock.calls.length,
+			reservations = f.w.state.reservations.length;
+		await expect(
+			f.call("attach_workspace", {
+				workspaceId: s.id,
+				execution: { id: s.id, checkoutId: "missing", machineId: "machine", kind: "worktree", owned: true },
+			}),
+		).rejects.toThrow("unavailable");
+		expect(f.host.ensure).toHaveBeenCalledTimes(calls);
+		expect(f.w.state.reservations).toHaveLength(reservations);
+	});
+	it("pins a reconciled publication's review base across uncertain push retries even as upstream advances", async () => {
+		const f = await fixture();
+		const upstream = await f.git.commit({
+			ref: "refs/heads/upstream",
+			parent: f.base,
+			files: { "other.txt": "upstream" },
+			message: "Upstream",
+			author: { name: "Other", email: "other@local", timestamp: 12346 },
+		});
+		const merged = await f.git.merge({
+			ours: "refs/heads/workspace",
+			theirs: "refs/heads/upstream",
+			message: "Integrate",
+			author: { name: "Agent", email: "agent@local", timestamp: 12347 },
+		});
+		if (!merged.oid) throw new Error("Fixture merge failed");
+		const state = f.runtime.state();
+		state.sourceHead = upstream;
+		f.store.put("repository", state);
+		const fields = {
+			workspaceId: f.workspace.id,
+			revision: merged.oid,
+			pack: Buffer.from(await f.git.exportPack(merged.oid)).toString("base64"),
+			idempotencyKey: "pinned-publication",
+		};
+		f.push.mockRejectedValueOnce(new Error("push response lost"));
+		await expect(f.call("publish_revision", fields)).rejects.toThrow("lost");
+		const next = await f.git.commit({
+			ref: "refs/heads/upstream",
+			parent: upstream,
+			files: { "next.txt": "next" },
+			message: "Advance again",
+			author: { name: "Other", email: "other@local", timestamp: 12348 },
+		});
+		const advanced = f.runtime.state();
+		advanced.sourceHead = next;
+		f.store.put("repository", advanced);
+		expect(await f.call("publish_revision", fields)).toMatchObject({ revision: merged.oid, baseRevision: upstream });
+		expect(f.w.state.reservations.filter((r) => r.action === "revision.publish")).toHaveLength(1);
+		expect(f.runtime.state().workspaces[0].baseRevision).toBe(f.base);
+	});
+	it("gives hosted writers distinct forks and reconciles uncertain attachment without another reservation", async () => {
+		const f = await fixture(true);
+		const other = { ...grant, actor: { ...agent, id: "other-agent", connectionId: "other-oauth" } };
+		const s = (await f.call("start_workspace", { title: "Other", baseRevision: f.base }, other)) as Workspace;
+		const attach = {
+			workspaceId: s.id,
+			execution: { id: s.id, checkoutId: "other", machineId: "machine", kind: "worktree" as const, owned: true },
+			idempotencyKey: "retry-fork",
+		};
+		vi.mocked(f.host.fork!).mockRejectedValueOnce(new Error("fork response lost"));
+		await expect(f.call("attach_workspace", attach, other)).rejects.toThrow("lost");
+		await f.call("attach_workspace", attach, other);
+		await f.call("attach_workspace", attach, other);
+		const workspaces = f.runtime.state().workspaces;
+		expect(workspaces[0].fork?.name).not.toBe(workspaces[1].fork?.name);
+		expect(f.w.state.reservations.filter((r) => r.workspaceId === s.id)).toHaveLength(1);
+		expect(f.w.state.reservations.at(-1)?.state).toBe("complete");
+	});
+	it("reconciles a persistent fork after upstream promotion without rewriting its starting revision or old review", async () => {
+		const f = await fixture(true);
+		const original = (await f.call("publish_revision", { workspaceId: f.workspace.id, revision: f.head, pack: f.pack })) as { id: string };
+		const oldProposal = (await f.call("create_proposal", { artifactId: original.id })) as { id: string };
+		const upstream = await f.git.commit({
+			ref: "refs/heads/upstream",
+			parent: f.base,
+			files: { "AGENTS.md": "Keep retries bounded and verify" },
+			message: "Upstream instructions",
+			author: { name: "Other", email: "other@local", timestamp: 12346 },
+		});
+		const other = { ...grant, actor: { ...agent, id: "other-agent", connectionId: "other-oauth" } };
+		const s = (await f.call("start_workspace", { title: "Instructions", baseRevision: f.base }, other)) as Workspace;
+		await f.call(
+			"attach_workspace",
+			{ workspaceId: s.id, execution: { id: s.id, checkoutId: "other", machineId: "machine", kind: "worktree", owned: true } },
+			other,
+		);
+		const artifact = (await f.call(
+			"publish_revision",
+			{ workspaceId: s.id, revision: upstream, pack: Buffer.from(await f.git.exportPack(upstream)).toString("base64") },
+			other,
+		)) as { id: string };
+		const proposal = (await f.call("create_proposal", { artifactId: artifact.id }, other)) as { id: string };
+		const human = { actor: owner, scopes: [], repositories: [repo.id] };
+		await f.call(
+			"review_proposal",
+			{ proposalId: proposal.id, revision: upstream, outcome: "approve", reason: "Verified instructions" },
+			human,
+		);
+		const fetch = vi.spyOn(f.git, "fetch").mockResolvedValue(f.base);
+		await f.call("promote_proposal", { proposalId: proposal.id }, human);
+		await f.call("report_change", {
+			workspaceId: f.workspace.id,
+			revision: f.head,
+			changes: [{ path: "renamed.md", previousPath: "AGENTS.md", status: "renamed" }],
+		});
+		const reservations = f.w.state.reservations.length,
+			pushes = f.push.mock.calls.length;
+		expect(await f.call("get_workspace_updates", { workspaceId: f.workspace.id })).toMatchObject({
+			revision: upstream,
+			status: "available",
+			available: true,
+			comparison: "diverged",
+			overlappingPaths: ["AGENTS.md"],
+		});
+		expect(await f.call("get_git_access", { workspaceId: f.workspace.id })).toMatchObject({ canonicalWrite: false });
+		expect(f.w.state.reservations).toHaveLength(reservations);
+		expect(f.push).toHaveBeenCalledTimes(pushes);
+		const merged = await f.git.merge({
+			ours: "refs/heads/workspace",
+			theirs: "refs/heads/upstream",
+			message: "Integrate upstream",
+			author: { name: "Agent", email: "agent@local", timestamp: 12347 },
+		});
+		if (!merged.oid) throw new Error("Fixture merge failed");
+		const reconciled = (await f.call("publish_revision", {
+			workspaceId: f.workspace.id,
+			revision: merged.oid,
+			pack: Buffer.from(await f.git.exportPack(merged.oid)).toString("base64"),
+		})) as { id: string; baseRevision: string; storage: { repository: string } };
+		expect(reconciled.baseRevision).toBe(upstream);
+		expect(reconciled.storage.repository).toBe("repo-repo-artifacts");
+		expect(f.runtime.state().workspaces[0]).toMatchObject({ baseRevision: f.base, integratedRevision: upstream });
+		const next = (await f.call("create_proposal", { artifactId: reconciled.id })) as { id: string; base: string };
+		expect(next.base).toBe(upstream);
+		expect(f.runtime.state().proposals.find((p) => p.id === oldProposal.id)?.base).toBe(f.base);
+		await f.call(
+			"review_proposal",
+			{ proposalId: next.id, revision: merged.oid, outcome: "approve", reason: "Verified reconciled work" },
+			human,
+		);
+		fetch.mockResolvedValue(upstream);
+		await f.call("promote_proposal", { proposalId: next.id }, human);
+		expect(f.runtime.state().sourceHead).toBe(merged.oid);
+		expect(await f.call("get_workspace_updates", { workspaceId: f.workspace.id })).toMatchObject({
+			status: "current",
+			comparison: "current",
+		});
+	});
+	it("rejects fabricated integration, foreign fetches, stale fetch targets and revoked retries", async () => {
+		const f = await fixture();
+		await f.call("publish_revision", { workspaceId: f.workspace.id, revision: f.head, pack: f.pack });
+		const upstream = await f.git.commit({
+			ref: "refs/heads/new-source",
+			parent: f.base,
+			files: { "other.txt": "upstream" },
+			message: "Upstream",
+			author: { name: "Other", email: "other@local", timestamp: 12346 },
+		});
+		const state = f.runtime.state();
+		state.sourceHead = upstream;
+		f.store.put("repository", state);
+		await expect(
+			f.call("publish_revision", { workspaceId: f.workspace.id, revision: f.head, baseRevision: upstream, pack: f.pack }),
+		).rejects.toThrow("Integrate");
+		const fields = { workspaceId: f.workspace.id, revision: f.head, pack: f.pack, idempotencyKey: "publish-retry" };
+		await f.call("publish_revision", fields);
+		delete f.w.state.members.owner;
+		await expect(f.call("publish_revision", fields)).rejects.toThrow("denied");
+	});
+	it("read snapshots and heartbeats never provision additional cloud resources", async () => {
 		const f = await fixture();
 		await f.call("get_repository");
-		await f.call("heartbeat", { sessionId: f.session.id });
+		const before = f.runtime.state();
+		expect(await f.call("get_workspace_updates", { workspaceId: f.workspace.id })).toMatchObject({
+			status: "current",
+			available: true,
+			comparison: "current",
+			changes: [],
+		});
+		expect(f.runtime.state()).toEqual(before);
+		await f.call("heartbeat", { workspaceId: f.workspace.id });
 		expect(f.host.ensure).not.toHaveBeenCalled();
-		expect(f.w.state.reservations).toHaveLength(0);
+		expect(f.w.state.reservations).toHaveLength(1);
 	});
-	it("publishes exact history and retains it after session completion", async () => {
+	it("keeps reported refs separate from authoritative canonical source", async () => {
 		const f = await fixture();
-		const artifact = (await f.call("publish_revision", { sessionId: f.session.id, revision: f.head, pack: f.pack })) as {
+		await f.call("report_ref", { workspaceId: f.workspace.id, ref: "trunk", revision: "e".repeat(40) });
+		expect(await f.call("get_workspace_updates", { workspaceId: f.workspace.id })).toMatchObject({
+			status: "current",
+			trust: "accepted",
+			available: true,
+			changes: [],
+		});
+		expect(await f.call("get_git_access", { workspaceId: f.workspace.id })).toMatchObject({ canonicalWrite: false });
+		expect(f.host.ensure).not.toHaveBeenCalled();
+		expect(f.w.state.reservations).toHaveLength(1);
+	});
+	it("publishes exact history and retains it after workspace completion", async () => {
+		const f = await fixture();
+		const artifact = (await f.call("publish_revision", { workspaceId: f.workspace.id, revision: f.head, pack: f.pack })) as {
 			id: string;
 			revision: string;
 		};
 		expect(artifact.revision).toBe(f.head);
 		expect((await f.git.log(f.head))[0].message).toBe("exact agent commit");
-		await f.call("end_session", { sessionId: f.session.id });
+		await f.call("end_workspace", { workspaceId: f.workspace.id });
 		const result = (await f.call("read_artifact", { artifactId: artifact.id })) as { artifact: { revision: string } };
 		expect(result.artifact.revision).toBe(f.head);
 		expect(f.runtime.state().artifacts).toHaveLength(1);
@@ -124,19 +402,31 @@ describe("repository runtime", () => {
 	it("reconciles a failed publication with one reservation and one artifact", async () => {
 		const f = await fixture();
 		f.push.mockRejectedValueOnce(new Error("response lost after push"));
-		const cmd = { sessionId: f.session.id, revision: f.head, pack: f.pack, idempotencyKey: "same-operation" };
+		const cmd = { workspaceId: f.workspace.id, revision: f.head, pack: f.pack, idempotencyKey: "same-operation" };
 		await expect(f.call("publish_revision", cmd)).rejects.toThrow("response lost");
-		expect(f.w.state.reservations[0].state).toBe("uncertain");
+		expect(f.w.state.reservations.at(-1)?.state).toBe("uncertain");
 		expect(f.runtime.state().artifacts).toHaveLength(0);
-		const a = await f.call("publish_revision", cmd);
+		vi.spyOn(f.git, "fetch").mockRejectedValue(new Error("fork ref has advanced"));
+		const a = await f.runtime.command(
+			{
+				tool: "publish_revision",
+				namespaceId: repo.namespaceId,
+				repositoryId: repo.id,
+				workspaceId: f.workspace.id,
+				revision: f.head,
+				ref: "work",
+				idempotencyKey: "same-operation",
+			},
+			grant,
+		);
 		expect(await f.call("publish_revision", cmd)).toEqual(a);
-		expect(f.w.state.reservations).toHaveLength(1);
+		expect(f.w.state.reservations.filter((r) => r.action === "revision.publish")).toHaveLength(1);
 		expect(f.runtime.state().artifacts).toHaveLength(1);
-		expect(f.push).toHaveBeenCalledTimes(2);
+		expect(f.push).toHaveBeenCalledTimes(3);
 	});
 	it("rechecks revoked repository membership even for replayed commands", async () => {
 		const f = await fixture();
-		const cmd = { sessionId: f.session.id, revision: f.head, pack: f.pack, idempotencyKey: "published" };
+		const cmd = { workspaceId: f.workspace.id, revision: f.head, pack: f.pack, idempotencyKey: "published" };
 		await f.call("publish_revision", cmd);
 		delete f.w.state.members.owner;
 		await expect(f.call("publish_revision", cmd)).rejects.toThrow("denied");
@@ -147,19 +437,19 @@ describe("repository runtime", () => {
 		f.w.state.repositories[0].grants = [{ subject: "user", id: "dev", role: "write" }];
 		f.w.state.repositories[0].policy.protectedPaths = ["src"];
 		const dev = { ...grant, actor: { ...agent, userId: "dev", id: "dev-agent" } };
-		const s = (await f.call("start_session", { title: "Protected", baseRevision: f.base }, dev)) as Session;
+		const s = (await f.call("start_workspace", { title: "Protected", baseRevision: f.base }, dev)) as Workspace;
 		await f.call(
-			"attach_session",
-			{ sessionId: s.id, execution: { id: s.id, checkoutId: "other", machineId: "machine", kind: "worktree", owned: true } },
+			"attach_workspace",
+			{ workspaceId: s.id, execution: { id: s.id, checkoutId: "other", machineId: "machine", kind: "worktree", owned: true } },
 			dev,
 		);
-		await expect(f.call("publish_revision", { sessionId: s.id, revision: f.head, pack: f.pack }, dev)).rejects.toThrow("Protected");
-		expect(f.push).not.toHaveBeenCalled();
+		await expect(f.call("publish_revision", { workspaceId: s.id, revision: f.head, pack: f.pack }, dev)).rejects.toThrow("Protected");
+		expect(f.push.mock.calls.every(([input]) => input.remoteRef === "refs/heads/cruce-base")).toBe(true);
 		await expect(f.call("get_source", { revision: f.head }, dev)).rejects.toThrow("unavailable");
 	});
 	it("deploys source artifacts, never a caller supplied alternate revision", async () => {
 		const f = await fixture();
-		const artifact = (await f.call("publish_revision", { sessionId: f.session.id, revision: f.head, pack: f.pack })) as { id: string };
+		const artifact = (await f.call("publish_revision", { workspaceId: f.workspace.id, revision: f.head, pack: f.pack })) as { id: string };
 		const human = { actor: owner, scopes: [], repositories: [repo.id] };
 		const env = (await f.call(
 			"configure_environment",
@@ -183,27 +473,27 @@ describe("repository runtime", () => {
 });
 
 describe("terminal and deployment recovery", () => {
-	it("atomically binds human terminal credentials to one session and permits the original retry", async () => {
+	it("atomically binds human terminal credentials to one workspace and permits the original retry", async () => {
 		const f = await fixture();
 		const human = { actor: { ...owner, connectionId: "terminal" } };
 		const fields = { title: "Human", baseRevision: f.base, idempotencyKey: "human-start" };
-		const s = await f.call("start_session", fields, human);
-		expect(await f.call("start_session", fields, human)).toEqual(s);
-		await expect(f.call("start_session", { ...fields, idempotencyKey: "other-start" }, human)).rejects.toThrow("bound");
-		await expect(f.call("heartbeat", { sessionId: f.session.id }, human)).rejects.toThrow("scope");
+		const s = await f.call("start_workspace", fields, human);
+		expect(await f.call("start_workspace", fields, human)).toEqual(s);
+		await expect(f.call("start_workspace", { ...fields, idempotencyKey: "other-start" }, human)).rejects.toThrow("bound");
+		await expect(f.call("heartbeat", { workspaceId: f.workspace.id }, human)).rejects.toThrow("scope");
 	});
-	it("reports pinned instructions unavailable without publication and provides structural context after upload", async () => {
+	it("provides pinned canonical instructions before and after workspace publication", async () => {
 		const f = await fixture();
-		expect(await f.call("get_context", { sessionId: f.session.id })).toMatchObject({ available: false });
-		await f.call("publish_revision", { sessionId: f.session.id, revision: f.head, pack: f.pack });
-		expect(await f.call("get_context", { sessionId: f.session.id })).toMatchObject({
+		expect(await f.call("get_context", { workspaceId: f.workspace.id })).toMatchObject({ available: true });
+		await f.call("publish_revision", { workspaceId: f.workspace.id, revision: f.head, pack: f.pack });
+		expect(await f.call("get_context", { workspaceId: f.workspace.id })).toMatchObject({
 			available: true,
 			structure: { revision: f.base, indexer: "babel-typescript" },
 		});
 	});
 	it("does not replay a superseded uncertain deployment over a newer request", async () => {
 		const f = await fixture();
-		const artifact = (await f.call("publish_revision", { sessionId: f.session.id, revision: f.head, pack: f.pack })) as { id: string };
+		const artifact = (await f.call("publish_revision", { workspaceId: f.workspace.id, revision: f.head, pack: f.pack })) as { id: string };
 		const env = (await f.call(
 			"configure_environment",
 			{ environment: { name: "Preview", kind: "preview", workerName: "worker", smokeChecks: [] } },
@@ -218,4 +508,75 @@ describe("terminal and deployment recovery", () => {
 		expect(await f.runtime.tick(newer.id, true)).toBe("failed");
 		expect(f.push).toHaveBeenCalledTimes(pushes);
 	});
+});
+
+it("clones, pushes and fetches with native Git through the workspace gateway while canonical stays unchanged", async () => {
+	const f = await fixture(true);
+	const root = await mkdtemp(join(tmpdir(), "cruce-native-git-"));
+	const canonical = join(root, "canonical.git"),
+		fork = join(root, "fork.git");
+	const command = (args: string[], input?: Uint8Array) => execFileSync("git", args, { input, stdio: "pipe" });
+	const native = async (args: string[]) =>
+		(await promisify(execFile)("git", ["-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", ...args])).stdout.trim();
+	let origin = "";
+	const server = createServer(async (req, res) => {
+		try {
+			const chunks: Buffer[] = [];
+			for await (const chunk of req) chunks.push(Buffer.from(chunk));
+			const request = new Request(`${origin}${req.url}`, {
+				method: req.method,
+				...(req.method === "POST" ? { body: Buffer.concat(chunks) } : {}),
+			});
+			const result = await f.runtime.gitRequest(request, grant);
+			res.writeHead(result.status, Object.fromEntries(result.headers));
+			res.end(Buffer.from(await result.arrayBuffer()));
+		} catch {
+			res.writeHead(403).end("denied");
+		}
+	});
+	try {
+		for (const directory of [canonical, fork]) {
+			command(["init", "--bare", "--initial-branch=trunk", directory]);
+			command(["--git-dir", directory, "index-pack", "--stdin"], await f.git.exportPack(f.base));
+			command(["--git-dir", directory, "update-ref", "refs/heads/trunk", f.base]);
+		}
+		vi.mocked(f.host.gitRequest).mockImplementation(async (name, request) => {
+			const url = new URL(request.url),
+				advertisement = url.pathname.endsWith("/info/refs");
+			const service = advertisement ? url.searchParams.get("service")! : url.pathname.split("/").at(-1)!;
+			const directory = name === "repo-repo" ? canonical : fork;
+			const bytes = command(
+				[service.replace("git-", ""), "--stateless-rpc", ...(advertisement ? ["--advertise-refs"] : []), directory],
+				advertisement ? undefined : new Uint8Array(await request.arrayBuffer()),
+			);
+			const prefix = `# service=${service}\n`;
+			return new Response(
+				advertisement ? Buffer.concat([Buffer.from(`${(prefix.length + 4).toString(16).padStart(4, "0")}${prefix}0000`), bytes]) : bytes,
+				{ headers: { "content-type": `application/x-${service}-${advertisement ? "advertisement" : "result"}` } },
+			);
+		});
+		await new Promise<void>((resolve, reject) => {
+			server.once("error", reject);
+			server.listen(0, "127.0.0.1", resolve);
+		});
+		const address = server.address();
+		if (!address || typeof address === "string") throw new Error("No fixture port");
+		origin = `http://127.0.0.1:${address.port}`;
+		const remote = `${origin}/mcp/git/namespace/repo/${f.workspace.id}.git`;
+		const clone = join(root, "checkout");
+		await native(["clone", `${origin}/mcp/git/namespace/repo/canonical.git`, clone]);
+		await native(["-C", clone, "remote", "add", "work", remote]);
+		await writeFile(join(clone, "native.txt"), "Native Git commit\n");
+		await native(["-C", clone, "add", "native.txt"]);
+		await native(["-C", clone, "-c", "user.name=Fixture", "-c", "user.email=fixture@local", "commit", "-m", "Native workspace work"]);
+		const revision = await native(["-C", clone, "rev-parse", "HEAD"]);
+		await native(["-C", clone, "push", "work", "HEAD:refs/heads/work"]);
+		await native(["-C", clone, "fetch", "work", "work"]);
+		expect(await native(["-C", clone, "rev-parse", "FETCH_HEAD"])).toBe(revision);
+		expect(await native(["--git-dir", canonical, "rev-parse", "trunk"])).toBe(f.base);
+		await expect(native(["-C", clone, "push", "origin", "HEAD:trunk"])).rejects.toThrow();
+	} finally {
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+		await rm(root, { recursive: true, force: true });
+	}
 });

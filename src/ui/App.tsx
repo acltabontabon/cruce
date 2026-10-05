@@ -1,31 +1,32 @@
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { gitRemotePath } from "../shared/git-access.ts";
 import type {
 	Artifact,
 	Command,
+	Namespace,
+	NamespaceRole,
 	Repository,
 	RepositorySnapshot,
 	ResourcePolicy,
 	Team,
 	User,
-	Workspace,
-	WorkspaceRole,
 } from "../shared/platform.ts";
-import { BranchArt, Dialog, Icon, SourceChoice } from "./design.tsx";
-import { ArtifactInspection, Code } from "./inspect.tsx";
+import { BranchArt, Dialog, Icon } from "./design.tsx";
+import { ArtifactInspection, Code, WorkspaceUpdateInspection } from "./inspect.tsx";
 import "./styles.css";
 
 const count = (n: number, label: string) => `${n} ${label}${n === 1 ? "" : "s"}`;
 const short = (s?: string) => s?.slice(0, 8) ?? "—";
 const time = (n: number) => new Date(n).toLocaleString();
-const workspaceTabs = ["repositories", "members", "teams", "settings"];
+const namespaceTabs = ["repositories", "members", "teams", "settings"];
 const tabs = ["overview", "code", "work", "artifacts", "deployments", "settings"];
-type WorkspaceView = {
+type NamespaceView = {
 	repositorySummaries?: { id: string; active: number; overlaps: number; latestArtifact?: Artifact }[];
 	activity?: { id: string; repositoryId: string; repositoryName: string; summary: string; at: number }[];
-	workspace: Workspace;
-	role: WorkspaceRole;
+	namespace: Namespace;
+	role: NamespaceRole;
 	repositories: Repository[];
-	members: Record<string, WorkspaceRole>;
+	members: Record<string, NamespaceRole>;
 	people: { id: string; name: string; email: string }[];
 	teams: Team[];
 	policy: ResourcePolicy;
@@ -56,15 +57,15 @@ function readRoute() {
 	const query = new URLSearchParams(location.search),
 		[tab, id] = location.hash.replace(/^#\/?/, "").split("/");
 	return {
-		workspaceId: query.get("workspace") ?? "",
+		namespaceId: query.get("namespace") ?? "",
 		screen:
 			query.get("page") === "account"
 				? "account"
-				: query.get("page") === "workspaces" || !query.has("workspace")
-					? "workspaces"
-					: "workspace",
+				: query.get("page") === "namespaces" || !query.has("namespace")
+					? "namespaces"
+					: "namespace",
 		repositoryId: query.get("repository") ?? "",
-		tab: [...tabs, ...workspaceTabs].includes(tab) ? tab : "overview",
+		tab: [...tabs, ...namespaceTabs].includes(tab) ? tab : "overview",
 		id: id ?? "",
 	};
 }
@@ -101,8 +102,8 @@ function Form({ submit, label, children }: { submit: (data: FormData) => Promise
 const value = (d: FormData, key: string) => String(d.get(key) ?? "");
 export function App() {
 	const [route, setRoute] = useState(readRoute),
-		[me, setMe] = useState<{ user: User; workspaces: Workspace[] }>(),
-		[workspace, setWorkspace] = useState<WorkspaceView>(),
+		[me, setMe] = useState<{ user: User; namespaces: Namespace[] }>(),
+		[namespace, setNamespace] = useState<NamespaceView>(),
 		[view, setView] = useState<RepositorySnapshot>(),
 		[error, setError] = useState<Error>(),
 		[notice, setNotice] = useState(""),
@@ -111,25 +112,25 @@ export function App() {
 		[search, setSearch] = useState(""),
 		[finderLoading, setFinderLoading] = useState(false),
 		[finderError, setFinderError] = useState(""),
-		[catalog, setCatalog] = useState<{ workspace: Workspace; repository: Repository }[]>([]),
-		[overlay, setOverlay] = useState<"workspace" | "create-workspace" | "repository">();
-	const workspaceTab = workspaceTabs.includes(route.tab) ? route.tab : "repositories";
+		[catalog, setCatalog] = useState<{ namespace: Namespace; repository: Repository }[]>([]),
+		[overlay, setOverlay] = useState<"namespace" | "create-namespace" | "repository">();
+	const namespaceTab = namespaceTabs.includes(route.tab) ? route.tab : "repositories";
 	const routeRef = useRef(route);
 	routeRef.current = route;
 	const retries = useRef(new Map<string, string>()),
 		generation = useRef(0),
 		[busy, setBusy] = useState(false);
 	const reload = useCallback(() => setRefresh((n) => n + 1), []);
-	const navigate = useCallback((workspaceId: string, repositoryId = "", tab = "overview", id = "") => {
+	const navigate = useCallback((namespaceId: string, repositoryId = "", tab = "overview", id = "") => {
 		const url = new URL(location.href);
 		url.pathname = "/";
 		url.search = "";
-		url.searchParams.set("workspace", workspaceId);
+		url.searchParams.set("namespace", namespaceId);
 		if (repositoryId) url.searchParams.set("repository", repositoryId);
 		url.hash = `/${tab}${id ? `/${id}` : ""}`;
 		const previous = readRoute();
 		history.pushState(null, "", url);
-		if (previous.workspaceId !== workspaceId || previous.repositoryId !== repositoryId) {
+		if (previous.namespaceId !== namespaceId || previous.repositoryId !== repositoryId) {
 			generation.current++;
 			setView(undefined);
 		}
@@ -140,13 +141,13 @@ export function App() {
 		setOverlay(undefined);
 	}, []);
 	const navigatePage = useCallback(
-		(screen: "workspaces" | "account") => {
+		(screen: "namespaces" | "account") => {
 			const url = new URL(location.href);
 			url.pathname = "/";
 			url.search = "";
 			url.hash = "";
 			url.searchParams.set("page", screen);
-			if (route.workspaceId) url.searchParams.set("workspace", route.workspaceId);
+			if (route.namespaceId) url.searchParams.set("namespace", route.namespaceId);
 			history.pushState(null, "", url);
 			generation.current++;
 			setView(undefined);
@@ -156,7 +157,7 @@ export function App() {
 			setOverlay(undefined);
 			setRoute(readRoute());
 		},
-		[route.workspaceId],
+		[route.namespaceId],
 	);
 
 	useEffect(() => {
@@ -167,7 +168,7 @@ export function App() {
 	useEffect(() => {
 		const change = () => {
 			const next = readRoute();
-			if (next.workspaceId !== routeRef.current.workspaceId || next.repositoryId !== routeRef.current.repositoryId) {
+			if (next.namespaceId !== routeRef.current.namespaceId || next.repositoryId !== routeRef.current.repositoryId) {
 				generation.current++;
 				setView(undefined);
 			}
@@ -194,10 +195,10 @@ export function App() {
 	}, []);
 	useEffect(() => {
 		const controller = new AbortController();
-		void request<{ user: User; workspaces: Workspace[] }>("/api/me", undefined, "GET", controller.signal)
+		void request<{ user: User; namespaces: Namespace[] }>("/api/me", undefined, "GET", controller.signal)
 			.then((data) => {
 				setMe(data);
-				if (!readRoute().workspaceId) setRoute((r) => ({ ...r, workspaceId: data.user.personalWorkspaceId }));
+				if (!readRoute().namespaceId) setRoute((r) => ({ ...r, namespaceId: data.user.personalNamespaceId }));
 			})
 			.catch((e) => {
 				if (e.name !== "AbortError") setError(e);
@@ -205,18 +206,18 @@ export function App() {
 		return () => controller.abort();
 	}, []);
 	useEffect(() => {
-		if (me && !route.workspaceId) setRoute((current) => ({ ...current, workspaceId: me.user.personalWorkspaceId }));
-	}, [me, route.workspaceId]);
+		if (me && !route.namespaceId) setRoute((current) => ({ ...current, namespaceId: me.user.personalNamespaceId }));
+	}, [me, route.namespaceId]);
 
 	useEffect(() => {
-		if (!route.workspaceId) return;
+		if (!route.namespaceId) return;
 		void refresh; // Explicit invalidation after a successful mutation.
 		const controller = new AbortController();
-		setWorkspace(undefined);
+		setNamespace(undefined);
 		const load = () =>
-			request<WorkspaceView>(`/api/workspaces/${route.workspaceId}`, undefined, "GET", controller.signal)
+			request<NamespaceView>(`/api/namespaces/${route.namespaceId}`, undefined, "GET", controller.signal)
 				.then((data) => {
-					if (!controller.signal.aborted) setWorkspace(data);
+					if (!controller.signal.aborted) setNamespace(data);
 				})
 				.catch((e) => {
 					if (e.name !== "AbortError") setError(e);
@@ -227,9 +228,9 @@ export function App() {
 			controller.abort();
 			clearInterval(timer);
 		};
-	}, [route.workspaceId, refresh]);
+	}, [route.namespaceId, refresh]);
 	useEffect(() => {
-		if (!route.repositoryId || !route.workspaceId) {
+		if (!route.repositoryId || !route.namespaceId) {
 			setView(undefined);
 			return;
 		}
@@ -238,7 +239,7 @@ export function App() {
 			ticket = ++generation.current;
 		const load = () =>
 			request<RepositorySnapshot>(
-				`/api/workspaces/${route.workspaceId}/repositories/${route.repositoryId}`,
+				`/api/namespaces/${route.namespaceId}/repositories/${route.repositoryId}`,
 				undefined,
 				"GET",
 				controller.signal,
@@ -261,7 +262,7 @@ export function App() {
 			controller.abort();
 			clearInterval(timer);
 		};
-	}, [route.workspaceId, route.repositoryId, refresh]);
+	}, [route.namespaceId, route.repositoryId, refresh]);
 	useEffect(() => {
 		if (!finder || !me) return;
 		void refresh;
@@ -270,10 +271,10 @@ export function App() {
 		setFinderError("");
 		setCatalog([]);
 		void Promise.all(
-			me.workspaces.map(async (w) => {
+			me.namespaces.map(async (w) => {
 				try {
-					return (await request<Repository[]>(`/api/workspaces/${w.id}/repositories`, undefined, "GET", controller.signal)).map(
-						(repository) => ({ workspace: w, repository }),
+					return (await request<Repository[]>(`/api/namespaces/${w.id}/repositories`, undefined, "GET", controller.signal)).map(
+						(repository) => ({ namespace: w, repository }),
 					);
 				} catch (e) {
 					if (!controller.signal.aborted) setFinderError((e as Error).message);
@@ -297,7 +298,7 @@ export function App() {
 			url,
 			{
 				...body,
-				...(method === "POST" && (body.tool || url.endsWith("repositories") || url === "/api/workspaces") ? { idempotencyKey: key } : {}),
+				...(method === "POST" && (body.tool || url.endsWith("repositories") || url === "/api/namespaces") ? { idempotencyKey: key } : {}),
 			},
 			method,
 		);
@@ -307,7 +308,7 @@ export function App() {
 	};
 	const execute = async (command: Partial<Command> & { tool: string }) => {
 		if (!view) throw new Error("Repository unavailable");
-		const url = `/api/workspaces/${route.workspaceId}/repositories/${route.repositoryId}/command`;
+		const url = `/api/namespaces/${route.namespaceId}/repositories/${route.repositoryId}/command`;
 		if (command.tool.startsWith("get_") || command.tool === "read_artifact") return request(url, command);
 		setBusy(true);
 		try {
@@ -318,7 +319,7 @@ export function App() {
 			setBusy(false);
 		}
 	};
-	const base = `/api/workspaces/${route.workspaceId}`;
+	const base = `/api/namespaces/${route.namespaceId}`;
 	if (!me)
 		return (
 			<main className="welcome">
@@ -335,13 +336,13 @@ export function App() {
 	if (location.pathname.startsWith("/invite/"))
 		return (
 			<main className="welcome">
-				<h1>Join workspace</h1>
+				<h1>Join namespace</h1>
 				<Form
 					label="Accept invitation"
 					submit={async () => {
-						const workspaceId = location.pathname.split("/")[2];
-						await request(`/api/workspaces/${workspaceId}/accept`, { token: location.hash.slice(1) });
-						location.href = `/?workspace=${workspaceId}`;
+						const namespaceId = location.pathname.split("/")[2];
+						await request(`/api/namespaces/${namespaceId}/accept`, { token: location.hash.slice(1) });
+						location.href = `/?namespace=${namespaceId}`;
 					}}
 				>
 					<p>Signed in as {me.user.email}. This invitation must match your verified email.</p>
@@ -356,11 +357,11 @@ export function App() {
 			<aside>
 				<a
 					className="brand"
-					href="/?page=workspaces"
+					href="/?page=namespaces"
 					onClick={(e) => {
 						if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
 							e.preventDefault();
-							navigatePage("workspaces");
+							navigatePage("namespaces");
 						}
 					}}
 				>
@@ -371,15 +372,15 @@ export function App() {
 				</a>
 				<button
 					type="button"
-					className="workspace-switcher"
-					aria-label="Switch workspace"
+					className="namespace-switcher"
+					aria-label="Switch namespace"
 					aria-haspopup="dialog"
-					onClick={() => setOverlay("workspace")}
+					onClick={() => setOverlay("namespace")}
 				>
-					<span className="workspace-avatar">{(workspace?.workspace.name ?? "W").slice(0, 1).toUpperCase()}</span>
+					<span className="namespace-avatar">{(namespace?.namespace.name ?? "W").slice(0, 1).toUpperCase()}</span>
 					<span>
-						<strong>{workspace?.workspace.name ?? "Workspace"}</strong>
-						<small>{workspace?.workspace.kind === "shared" ? "Shared workspace" : "Personal workspace"}</small>
+						<strong>{namespace?.namespace.name ?? "Namespace"}</strong>
+						<small>{namespace?.namespace.kind === "shared" ? "Shared namespace" : "Personal namespace"}</small>
 					</span>
 					<Icon name="chevron" />
 				</button>
@@ -389,28 +390,28 @@ export function App() {
 				</button>
 				<button
 					type="button"
-					className={`all-workspaces ${route.screen === "workspaces" ? "selected" : ""}`}
-					onClick={() => navigatePage("workspaces")}
+					className={`all-namespaces ${route.screen === "namespaces" ? "selected" : ""}`}
+					onClick={() => navigatePage("namespaces")}
 				>
 					<Icon name="repositories" />
-					All workspaces
+					All namespaces
 					<Icon name="arrow" />
 				</button>
-				{route.screen === "workspace" && (
+				{route.screen === "namespace" && (
 					<>
-						<p className="nav-label">Workspace</p>
-						<nav aria-label="Workspace navigation">
-							{["repositories", ...(workspace?.workspace.kind === "shared" ? ["members", "teams"] : []), "settings"].map((tab) => (
+						<p className="nav-label">Namespace</p>
+						<nav aria-label="Namespace navigation">
+							{["repositories", ...(namespace?.namespace.kind === "shared" ? ["members", "teams"] : []), "settings"].map((tab) => (
 								<button
 									type="button"
 									key={tab}
-									className={route.screen === "workspace" && !route.repositoryId && workspaceTab === tab ? "selected" : ""}
-									aria-current={route.screen === "workspace" && !route.repositoryId && workspaceTab === tab ? "page" : undefined}
-									onClick={() => navigate(route.workspaceId, "", tab)}
+									className={route.screen === "namespace" && !route.repositoryId && namespaceTab === tab ? "selected" : ""}
+									aria-current={route.screen === "namespace" && !route.repositoryId && namespaceTab === tab ? "page" : undefined}
+									onClick={() => navigate(route.namespaceId, "", tab)}
 								>
 									<Icon name={tab} />
 									{tab}
-									{tab === "repositories" && <span className="nav-count">{workspace?.repositories.length ?? "—"}</span>}
+									{tab === "repositories" && <span className="nav-count">{namespace?.repositories.length ?? "—"}</span>}
 								</button>
 							))}
 						</nav>
@@ -424,7 +425,7 @@ export function App() {
 							<span>{view.repository.name}</span>
 							<Icon name="chevron" />
 						</button>
-						<small>{view.repository.source.kind === "local" ? "Local Git" : "Artifacts hosted Git"}</small>
+						<small>Artifacts hosted Git</small>
 					</div>
 				)}
 				<div className="sidebar-bottom">
@@ -449,14 +450,14 @@ export function App() {
 						<button
 							type="button"
 							onClick={() =>
-								route.screen === "workspace" ? navigate(route.workspaceId) : navigatePage(route.screen as "workspaces" | "account")
+								route.screen === "namespace" ? navigate(route.namespaceId) : navigatePage(route.screen as "namespaces" | "account")
 							}
 						>
-							{route.screen === "workspaces"
-								? "All workspaces"
+							{route.screen === "namespaces"
+								? "All namespaces"
 								: route.screen === "account"
 									? "Your account"
-									: (workspace?.workspace.handle ?? "Workspace")}
+									: (namespace?.namespace.handle ?? "Namespace")}
 						</button>
 						{view && (
 							<>
@@ -467,13 +468,7 @@ export function App() {
 					</div>
 					<span className="context-badge">
 						<Icon name={view ? "branch" : "lock"} />
-						{view
-							? view.repository.source.kind === "local"
-								? "Local Git · reported observations"
-								: "Artifacts hosted Git"
-							: route.screen === "workspace"
-								? "Private workspace"
-								: "Your Cruce"}
+						{view ? "Artifacts hosted Git" : route.screen === "namespace" ? "Private namespace" : "Your Cruce"}
 					</span>
 				</header>
 				{error && (
@@ -485,8 +480,8 @@ export function App() {
 					</div>
 				)}
 				{notice && <p role="status">{notice}</p>}
-				{route.screen === "workspaces" ? (
-					<WorkspaceHome me={me} refresh={refresh} open={navigate} create={() => setOverlay("create-workspace")} />
+				{route.screen === "namespaces" ? (
+					<NamespaceHome me={me} refresh={refresh} open={navigate} create={() => setOverlay("create-namespace")} />
 				) : route.screen === "account" ? (
 					<AccountPage me={me} open={navigate} />
 				) : route.repositoryId ? (
@@ -498,7 +493,7 @@ export function App() {
 									key={tab}
 									className={route.tab === tab ? "selected" : ""}
 									aria-current={route.tab === tab ? "page" : undefined}
-									onClick={() => navigate(route.workspaceId, route.repositoryId, tab)}
+									onClick={() => navigate(route.namespaceId, route.repositoryId, tab)}
 								>
 									{tab}
 								</button>
@@ -514,13 +509,25 @@ export function App() {
 												{view.repository.defaultBranch} · {short(view.sourceHead ?? view.refs.at(-1)?.revision)}
 											</code>
 										</div>
+										{view.sourceHead && (
+											<details className="clone-instructions">
+												<summary>Clone</summary>
+												<pre>
+													<code>{`git clone ${location.origin}${gitRemotePath(view.repository.namespaceId, view.repository.id)}`}</code>
+												</pre>
+												<p>
+													Use your Cruce OAuth connection with a Git credential helper. Canonical is read-only; each workspace has its own
+													writable fork.
+												</p>
+											</details>
+										)}
 										<div className="status-strip">
-											<span>{view.sessions.filter((s) => s.state === "active").length} active sessions</span>
+											<span>{view.workspaces.filter((s) => s.state === "active").length} active workspaces</span>
 											<span>{count(view.overlaps.length, "overlap")}</span>
 											<span>{count(view.artifacts.length, "artifact")}</span>
 											<span>
 												{count(
-													view.sessions.filter((session) => session.actor.kind === "agent" && session.state === "active").length,
+													view.workspaces.filter((workspace) => workspace.actor.kind === "agent" && workspace.state === "active").length,
 													"agent",
 												)}{" "}
 												working
@@ -539,13 +546,13 @@ export function App() {
 															type="button"
 															className="review-row"
 															key={p.id}
-															onClick={() => navigate(route.workspaceId, route.repositoryId, "work", p.id)}
+															onClick={() => navigate(route.namespaceId, route.repositoryId, "work", p.id)}
 														>
 															<span className="review-number">#{p.number}</span>
 															<span>
 																<strong>{p.title}</strong>
 																<small>
-																	{view.sessions.find((session) => session.id === p.sessionId)?.actor.name ?? "Session"} ·{" "}
+																	{view.workspaces.find((workspace) => workspace.id === p.workspaceId)?.actor.name ?? "Workspace"} ·{" "}
 																	<code>{short(p.revision)}</code>
 																</small>
 															</span>
@@ -559,8 +566,8 @@ export function App() {
 													))}
 											</section>
 										)}
-										<h2>Sessions in motion</h2>
-										<Sessions view={view} open={(id) => navigate(route.workspaceId, route.repositoryId, "work", id)} />
+										<h2>Active workspaces</h2>
+										<Workspaces view={view} open={(id) => navigate(route.namespaceId, route.repositoryId, "work", id)} />
 										<Overlaps view={view} />
 										<div className="columns">
 											<section>
@@ -568,7 +575,7 @@ export function App() {
 												{view.artifacts.length ? (
 													<ArtifactRow
 														artifact={view.artifacts.at(-1)!}
-														open={(id) => navigate(route.workspaceId, route.repositoryId, "artifacts", id)}
+														open={(id) => navigate(route.namespaceId, route.repositoryId, "artifacts", id)}
 													/>
 												) : (
 													<Empty>No artifacts published yet.</Empty>
@@ -593,12 +600,14 @@ export function App() {
 								{route.tab === "work" && (
 									<>
 										<h1>Work</h1>
-										<Sessions view={view} open={(id) => navigate(route.workspaceId, route.repositoryId, "work", id)} all />
+										<Workspaces view={view} open={(id) => navigate(route.namespaceId, route.repositoryId, "work", id)} all />
 										<Overlaps view={view} />
-										{route.id && view.sessions.find((s) => s.id === route.id) && <SessionDetail view={view} id={route.id} />}
+										{route.id && view.workspaces.find((s) => s.id === route.id) && (
+											<WorkspaceDetail view={view} id={route.id} execute={execute} />
+										)}
 										<h2>Changes</h2>
 										{!view.proposals.length && (
-											<Empty>No changes proposed. Publish committed source from a session to request review.</Empty>
+											<Empty>No changes proposed. Publish committed source from a workspace to request review.</Empty>
 										)}
 										{view.proposals.map((p) => (
 											<details key={p.id} open={route.id === p.id}>
@@ -609,7 +618,7 @@ export function App() {
 													Base <code>{short(p.base)}</code> → <code>{short(p.revision)}</code>
 												</p>
 												<p>{view.readiness[p.id]?.reasons.join(" · ") || "Ready for human promotion"}</p>
-												<button type="button" onClick={() => navigate(route.workspaceId, route.repositoryId, "code", p.id)}>
+												<button type="button" onClick={() => navigate(route.namespaceId, route.repositoryId, "code", p.id)}>
 													Inspect diff
 												</button>
 												{p.reviews.map((r, i) => (
@@ -698,17 +707,14 @@ export function App() {
 																<input name="reason" required />
 															</label>
 														</Form>
-														{view.repository.source.kind === "artifacts" ? (
-															<button
-																type="button"
-																disabled={busy || !view.readiness[p.id]?.ready}
-																onClick={() => void execute({ tool: "promote_proposal", proposalId: p.id }).catch((e) => setError(e))}
-															>
-																Promote source
-															</button>
-														) : (
-															<p>After approval, merge and push with normal Git. Cruce records the observed ref separately.</p>
-														)}
+
+														<button
+															type="button"
+															disabled={busy || !view.readiness[p.id]?.ready}
+															onClick={() => void execute({ tool: "promote_proposal", proposalId: p.id }).catch((e) => setError(e))}
+														>
+															Promote source
+														</button>
 													</>
 												)}
 											</details>
@@ -722,13 +728,13 @@ export function App() {
 									<>
 										<h1>Artifacts</h1>
 										{!view.artifacts.length && (
-											<Empty>No artifacts yet. Publish exact committed source or evidence from your session.</Empty>
+											<Empty>No artifacts yet. Publish exact committed source or evidence from your workspace.</Empty>
 										)}
 										{view.artifacts.map((a) => (
 											<ArtifactRow
 												key={a.id}
 												artifact={a}
-												open={(id) => navigate(route.workspaceId, route.repositoryId, "artifacts", id)}
+												open={(id) => navigate(route.namespaceId, route.repositoryId, "artifacts", id)}
 											/>
 										))}
 										{route.id && <ArtifactDetail key={route.id} id={route.id} view={view} execute={execute} />}
@@ -740,7 +746,7 @@ export function App() {
 										<p className="muted">Deployments consume immutable source artifacts. Build output is shown only when captured.</p>
 										{!view.environments.length && (
 											<Empty>
-												No environments configured. Connect Cloudflare in workspace settings, then configure an environment here.
+												No environments configured. Connect Cloudflare in namespace settings, then configure an environment here.
 											</Empty>
 										)}
 										{view.environments.map((env) => (
@@ -776,7 +782,7 @@ export function App() {
 																	))}
 															</select>
 														</label>
-														<p className="cost">Consumes Cloudflare build and deployment resources under workspace policy.</p>
+														<p className="cost">Consumes Cloudflare build and deployment resources under namespace policy.</p>
 													</Form>
 												)}
 												{view.deployments
@@ -789,7 +795,7 @@ export function App() {
 																{d.actor.name} · {time(d.at)} · artifact{" "}
 																<button
 																	type="button"
-																	onClick={() => navigate(route.workspaceId, route.repositoryId, "artifacts", d.artifactId)}
+																	onClick={() => navigate(route.namespaceId, route.repositoryId, "artifacts", d.artifactId)}
 																>
 																	{short(d.artifactId)}
 																</button>
@@ -866,15 +872,15 @@ export function App() {
 									<>
 										<h1>Repository settings</h1>
 										<p>
-											<code>{view.repository.id}</code> · {view.repository.source.kind}
+											<code>{view.repository.id}</code> · Artifacts
 										</p>
 										<h2>Connect your checkout</h2>
-										<pre>{`node /path/to/cruce/runner/cruce.mjs connect --workspace ${route.workspaceId} --repository ${route.repositoryId} --server ${location.origin} --client codex`}</pre>
+										<pre>{`node /path/to/cruce/runner/cruce.mjs connect --namespace ${route.namespaceId} --repository ${route.repositoryId} --server ${location.origin} --client codex`}</pre>
 										<p>
-											For a human session, use <code>human</code> instead of <code>connect</code>, then{" "}
+											For a human workspace, use <code>human</code> instead of <code>connect</code>, then{" "}
 											<code>start --title "Your work"</code>.
 										</p>
-										{view.permissions.maintain && workspace && (
+										{view.permissions.maintain && namespace && (
 											<>
 												<Form
 													label="Rename repository"
@@ -889,7 +895,7 @@ export function App() {
 												{view.repository.grants.map((g) => (
 													<p key={`${g.subject}:${g.id}`}>
 														{g.subject}:{" "}
-														{workspace.people.find((p) => p.id === g.id)?.name ?? workspace.teams.find((t) => t.id === g.id)?.name ?? g.id}{" "}
+														{namespace.people.find((p) => p.id === g.id)?.name ?? namespace.teams.find((t) => t.id === g.id)?.name ?? g.id}{" "}
 														· {g.role}{" "}
 														<button
 															type="button"
@@ -924,12 +930,12 @@ export function App() {
 													<label>
 														Member or team
 														<select name="subject">
-															{workspace.people.map((p) => (
+															{namespace.people.map((p) => (
 																<option key={p.id} value={`user:${p.id}`}>
 																	{p.name}
 																</option>
 															))}
-															{workspace.teams.map((t) => (
+															{namespace.teams.map((t) => (
 																<option key={t.id} value={`team:${t.id}`}>
 																	Team: {t.name}
 																</option>
@@ -982,41 +988,41 @@ export function App() {
 							<Empty>Loading repository…</Empty>
 						)}
 					</>
-				) : workspace ? (
+				) : namespace ? (
 					<>
-						<div className="page-title workspace-title">
+						<div className="page-title namespace-title">
 							<div>
-								<p className="eyebrow">Your workspace, connected</p>
-								<h1>{workspaceTab === "repositories" ? "Repositories" : workspaceTab[0].toUpperCase() + workspaceTab.slice(1)}</h1>
+								<p className="eyebrow">Your namespace, connected</p>
+								<h1>{namespaceTab === "repositories" ? "Repositories" : namespaceTab[0].toUpperCase() + namespaceTab.slice(1)}</h1>
 								<p className="page-description">
-									{workspaceTab === "repositories"
-										? "Repositories, agent sessions, and the changes ready for your attention."
-										: `Manage ${workspaceTab} for ${workspace.workspace.name}.`}
+									{namespaceTab === "repositories"
+										? "Repositories, agent workspaces, and the changes ready for your attention."
+										: `Manage ${namespaceTab} for ${namespace.namespace.name}.`}
 								</p>
 							</div>
-							{workspaceTab === "repositories" && workspace.permissions.maintain && workspace.repositories.length > 0 && (
+							{namespaceTab === "repositories" && namespace.permissions.maintain && namespace.repositories.length > 0 && (
 								<button className="primary" type="button" onClick={() => setOverlay("repository")}>
 									<Icon name="plus" />
 									New repository
 								</button>
 							)}
 						</div>
-						{workspaceTab === "repositories" && (
+						{namespaceTab === "repositories" && (
 							<>
-								{workspace.repositories.length ? (
+								{namespace.repositories.length ? (
 									<div className="repo-list">
-										{workspace.repositories.map((r) => (
-											<button type="button" key={r.id} onClick={() => navigate(workspace.workspace.id, r.id)}>
+										{namespace.repositories.map((r) => (
+											<button type="button" key={r.id} onClick={() => navigate(namespace.namespace.id, r.id)}>
 												<span className="repo-symbol">
-													<Icon name={r.source.kind === "local" ? "local" : "cloud"} />
+													<Icon name="cloud" />
 												</span>
 												<strong>{r.name}</strong>
 												<span>
-													{r.source.kind === "local" ? "Local Git" : "Artifacts"} · {r.defaultBranch}
-													{workspace.repositorySummaries?.find((s) => s.id === r.id) && (
+													Artifacts · {r.defaultBranch}
+													{namespace.repositorySummaries?.find((s) => s.id === r.id) && (
 														<small>
-															{workspace.repositorySummaries.find((s) => s.id === r.id)!.active} active sessions ·{" "}
-															{workspace.repositorySummaries.find((s) => s.id === r.id)!.overlaps} overlaps
+															{namespace.repositorySummaries.find((s) => s.id === r.id)!.active} active workspaces ·{" "}
+															{namespace.repositorySummaries.find((s) => s.id === r.id)!.overlaps} overlaps
 														</small>
 													)}
 												</span>
@@ -1038,7 +1044,7 @@ export function App() {
 												No repositories yet. Bring your local Git into Cruce to coordinate developers and agents, with context that follows
 												the commit.
 											</p>
-											{workspace.permissions.maintain && (
+											{namespace.permissions.maintain && (
 												<button type="button" className="primary" onClick={() => setOverlay("repository")}>
 													<Icon name="plus" />
 													New repository
@@ -1048,15 +1054,15 @@ export function App() {
 										</div>
 									</section>
 								)}
-								{workspace.activity?.length ? (
+								{namespace.activity?.length ? (
 									<section>
 										<h2>Recent activity</h2>
 										<ol className="activity">
-											{workspace.activity.map((e) => (
+											{namespace.activity.map((e) => (
 												<li key={`${e.repositoryId}:${e.id}`}>
 													<time>{time(e.at)}</time>
 													<span>
-														<button type="button" onClick={() => navigate(workspace.workspace.id, e.repositoryId)}>
+														<button type="button" onClick={() => navigate(namespace.namespace.id, e.repositoryId)}>
 															{e.repositoryName}
 														</button>{" "}
 														{e.summary}
@@ -1066,16 +1072,16 @@ export function App() {
 										</ol>
 									</section>
 								) : null}
-								<div className="workspace-guide">
+								<div className="namespace-guide">
 									<div>
 										<span className="guide-number">01</span>
 										<h3>Bring your Git</h3>
-										<p>Connect a local repository or create one with Artifacts.</p>
+										<p>Create a repository, then clone it with Git.</p>
 									</div>
 									<div>
 										<span className="guide-number">02</span>
 										<h3>Connect your agents</h3>
-										<p>Authorize a local agent connection. Each writer gets its own worktree and session.</p>
+										<p>Authorize a local agent connection. Each writer gets its own worktree and workspace.</p>
 									</div>
 									<div>
 										<span className="guide-number">03</span>
@@ -1085,12 +1091,12 @@ export function App() {
 								</div>
 							</>
 						)}
-						{workspaceTab === "members" && (
+						{namespaceTab === "members" && (
 							<>
-								{workspace.people.map((p) => (
+								{namespace.people.map((p) => (
 									<div className="record" key={p.id}>
-										<strong>{p.name}</strong> {p.email} · {workspace.members[p.id]}
-										{workspace.permissions.maintain && workspace.members[p.id] !== "owner" && (
+										<strong>{p.name}</strong> {p.email} · {namespace.members[p.id]}
+										{namespace.permissions.maintain && namespace.members[p.id] !== "owner" && (
 											<Form
 												label="Update member"
 												submit={(d) =>
@@ -1098,11 +1104,11 @@ export function App() {
 												}
 											>
 												<label>
-													Workspace role
-													<select name="role" defaultValue={workspace.members[p.id]}>
+													Namespace role
+													<select name="role" defaultValue={namespace.members[p.id]}>
 														<option value="viewer">Viewer</option>
 														<option value="developer">Developer</option>
-														{workspace.permissions.owner && <option value="maintainer">Maintainer</option>}
+														{namespace.permissions.owner && <option value="maintainer">Maintainer</option>}
 														<option value="remove">Remove member</option>
 													</select>
 												</label>
@@ -1110,7 +1116,7 @@ export function App() {
 										)}
 									</div>
 								))}
-								{workspace.permissions.maintain && (
+								{namespace.permissions.maintain && (
 									<Form
 										label="Create invitation link"
 										submit={async (d) => {
@@ -1130,49 +1136,49 @@ export function App() {
 											<select name="role">
 												<option value="developer">Developer</option>
 												<option value="viewer">Viewer</option>
-												{workspace.permissions.owner && <option value="maintainer">Maintainer</option>}
+												{namespace.permissions.owner && <option value="maintainer">Maintainer</option>}
 											</select>
 										</label>
 									</Form>
 								)}
 							</>
 						)}
-						{workspaceTab === "teams" && (
+						{namespaceTab === "teams" && (
 							<>
-								{!workspace.teams.length && <Empty>No teams yet. Teams group workspace members for repository access.</Empty>}
-								{[...workspace.teams, { id: "", name: "", members: [] }].map((t) => (
-									<TeamForm key={t.id || "new"} team={t} workspace={workspace} save={(body) => mutate(`${base}/teams`, body)} />
+								{!namespace.teams.length && <Empty>No teams yet. Teams group namespace members for repository access.</Empty>}
+								{[...namespace.teams, { id: "", name: "", members: [] }].map((t) => (
+									<TeamForm key={t.id || "new"} team={t} namespace={namespace} save={(body) => mutate(`${base}/teams`, body)} />
 								))}
 							</>
 						)}
-						{workspaceTab === "settings" && (
+						{namespaceTab === "settings" && (
 							<>
-								<h2>Workspace settings</h2>
-								{workspace.permissions.maintain && (
+								<h2>Namespace settings</h2>
+								{namespace.permissions.maintain && (
 									<Form
-										label="Save workspace"
+										label="Save namespace"
 										submit={async (d) => {
-											const w = await mutate<Workspace>(base, { name: value(d, "name"), handle: value(d, "handle") }, "PATCH");
-											setMe({ ...me, workspaces: me.workspaces.map((old) => (old.id === w.id ? w : old)) });
+											const w = await mutate<Namespace>(base, { name: value(d, "name"), handle: value(d, "handle") }, "PATCH");
+											setMe({ ...me, namespaces: me.namespaces.map((old) => (old.id === w.id ? w : old)) });
 										}}
 									>
 										<label>
 											Name
-											<input name="name" defaultValue={workspace.workspace.name} required />
+											<input name="name" defaultValue={namespace.namespace.name} required />
 										</label>
 										<label>
 											Handle
-											<input name="handle" defaultValue={workspace.workspace.handle} required />
+											<input name="handle" defaultValue={namespace.namespace.handle} required />
 										</label>
 									</Form>
 								)}
 								<h2>Cloudflare account</h2>
 								<p>
-									{workspace.account
-										? `${workspace.account.label} · ${workspace.account.accountId}`
-										: "Not connected. Local Git coordination works without Cloudflare resources."}
+									{namespace.account
+										? `${namespace.account.label} · ${namespace.account.accountId}`
+										: "Not connected. Connect an Artifacts account to create repositories and workspaces."}
 								</p>
-								{workspace.permissions.owner && (
+								{namespace.permissions.owner && (
 									<Form
 										label="Connect account"
 										submit={(d) =>
@@ -1194,33 +1200,33 @@ export function App() {
 										<p className="muted">Credentials are sealed and never returned to agents.</p>
 									</Form>
 								)}
-								{workspace.permissions.maintain && (
+								{namespace.permissions.maintain && (
 									<Form
 										label="Save resource policy"
 										submit={(d) =>
 											mutate(`${base}/policy`, {
 												dailyLimit: Number(value(d, "dailyLimit")),
-												previewsPerSession: Number(value(d, "previewsPerSession")),
-												rules: Object.fromEntries(Object.keys(workspace.policy.rules).map((key) => [key, value(d, key)])),
+												previewsPerWorkspace: Number(value(d, "previewsPerWorkspace")),
+												rules: Object.fromEntries(Object.keys(namespace.policy.rules).map((key) => [key, value(d, key)])),
 											})
 										}
 									>
 										<h2>Shared resource budgets</h2>
 										<label>
 											Daily operations
-											<input name="dailyLimit" type="number" min="0" max="10000" defaultValue={workspace.policy.dailyLimit} />
+											<input name="dailyLimit" type="number" min="0" max="10000" defaultValue={namespace.policy.dailyLimit} />
 										</label>
 										<label>
-											Previews per session
+											Previews per workspace
 											<input
-												name="previewsPerSession"
+												name="previewsPerWorkspace"
 												type="number"
 												min="0"
 												max="1000"
-												defaultValue={workspace.policy.previewsPerSession}
+												defaultValue={namespace.policy.previewsPerWorkspace}
 											/>
 										</label>
-										{Object.entries(workspace.policy.rules).map(([key, rule]) => (
+										{Object.entries(namespace.policy.rules).map(([key, rule]) => (
 											<label key={key}>
 												{key}
 												<select name={key} defaultValue={rule}>
@@ -1236,41 +1242,41 @@ export function App() {
 						)}
 					</>
 				) : (
-					<Empty>Loading workspace…</Empty>
+					<Empty>Loading namespace…</Empty>
 				)}
 			</main>
-			{overlay === "workspace" && (
-				<Dialog title="Switch workspace" close={() => setOverlay(undefined)} className="workspace-picker">
+			{overlay === "namespace" && (
+				<Dialog title="Switch namespace" close={() => setOverlay(undefined)} className="namespace-picker">
 					<p className="muted">Choose where you work.</p>
-					<button type="button" className="workspace-option all-option" onClick={() => navigatePage("workspaces")}>
+					<button type="button" className="namespace-option all-option" onClick={() => navigatePage("namespaces")}>
 						<Icon name="repositories" />
-						<span>View all workspaces</span>
+						<span>View all namespaces</span>
 						<Icon name="arrow" />
 					</button>
-					{me.workspaces.map((w) => (
-						<button className="workspace-option" type="button" key={w.id} onClick={() => navigate(w.id)}>
-							<span className="workspace-avatar">{w.name.slice(0, 1).toUpperCase()}</span>
+					{me.namespaces.map((w) => (
+						<button className="namespace-option" type="button" key={w.id} onClick={() => navigate(w.id)}>
+							<span className="namespace-avatar">{w.name.slice(0, 1).toUpperCase()}</span>
 							<span>
 								<strong>{w.name}</strong>
-								<small>{w.kind === "personal" ? "Personal workspace" : "Shared workspace"}</small>
+								<small>{w.kind === "personal" ? "Personal namespace" : "Shared namespace"}</small>
 							</span>
-							{route.workspaceId === w.id && <Icon name="check" />}
+							{route.namespaceId === w.id && <Icon name="check" />}
 						</button>
 					))}
-					<button type="button" className="create-workspace-trigger" onClick={() => setOverlay("create-workspace")}>
+					<button type="button" className="create-namespace-trigger" onClick={() => setOverlay("create-namespace")}>
 						<Icon name="plus" />
-						Create workspace
+						Create namespace
 					</button>
 				</Dialog>
 			)}
-			{overlay === "create-workspace" && (
-				<Dialog title="Create workspace" close={() => setOverlay(undefined)}>
+			{overlay === "create-namespace" && (
+				<Dialog title="Create namespace" close={() => setOverlay(undefined)}>
 					<p className="muted">A shared place for your team's repositories.</p>
 					<Form
-						label="Create workspace"
+						label="Create namespace"
 						submit={async (d) => {
-							const w = await mutate<Workspace>("/api/workspaces", { name: value(d, "name"), handle: value(d, "handle") });
-							setMe({ ...me, workspaces: [...me.workspaces, w] });
+							const w = await mutate<Namespace>("/api/namespaces", { name: value(d, "name"), handle: value(d, "handle") });
+							setMe({ ...me, namespaces: [...me.namespaces, w] });
 							navigate(w.id);
 						}}
 					>
@@ -1279,27 +1285,30 @@ export function App() {
 							<input name="name" required placeholder="e.g. Acme engineering" />
 						</label>
 						<label>
-							Workspace handle
+							Namespace handle
 							<input name="handle" required pattern="[a-z0-9-]+" placeholder="acme" />
 						</label>
 					</Form>
 				</Dialog>
 			)}
-			{overlay === "repository" && workspace?.permissions.maintain && (
+			{overlay === "repository" && namespace?.permissions.maintain && (
 				<Dialog title="New repository" close={() => setOverlay(undefined)} className="repository-dialog">
-					<p className="muted">Add a repository to {workspace.workspace.name}.</p>
+					<p className="muted">Add a repository to {namespace.namespace.name}.</p>
 					<Form
 						label="Add repository"
 						submit={async (d) => {
 							const repo = await mutate<Repository>(`${base}/repositories`, {
 								name: value(d, "name"),
-								source: value(d, "source"),
 								defaultBranch: value(d, "branch"),
 							});
-							navigate(workspace.workspace.id, repo.id);
+							navigate(namespace.namespace.id, repo.id);
 						}}
 					>
-						<SourceChoice connected={Boolean(workspace.account)} />
+						<p className="cost">
+							Creates canonical Git storage in your connected Cloudflare account. Agent workspaces consume isolated forks under namespace
+							policy.
+						</p>
+						{!namespace.account && <p>Connect Cloudflare in namespace settings before creating a repository.</p>}
 						<div className="form-fields">
 							<label>
 								Repository name
@@ -1334,7 +1343,7 @@ export function App() {
 								}}
 								value={search}
 								onChange={(e) => setSearch(e.target.value)}
-								placeholder="workspace/repository"
+								placeholder="namespace/repository"
 							/>
 						</label>
 						{finderLoading && <p className="muted">Finding repositories…</p>}
@@ -1348,14 +1357,14 @@ export function App() {
 						)}
 						{!finderLoading &&
 							!finderError &&
-							!catalog.some((r) => `${r.workspace.handle}/${r.repository.name}`.toLowerCase().includes(search.toLowerCase())) && (
+							!catalog.some((r) => `${r.namespace.handle}/${r.repository.name}`.toLowerCase().includes(search.toLowerCase())) && (
 								<p className="muted">No matching repositories.</p>
 							)}
 						{catalog
-							.filter((r) => `${r.workspace.handle}/${r.repository.name}`.toLowerCase().includes(search.toLowerCase()))
+							.filter((r) => `${r.namespace.handle}/${r.repository.name}`.toLowerCase().includes(search.toLowerCase()))
 							.map((r) => (
-								<button type="button" key={r.repository.id} onClick={() => navigate(r.workspace.id, r.repository.id)}>
-									{r.workspace.handle}/{r.repository.name}
+								<button type="button" key={r.repository.id} onClick={() => navigate(r.namespace.id, r.repository.id)}>
+									{r.namespace.handle}/{r.repository.name}
 								</button>
 							))}
 					</fieldset>
@@ -1364,18 +1373,18 @@ export function App() {
 		</div>
 	);
 }
-function WorkspaceHome({
+function NamespaceHome({
 	me,
 	refresh,
 	open,
 	create,
 }: {
-	me: { user: User; workspaces: Workspace[] };
+	me: { user: User; namespaces: Namespace[] };
 	refresh: number;
-	open: (workspaceId: string, repositoryId?: string) => void;
+	open: (namespaceId: string, repositoryId?: string) => void;
 	create: () => void;
 }) {
-	const [spaces, setSpaces] = useState<Record<string, WorkspaceView>>({}),
+	const [spaces, setSpaces] = useState<Record<string, NamespaceView>>({}),
 		[failures, setFailures] = useState<Record<string, string>>({}),
 		[loading, setLoading] = useState(true),
 		[retry, setRetry] = useState(0),
@@ -1391,9 +1400,9 @@ function WorkspaceHome({
 		const load = async () => {
 			const ticket = ++sequence;
 			await Promise.all(
-				me.workspaces.map(async (w) => {
+				me.namespaces.map(async (w) => {
 					try {
-						const result = await request<WorkspaceView>(`/api/workspaces/${w.id}`, undefined, "GET", controller.signal);
+						const result = await request<NamespaceView>(`/api/namespaces/${w.id}`, undefined, "GET", controller.signal);
 						if (!controller.signal.aborted && ticket === sequence) {
 							setSpaces((current) => ({ ...current, [w.id]: result }));
 							setFailures((current) => {
@@ -1422,46 +1431,46 @@ function WorkspaceHome({
 			controller.abort();
 			clearInterval(timer);
 		};
-	}, [me.workspaces, refresh, retry]);
+	}, [me.namespaces, refresh, retry]);
 	const motion = Object.values(spaces)
 		.flatMap((w) =>
 			(w.repositorySummaries ?? [])
 				.filter((summary) => summary.active > 0 || summary.overlaps > 0)
-				.map((summary) => ({ ...summary, workspace: w.workspace, repository: w.repositories.find((r) => r.id === summary.id) })),
+				.map((summary) => ({ ...summary, namespace: w.namespace, repository: w.repositories.find((r) => r.id === summary.id) })),
 		)
 		.filter((row) => row.repository);
 
-	const matches = me.workspaces.filter((w) =>
+	const matches = me.namespaces.filter((w) =>
 		`${w.name} ${w.handle} ${spaces[w.id]?.repositories.map((r) => r.name).join(" ") ?? ""}`.toLowerCase().includes(filter.toLowerCase()),
 	);
 	return (
 		<>
 			<div className="page-title home-title">
 				<div>
-					<p className="eyebrow">All workspaces</p>
+					<p className="eyebrow">All namespaces</p>
 					<h1>
 						Agent work.
 						<br />
 						<span>Shared direction.</span>
 					</h1>
-					<p className="page-description">Follow agent sessions across repositories. Inspect the commit. Decide what moves forward.</p>
+					<p className="page-description">Follow agent workspaces across repositories. Inspect the commit. Decide what moves forward.</p>
 				</div>
 				<button type="button" className="primary" onClick={create}>
 					<Icon name="plus" />
-					Create workspace
+					Create namespace
 				</button>
 			</div>
 			<div className="home-toolbar">
 				<p>
-					<strong>{me.workspaces.length}</strong> workspaces <span className="toolbar-dot">/</span>{" "}
+					<strong>{me.namespaces.length}</strong> namespaces <span className="toolbar-dot">/</span>{" "}
 					<strong>{loading ? "—" : Object.values(spaces).reduce((n, w) => n + w.repositories.length, 0)}</strong> repositories
-					{Object.keys(failures).length > 0 && <small>Counts include available workspaces.</small>}
+					{Object.keys(failures).length > 0 && <small>Counts include available namespaces.</small>}
 				</p>
-				<label className="workspace-search">
+				<label className="namespace-search">
 					<Icon name="search" />
 					<input
-						aria-label="Filter workspaces"
-						placeholder="Find a workspace or repository…"
+						aria-label="Filter namespaces"
+						placeholder="Find a namespace or repository…"
 						value={filter}
 						onChange={(e) => setFilter(e.target.value)}
 					/>
@@ -1471,7 +1480,7 @@ function WorkspaceHome({
 				<section className="motion-panel">
 					<div className="section-heading">
 						<div>
-							<p className="eyebrow">Across your workspaces</p>
+							<p className="eyebrow">Across your namespaces</p>
 							<h2>Work in motion</h2>
 						</div>
 						<span className="observed-label">
@@ -1482,38 +1491,38 @@ function WorkspaceHome({
 					{motion.map((row) => (
 						<button
 							type="button"
-							key={`${row.workspace.id}/${row.id}`}
+							key={`${row.namespace.id}/${row.id}`}
 							className="motion-row"
-							onClick={() => open(row.workspace.id, row.id)}
+							onClick={() => open(row.namespace.id, row.id)}
 						>
 							<Icon name="branch" />
 							<span>
 								<strong>{row.repository!.name}</strong>
-								<small>{row.workspace.name}</small>
+								<small>{row.namespace.name}</small>
 							</span>
-							<span className="motion-count">{row.active} active sessions</span>
+							<span className="motion-count">{row.active} active workspaces</span>
 							<span className="surface-count">{count(row.overlaps, "shared surface")}</span>
 							<Icon name="arrow" />
 						</button>
 					))}
 				</section>
 			)}
-			<div className="workspace-grid">
+			<div className="namespace-grid">
 				{matches.map((w, index) => {
 					const data = spaces[w.id];
 					return (
-						<section className={`workspace-card ${w.kind}`} key={w.id}>
-							<div className="workspace-card-top">
-								<span className="workspace-avatar">{w.name.slice(0, 1).toUpperCase()}</span>
+						<section className={`namespace-card ${w.kind}`} key={w.id}>
+							<div className="namespace-card-top">
+								<span className="namespace-avatar">{w.name.slice(0, 1).toUpperCase()}</span>
 								<span className="space-kind">{w.kind === "personal" ? "Personal" : "Shared"}</span>
 								<span className="space-index">{String(index + 1).padStart(2, "0")}</span>
 							</div>
-							<button className="workspace-card-title" type="button" onClick={() => open(w.id)}>
+							<button className="namespace-card-title" type="button" onClick={() => open(w.id)}>
 								<h2>{w.name}</h2>
 								<Icon name="arrow" />
 							</button>
-							<p className="workspace-handle">/{w.handle}</p>
-							<div className="workspace-card-body">
+							<p className="namespace-handle">/{w.handle}</p>
+							<div className="namespace-card-body">
 								{failures[w.id] ? (
 									<div role="alert">
 										<p>{failures[w.id]}</p>
@@ -1523,22 +1532,22 @@ function WorkspaceHome({
 									</div>
 								) : data ? (
 									<>
-										<p className="workspace-card-meta">
+										<p className="namespace-card-meta">
 											{data.repositories.length} repositories <span>· {data.role}</span>
 										</p>
 										{data.repositories.length ? (
 											data.repositories.slice(0, 3).map((r) => (
 												<button className="home-repo" key={r.id} type="button" onClick={() => open(w.id, r.id)}>
-													<Icon name={r.source.kind === "local" ? "local" : "cloud"} />
+													<Icon name="cloud" />
 													<span>{r.name}</span>
 													<Icon name="arrow" />
 												</button>
 											))
 										) : (
-											<p className="workspace-card-empty">
+											<p className="namespace-card-empty">
 												A clean slate for your agents.
 												<br />
-												Open this workspace to add your first repository.
+												Open this namespace to add your first repository.
 											</p>
 										)}
 									</>
@@ -1546,15 +1555,15 @@ function WorkspaceHome({
 									<p className="muted">Loading repositories…</p>
 								)}
 							</div>
-							<button className="open-workspace" type="button" onClick={() => open(w.id)}>
-								Open workspace
+							<button className="open-namespace" type="button" onClick={() => open(w.id)}>
+								Open namespace
 								<Icon name="arrow" />
 							</button>
 						</section>
 					);
 				})}
 			</div>
-			{!matches.length && <Empty>No matching workspaces. Try a workspace name, handle, or repository.</Empty>}
+			{!matches.length && <Empty>No matching namespaces. Try a namespace name, handle, or repository.</Empty>}
 			<div className="home-footer">
 				<Icon name="branch" />
 				<p>
@@ -1564,10 +1573,10 @@ function WorkspaceHome({
 		</>
 	);
 }
-function AccountPage({ me, open }: { me: { user: User; workspaces: Workspace[] }; open: (workspaceId: string) => void }) {
+function AccountPage({ me, open }: { me: { user: User; namespaces: Namespace[] }; open: (namespaceId: string) => void }) {
 	return (
 		<>
-			<div className="page-title workspace-title">
+			<div className="page-title namespace-title">
 				<div>
 					<p className="eyebrow">Your corner of Cruce</p>
 					<h1>Your account</h1>
@@ -1588,7 +1597,7 @@ function AccountPage({ me, open }: { me: { user: User; workspaces: Workspace[] }
 							Authenticated with Cloudflare Access
 						</span>
 						<p className="muted">
-							Your account identity is managed by your sign-in provider. Workspace access is managed separately in each workspace.
+							Your account identity is managed by your sign-in provider. Namespace access is managed separately in each namespace.
 						</p>
 						<a className="sign-out" href="/auth/logout">
 							Sign out
@@ -1597,15 +1606,15 @@ function AccountPage({ me, open }: { me: { user: User; workspaces: Workspace[] }
 					</div>
 				</section>
 				<section className="account-memberships">
-					<p className="eyebrow">Workspace access</p>
-					<h2>A place in every workspace.</h2>
-					<p className="muted">Repository permissions follow your current workspace membership and repository grants.</p>
-					{me.workspaces.map((w) => (
+					<p className="eyebrow">Namespace access</p>
+					<h2>A place in every namespace.</h2>
+					<p className="muted">Repository permissions follow your current namespace membership and repository grants.</p>
+					{me.namespaces.map((w) => (
 						<button className="membership-row" type="button" key={w.id} onClick={() => open(w.id)}>
-							<span className="workspace-avatar">{w.name.slice(0, 1).toUpperCase()}</span>
+							<span className="namespace-avatar">{w.name.slice(0, 1).toUpperCase()}</span>
 							<span>
 								<strong>{w.name}</strong>
-								<small>{w.kind === "personal" ? "Personal workspace" : "Shared workspace"}</small>
+								<small>{w.kind === "personal" ? "Personal namespace" : "Shared namespace"}</small>
 							</span>
 							<Icon name="arrow" />
 						</button>
@@ -1616,13 +1625,13 @@ function AccountPage({ me, open }: { me: { user: User; workspaces: Workspace[] }
 	);
 }
 
-function Sessions({ view, open, all = false }: { view: RepositorySnapshot; open: (id: string) => void; all?: boolean }) {
-	const sessions = view.sessions
+function Workspaces({ view, open, all = false }: { view: RepositorySnapshot; open: (id: string) => void; all?: boolean }) {
+	const workspaces = view.workspaces
 		.filter((s) => all || ["active", "preparing", "disconnected"].includes(s.state))
 		.sort((a, b) => Number(b.actor.kind === "agent") - Number(a.actor.kind === "agent"));
-	return sessions.length ? (
-		<div className="session-list">
-			{sessions.map((s) => (
+	return workspaces.length ? (
+		<div className="workspace-list">
+			{workspaces.map((s) => (
 				<button type="button" key={s.id} onClick={() => open(s.id)}>
 					<span className={`presence ${s.state}`} />
 					<span>
@@ -1632,18 +1641,19 @@ function Sessions({ view, open, all = false }: { view: RepositorySnapshot; open:
 					<span>
 						{s.title}
 						<small>
-							<code>{s.branch ?? "No ref"}</code> · {s.changes.length} files
+							<code>{s.branch ?? "No ref"}</code> · +{count(s.commits.length, "commit")} · {count(s.changes.length, "file")}
 						</small>
 					</span>
 					<span>
 						{s.state}
+						{view.workspaceUpdates[s.id]?.status === "available" && <small>Upstream updates available</small>}
 						<small>Last observed {time(s.lastActivity)}</small>
 					</span>
 				</button>
 			))}
 		</div>
 	) : (
-		<Empty>No active sessions. Sessions appear when you or an agent begins work through the local bridge.</Empty>
+		<Empty>No active workspaces. Workspaces appear when you or an agent begins work through the local bridge.</Empty>
 	);
 }
 function Overlaps({ view }: { view: RepositorySnapshot }) {
@@ -1652,16 +1662,18 @@ function Overlaps({ view }: { view: RepositorySnapshot }) {
 			<h2>Shared surfaces</h2>
 			{view.overlaps.map((o) => (
 				<p key={o.id}>
-					<code>{o.surface}</code> · {o.sessions.map((id) => view.sessions.find((s) => s.id === id)?.actor.name).join(" and ")} · reported
-					overlap
+					<code>{o.surface}</code> · {o.workspaces.map((id) => view.workspaces.find((s) => s.id === id)?.actor.name).join(" and ")} ·
+					reported overlap
 				</p>
 			))}
 			<small>Overlap is awareness, not a Git conflict.</small>
 		</section>
 	) : null;
 }
-function SessionDetail({ view, id }: { view: RepositorySnapshot; id: string }) {
-	const s = view.sessions.find((s) => s.id === id)!;
+function WorkspaceDetail({ view, id, execute }: { view: RepositorySnapshot; id: string; execute: Execute }) {
+	const s = view.workspaces.find((s) => s.id === id)!;
+	const updates = view.workspaceUpdates[id];
+	const [cleanupError, setCleanupError] = useState("");
 	return (
 		<section>
 			<h2>{s.title}</h2>
@@ -1674,6 +1686,53 @@ function SessionDetail({ view, id }: { view: RepositorySnapshot; id: string }) {
 			<p>
 				Head <code>{s.headRevision}</code>
 			</p>
+			<p>
+				{updates.status === "unknown"
+					? "Upstream revision unavailable"
+					: updates.status === "current"
+						? "Upstream matches the workspace baseline"
+						: "Upstream updates available"}
+				{updates.revision && (
+					<>
+						{" "}
+						· <code>{short(updates.revision)}</code> · {updates.trust}
+					</>
+				)}
+			</p>
+			{updates.status === "available" && (
+				<p>Fetch canonical with Git, merge when ready and verify before publishing. Your starting revision stays fixed.</p>
+			)}
+			<WorkspaceUpdateInspection key={`${id}:${updates.revision}:${s.headRevision}:${view.version}`} id={id} execute={execute} />
+			{s.integratedRevision && (
+				<p>
+					Last integrated upstream <code>{s.integratedRevision}</code>
+				</p>
+			)}
+			{s.fork ? (
+				<>
+					<p>Artifacts fork · {s.fork.state}</p>
+					{s.fork.state === "ready" && (
+						<pre>
+							<code>{`git fetch ${location.origin}${gitRemotePath(view.repository.namespaceId, view.repository.id, s.id)}`}</code>
+						</pre>
+					)}
+					{view.permissions.human && view.permissions.maintain && s.fork.state !== "deleted" && (
+						<button
+							type="button"
+							disabled={!view.forkCleanup[s.id]?.ready}
+							title={view.forkCleanup[s.id]?.reasons.join("; ")}
+							onClick={() =>
+								void execute({ tool: "cleanup_workspace", workspaceId: s.id }).catch((error) => setCleanupError(error.message))
+							}
+						>
+							{s.fork.state === "deleting" ? "Check fork deletion" : "Clean up retained fork"}
+						</button>
+					)}
+				</>
+			) : (
+				<p>No hosted fork provisioned</p>
+			)}
+			{cleanupError && <p role="alert">{cleanupError}</p>}
 			{s.context && <p>{s.context}</p>}
 			<ul>
 				{s.changes.map((c) => (
@@ -1692,6 +1751,11 @@ function SessionDetail({ view, id }: { view: RepositorySnapshot; id: string }) {
 				<p>
 					{s.execution?.kind ?? "Awaiting attachment"} · {s.execution?.id ?? ""}
 				</p>
+				{s.fork?.name && (
+					<p>
+						Hosted storage <code>{s.fork.name}</code>
+					</p>
+				)}
 				<p>
 					{s.commits.length} reported commits · {time(s.startedAt)}
 				</p>
@@ -1747,8 +1811,16 @@ function ArtifactDetail({ id, view, execute }: { id: string; view: RepositorySna
 				<dd>
 					<code>{a.revision}</code>
 				</dd>
-				<dt>Session</dt>
-				<dd>{view.sessions.find((s) => s.id === a.sessionId)?.title}</dd>
+				<dt>Workspace</dt>
+				<dd>{view.workspaces.find((s) => s.id === a.workspaceId)?.title}</dd>
+				{a.baseRevision && (
+					<>
+						<dt>Review base</dt>
+						<dd>
+							<code>{a.baseRevision}</code>
+						</dd>
+					</>
+				)}
 				<dt>Storage</dt>
 				<dd>{a.storage.repository}</dd>
 				<dt>Content hash</dt>
@@ -1770,15 +1842,15 @@ function ArtifactDetail({ id, view, execute }: { id: string; view: RepositorySna
 }
 function TeamForm({
 	team,
-	workspace,
+	namespace,
 	save,
 }: {
 	team: Team;
-	workspace: WorkspaceView;
+	namespace: NamespaceView;
 	save: (body: Record<string, unknown>) => Promise<unknown>;
 }) {
 	const stableId = useRef(team.id || crypto.randomUUID());
-	if (!workspace.permissions.maintain) return <p>{team.name}</p>;
+	if (!namespace.permissions.maintain) return <p>{team.name}</p>;
 	return (
 		<details>
 			<summary>{team.name || "Create team"}</summary>
@@ -1790,7 +1862,7 @@ function TeamForm({
 					Team name
 					<input name="name" defaultValue={team.name} required />
 				</label>
-				{workspace.people.map((p) => (
+				{namespace.people.map((p) => (
 					<label className="checkbox" key={p.id}>
 						<input type="checkbox" name="members" value={p.id} defaultChecked={team.members.includes(p.id)} />
 						{p.name}

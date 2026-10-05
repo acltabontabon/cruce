@@ -2,7 +2,7 @@ import type { Scope } from "../core/capabilities.ts";
 import { DomainError } from "../core/errors.ts";
 import { type Authority, type Command, CommandInput, type CostClass, type ResourceAction } from "./platform.ts";
 export const CRUCE_INSTRUCTIONS =
-	"Cruce coordinates developers and agents through Workspace → Repository → Session. Start a session at an exact Git revision. Writers attach an exclusive execution context; agent writers work in the dedicated directory returned by the bridge. Report changes, inspect advisory overlap, commit with normal Git, then publish exact revisions and artifacts. Local reports are not runtime verification. Source promotion and production deployment require a human decision. Never discard working changes to refresh a session.";
+	"Cruce coordinates developers and agents through Namespace → Repository → Workspace. Start a workspace at an exact Git revision. Writers attach an exclusive execution context; agent writers work in the dedicated directory returned by the bridge. Hosted writers use normal Git to push into their own workspace fork; publish_revision seals an exact pushed revision for review. Report changes and inspect advisory overlap and get_workspace_updates. Use get_git_access for canonical and fork remotes. Fetch and merge with normal Git when ready, verify, then publish exact revisions and artifacts. Keep the original starting revision and previous published commits reachable. Local reports are not runtime verification. Source promotion and production deployment require a human decision. Never discard working changes to refresh a workspace.";
 export interface Tool {
 	name: string;
 	description: string;
@@ -26,7 +26,7 @@ const write = (
 	name: string,
 	description: string,
 	fields: (keyof Command)[],
-	scope: Scope = "session:write",
+	scope: Scope = "workspace:write",
 	action?: ResourceAction,
 ): Tool => ({
 	name,
@@ -39,20 +39,27 @@ const write = (
 	action,
 });
 export const CRUCE_TOOLS: Tool[] = [
-	read("list_workspaces", "List your authorized workspaces."),
-	read("list_repositories", "List repositories authorized for this connection.", ["workspaceId"]),
-	read("get_repository", "Repository state, current sessions, changes, artifacts, deployments and observation freshness."),
-	read("get_context", "Instructions at a session's immutable base revision, with workspace and repository policies.", ["sessionId"]),
-	read("get_session", "Inspect a session and its execution context.", ["sessionId"]),
-	read("list_active_sessions", "Active and disconnected sessions."),
+	read("list_namespaces", "List your authorized namespaces."),
+	read("list_repositories", "List repositories authorized for this connection.", ["namespaceId"]),
+	read("get_repository", "Repository state, current workspaces, changes, artifacts, deployments and observation freshness."),
+	read("get_context", "Instructions at a workspace's immutable base revision, with namespace and repository policies.", ["workspaceId"]),
+	read("get_workspace", "Inspect a workspace and its execution context.", ["workspaceId"]),
+	read(
+		"get_workspace_updates",
+		"Inspect upstream changes and advisory path overlap since the workspace's last integrated revision. Reads never fetch or provision.",
+		["workspaceId"],
+	),
+	read("list_active_workspaces", "Active and disconnected workspaces."),
 	read("inspect_overlap", "Advisory overlap based on current reported paths."),
-	read("export_revision", "Export a published source revision as exact Git objects for checkout or refresh.", ["revision"]),
+	read("get_git_access", "Inspect canonical and workspace Git remote paths. Authenticate Git with your Cruce OAuth connection.", [
+		"workspaceId",
+	]),
 	read("get_source", "Read an uploaded immutable source revision. Unavailable until source is explicitly published.", ["revision", "path"]),
 	read("get_history", "Git commit history for an uploaded revision.", ["revision"]),
 	read("get_diff", "Exact Git diff between uploaded revisions.", ["baseRevision", "revision", "path"]),
 	read("read_artifact", "Read immutable artifact metadata and stored content.", ["artifactId"]),
-	read("get_lineage", "Trace session, actor, commit, artifact, review and deployment provenance.", ["subjectId"]),
-	write("start_session", "Register bounded work from an exact Git revision; use the local bridge for isolated execution.", [
+	read("get_lineage", "Trace workspace, actor, commit, artifact, review and deployment provenance.", ["subjectId"]),
+	write("start_workspace", "Register bounded work from an exact Git revision; use the local bridge for isolated execution.", [
 		"title",
 		"baseRevision",
 		"branch",
@@ -60,33 +67,40 @@ export const CRUCE_TOOLS: Tool[] = [
 		"context",
 	]),
 	write(
-		"attach_session",
-		"Reserve an exclusive execution context. Local attachment is free; hosted writers consume an Artifacts fork.",
-		["sessionId", "execution"],
-		"session:write",
-		"session.fork",
+		"attach_workspace",
+		"Attach an exclusive local execution context and provision its canonical Artifacts fork once.",
+		["workspaceId", "execution"],
+		"workspace:write",
+		"workspace.fork",
 	),
-	write("heartbeat", "Renew session presence without changing its starting revision.", ["sessionId"]),
+	write("heartbeat", "Renew workspace presence without changing its starting revision.", ["workspaceId"]),
 	write("report_change", "Report local changed paths and commits; this is cooperative observation, not runtime verification.", [
-		"sessionId",
+		"workspaceId",
 		"revision",
 		"branch",
 		"changes",
 		"commits",
 	]),
-	write("report_ref", "Report a locally observed ref without claiming remote push verification.", ["sessionId", "ref", "revision"]),
-	write("end_session", "End participation, preserving working changes, commits and artifacts.", ["sessionId", "cancelled"]),
+	write("report_ref", "Report a locally observed ref without claiming remote push verification.", ["workspaceId", "ref", "revision"]),
+	write(
+		"cleanup_workspace",
+		"Delete an ended workspace fork only after every remote ref is retained. Local files are unaffected.",
+		["workspaceId"],
+		"workspace:write",
+		"workspace.cleanup",
+	),
+	write("end_workspace", "End participation, preserving working changes, commits and artifacts.", ["workspaceId", "cancelled"]),
 	write(
 		"publish_revision",
-		"Publish exact committed Git objects as an immutable source artifact.",
-		["sessionId", "revision", "pack", "title"],
+		"Seal an exact pushed fork revision as an immutable source artifact. Push with normal Git first.",
+		["workspaceId", "revision", "baseRevision", "ref", "title"],
 		"revision:publish",
 		"revision.publish",
 	),
 	write(
 		"publish_artifact",
-		"Store immutable evidence for an exact session revision.",
-		["sessionId", "revision", "content", "title"],
+		"Store immutable evidence for an exact workspace revision.",
+		["workspaceId", "revision", "content", "title"],
 		"artifact:publish",
 		"artifact.publish",
 	),
@@ -113,7 +127,7 @@ export function toolByName(name: string) {
 }
 export function toolInputShape(tool: Tool) {
 	const fields = new Set<keyof Command>([
-		"workspaceId",
+		"namespaceId",
 		"repositoryId",
 		...tool.fields,
 		...(tool.mutation ? ["idempotencyKey" as const] : []),

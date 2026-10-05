@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef } from "react";
 
 const paths: Record<string, ReactNode> = {
 	repositories: (
@@ -134,45 +134,6 @@ export function Dialog({
 			</div>
 			{children}
 		</dialog>
-	);
-}
-export function SourceChoice({ connected }: { connected: boolean }) {
-	const [source, setSource] = useState("local");
-	return (
-		<>
-			<fieldset className="source-choice">
-				<legend>Where does your code live?</legend>
-				{[
-					{ value: "local", icon: "local", title: "Open local repository", description: "Connect the Git repository on your machine." },
-					{
-						value: "artifacts",
-						icon: "cloud",
-						title: "Create Artifacts repository",
-						description: "Host a new Git repository on Cloudflare.",
-					},
-				].map((option) => (
-					<label className={source === option.value ? "chosen" : ""} key={option.value}>
-						<input
-							type="radio"
-							name="source"
-							value={option.value}
-							checked={source === option.value}
-							onChange={() => setSource(option.value)}
-							disabled={option.value === "artifacts" && !connected}
-						/>
-						<Icon name={option.icon} />
-						<strong>{option.title}</strong>
-						<span>{option.description}</span>
-					</label>
-				))}
-			</fieldset>
-			<p className={`source-note ${source === "artifacts" ? "cost" : ""}`}>
-				{source === "local"
-					? "Local registration keeps your existing remote and history on your machine. Attach your checkout through the local bridge after registration."
-					: "Uses your connected Cloudflare account and consumes storage resources under workspace policy."}
-			</p>
-			{!connected && <p className="muted">To use Artifacts, connect Cloudflare in workspace settings first.</p>}
-		</>
 	);
 }
 export function BranchArt() {

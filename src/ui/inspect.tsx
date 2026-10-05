@@ -1,8 +1,64 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChangesResponse } from "../shared/api.ts";
-import type { Command, RepositorySnapshot } from "../shared/platform.ts";
+import type { Command, RepositorySnapshot, WorkspaceUpdateDetails } from "../shared/platform.ts";
 export type Execute = (cmd: Partial<Command> & { tool: string }) => Promise<unknown>;
 const short = (s?: string) => s?.slice(0, 8) ?? "—";
+export function WorkspaceUpdateInspection({ id, execute }: { id: string; execute: Execute }) {
+	const [updates, setUpdates] = useState<WorkspaceUpdateDetails>(),
+		[error, setError] = useState(""),
+		[loading, setLoading] = useState(false);
+	const ticket = useRef(0);
+	useEffect(
+		() => () => {
+			ticket.current++;
+		},
+		[],
+	);
+	const load = async () => {
+		const current = ++ticket.current;
+		setLoading(true);
+		setError("");
+		try {
+			const result = await execute({ tool: "get_workspace_updates", workspaceId: id });
+			if (current === ticket.current) setUpdates(result as WorkspaceUpdateDetails);
+		} catch (e) {
+			if (current === ticket.current) setError((e as Error).message);
+		} finally {
+			if (current === ticket.current) setLoading(false);
+		}
+	};
+	return (
+		<>
+			<button type="button" onClick={() => void load()} disabled={loading}>
+				{loading ? "Inspecting updates…" : "Inspect upstream changes"}
+			</button>
+			{error && <p role="alert">{error}</p>}
+			{updates && (
+				<div>
+					<p>
+						{updates.available
+							? `Published history: ${updates.comparison}`
+							: "Upstream source is unavailable until committed source is published."}
+					</p>
+					{updates.changes.length > 0 && (
+						<ul>
+							{updates.changes.map((f) => (
+								<li key={f.path}>
+									<code>{f.path}</code> · {f.status}
+									{f.binary ? " · binary" : ""}
+									{updates.overlappingPaths.includes(f.path) ? " · overlaps reported workspace work" : ""}
+								</li>
+							))}
+						</ul>
+					)}
+					{updates.overlappingPaths.length > 0 && (
+						<p>Path overlap is advisory. Resolve integration with Git and verify the resulting revision.</p>
+					)}
+				</div>
+			)}
+		</>
+	);
+}
 export function ArtifactInspection({ id, execute }: { id: string; execute: Execute }) {
 	const [content, setContent] = useState<string>(),
 		[lineage, setLineage] =

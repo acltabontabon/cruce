@@ -1,7 +1,7 @@
 /**
  * A filesystem for isomorphic-git backed by Durable Object SQLite storage.
  *
- * Cruce keeps one bare Git workspace per project in its control-tower Durable Object. Persisting the
+ * Cruce keeps one bare Git object cache per repository in its control-tower Durable Object. Persisting the
  * object database here means fetches from Artifacts are incremental (no re-clone per operation) and
  * the offline demo backend survives restarts.
  */
@@ -78,7 +78,7 @@ export class SqlFs {
 		if (!this.row("/")) sql.exec(`INSERT INTO gitfs (path, dir, data, mtime) VALUES ('/', 1, NULL, ?)`, Date.now());
 	}
 
-	/** Remove a whole subtree (used to reset a workspace). */
+	/** Remove a whole subtree (used to reset the object cache). */
 	removeTree(prefix: string) {
 		const p = norm(prefix);
 		this.sql.exec(`DELETE FROM gitfs WHERE path = ? OR (path > ? AND path < ?)`, p, `${p}/`, `${p}0`);

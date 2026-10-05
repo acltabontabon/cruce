@@ -2,21 +2,21 @@ import type {
 	Actor,
 	Authority,
 	Invitation,
+	Namespace,
+	NamespaceRole,
+	NamespaceState,
 	Repository,
 	RepositoryRole,
 	ResourceAction,
 	ResourcePolicy,
 	User,
-	Workspace,
-	WorkspaceRole,
-	WorkspaceState,
 } from "../shared/platform.ts";
-import { DEFAULT_RESOURCE_POLICY, workspaceMaintain } from "./capabilities.ts";
+import { DEFAULT_RESOURCE_POLICY, namespaceMaintain } from "./capabilities.ts";
 import { DomainError, stable } from "./errors.ts";
 
 export interface DirectoryState {
 	users: User[];
-	workspaces: Workspace[];
+	namespaces: Namespace[];
 }
 export class DirectoryController {
 	constructor(
@@ -31,7 +31,7 @@ export class DirectoryController {
 			return user;
 		}
 		const userId = this.nextId(),
-			workspaceId = this.nextId();
+			namespaceId = this.nextId();
 		const base =
 			email
 				.split("@")[0]
@@ -41,36 +41,36 @@ export class DirectoryController {
 				.slice(0, 45) || "personal";
 		let handle = base,
 			n = 1;
-		while (this.state.workspaces.some((w) => w.handle === handle)) handle = `${base}-${n++}`;
-		user = { id: userId, issuer, subject, email: email.toLowerCase(), name: email.split("@")[0], personalWorkspaceId: workspaceId };
+		while (this.state.namespaces.some((w) => w.handle === handle)) handle = `${base}-${n++}`;
+		user = { id: userId, issuer, subject, email: email.toLowerCase(), name: email.split("@")[0], personalNamespaceId: namespaceId };
 		this.state.users.push(user);
-		this.state.workspaces.push({ id: workspaceId, handle, name: user.name, kind: "personal", ownerId: userId, createdAt: this.now });
+		this.state.namespaces.push({ id: namespaceId, handle, name: user.name, kind: "personal", ownerId: userId, createdAt: this.now });
 		return user;
 	}
 	create(user: User, input: { handle: string; name: string }, id: string) {
-		const old = this.state.workspaces.find((w) => w.id === id);
+		const old = this.state.namespaces.find((w) => w.id === id);
 		if (old) {
 			if (old.ownerId !== user.id || old.handle !== input.handle || old.name !== input.name)
 				throw new DomainError(409, "Creation key reused");
 			return old;
 		}
-		if (this.state.workspaces.some((w) => w.handle === input.handle)) throw new DomainError(409, "Workspace handle already used");
-		const workspace: Workspace = { id, ...input, ownerId: user.id, kind: "shared", createdAt: this.now };
-		this.state.workspaces.push(workspace);
-		return workspace;
+		if (this.state.namespaces.some((w) => w.handle === input.handle)) throw new DomainError(409, "Namespace handle already used");
+		const namespace: Namespace = { id, ...input, ownerId: user.id, kind: "shared", createdAt: this.now };
+		this.state.namespaces.push(namespace);
+		return namespace;
 	}
 	rename(id: string, input: { handle: string; name: string }) {
-		if (this.state.workspaces.some((w) => w.id !== id && w.handle === input.handle))
-			throw new DomainError(409, "Workspace handle already used");
-		const w = this.state.workspaces.find((w) => w.id === id);
-		if (!w) throw new DomainError(404, "Workspace unavailable");
+		if (this.state.namespaces.some((w) => w.id !== id && w.handle === input.handle))
+			throw new DomainError(409, "Namespace handle already used");
+		const w = this.state.namespaces.find((w) => w.id === id);
+		if (!w) throw new DomainError(404, "Namespace unavailable");
 		Object.assign(w, input);
 		return w;
 	}
 }
-export const initialWorkspace = (workspace: Workspace): WorkspaceState => ({
-	workspace,
-	members: { [workspace.ownerId]: "owner" },
+export const initialNamespace = (namespace: Namespace): NamespaceState => ({
+	namespace,
+	members: { [namespace.ownerId]: "owner" },
 	teams: [],
 	invitations: [],
 	repositories: [],
@@ -79,9 +79,9 @@ export const initialWorkspace = (workspace: Workspace): WorkspaceState => ({
 	version: 1,
 });
 const rank: Record<RepositoryRole, number> = { read: 1, write: 2, maintain: 3 };
-export function repositoryRole(state: WorkspaceState, repository: Repository, userId: string): RepositoryRole | undefined {
+export function repositoryRole(state: NamespaceState, repository: Repository, userId: string): RepositoryRole | undefined {
 	const role = state.members[userId];
-	if (!role || repository.workspaceId !== state.workspace.id) return;
+	if (!role || repository.namespaceId !== state.namespace.id) return;
 	if (role === "owner" || role === "maintainer") return "maintain";
 	const teams = state.teams.filter((t) => t.members.includes(userId)).map((t) => t.id);
 	const granted = repository.grants
@@ -90,14 +90,14 @@ export function repositoryRole(state: WorkspaceState, repository: Repository, us
 	const effective = Math.min(granted, role === "viewer" ? 1 : 2);
 	return effective === 2 ? "write" : effective === 1 ? "read" : undefined;
 }
-export class WorkspaceController {
+export class NamespaceController {
 	constructor(
-		readonly state: WorkspaceState,
+		readonly state: NamespaceState,
 		readonly now: number,
 	) {}
 	authority(actor: Actor, repositoryId?: string, scopes?: string[], approvedRepositories?: string[]): Authority {
 		const role = this.state.members[actor.userId];
-		if (!role || actor.kind === "system") throw new DomainError(403, "Workspace access denied");
+		if (!role || actor.kind === "system") throw new DomainError(403, "Namespace access denied");
 		let access: RepositoryRole | undefined;
 		if (repositoryId) {
 			const repository = this.state.repositories.find((r) => r.id === repositoryId);
@@ -106,14 +106,14 @@ export class WorkspaceController {
 			if (actor.kind === "agent" && (!approvedRepositories?.includes(repositoryId) || !scopes?.includes("cruce:read")))
 				throw new DomainError(403, "Repository not authorized for this agent connection");
 		}
-		return { actor, workspaceId: this.state.workspace.id, repositoryId, role, repositoryRole: access, scopes };
+		return { actor, namespaceId: this.state.namespace.id, repositoryId, role, repositoryRole: access, scopes };
 	}
-	member(a: Authority, userId: string, role?: WorkspaceRole) {
-		workspaceMaintain(a);
-		if (this.state.workspace.kind === "personal")
-			throw new DomainError(409, "Personal workspaces have one owner; create a shared workspace to collaborate");
+	member(a: Authority, userId: string, role?: NamespaceRole) {
+		namespaceMaintain(a);
+		if (this.state.namespace.kind === "personal")
+			throw new DomainError(409, "Personal namespaces have one owner; create a shared namespace to collaborate");
 		if (this.state.members[userId] === "owner" || role === "owner")
-			throw new DomainError(403, "Workspace ownership cannot be changed through membership");
+			throw new DomainError(403, "Namespace ownership cannot be changed through membership");
 		if (role === "maintainer" && a.role !== "owner") throw new DomainError(403, "Only owners appoint maintainers");
 		if (this.state.members[userId] === "maintainer" && a.role !== "owner") throw new DomainError(403, "Only owners change maintainers");
 		if (role) this.state.members[userId] = role;
@@ -125,17 +125,17 @@ export class WorkspaceController {
 		this.state.version++;
 	}
 	team(a: Authority, id: string, name: string, members: string[]) {
-		workspaceMaintain(a);
-		if (this.state.workspace.kind !== "shared") throw new DomainError(409, "Teams belong to shared workspaces");
-		if (members.some((u) => !this.state.members[u])) throw new DomainError(400, "Team members must belong to the workspace");
+		namespaceMaintain(a);
+		if (this.state.namespace.kind !== "shared") throw new DomainError(409, "Teams belong to shared namespaces");
+		if (members.some((u) => !this.state.members[u])) throw new DomainError(400, "Team members must belong to the namespace");
 		const t = this.state.teams.find((t) => t.id === id);
 		if (t) Object.assign(t, { name, members: [...new Set(members)] });
 		else this.state.teams.push({ id, name, members: [...new Set(members)] });
 		this.state.version++;
 	}
 	invite(a: Authority, invitation: Invitation) {
-		workspaceMaintain(a);
-		if (this.state.workspace.kind !== "shared" || (invitation.role === "maintainer" && a.role !== "owner"))
+		namespaceMaintain(a);
+		if (this.state.namespace.kind !== "shared" || (invitation.role === "maintainer" && a.role !== "owner"))
 			throw new DomainError(403, "Invitation not permitted");
 		this.state.invitations.push(invitation);
 		this.state.version++;
@@ -150,29 +150,29 @@ export class WorkspaceController {
 		this.state.version++;
 	}
 	repository(a: Authority, repository: Repository) {
-		workspaceMaintain(a);
-		if (repository.workspaceId !== this.state.workspace.id) throw new DomainError(403, "Workspace mismatch");
+		namespaceMaintain(a);
+		if (repository.namespaceId !== this.state.namespace.id) throw new DomainError(403, "Namespace mismatch");
 		if (this.state.repositories.some((r) => r.id !== repository.id && r.name === repository.name))
 			throw new DomainError(409, "Repository name already used");
 		for (const g of repository.grants)
 			if (g.subject === "user" ? !this.state.members[g.id] : !this.state.teams.some((t) => t.id === g.id))
-				throw new DomainError(400, "Grant requires a workspace member or team");
+				throw new DomainError(400, "Grant requires a namespace member or team");
 		const i = this.state.repositories.findIndex((r) => r.id === repository.id);
 		if (i < 0) this.state.repositories.push(repository);
 		else this.state.repositories[i] = repository;
 		this.state.version++;
 	}
 	setPolicy(a: Authority, policy: ResourcePolicy) {
-		workspaceMaintain(a);
+		namespaceMaintain(a);
 		if (policy.rules["production.deploy"] === "allow") throw new DomainError(400, "Production always needs human approval");
 		this.state.policy = policy;
 		this.state.version++;
 	}
-	reserve(a: Authority, id: string, fingerprint: string, action: ResourceAction, sessionId?: string) {
+	reserve(a: Authority, id: string, fingerprint: string, action: ResourceAction, workspaceId?: string) {
 		const repo = this.state.repositories.find((r) => r.id === a.repositoryId);
 		if (!repo || !a.repositoryRole || a.repositoryRole === "read") throw new DomainError(403, "Repository write permission required");
 		const key = `${a.actor.id}:${id}`,
-			full = stable({ fingerprint, action, repositoryId: repo.id, sessionId });
+			full = stable({ fingerprint, action, repositoryId: repo.id, workspaceId });
 		const rules = [this.state.policy.rules[action], repo.policy.resourceRules[action]];
 		if (rules.includes("deny")) throw new DomainError(403, "Resource policy denies this operation");
 		const human = a.actor.kind === "human" && a.repositoryRole === "maintain";
@@ -186,18 +186,18 @@ export class WorkspaceController {
 		const day = Math.floor(this.now / 86400000);
 		const used = this.state.reservations.filter((r) => r.state !== "released" && Math.floor(r.at / 86400000) === day);
 		if (used.length >= this.state.policy.dailyLimit)
-			throw new DomainError(403, "Workspace daily resource budget reached; update the workspace limit explicitly");
+			throw new DomainError(403, "Namespace daily resource budget reached; update the namespace limit explicitly");
 		if (
 			action === "preview.deploy" &&
-			this.state.reservations.filter((r) => r.action === action && r.sessionId === sessionId && r.state !== "released").length >=
-				this.state.policy.previewsPerSession
+			this.state.reservations.filter((r) => r.action === action && r.workspaceId === workspaceId && r.state !== "released").length >=
+				this.state.policy.previewsPerWorkspace
 		)
-			throw new DomainError(403, "Session preview budget reached; update the workspace limit explicitly");
+			throw new DomainError(403, "Workspace preview budget reached; update the namespace limit explicitly");
 		const reservation = {
 			id: key,
 			fingerprint: full,
 			repositoryId: repo.id,
-			sessionId,
+			workspaceId,
 			action,
 			actorId: a.actor.id,
 			at: this.now,

@@ -1,4 +1,4 @@
-/** In-memory filesystem for isomorphic-git (tests and ephemeral workspaces). Same surface as SqlFs. */
+/** In-memory filesystem for isomorphic-git (tests and ephemeral Git workspaces). Same surface as SqlFs. */
 
 type Entry = { kind: "dir"; mtime: number } | { kind: "file"; data: Uint8Array; mtime: number };
 

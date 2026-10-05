@@ -12,7 +12,7 @@ async function seeded() {
 	return { ws, seed };
 }
 
-describe("git workspace (isomorphic-git, bare, in the control plane)", () => {
+describe("git namespace (isomorphic-git, bare, in the control plane)", () => {
 	it("produces reproducible commits from trees", async () => {
 		const a = await seeded();
 		const b = await seeded();
@@ -58,8 +58,8 @@ describe("git workspace (isomorphic-git, bare, in the control plane)", () => {
 		const c23 = await ws.commit({
 			ref: branch("F-023"),
 			parent: seed,
-			files: overlayFiles("f023-session-cleanup"),
-			message: "sessions",
+			files: overlayFiles("f023-workspace-cleanup"),
+			message: "workspaces",
 			author: author(2),
 		});
 		const c21 = await ws.commit({

@@ -2,13 +2,13 @@ import { type OAuthHelpers, OAuthProvider } from "@cloudflare/workers-oauth-prov
 import { DEFAULT_AGENT_SCOPES, SCOPE_LABELS, SCOPES, type Scope } from "../core/capabilities.ts";
 import { DomainError as CoordinationError } from "../core/errors.ts";
 import type { Directory } from "./directory.ts";
+import type { NamespaceRuntime } from "./namespace-runtime.ts";
 import { decode, seal, unseal } from "./sealing.ts";
-import type { WorkspaceRuntime } from "./workspace-runtime.ts";
 
 export { seal, unseal };
 export interface AuthEnv {
 	DIRECTORY: DurableObjectNamespace<Directory>;
-	WORKSPACE: DurableObjectNamespace<WorkspaceRuntime>;
+	NAMESPACE: DurableObjectNamespace<NamespaceRuntime>;
 	OAUTH_KV: KVNamespace;
 	OAUTH_PROVIDER?: OAuthHelpers;
 	CRUCE_SECRET?: string;
@@ -122,15 +122,15 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 		});
 	const directory = env.DIRECTORY.getByName("directory");
 	const user = await directory.login(identity);
-	const personal = await directory.workspace(user.personalWorkspaceId);
-	await env.WORKSPACE.getByName(personal.id).initialize(personal);
+	const personal = await directory.namespace(user.personalNamespaceId);
+	await env.NAMESPACE.getByName(personal.id).initialize(personal);
 	const choices: { id: string; label: string }[] = [];
-	for (const workspace of await directory.workspaces()) {
+	for (const namespace of await directory.namespaces()) {
 		try {
-			const view = await env.WORKSPACE.getByName(workspace.id).snapshot({
+			const view = await env.NAMESPACE.getByName(namespace.id).snapshot({
 				actor: { id: user.id, userId: user.id, kind: "human", name: user.name },
 			});
-			for (const repo of view.repositories) choices.push({ id: repo.id, label: `${workspace.handle}/${repo.name}` });
+			for (const repo of view.repositories) choices.push({ id: repo.id, label: `${namespace.handle}/${repo.name}` });
 		} catch {}
 	}
 	const oauth = env.OAUTH_PROVIDER;
@@ -146,7 +146,7 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 				`<label><input type="checkbox" name="scope" value="${scope}"${preset.includes(scope) ? " checked" : ""}${scope === "cruce:read" ? " disabled checked" : ""}> <code>${scope}</code> — ${escapeHtml(SCOPE_LABELS[scope])}</label><br>`,
 		).join("");
 		return new Response(
-			`<html lang="en"><meta charset="utf-8"><title>Connect to Cruce</title><h1>Connect to Cruce</h1><p>${escapeHtml(description.clientName ?? original.clientId)} requests access to the repositories you select.</p><p>Signed in as ${escapeHtml(identity.email)}.</p><form method="post"><input type="hidden" name="handle" value="${escapeHtml(consent.handle)}"><fieldset><legend>Allow this agent to</legend>${options}</fieldset><fieldset><legend>Repositories</legend>${choices.map((r) => `<label><input type="checkbox" name="repository" value="${escapeHtml(r.id)}"> ${escapeHtml(r.label)}</label><br>`).join("")}</fieldset><p>Agents never promote accepted source or deploy production; those remain human decisions. Metered Cloudflare operations stay subject to workspace policy and budgets.</p><p>Redirect: ${escapeHtml(original.redirectUri)}</p><button>Allow</button></form><a href="/">Cancel</a></html>`,
+			`<html lang="en"><meta charset="utf-8"><title>Connect to Cruce</title><h1>Connect to Cruce</h1><p>${escapeHtml(description.clientName ?? original.clientId)} requests access to the repositories you select.</p><p>Signed in as ${escapeHtml(identity.email)}.</p><form method="post"><input type="hidden" name="handle" value="${escapeHtml(consent.handle)}"><fieldset><legend>Allow this agent to</legend>${options}</fieldset><fieldset><legend>Repositories</legend>${choices.map((r) => `<label><input type="checkbox" name="repository" value="${escapeHtml(r.id)}"> ${escapeHtml(r.label)}</label><br>`).join("")}</fieldset><p>Agents never promote accepted source or deploy production; those remain human decisions. Metered Cloudflare operations stay subject to namespace policy and budgets.</p><p>Redirect: ${escapeHtml(original.redirectUri)}</p><button>Allow</button></form><a href="/">Cancel</a></html>`,
 			{ headers: consent.headers },
 		);
 	}

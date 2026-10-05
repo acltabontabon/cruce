@@ -4,7 +4,7 @@ import * as entrypoint from "./src/worker/index.ts" with { type: "cf-worker" };
 /**
  * Cruce on Cloudflare.
  *
- *   cf dev                              local Worker; source resources require explicit workspace configuration
+ *   cf dev                              local Worker; source resources require explicit namespace configuration
  *   cf dev --mode offline               local Worker with no Artifacts provisioning
  *   pnpm deploy:test                    the single live MVP test environment
  */
@@ -27,14 +27,14 @@ export default defineConfig(({ mode }) => {
 			exports: {
 				ControlTower: exports.durableObject({ storage: "sqlite" }),
 				Directory: exports.durableObject({ storage: "sqlite" }),
-				WorkspaceRuntime: exports.durableObject({ storage: "sqlite" }),
+				NamespaceRuntime: exports.durableObject({ storage: "sqlite" }),
 				// Durable orchestration for deployments of exact revisions (build → smoke checks → evidence).
 				DeploymentWorkflow: exports.workflow({ name: "cruce-deployment" }),
 			},
 			env: {
 				CONTROL_TOWER: bindings.durableObject({ worker: "cruce", exportName: "ControlTower" }),
 				DIRECTORY: bindings.durableObject({ worker: "cruce", exportName: "Directory" }),
-				WORKSPACE: bindings.durableObject({ worker: "cruce", exportName: "WorkspaceRuntime" }),
+				NAMESPACE: bindings.durableObject({ worker: "cruce", exportName: "NamespaceRuntime" }),
 				DEPLOYMENT_WORKFLOW: bindings.workflow({ name: "cruce-deployment", worker: "cruce", exportName: "DeploymentWorkflow" }),
 				OAUTH_KV: bindings.kv(),
 				CRUCE_PUBLIC_ORIGIN: bindings.text(

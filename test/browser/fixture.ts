@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { DirectoryController, initialWorkspace, WorkspaceController } from "../../src/core/ownership.ts";
+import { DirectoryController, initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
 import { initialRepository, RepositoryController } from "../../src/core/platform.ts";
 import { type Actor, type Command, CommandInput, type Repository } from "../../src/shared/platform.ts";
 import { MemoryFs } from "../../src/worker/git/memory-fs.ts";
@@ -25,53 +25,60 @@ export async function fixture() {
 	});
 	let counter = 0;
 	const next = () => `fixture-${++counter}`;
-	const directory = new DirectoryController({ users: [], workspaces: [] }, FIXED_TIME, next),
+	const directory = new DirectoryController({ users: [], namespaces: [] }, FIXED_TIME, next),
 		user = directory.login("fixture", "alex", "alex@example.com"),
 		actor: Actor = { id: user.id, userId: user.id, name: "Alex Morgan", kind: "human" };
 	user.name = "Alex Morgan";
-	const personal = directory.state.workspaces[0],
+	const personal = directory.state.namespaces[0],
 		shared = directory.create(user, { handle: "fernloop", name: "Fernloop" }, "fernloop"),
-		workspaces = new Map([personal, shared].map((w) => [w.id, new WorkspaceController(initialWorkspace(w), FIXED_TIME)]));
+		namespaces = new Map([personal, shared].map((w) => [w.id, new NamespaceController(initialNamespace(w), FIXED_TIME)]));
 	personal.name = "Alex Morgan";
 	const repository: Repository = {
 		id: "payments",
-		workspaceId: shared.id,
+		namespaceId: shared.id,
 		name: "payment-service",
 		defaultBranch: "main",
 		createdAt: FIXED_TIME,
-		source: { kind: "local" },
+		storageName: "repo-repo",
 		grants: [],
 		policy: { protectedPaths: [], requiredEvidence: ["tests"], resourceRules: {} },
 	};
-	const ws = workspaces.get(shared.id)!;
+	const ws = namespaces.get(shared.id)!;
 	ws.repository(ws.authority(actor), repository);
 	const c = new RepositoryController(initialRepository(repository), FIXED_TIME, next),
 		agent: Actor = { id: "codex", userId: user.id, name: "Codex", kind: "agent", connectionId: "oauth-fixture" };
 	const auth = (a = actor) => ({ ...ws.authority(a), repositoryId: repository.id, repositoryRole: "maintain" as const });
 	const run = (tool: string, fields: Partial<Command> = {}, a = actor) =>
-		c.command({ tool, workspaceId: shared.id, repositoryId: repository.id, ...fields }, auth(a));
+		c.command({ tool, namespaceId: shared.id, repositoryId: repository.id, ...fields }, auth(a));
 	for (const a of [actor, agent]) {
 		const s = run(
-			"start_session",
+			"start_workspace",
 			{ title: a.kind === "human" ? "Inspect payment timeout" : "Implement retry policy", baseRevision: base },
 			a,
 		) as { id: string };
 		run(
-			"attach_session",
+			"attach_workspace",
 			{
-				sessionId: s.id,
+				workspaceId: s.id,
 				execution: { id: s.id, checkoutId: s.id, machineId: "fixture", kind: "worktree", owned: true, branch: `cruce/${s.id}` },
 			},
 			a,
 		);
-		run("report_change", { sessionId: s.id, revision: head, changes: [{ path: "src/retry.ts", status: "modified" }], commits: [head] }, a);
+		run(
+			"report_change",
+			{ workspaceId: s.id, revision: head, changes: [{ path: "src/retry.ts", status: "modified" }], commits: [head] },
+			a,
+		);
 	}
-	const session = c.state.sessions[1];
+	c.state.sourceHead = base;
+	for (const w of c.state.workspaces)
+		w.fork = { id: w.id, name: `fork-${w.id}`, remote: `https://fixture.invalid/${w.id}.git`, state: "ready" };
+	const workspace = c.state.workspaces[1];
 	c.addArtifact({
 		id: "source",
-		workspaceId: shared.id,
+		namespaceId: shared.id,
 		repositoryId: repository.id,
-		sessionId: session.id,
+		workspaceId: workspace.id,
 		actor: agent,
 		revision: head,
 		kind: "source",
@@ -97,25 +104,29 @@ export async function fixture() {
 			const body = buffers.length ? JSON.parse(Buffer.concat(buffers).toString()) : {};
 			const parts = url.pathname.split("/").filter(Boolean);
 			if (url.pathname === "/__fixture/calls") return json(res, calls);
-			if (url.pathname === "/api/me") return json(res, { user, workspaces: directory.state.workspaces });
-			if (url.pathname === "/api/workspaces" && req.method === "POST") {
+			if (url.pathname === "/__fixture/upstream" && req.method === "POST") {
+				c.state.sourceHead = head;
+				return json(res, { updated: true });
+			}
+			if (url.pathname === "/api/me") return json(res, { user, namespaces: directory.state.namespaces });
+			if (url.pathname === "/api/namespaces" && req.method === "POST") {
 				const w = directory.create(user, body, body.idempotencyKey);
-				workspaces.set(w.id, new WorkspaceController(initialWorkspace(w), FIXED_TIME));
+				namespaces.set(w.id, new NamespaceController(initialNamespace(w), FIXED_TIME));
 				return json(res, w);
 			}
-			const w = workspaces.get(parts[2]);
-			if (!w) return json(res, { error: "Workspace access denied" }, 403);
+			const w = namespaces.get(parts[2]);
+			if (!w) return json(res, { error: "Namespace access denied" }, 403);
 			const a = w.authority(actor);
 			if (parts.length === 3) {
 				if (req.method === "PATCH") {
-					Object.assign(w.state.workspace, directory.rename(w.state.workspace.id, body));
-					return json(res, w.state.workspace);
+					Object.assign(w.state.namespace, directory.rename(w.state.namespace.id, body));
+					return json(res, w.state.namespace);
 				}
 				const repositorySummaries = w.state.repositories.map((r) => {
 					const snapshot = runtimes.get(r.id)!.snapshot({ ...a, repositoryId: r.id, repositoryRole: "maintain" });
 					return {
 						id: r.id,
-						active: snapshot.sessions.filter((session) => session.state === "active").length,
+						active: snapshot.workspaces.filter((workspace) => workspace.state === "active").length,
 						overlaps: snapshot.overlaps.length,
 						latestArtifact: snapshot.artifacts.at(-1),
 					};
@@ -126,7 +137,7 @@ export async function fixture() {
 				w.team(a, body.id, body.name, body.members);
 				return json(res, { saved: true });
 			}
-			if (parts[3] === "invitations") return json(res, { url: `http://localhost/invite/${w.state.workspace.id}#fixture-invitation` });
+			if (parts[3] === "invitations") return json(res, { url: `http://localhost/invite/${w.state.namespace.id}#fixture-invitation` });
 			if (parts[3] === "policy") {
 				w.setPolicy(a, body);
 				return json(res, { saved: true });
@@ -138,9 +149,9 @@ export async function fixture() {
 					...repository,
 					id: body.idempotencyKey,
 					name: body.name,
-					workspaceId: w.state.workspace.id,
+					namespaceId: w.state.namespace.id,
 					defaultBranch: body.defaultBranch,
-					source: { kind: body.source },
+					storageName: `repo-${body.idempotencyKey}`,
 				};
 				w.repository(a, r);
 				runtimes.set(r.id, new RepositoryController(initialRepository(r), FIXED_TIME, next));
@@ -155,8 +166,22 @@ export async function fixture() {
 				return json(res, runtime.state.repository);
 			}
 			if (req.method === "GET") return json(res, runtime.snapshot(authority));
-			const cmd = CommandInput.parse({ ...body, workspaceId: w.state.workspace.id, repositoryId: runtime.state.repository.id });
+			const cmd = CommandInput.parse({ ...body, namespaceId: w.state.namespace.id, repositoryId: runtime.state.repository.id });
 			calls.push(cmd);
+			if (cmd.tool === "get_workspace_updates") {
+				const workspace = runtime.workspace(cmd.workspaceId),
+					updates = runtime.workspaceUpdates(workspace);
+				const changes = updates.revision ? (await git.reviewChanges(updates.baselineRevision, updates.revision)).files : [];
+				const touched = new Set(workspace.changes.flatMap((f) => [f.path, ...(f.previousPath ? [f.previousPath] : [])]));
+				return json(res, {
+					...updates,
+					available: !!updates.revision,
+					comparison: updates.revision === workspace.headRevision ? "current" : "unavailable",
+					changes,
+					overlappingPaths: changes.map((f) => f.path).filter((p) => touched.has(p)),
+					overlapTrust: "reported",
+				});
+			}
 			if (cmd.tool === "get_source") return json(res, { revision: cmd.revision, files: await git.readFiles(cmd.revision ?? head) });
 			if (cmd.tool === "get_history") return json(res, await git.log(cmd.revision ?? head));
 			if (cmd.tool === "get_diff") return json(res, await git.reviewChanges(cmd.baseRevision ?? base, cmd.revision ?? head, cmd.path));

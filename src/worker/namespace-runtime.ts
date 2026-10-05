@@ -1,16 +1,16 @@
 import { DurableObject } from "cloudflare:workers";
 import { DomainError } from "../core/errors.ts";
-import { initialWorkspace, WorkspaceController } from "../core/ownership.ts";
+import { initialNamespace, NamespaceController } from "../core/ownership.ts";
 import type {
 	Actor,
 	Invitation,
+	Namespace,
+	NamespaceRole,
+	NamespaceState,
 	Repository,
 	ResourceAction,
 	ResourcePolicy,
 	User,
-	Workspace,
-	WorkspaceRole,
-	WorkspaceState,
 } from "../shared/platform.ts";
 import { ResourceBoundary } from "./deployments.ts";
 import { Serial, sqlStore } from "./store.ts";
@@ -19,27 +19,27 @@ export interface ConnectionGrant {
 	scopes?: string[];
 	repositories?: string[];
 }
-export class WorkspaceRuntime extends DurableObject<{ CRUCE_SECRET?: string }> {
+export class NamespaceRuntime extends DurableObject<{ CRUCE_SECRET?: string }> {
 	private accounts = new Serial();
 	private store = sqlStore(this.ctx.storage.sql);
 	private controller() {
-		const state = this.store.get<WorkspaceState>("workspace");
-		if (!state) throw new DomainError(404, "Workspace unavailable");
-		return new WorkspaceController(state, Date.now());
+		const state = this.store.get<NamespaceState>("namespace");
+		if (!state) throw new DomainError(404, "Namespace unavailable");
+		return new NamespaceController(state, Date.now());
 	}
-	initialize(workspace: Workspace) {
-		const old = this.store.get<WorkspaceState>("workspace");
-		if (!old) this.store.put("workspace", initialWorkspace(workspace));
-		else if (old.workspace.id !== workspace.id) throw new DomainError(409, "Workspace identity mismatch");
+	initialize(namespace: Namespace) {
+		const old = this.store.get<NamespaceState>("namespace");
+		if (!old) this.store.put("namespace", initialNamespace(namespace));
+		else if (old.namespace.id !== namespace.id) throw new DomainError(409, "Namespace identity mismatch");
 	}
-	metadata(workspace: Workspace) {
+	metadata(namespace: Namespace) {
 		const c = this.controller();
-		if (c.state.workspace.id !== workspace.id) throw new DomainError(403, "Workspace mismatch");
-		c.state.workspace = workspace;
+		if (c.state.namespace.id !== namespace.id) throw new DomainError(403, "Namespace mismatch");
+		c.state.namespace = namespace;
 		this.save(c);
 	}
-	private save(c: WorkspaceController) {
-		this.store.put("workspace", c.state);
+	private save(c: NamespaceController) {
+		this.store.put("namespace", c.state);
 	}
 	authority(grant: ConnectionGrant, repositoryId?: string) {
 		return this.controller().authority(grant.actor, repositoryId, grant.scopes, grant.repositories);
@@ -57,13 +57,13 @@ export class WorkspaceRuntime extends DurableObject<{ CRUCE_SECRET?: string }> {
 			}
 		});
 		return {
-			workspace: c.state.workspace,
+			namespace: c.state.namespace,
 			role: a.role,
 			repositories,
 			members: maintain ? c.state.members : {},
 			teams: maintain ? c.state.teams : [],
 			policy: c.state.policy,
-			account: new ResourceBoundary(this.store, this.env, { namespace: c.state.workspace.id }).account(),
+			account: new ResourceBoundary(this.store, this.env, { namespace: c.state.namespace.id }).account(),
 			reservations: maintain ? c.state.reservations : [],
 			permissions: { maintain, owner: maintain && a.role === "owner" },
 		};
@@ -79,7 +79,7 @@ export class WorkspaceRuntime extends DurableObject<{ CRUCE_SECRET?: string }> {
 		this.save(c);
 		return repository;
 	}
-	member(grant: ConnectionGrant, userId: string, role?: WorkspaceRole) {
+	member(grant: ConnectionGrant, userId: string, role?: NamespaceRole) {
 		const c = this.controller();
 		c.member(c.authority(grant.actor), userId, role);
 		this.save(c);
@@ -108,8 +108,8 @@ export class WorkspaceRuntime extends DurableObject<{ CRUCE_SECRET?: string }> {
 		return this.accounts.run(async () => {
 			const c = this.controller(),
 				a = c.authority(grant.actor);
-			if (a.actor.kind !== "human" || a.role !== "owner") throw new DomainError(403, "Workspace owner required");
-			const boundary = new ResourceBoundary(this.store, this.env, { namespace: c.state.workspace.id });
+			if (a.actor.kind !== "human" || a.role !== "owner") throw new DomainError(403, "Namespace owner required");
+			const boundary = new ResourceBoundary(this.store, this.env, { namespace: c.state.namespace.id });
 			if (input) {
 				const old = boundary.account();
 				if (old && old.accountId !== input.accountId && c.state.reservations.some((r) => r.state !== "released"))
@@ -120,11 +120,11 @@ export class WorkspaceRuntime extends DurableObject<{ CRUCE_SECRET?: string }> {
 			return null;
 		});
 	}
-	reserve(grant: ConnectionGrant, repositoryId: string, id: string, fingerprint: string, action: ResourceAction, sessionId?: string) {
+	reserve(grant: ConnectionGrant, repositoryId: string, id: string, fingerprint: string, action: ResourceAction, workspaceId?: string) {
 		const c = this.controller(),
 			a = c.authority(grant.actor, repositoryId, grant.scopes, grant.repositories);
-		if (!this.store.get("resource-account")) throw new DomainError(409, "Connect the workspace Cloudflare account first");
-		const reservation = c.reserve(a, id, fingerprint, action, sessionId);
+		if (!this.store.get("resource-account")) throw new DomainError(409, "Connect the namespace Cloudflare account first");
+		const reservation = c.reserve(a, id, fingerprint, action, workspaceId);
 		this.save(c);
 		return reservation;
 	}
@@ -138,7 +138,7 @@ export class WorkspaceRuntime extends DurableObject<{ CRUCE_SECRET?: string }> {
 	/** Internal DO RPC only; never returned by an HTTP route. The credential remains sealed. */
 	resourceConfiguration() {
 		return {
-			namespace: this.controller().state.workspace.id,
+			namespace: this.controller().state.namespace.id,
 			account: this.store.get("resource-account"),
 			policy: this.controller().state.policy,
 		};

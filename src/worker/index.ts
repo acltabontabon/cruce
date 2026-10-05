@@ -7,7 +7,7 @@ import { json, type PlatformEnv, platformRoute } from "./platform-router.ts";
 export { ControlTower } from "./control-tower.ts";
 export { DeploymentWorkflow } from "./deployment-workflow.ts";
 export { Directory } from "./directory.ts";
-export { WorkspaceRuntime } from "./workspace-runtime.ts";
+export { NamespaceRuntime } from "./namespace-runtime.ts";
 
 function failure(error: unknown) {
 	const status = domainStatus(error) ?? (error instanceof z.ZodError ? 400 : 500);
@@ -52,6 +52,27 @@ export default {
 			url.search = "";
 			return consoleHandler.fetch(new Request(url, request) as Parameters<typeof consoleHandler.fetch>[0], env, ctx);
 		}
+		// Git credential helpers speak Basic; authenticate the contained OAuth token
+		// with the same provider as MCP. Never infer identity from the username.
+		if (url.pathname.startsWith("/mcp/git/") && request.headers.get("authorization")?.startsWith("Basic ")) {
+			try {
+				const decoded = atob(request.headers.get("authorization")!.slice(6));
+				const token = decoded.slice(decoded.indexOf(":") + 1);
+				if (!decoded.includes(":") || !token || /[\r\n]/.test(token)) throw new Error("Invalid credentials");
+				const headers = new Headers(request.headers);
+				headers.set("authorization", `Bearer ${token}`);
+				request = new Request(request, { headers }) as typeof request;
+			} catch {
+				return json({ error: "Invalid Git credentials" }, 401);
+			}
+		}
+		if (url.pathname.startsWith("/mcp/git/") && !request.headers.has("authorization"))
+			return new Response("Git authentication required", {
+				status: 401,
+				headers: { "www-authenticate": 'Basic realm="Cruce Git"', "cache-control": "no-store" },
+			});
+		if (url.pathname.startsWith("/mcp/git/") && /^Bearer [0-9a-f-]{72}$/.test(request.headers.get("authorization") ?? ""))
+			return consoleHandler.fetch(request, env, ctx);
 		return oauthProvider(api, consoleHandler, env.CRUCE_PUBLIC_ORIGIN ?? new URL(request.url).origin).fetch(request, env, ctx);
 	},
 } satisfies ExportedHandler<PlatformEnv>;

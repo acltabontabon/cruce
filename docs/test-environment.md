@@ -29,3 +29,7 @@ Cloudflare's compiler calls its optimized mode `production`; that label does not
 The real Artifacts adapter passed a separate opt-in integration run in namespace `cruce-check-muuga1hc`: `trunk` default branch, isolated hosted fork, exact Git-pack publication, independent fetch and retention after session completion. Details are in [verification](local-verification.md).
 
 The prior project-based test environment had no preview or production environment configured. A test Worker and Workers Builds connection are still required to verify successful artifact deployment, runtime version observation, smoke checks and rollback end to end. Those results are not implied by an uploaded control-plane Worker or by the fixed-clock demo.
+
+## Local Git foundation refactor — 2026-10-05
+
+The current working tree replaces ownership Workspace with Namespace and Session with durable Workspace. All repositories now use canonical Artifacts storage. The new native Git gateway requires `/mcp/git/*` in the transport configuration, still protected by Cruce authentication. These code/configuration changes have not been deployed; the earlier version and provider checks above do not verify them. No existing records are migrated.

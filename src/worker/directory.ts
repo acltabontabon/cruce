@@ -6,7 +6,7 @@ import { sqlStore } from "./store.ts";
 export class Directory extends DurableObject {
 	private store = sqlStore(this.ctx.storage.sql);
 	private controller() {
-		return new DirectoryController(this.store.get<DirectoryState>("directory") ?? { users: [], workspaces: [] }, Date.now(), () =>
+		return new DirectoryController(this.store.get<DirectoryState>("directory") ?? { users: [], namespaces: [] }, Date.now(), () =>
 			crypto.randomUUID(),
 		);
 	}
@@ -26,12 +26,12 @@ export class Directory extends DurableObject {
 			.state.users.filter((u) => ids.includes(u.id))
 			.map((u) => ({ id: u.id, name: u.name, email: u.email }));
 	}
-	workspaces() {
-		return this.controller().state.workspaces;
+	namespaces() {
+		return this.controller().state.namespaces;
 	}
-	workspace(id: string) {
-		const w = this.controller().state.workspaces.find((w) => w.id === id);
-		if (!w) throw new DomainError(404, "Workspace unavailable");
+	namespace(id: string) {
+		const w = this.controller().state.namespaces.find((w) => w.id === id);
+		if (!w) throw new DomainError(404, "Namespace unavailable");
 		return w;
 	}
 	create(user: User, input: { handle: string; name: string }, id: string) {

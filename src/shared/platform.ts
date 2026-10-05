@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export type WorkspaceRole = "owner" | "maintainer" | "developer" | "viewer";
+export type NamespaceRole = "owner" | "maintainer" | "developer" | "viewer";
 export type RepositoryRole = "read" | "write" | "maintain";
 export type ActorKind = "human" | "agent" | "system";
 export interface User {
@@ -9,7 +9,7 @@ export interface User {
 	subject: string;
 	email: string;
 	name: string;
-	personalWorkspaceId: string;
+	personalNamespaceId: string;
 }
 export interface Actor {
 	id: string;
@@ -20,13 +20,13 @@ export interface Actor {
 }
 export interface Authority {
 	actor: Actor;
-	workspaceId: string;
+	namespaceId: string;
 	repositoryId?: string;
-	role: WorkspaceRole;
+	role: NamespaceRole;
 	repositoryRole?: RepositoryRole;
 	scopes?: string[];
 }
-export interface Workspace {
+export interface Namespace {
 	id: string;
 	handle: string;
 	name: string;
@@ -42,24 +42,25 @@ export interface Team {
 export interface Invitation {
 	id: string;
 	email: string;
-	role: Exclude<WorkspaceRole, "owner">;
+	role: Exclude<NamespaceRole, "owner">;
 	tokenHash: string;
 	expiresAt: number;
 	acceptedBy?: string;
 }
 export interface Repository {
 	id: string;
-	workspaceId: string;
+	namespaceId: string;
 	name: string;
 	defaultBranch: string;
 	createdAt: number;
-	source: { kind: "local" | "artifacts"; remote?: string; storageName?: string };
+	storageName: string;
 	grants: { subject: "user" | "team"; id: string; role: RepositoryRole }[];
 	policy: { protectedPaths: string[]; requiredEvidence: string[]; resourceRules: Partial<Record<ResourceAction, ResourceRule>> };
 }
 export const RESOURCE_ACTIONS = [
 	"repository.create",
-	"session.fork",
+	"workspace.fork",
+	"workspace.cleanup",
 	"revision.publish",
 	"artifact.publish",
 	"preview.deploy",
@@ -71,13 +72,13 @@ export type CostClass = "none" | "local" | "artifacts" | "metered" | "metered_pr
 export interface ResourcePolicy {
 	rules: Record<ResourceAction, ResourceRule>;
 	dailyLimit: number;
-	previewsPerSession: number;
+	previewsPerWorkspace: number;
 }
 export interface ResourceReservation {
 	id: string;
 	fingerprint: string;
 	repositoryId: string;
-	sessionId?: string;
+	workspaceId?: string;
 	action: ResourceAction;
 	actorId: string;
 	at: number;
@@ -92,9 +93,9 @@ export interface ResourceAccount {
 	connectedBy?: string;
 	at?: number;
 }
-export interface WorkspaceState {
-	workspace: Workspace;
-	members: Record<string, WorkspaceRole>;
+export interface NamespaceState {
+	namespace: Namespace;
+	members: Record<string, NamespaceRole>;
 	teams: Team[];
 	invitations: Invitation[];
 	repositories: Repository[];
@@ -106,18 +107,18 @@ export interface ExecutionContext {
 	id: string;
 	checkoutId: string;
 	machineId: string;
-	kind: "worktree" | "checkout";
+	kind: "worktree" | "clone" | "checkout";
 	owned: boolean;
 	branch?: string;
-	storageName?: string;
 }
-export interface SessionChange {
+export interface WorkspaceChange {
 	path: string;
 	previousPath?: string;
 	status: "added" | "modified" | "deleted" | "renamed";
 	binary?: boolean;
 }
-export interface Session {
+/** Durable repository work: actor + task + immutable base + fork, independent of client presence. */
+export interface Workspace {
 	id: string;
 	repositoryId: string;
 	actor: Actor;
@@ -128,18 +129,33 @@ export interface Session {
 	mode: "read" | "write";
 	context?: string;
 	execution?: ExecutionContext;
+	fork?: { name: string; id: string; remote: string; state: "ready" | "deleting" | "deleted" };
 	state: "preparing" | "active" | "disconnected" | "completed" | "cancelled";
 	startedAt: number;
 	lastActivity: number;
 	endedAt?: number;
-	changes: SessionChange[];
+	changes: WorkspaceChange[];
 	commits: string[];
 	publishedRevision?: string;
+	integratedRevision?: string;
+}
+export interface WorkspaceUpdates {
+	baselineRevision: string;
+	revision?: string;
+	trust?: "accepted" | "reported";
+	status: "unknown" | "current" | "available";
+}
+export interface WorkspaceUpdateDetails extends WorkspaceUpdates {
+	available: boolean;
+	comparison: "unavailable" | "current" | "ahead" | "behind" | "diverged" | "unrelated";
+	changes: WorkspaceChange[];
+	overlappingPaths: string[];
+	overlapTrust: "reported";
 }
 export interface Overlap {
 	id: string;
 	kind: "file" | "symbol";
-	sessions: string[];
+	workspaces: string[];
 	surface: string;
 	evidence: "reported";
 	observedAt: number;
@@ -147,18 +163,19 @@ export interface Overlap {
 export interface RefObservation {
 	ref: string;
 	revision: string;
-	sessionId: string;
+	workspaceId: string;
 	actorId: string;
 	at: number;
 	trust: "reported" | "verified";
 }
 export interface Artifact {
 	id: string;
-	workspaceId: string;
+	namespaceId: string;
 	repositoryId: string;
-	sessionId: string;
+	workspaceId: string;
 	actor: Actor;
 	revision: string;
+	baseRevision?: string;
 	kind: "source" | "evidence" | "build";
 	title: string;
 	contentHash: string;
@@ -190,7 +207,7 @@ export interface Verification {
 export interface Proposal {
 	id: string;
 	number: number;
-	sessionId: string;
+	workspaceId: string;
 	artifactId: string;
 	base: string;
 	revision: string;
@@ -226,7 +243,7 @@ export interface Deployment {
 	environmentId: string;
 	artifactId: string;
 	revision: string;
-	sessionId: string;
+	workspaceId: string;
 	actor: Actor;
 	state: "queued" | "building" | "deployed" | "failed" | "superseded";
 	branch: string;
@@ -254,7 +271,7 @@ export interface ActivityEvent {
 export interface RepositoryState {
 	repository: Repository;
 	version: number;
-	sessions: Session[];
+	workspaces: Workspace[];
 	artifacts: Artifact[];
 	proposals: Proposal[];
 	verifications: Verification[];
@@ -265,12 +282,15 @@ export interface RepositoryState {
 	activity: ActivityEvent[];
 	receipts: Record<string, { fingerprint: string; result: unknown }>;
 	sourceHead?: string;
+	canonical?: { id: string; name: string; remote: string };
 }
 export interface RepositorySnapshot extends Omit<RepositoryState, "receipts"> {
 	overlaps: Overlap[];
+	workspaceUpdates: Record<string, WorkspaceUpdates>;
 	permissions: { write: boolean; maintain: boolean; human: boolean };
 	sourceAvailable: boolean;
 	readiness: Record<string, { ready: boolean; reasons: string[] }>;
+	forkCleanup: Record<string, { ready: boolean; reasons: string[] }>;
 	context?: { available: boolean; files: Record<string, string> };
 }
 
@@ -302,7 +322,14 @@ export const branch = z
 		"Valid Git branch required",
 	);
 export const ExecutionInput = z
-	.object({ id, checkoutId: id, machineId: id, kind: z.enum(["worktree", "checkout"]), owned: z.boolean(), branch: branch.optional() })
+	.object({
+		id,
+		checkoutId: id,
+		machineId: id,
+		kind: z.enum(["worktree", "clone", "checkout"]),
+		owned: z.boolean(),
+		branch: branch.optional(),
+	})
 	.strict();
 export const ChangeInput = z
 	.object({
@@ -315,9 +342,9 @@ export const ChangeInput = z
 export const CommandInput = z
 	.object({
 		tool: z.string(),
-		workspaceId: id.optional(),
+		namespaceId: id.optional(),
 		repositoryId: id.optional(),
-		sessionId: id.optional(),
+		workspaceId: id.optional(),
 		idempotencyKey: id.optional(),
 		title: z.string().min(1).max(200).optional(),
 		context: z.string().max(10000).optional(),
@@ -329,10 +356,6 @@ export const CommandInput = z
 		changes: z.array(ChangeInput).max(5000).optional(),
 		commits: z.array(revision).max(1000).optional(),
 		cancelled: z.boolean().optional(),
-		pack: z
-			.string()
-			.max(44 * 1024 * 1024)
-			.optional(),
 		artifactId: id.optional(),
 		proposalId: id.optional(),
 		subjectId: id.optional(),

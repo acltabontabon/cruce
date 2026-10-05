@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanupExecution, context, createExecution, observeChanges, releaseCheckout, reserveCheckout } from "../../runner/execution.ts";
-import { git, packRevision } from "../../runner/local-git.ts";
+import { configureFork } from "../../runner/git-remotes.ts";
+import { git, pipeGit } from "../../runner/local-git.ts";
 import { MemoryFs } from "../../src/worker/git/memory-fs.ts";
 import { GitWorkspace } from "../../src/worker/git/workspace.ts";
 
@@ -13,7 +14,7 @@ afterEach(async () => {
 	for (const path of paths.splice(0)) await rm(path, { recursive: true, force: true });
 });
 async function repository() {
-	const root = await mkdtemp(join(tmpdir(), "cruce-session-"));
+	const root = await mkdtemp(join(tmpdir(), "cruce-workspace-"));
 	paths.push(root);
 	const run = (args: string[]) =>
 		execFileSync("git", args, {
@@ -39,22 +40,58 @@ async function repository() {
 	run(["remote", "add", "origin", "https://example.invalid/repo.git"]);
 	return { root, run, base: run(["rev-parse", "HEAD"]) };
 }
-describe("local session execution", () => {
+describe("local workspace execution", () => {
+	it("configures independent fork push destinations without changing another worktree or origin", async () => {
+		const { root, base } = await repository();
+		const a = await createExecution(root, "agent-a", base);
+		const b = await createExecution(root, "agent-b", base);
+		await configureFork(a.directory, "agent-a", "https://cruce.example", "codex", "/mcp/git/team/repo/agent-a.git");
+		await configureFork(b.directory, "agent-b", "https://cruce.example", "claude", "/mcp/git/team/repo/agent-b.git");
+		expect(await git(a.directory, ["config", "branch.cruce/workspace-agent-a.pushRemote"])).toBe("cruce-agent-a");
+		expect(await git(b.directory, ["config", "branch.cruce/workspace-agent-b.pushRemote"])).toBe("cruce-agent-b");
+		expect(await git(root, ["remote", "get-url", "origin"])).toBe("https://example.invalid/repo.git");
+		await expect(configureFork(root, "agent-a", "https://cruce.example", "codex", "/mcp/git/team/repo/agent-a.git")).rejects.toThrow(
+			"dedicated branch",
+		);
+	});
+	it("imports exact upstream objects into a workspace ref while preserving dirty files, index, branch and HEAD", async () => {
+		const { root, base } = await repository();
+		const a = await createExecution(root, "workspace-fetch", base);
+		await writeFile(join(root, "new.txt"), "Upstream");
+		await git(root, ["add", "new.txt"]);
+		await git(root, ["-c", "commit.gpgsign=false", "commit", "-m", "Upstream"]);
+		const upstream = await git(root, ["rev-parse", "HEAD"]);
+		await writeFile(join(a.directory, "code.txt"), "staged\n");
+		await git(a.directory, ["add", "code.txt"]);
+		await writeFile(join(a.directory, "code.txt"), "unstaged\n");
+		await writeFile(join(a.directory, "untracked.txt"), "retain\n");
+		const index = await git(a.directory, ["write-tree"]),
+			status = await git(a.directory, ["status", "--porcelain"]),
+			branch = await git(a.directory, ["symbolic-ref", "HEAD"]);
+		await git(a.directory, ["fetch", root, "trunk:refs/cruce/upstream"]);
+		expect(await git(a.directory, ["rev-parse", "refs/cruce/upstream"])).toBe(upstream);
+		expect(await git(a.directory, ["rev-parse", "HEAD"])).toBe(base);
+		expect(await git(a.directory, ["symbolic-ref", "HEAD"])).toBe(branch);
+		expect(await git(a.directory, ["write-tree"])).toBe(index);
+		expect(await git(a.directory, ["status", "--porcelain"])).toBe(status);
+		expect(await readFile(join(a.directory, "code.txt"), "utf8")).toBe("unstaged\n");
+		expect(await git(a.directory, ["remote", "get-url", "origin"])).toBe("https://example.invalid/repo.git");
+	});
 	it("creates separate worktrees while preserving local remotes and uncommitted work", async () => {
 		const { root, base } = await repository();
 		await writeFile(join(root, "code.txt"), "working change\n");
-		const [a, b] = await Promise.all([createExecution(root, "session-a", base), createExecution(root, "session-b", base)]);
+		const [a, b] = await Promise.all([createExecution(root, "workspace-a", base), createExecution(root, "workspace-b", base)]);
 		expect(a.execution.checkoutId).not.toBe(b.execution.checkoutId);
 		expect(await readFile(join(root, "code.txt"), "utf8")).toBe("working change\n");
 		expect(await git(root, ["remote", "get-url", "origin"])).toBe("https://example.invalid/repo.git");
 		expect(await git(a.directory, ["rev-parse", "HEAD"])).toBe(base);
-		expect((await createExecution(root, "session-a", base)).directory).toBe(a.directory);
+		expect((await createExecution(root, "workspace-a", base)).directory).toBe(a.directory);
 	});
 	it("real paths reject duplicate writers and ownership-safe release", async () => {
 		const { root } = await repository();
 		await reserveCheckout(root, "a");
 		await expect(reserveCheckout(root, "b")).rejects.toThrow("already has a writer");
-		await expect(releaseCheckout(root, "b")).rejects.toThrow("another session");
+		await expect(releaseCheckout(root, "b")).rejects.toThrow("another workspace");
 		const alias = join(tmpdir(), `cruce-alias-${Date.now()}`);
 		paths.push(alias);
 		await symlink(root, alias);
@@ -79,22 +116,22 @@ describe("local session execution", () => {
 		run(["add", "."]);
 		run(["commit", "-m", "Exact commit"]);
 		const head = run(["rev-parse", "HEAD"]),
-			packed = await packRevision(root, base);
+			packed = await pipeGit(root, ["pack-objects", "--revs", "--stdout", "-q"], Buffer.from(`${head}\n`));
 		const remote = new GitWorkspace(new MemoryFs() as never);
 		await remote.ensureInit();
-		await remote.importPack(Buffer.from(packed.pack, "base64"));
+		await remote.importPack(packed);
 		expect((await remote.log(head))[0].oid).toBe(head);
 		expect(await remote.mergeBase(base, head)).toBe(base);
 	});
 	it("cleanup refuses dirty or unpublished work and only removes owned worktrees", async () => {
 		const { root, base } = await repository();
-		const work = await createExecution(root, "session-safe", base);
+		const work = await createExecution(root, "workspace-safe", base);
 		await writeFile(join(work.directory, "new.txt"), "preserve");
-		await expect(cleanupExecution(work.directory, "session-safe", base)).rejects.toThrow("Uncommitted");
+		await expect(cleanupExecution(work.directory, "workspace-safe", base)).rejects.toThrow("Uncommitted");
 		await rm(join(work.directory, "new.txt"));
 		await expect(cleanupExecution(work.directory, "wrong", base)).rejects.toThrow("not owned");
-		await expect(cleanupExecution(work.directory, "session-safe", "b".repeat(40))).rejects.toThrow("Unpublished");
-		await cleanupExecution(work.directory, "session-safe", base);
+		await expect(cleanupExecution(work.directory, "workspace-safe", "b".repeat(40))).rejects.toThrow("Unpublished");
+		await cleanupExecution(work.directory, "workspace-safe", base);
 		expect(await git(root, ["rev-parse", "HEAD"])).toBe(base);
 	});
 });

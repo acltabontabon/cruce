@@ -20,3 +20,9 @@ Browser screenshots are in ignored `dist/ui-checks/`. Live integration metadata 
 Executed successfully against the configured test account. The exact revision was `3e72f788d0e6a8f4b1851277e6ae296c7fbbab78` in isolated namespace `cruce-check-muuga1hc`. This verifies real Artifacts behavior through the adapter. It is separate from an agent's browser OAuth consent journey and from Workers Builds deployment verification.
 
 The new test Worker was deployed and its signed-in console verified to create a personal workspace with an honest empty repository state. A successful Workers Builds deployment, runtime smoke check and production rollback remain unverified live until a test Worker/build connection is supplied. Passing mocked failure/rollback tests does not establish that configuration.
+
+## Canonical Git foundation — 2026-10-05
+
+The current local implementation uses Namespace → Repository → Workspace and mandatory canonical Artifacts storage. Typecheck, lint, 88 unit/integration tests, 13 browser journeys, deterministic scenario checks and the offline Cloudflare build passed. Native Git cloned canonical, pushed/fetched an isolated fork and failed to push canonical in the local protocol fixture. Browser screenshots were inspected under `dist/ui-checks`.
+
+No live claims follow from these checks. Explicit CRUCE_TEST_ACCOUNT_ID and CRUCE_TEST_TOKEN were absent. `pnpm verify:cloud` now exercises native Git and fork deletion with those credentials. Deployment, Access transport configuration, renamed Durable Object state and Workers Builds remain unverified in the live environment. See [implementation plan](git-foundation-plan.md) and [setup](native-setup.md).

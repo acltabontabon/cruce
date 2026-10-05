@@ -17,7 +17,7 @@ export function cruceServer(execute: (command: MachineCommand) => Promise<unknow
 	for (const tool of CRUCE_TOOLS) {
 		if (scopes && !scopes.includes(tool.scope)) continue;
 		const cost =
-			tool.class === "resource" ? ` Resource action: ${COST_LABELS[tool.cost]}; subject to workspace and repository policy.` : "";
+			tool.class === "resource" ? ` Resource action: ${COST_LABELS[tool.cost]}; subject to namespace and repository policy.` : "";
 		server.registerTool(
 			tool.name,
 			{
@@ -25,7 +25,7 @@ export function cruceServer(execute: (command: MachineCommand) => Promise<unknow
 				inputSchema: toolInputShape(tool),
 				annotations: {
 					readOnlyHint: !tool.mutation,
-					destructiveHint: false,
+					destructiveHint: tool.name === "cleanup_workspace",
 					idempotentHint: !tool.mutation,
 					openWorldHint: tool.class === "resource",
 				},

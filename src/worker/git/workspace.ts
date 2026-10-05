@@ -6,7 +6,7 @@ import type { ChangesResponse } from "../../shared/api.ts";
 import type { ChangedFile } from "../../shared/git.ts";
 
 /**
- * Real Git, inside the control plane. A bare workspace repository (no working tree) where Cruce
+ * Real Git, inside the control plane. A bare Git workspace repository (no working tree) where Cruce
  * builds commits from trees, computes diffs, runs three-way merges, and attaches notes. Artifacts
  * repositories are remotes of this workspace; tokens are passed per request as an Authorization
  * header and never written to config or URLs.
@@ -423,7 +423,7 @@ export class GitWorkspace {
 
 	private async prepareFetch() {
 		// A bare init has no remote refspec. Fetch needs one even when its URL is explicit.
-		// Tracking refs stay separate from accepted source, workspace heads and local notes.
+		// Tracking refs stay separate from accepted source, namespace heads and local notes.
 		await git.setConfig({ ...this.base, path: "remote.artifacts.fetch", value: "+refs/*:refs/remotes/artifacts/*" });
 	}
 
@@ -439,6 +439,10 @@ export class GitWorkspace {
 		});
 		if (!result.ok) throw new Error(`push rejected: ${JSON.stringify(result.refs)}`);
 		return result;
+	}
+
+	async remoteRefs(input: { url: string; token: string }) {
+		return git.listServerRefs({ http, url: input.url, headers: { Authorization: `Bearer ${input.token}` } });
 	}
 
 	async deleteRemote(input: { url: string; token: string; remoteRef: string }) {

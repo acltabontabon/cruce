@@ -7,7 +7,7 @@ import { expect, it } from "vitest";
 import { MemoryFs } from "../../src/worker/git/memory-fs.ts";
 import { GitWorkspace, NOTES_REF } from "../../src/worker/git/workspace.ts";
 
-it("fetches real smart-HTTP Git into a bare workspace without moving accepted source", async () => {
+it("fetches real smart-HTTP Git into a bare Git workspace without moving accepted source", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "cruce-git-transport-"));
 	const git = (args: string[], input?: Uint8Array) => execFileSync("git", args, { input, stdio: ["pipe", "pipe", "pipe"] });
 	const requests: string[] = [];

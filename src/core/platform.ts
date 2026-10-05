@@ -9,15 +9,16 @@ import type {
 	Repository,
 	RepositorySnapshot,
 	RepositoryState,
-	Session,
+	Workspace,
+	WorkspaceUpdates,
 } from "../shared/platform.ts";
 import { humanMaintain, writeAccess } from "./capabilities.ts";
 import { DomainError, requireValue, stable } from "./errors.ts";
-export const SESSION_TTL = 90_000;
+export const WORKSPACE_TTL = 90_000;
 export const initialRepository = (repository: Repository): RepositoryState => ({
 	repository,
 	version: 0,
-	sessions: [],
+	workspaces: [],
 	artifacts: [],
 	proposals: [],
 	verifications: [],
@@ -38,9 +39,9 @@ export class RepositoryController {
 		this.state.version++;
 		this.state.activity.push({ id: `event-${this.state.version}`, actor, kind, summary, ids, at: this.now });
 	}
-	session(id?: string) {
-		const s = this.state.sessions.find((s) => s.id === id);
-		if (!s) throw new DomainError(404, "Session unavailable");
+	workspace(id?: string) {
+		const s = this.state.workspaces.find((s) => s.id === id);
+		if (!s) throw new DomainError(404, "Workspace unavailable");
 		return s;
 	}
 	proposal(id?: string) {
@@ -60,19 +61,32 @@ export class RepositoryController {
 	}
 	owned(a: Authority, id?: string, write = true) {
 		if (write) writeAccess(a);
-		const s = this.session(id);
+		const s = this.workspace(id);
 		if (s.actor.id !== a.actor.id || s.actor.connectionId !== a.actor.connectionId)
-			throw new DomainError(403, "Session belongs to another actor connection");
-		if (["completed", "cancelled"].includes(s.state)) throw new DomainError(409, "Session has ended");
-		if (write && s.mode !== "write") throw new DomainError(403, "Read-only session");
+			throw new DomainError(403, "Workspace belongs to another actor connection");
+		if (["completed", "cancelled"].includes(s.state)) throw new DomainError(409, "Workspace has ended");
+		if (write && s.mode !== "write") throw new DomainError(403, "Read-only workspace");
 		return s;
 	}
-	live(s: Session) {
-		return s.state === "active" && s.lastActivity + SESSION_TTL > this.now;
+	live(s: Workspace) {
+		return s.state === "active" && s.lastActivity + WORKSPACE_TTL > this.now;
+	}
+	upstream() {
+		return this.state.sourceHead;
+	}
+	workspaceUpdates(s: Workspace): WorkspaceUpdates {
+		const revision = this.upstream(),
+			baselineRevision = revision && s.publishedRevision === revision ? revision : (s.integratedRevision ?? s.baseRevision);
+		return {
+			baselineRevision,
+			revision,
+			trust: revision ? (this.state.sourceHead ? "accepted" : "reported") : undefined,
+			status: !revision ? "unknown" : revision === baselineRevision ? "current" : "available",
+		};
 	}
 	overlaps(): Overlap[] {
-		const byPath = new Map<string, Session[]>();
-		for (const s of this.state.sessions.filter((s) => this.live(s) && s.mode === "write")) {
+		const byPath = new Map<string, Workspace[]>();
+		for (const s of this.state.workspaces.filter((s) => this.live(s) && s.mode === "write")) {
 			for (const p of new Set(s.changes.flatMap((c) => [c.path, ...(c.previousPath ? [c.previousPath] : [])])))
 				byPath.set(p, [...(byPath.get(p) ?? []), s]);
 		}
@@ -81,16 +95,22 @@ export class RepositoryController {
 			.map(([surface, s]) => ({
 				id: `file:${surface}`,
 				kind: "file",
-				sessions: s.map((s) => s.id).sort(),
+				workspaces: s.map((s) => s.id).sort(),
 				surface,
 				evidence: "reported",
 				observedAt: Math.min(...s.map((s) => s.lastActivity)),
 			}));
 	}
+	forkCleanup(s: Workspace) {
+		const reasons: string[] = [];
+		if (!s.fork || s.fork.state === "deleted") reasons.push("No retained fork");
+		if (!["completed", "cancelled"].includes(s.state)) reasons.push("End the workspace before cleaning up its fork");
+		return { ready: reasons.length === 0, reasons };
+	}
 	readiness(p: Proposal, accepted = false) {
 		const reasons: string[] = [];
 		if (p.state !== "open" && !(accepted && p.state === "promoted")) reasons.push("Change is closed or promotion is in progress");
-		const head = this.state.sourceHead ?? this.state.refs.filter((r) => r.ref === this.state.repository.defaultBranch).at(-1)?.revision;
+		const head = this.upstream();
 		if (head && p.base !== head && !(accepted && p.state === "promoted" && p.revision === head))
 			reasons.push("Base revision changed; refresh and propose the reconciled revision");
 		const latest = new Map<string, (typeof p.reviews)[number]>();
@@ -113,12 +133,14 @@ export class RepositoryController {
 	}
 	snapshot(a: Authority): RepositorySnapshot {
 		const { receipts: _, ...state } = structuredClone(this.state);
-		state.sessions = state.sessions.map((s) => ({ ...s, state: s.state === "active" && !this.live(s) ? "disconnected" : s.state }));
+		state.workspaces = state.workspaces.map((s) => ({ ...s, state: s.state === "active" && !this.live(s) ? "disconnected" : s.state }));
 		return {
 			...state,
 			overlaps: this.overlaps(),
+			workspaceUpdates: Object.fromEntries(this.state.workspaces.map((s) => [s.id, this.workspaceUpdates(s)])),
 			permissions: { write: a.repositoryRole !== "read", maintain: a.repositoryRole === "maintain", human: a.actor.kind === "human" },
 			sourceAvailable: !!this.state.sourceHead || !!this.state.artifacts.find((a) => a.kind === "source"),
+			forkCleanup: Object.fromEntries(this.state.workspaces.map((s) => [s.id, this.forkCleanup(s)])),
 			readiness: Object.fromEntries(this.state.proposals.map((p) => [p.id, this.readiness(p)])),
 		};
 	}
@@ -126,15 +148,15 @@ export class RepositoryController {
 		const ids = new Set([subject]);
 		let changed = true;
 		const records = [
-			...this.state.sessions.map((s) => ({ type: "session", record: s, ids: [s.id, s.baseRevision, s.headRevision, s.actor.id] })),
-			...this.state.artifacts.map((a) => ({ type: "artifact", record: a, ids: [a.id, a.sessionId, a.revision, a.actor.id] })),
-			...this.state.proposals.map((p) => ({ type: "change", record: p, ids: [p.id, p.sessionId, p.artifactId, p.revision] })),
-			...this.state.deployments.map((d) => ({ type: "deployment", record: d, ids: [d.id, d.artifactId, d.sessionId, d.revision] })),
+			...this.state.workspaces.map((s) => ({ type: "workspace", record: s, ids: [s.id, s.baseRevision, s.headRevision, s.actor.id] })),
+			...this.state.artifacts.map((a) => ({ type: "artifact", record: a, ids: [a.id, a.workspaceId, a.revision, a.actor.id] })),
+			...this.state.proposals.map((p) => ({ type: "change", record: p, ids: [p.id, p.workspaceId, p.artifactId, p.revision] })),
+			...this.state.deployments.map((d) => ({ type: "deployment", record: d, ids: [d.id, d.artifactId, d.workspaceId, d.revision] })),
 			...this.state.verifications.map((v) => ({ type: "verification", record: v, ids: [v.id, v.proposalId, v.revision] })),
 			...this.state.promotions.map((p) => ({ type: "promotion", record: p, ids: [p.id, p.proposalId, p.to] })),
 		];
 		// Actor identities are leaves, never edges that join every unrelated action by the same person.
-		const actors = new Set(this.state.sessions.map((s) => s.actor.id));
+		const actors = new Set(this.state.workspaces.map((s) => s.actor.id));
 		while (changed) {
 			changed = false;
 			for (const r of records)
@@ -148,27 +170,29 @@ export class RepositoryController {
 		return records.filter((r) => ids.has(r.record.id)).map(({ type, record }) => ({ type, record }));
 	}
 	command(cmd: Command, a: Authority): unknown {
-		if (a.repositoryId !== this.state.repository.id || a.workspaceId !== this.state.repository.workspaceId)
+		if (a.repositoryId !== this.state.repository.id || a.namespaceId !== this.state.repository.namespaceId)
 			throw new DomainError(403, "Repository identity mismatch");
 		switch (cmd.tool) {
 			case "get_repository":
 				return this.snapshot(a);
-			case "get_session":
-				return this.snapshot(a).sessions.find((s) => s.id === cmd.sessionId) ?? this.session(cmd.sessionId);
-			case "list_active_sessions":
-				return this.snapshot(a).sessions.filter((s) => !["completed", "cancelled"].includes(s.state));
+			case "get_workspace":
+				return this.snapshot(a).workspaces.find((s) => s.id === cmd.workspaceId) ?? this.workspace(cmd.workspaceId);
+			case "get_workspace_updates":
+				return this.workspaceUpdates(this.workspace(cmd.workspaceId));
+			case "list_active_workspaces":
+				return this.snapshot(a).workspaces.filter((s) => !["completed", "cancelled"].includes(s.state));
 			case "inspect_overlap":
 				return this.overlaps();
 			case "get_lineage":
 				return this.trace(requireValue(cmd.subjectId, "Subject required"));
-			case "start_session": {
+			case "start_workspace": {
 				if (cmd.mode !== "read") writeAccess(a);
 				const base = requireValue(cmd.baseRevision, "Exact base revision required");
-				const s: Session = {
+				const s: Workspace = {
 					id: this.nextId(),
 					repositoryId: this.state.repository.id,
 					actor: a.actor,
-					title: requireValue(cmd.title, "Session title required"),
+					title: requireValue(cmd.title, "Workspace title required"),
 					baseRevision: base,
 					headRevision: base,
 					branch: cmd.branch,
@@ -180,19 +204,19 @@ export class RepositoryController {
 					changes: [],
 					commits: [],
 				};
-				this.state.sessions.push(s);
-				this.event(a.actor, "session_started", `${a.actor.name} started ${s.title}`, [s.id, base]);
+				this.state.workspaces.push(s);
+				this.event(a.actor, "workspace_started", `${a.actor.name} started ${s.title}`, [s.id, base]);
 				return s;
 			}
-			case "attach_session": {
-				const s = this.owned(a, cmd.sessionId, false),
+			case "attach_workspace": {
+				const s = this.owned(a, cmd.workspaceId, false),
 					execution = requireValue(cmd.execution, "Execution context required");
 				if (s.mode === "write") {
 					writeAccess(a);
-					if (a.actor.kind === "agent" && (execution.kind !== "worktree" || !execution.owned))
-						throw new DomainError(403, "Agent writers require a dedicated Cruce worktree");
+					if (a.actor.kind === "agent" && (!["worktree", "clone"].includes(execution.kind) || !execution.owned))
+						throw new DomainError(403, "Agent writers require a dedicated Cruce worktree or clone");
 					if (
-						this.state.sessions.some(
+						this.state.workspaces.some(
 							(other) =>
 								other.id !== s.id &&
 								other.mode === "write" &&
@@ -201,25 +225,25 @@ export class RepositoryController {
 								other.execution.machineId === execution.machineId,
 						)
 					)
-						throw new DomainError(409, "Checkout already reserved by another writer; end that session first");
+						throw new DomainError(409, "Checkout already reserved by another writer; end that workspace first");
 				}
-				if (s.execution && stable({ ...s.execution, storageName: undefined }) !== stable(execution))
-					throw new DomainError(409, "Session execution context is immutable");
-				s.execution = { ...execution, storageName: s.execution?.storageName };
+				if (s.execution && stable(s.execution) !== stable(execution))
+					throw new DomainError(409, "Workspace execution context is immutable");
+				s.execution = { ...execution };
 				s.branch = execution.branch ?? s.branch;
 				s.state = "active";
 				s.lastActivity = this.now;
 				return s;
 			}
 			case "heartbeat": {
-				const s = this.owned(a, cmd.sessionId, false);
+				const s = this.owned(a, cmd.workspaceId, false);
 				if (s.mode === "write" && !s.execution) throw new DomainError(409, "Attach an isolated execution context first");
 				s.state = "active";
 				s.lastActivity = this.now;
 				return s;
 			}
 			case "report_change": {
-				const s = this.owned(a, cmd.sessionId);
+				const s = this.owned(a, cmd.workspaceId);
 				if (!s.execution) throw new DomainError(409, "Attach an execution context first");
 				const changes = requireValue(cmd.changes, "Changes required");
 				const before = stable(s.changes);
@@ -233,18 +257,18 @@ export class RepositoryController {
 					this.event(a.actor, "changes_reported", `${a.actor.name} changed ${changes.length} files`, [s.id, s.headRevision]);
 				return s;
 			}
-			case "end_session": {
-				const s = this.owned(a, cmd.sessionId, false);
+			case "end_workspace": {
+				const s = this.owned(a, cmd.workspaceId, false);
 				s.state = cmd.cancelled ? "cancelled" : "completed";
 				s.endedAt = this.now;
-				this.event(a.actor, "session_ended", `${a.actor.name} ${s.state} ${s.title}`, [s.id]);
+				this.event(a.actor, "workspace_ended", `${a.actor.name} ${s.state} ${s.title}`, [s.id]);
 				return s;
 			}
 			case "report_ref": {
-				const s = this.owned(a, cmd.sessionId);
+				const s = this.owned(a, cmd.workspaceId);
 				const ref = requireValue(cmd.ref, "Ref required"),
 					revision = requireValue(cmd.revision, "Revision required");
-				const observation = { ref, revision, sessionId: s.id, actorId: a.actor.id, at: this.now, trust: "reported" as const };
+				const observation = { ref, revision, workspaceId: s.id, actorId: a.actor.id, at: this.now, trust: "reported" as const };
 				this.state.refs.push(observation);
 				this.event(a.actor, "ref_observed", `${a.actor.name} reported ${ref} at ${revision.slice(0, 7)}`, [s.id, revision]);
 				return observation;
@@ -252,15 +276,15 @@ export class RepositoryController {
 			case "create_proposal": {
 				writeAccess(a);
 				const artifact = this.artifact(cmd.artifactId),
-					s = this.session(artifact.sessionId);
+					s = this.workspace(artifact.workspaceId);
 				if (artifact.kind !== "source" || s.actor.id !== a.actor.id)
-					throw new DomainError(403, "Propose a source artifact produced by your session");
+					throw new DomainError(403, "Propose a source artifact produced by your workspace");
 				const p: Proposal = {
 					id: this.nextId(),
 					number: this.state.proposals.length + 1,
-					sessionId: s.id,
+					workspaceId: s.id,
 					artifactId: artifact.id,
-					base: s.baseRevision,
+					base: artifact.baseRevision ?? s.baseRevision,
 					revision: artifact.revision,
 					title: cmd.title ?? artifact.title,
 					state: "open",
@@ -350,7 +374,7 @@ export class RepositoryController {
 	}
 	addArtifact(artifact: Artifact) {
 		this.state.artifacts.push(artifact);
-		this.event(artifact.actor, "artifact_published", artifact.title, [artifact.id, artifact.sessionId, artifact.revision]);
+		this.event(artifact.actor, "artifact_published", artifact.title, [artifact.id, artifact.workspaceId, artifact.revision]);
 		return artifact;
 	}
 	prepareDeployment(cmd: Command, a: Authority): Deployment {
@@ -383,7 +407,7 @@ export class RepositoryController {
 			environmentId: env.id,
 			artifactId: artifact.id,
 			revision: artifact.revision,
-			sessionId: artifact.sessionId,
+			workspaceId: artifact.workspaceId,
 			actor: a.actor,
 			state: "queued",
 			branch: env.kind === "production" ? "main" : `cruce/${env.id}`,

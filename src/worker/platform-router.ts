@@ -1,12 +1,13 @@
 import { z } from "zod";
-import { SCOPES, type Scope, workspaceMaintain } from "../core/capabilities.ts";
+import { namespaceMaintain, SCOPES, type Scope } from "../core/capabilities.ts";
 import { DomainError, requireValue } from "../core/errors.ts";
+import { parseGitRoute } from "../shared/git-access.ts";
 import { type Actor, branch, CommandInput, id, name, path, RESOURCE_ACTIONS, type Repository } from "../shared/platform.ts";
 import { type AuthEnv, type AuthProps, consoleIdentity, validateIdentity } from "./auth.ts";
 import type { ControlTower } from "./control-tower.ts";
 import { remoteMcp } from "./mcp.ts";
+import type { ConnectionGrant } from "./namespace-runtime.ts";
 import { hash } from "./store.ts";
-import type { ConnectionGrant } from "./workspace-runtime.ts";
 export interface PlatformEnv extends AuthEnv {
 	CONTROL_TOWER: DurableObjectNamespace<ControlTower>;
 }
@@ -25,27 +26,27 @@ const role = z.enum(["maintainer", "developer", "viewer"]);
 const repositoryInput = z.object({
 	name,
 	defaultBranch: branch.default("main"),
-	source: z.enum(["local", "artifacts"]),
 	idempotencyKey: id,
 });
 const humanBridgeTools = new Set([
 	"get_repository",
 	"get_context",
-	"get_session",
-	"list_active_sessions",
+	"get_workspace",
+	"list_active_workspaces",
 	"inspect_overlap",
 	"get_source",
-	"export_revision",
+	"get_git_access",
+	"cleanup_workspace",
 	"get_history",
 	"get_diff",
 	"read_artifact",
 	"get_lineage",
-	"start_session",
-	"attach_session",
+	"start_workspace",
+	"attach_workspace",
 	"heartbeat",
 	"report_change",
 	"report_ref",
-	"end_session",
+	"end_workspace",
 	"publish_revision",
 	"publish_artifact",
 	"create_proposal",
@@ -56,7 +57,7 @@ export async function platformRoute(
 	ctx: ExecutionContext,
 	props?: AuthProps,
 	scopes?: string[],
-	bridge?: { identity: AuthProps; repositoryId: string; workspaceId: string; connectionId: string; tokenKey: string; sessionId?: string },
+	bridge?: { identity: AuthProps; repositoryId: string; namespaceId: string; connectionId: string; tokenKey: string; workspaceId?: string },
 ): Promise<Response | undefined> {
 	const url = new URL(request.url),
 		parts = url.pathname.split("/").filter(Boolean);
@@ -74,8 +75,8 @@ export async function platformRoute(
 			: consoleIdentity(request, env));
 	const directory = env.DIRECTORY.getByName("directory"),
 		user = await directory.login(identity);
-	const personal = await directory.workspace(user.personalWorkspaceId);
-	await env.WORKSPACE.getByName(personal.id).initialize(personal);
+	const personal = await directory.namespace(user.personalNamespaceId);
+	await env.NAMESPACE.getByName(personal.id).initialize(personal);
 	const actor: Actor = {
 		id: props ? `agent-${requireValue(props.connectionId, "Reconnect this agent")}` : user.id,
 		userId: user.id,
@@ -84,31 +85,44 @@ export async function platformRoute(
 		connectionId: props?.connectionId ?? bridge?.connectionId,
 	};
 	const grant: ConnectionGrant = { actor, scopes, repositories: props?.repositoryIds };
-	const workspaces = async () => {
+	if (url.pathname.startsWith("/mcp/git/")) {
+		if (!props && !bridge) throw new DomainError(401, "Git requires a Cruce connection");
+		const route = requireValue(parseGitRoute(url), "Unsupported Git route");
+		if (
+			bridge &&
+			(route.namespaceId !== bridge.namespaceId ||
+				route.repositoryId !== bridge.repositoryId ||
+				(route.workspaceId && bridge.workspaceId && route.workspaceId !== bridge.workspaceId))
+		)
+			throw new DomainError(403, "Terminal Git scope denied");
+		const repo = await env.NAMESPACE.getByName(route.namespaceId).repository(grant, route.repositoryId);
+		return env.CONTROL_TOWER.getByName(repo.id).gitRequest(repo, request, grant);
+	}
+	const namespaces = async () => {
 		const allowed = [];
-		for (const w of await directory.workspaces())
+		for (const w of await directory.namespaces())
 			try {
-				const view = await env.WORKSPACE.getByName(w.id).snapshot(grant);
+				const view = await env.NAMESPACE.getByName(w.id).snapshot(grant);
 				if (!props || view.repositories.length) allowed.push(w);
 			} catch {}
 		return allowed;
 	};
 	const execute = async (raw: unknown) => {
 		const cmd = CommandInput.parse(raw);
-		if (cmd.tool === "list_workspaces") return workspaces();
-		const workspaceId = requireValue(cmd.workspaceId, "Workspace required"),
-			workspace = env.WORKSPACE.getByName(workspaceId);
-		if (cmd.tool === "list_repositories") return (await workspace.snapshot(grant)).repositories;
+		if (cmd.tool === "list_namespaces") return namespaces();
+		const namespaceId = requireValue(cmd.namespaceId, "Namespace required"),
+			namespace = env.NAMESPACE.getByName(namespaceId);
+		if (cmd.tool === "list_repositories") return (await namespace.snapshot(grant)).repositories;
 		const repositoryId = requireValue(cmd.repositoryId, "Repository required"),
-			repo = await workspace.repository(grant, repositoryId);
+			repo = await namespace.repository(grant, repositoryId);
 		if (bridge) {
-			if (workspaceId !== bridge.workspaceId || repositoryId !== bridge.repositoryId || !humanBridgeTools.has(cmd.tool))
-				throw new DomainError(403, "Human bridge session scope denied");
-			// The repository DO enforces session binding atomically, including lost-response retries.
+			if (namespaceId !== bridge.namespaceId || repositoryId !== bridge.repositoryId || !humanBridgeTools.has(cmd.tool))
+				throw new DomainError(403, "Human bridge workspace scope denied");
+			// The repository DO enforces workspace binding atomically, including lost-response retries.
 		}
 		const result = await env.CONTROL_TOWER.getByName(repo.id).command(repo, cmd, grant);
-		if (bridge && cmd.tool === "start_session") {
-			bridge.sessionId = (result as { id: string }).id;
+		if (bridge && cmd.tool === "start_workspace") {
+			bridge.workspaceId = (result as { id: string }).id;
 			await env.OAUTH_KV.put(bridge.tokenKey, JSON.stringify(bridge), { expirationTtl: 1800 });
 		}
 		return result;
@@ -123,42 +137,42 @@ export async function platformRoute(
 		return json(await execute(await input(request)));
 	}
 	if (props || bridge) throw new DomainError(403, "Console access required");
-	if (url.pathname === "/api/me" && request.method === "GET") return json({ user, workspaces: await workspaces() });
-	if (url.pathname === "/api/workspaces") {
-		if (request.method === "GET") return json(await workspaces());
+	if (url.pathname === "/api/me" && request.method === "GET") return json({ user, namespaces: await namespaces() });
+	if (url.pathname === "/api/namespaces") {
+		if (request.method === "GET") return json(await namespaces());
 		if (request.method === "POST") {
 			const body = z.object({ name: displayName, handle: name, idempotencyKey: id }).parse(await input(request));
-			const workspaceId = (await hash(`${user.id}:${body.idempotencyKey}`)).slice(0, 32);
-			const w = await directory.create(user, body, workspaceId);
-			await env.WORKSPACE.getByName(w.id).initialize(w);
+			const namespaceId = (await hash(`${user.id}:${body.idempotencyKey}`)).slice(0, 32);
+			const w = await directory.create(user, body, namespaceId);
+			await env.NAMESPACE.getByName(w.id).initialize(w);
 			return json(w, 201);
 		}
 	}
-	if (parts[1] !== "workspaces" || !parts[2]) throw new DomainError(404, "Not found");
-	const workspaceId = parts[2],
-		workspace = env.WORKSPACE.getByName(workspaceId);
+	if (parts[1] !== "namespaces" || !parts[2]) throw new DomainError(404, "Not found");
+	const namespaceId = parts[2],
+		namespace = env.NAMESPACE.getByName(namespaceId);
 	if (parts[3] === "accept" && request.method === "POST") {
 		const body = z.object({ token: z.string().min(20).max(200) }).parse(await input(request));
-		await workspace.accept(user, await hash(body.token));
+		await namespace.accept(user, await hash(body.token));
 		return json({ accepted: true });
 	}
-	const a = await workspace.authority(grant);
+	const a = await namespace.authority(grant);
 	if (parts.length === 3) {
 		if (request.method === "GET") {
-			const view = await workspace.snapshot(grant);
+			const view = await namespace.snapshot(grant);
 			const snapshots = await Promise.all(
 				view.repositories.map(
 					(repo) =>
 						env.CONTROL_TOWER.getByName(repo.id).command(
 							repo,
-							{ tool: "get_repository", workspaceId, repositoryId: repo.id },
+							{ tool: "get_repository", namespaceId, repositoryId: repo.id },
 							grant,
 						) as Promise<import("../shared/platform.ts").RepositorySnapshot>,
 				),
 			);
 			const repositorySummaries = snapshots.map((s) => ({
 				id: s.repository.id,
-				active: s.sessions.filter((x) => x.state === "active").length,
+				active: s.workspaces.filter((x) => x.state === "active").length,
 				overlaps: s.overlaps.length,
 				latestArtifact: s.artifacts.at(-1),
 				deployments: s.deployments.filter((d) => d.state === "deployed"),
@@ -169,36 +183,36 @@ export async function platformRoute(
 				.slice(0, 20);
 			return json({
 				...view,
-				workspace: await directory.workspace(workspaceId),
+				namespace: await directory.namespace(namespaceId),
 				people: await directory.users(Object.keys(view.members)),
 				repositorySummaries,
 				activity,
 			});
 		}
 		if (request.method === "PATCH") {
-			workspaceMaintain(a);
+			namespaceMaintain(a);
 			const body = z.object({ name: displayName, handle: name }).parse(await input(request));
-			const w = await directory.rename(workspaceId, body);
-			await workspace.metadata(w);
+			const w = await directory.rename(namespaceId, body);
+			await namespace.metadata(w);
 			return json(w);
 		}
 	}
 	if (parts[3] === "members" && request.method === "POST") {
 		const body = z.object({ userId: id, role: role.optional() }).parse(await input(request));
 		await directory.user(body.userId);
-		await workspace.member(grant, body.userId, body.role);
+		await namespace.member(grant, body.userId, body.role);
 		return json({ saved: true });
 	}
 	if (parts[3] === "teams" && request.method === "POST") {
 		const body = z.object({ id, name: displayName, members: z.array(id).max(1000) }).parse(await input(request));
-		await workspace.team(grant, body.id, body.name, body.members);
+		await namespace.team(grant, body.id, body.name, body.members);
 		return json({ saved: true });
 	}
 	if (parts[3] === "invitations" && request.method === "POST") {
 		const body = z.object({ email: z.email(), role }).parse(await input(request));
 		const token = crypto.randomUUID() + crypto.randomUUID();
-		await workspace.invite(grant, { id: crypto.randomUUID(), ...body, tokenHash: await hash(token), expiresAt: Date.now() + 7 * 86400000 });
-		return json({ url: `${url.origin}/invite/${workspaceId}#${token}` });
+		await namespace.invite(grant, { id: crypto.randomUUID(), ...body, tokenHash: await hash(token), expiresAt: Date.now() + 7 * 86400000 });
+		return json({ url: `${url.origin}/invite/${namespaceId}#${token}` });
 	}
 	if (parts[3] === "account" && request.method === "POST") {
 		const body = z
@@ -207,53 +221,51 @@ export async function platformRoute(
 				z.object({ accountId: z.string().regex(/^[0-9a-f]{32}$/), token: z.string().min(20).max(400), label: displayName.optional() }),
 			])
 			.parse(await input(request));
-		return json(await workspace.account(grant, "disconnect" in body ? null : body));
+		return json(await namespace.account(grant, "disconnect" in body ? null : body));
 	}
 	if (parts[3] === "policy" && request.method === "POST") {
 		const body = z
 			.object({
 				rules: z.record(z.enum(RESOURCE_ACTIONS), z.enum(["allow", "approval", "deny"])),
 				dailyLimit: z.number().int().min(0).max(10000),
-				previewsPerSession: z.number().int().min(0).max(1000),
+				previewsPerWorkspace: z.number().int().min(0).max(1000),
 			})
 			.parse(await input(request));
-		await workspace.policy(grant, body);
+		await namespace.policy(grant, body);
 		return json({ saved: true });
 	}
 	if (parts[3] !== "repositories") throw new DomainError(404, "Not found");
 	if (parts.length === 4) {
-		if (request.method === "GET") return json((await workspace.snapshot(grant)).repositories);
+		if (request.method === "GET") return json((await namespace.snapshot(grant)).repositories);
 		if (request.method === "POST") {
-			workspaceMaintain(a);
+			namespaceMaintain(a);
 			const body = repositoryInput.parse(await input(request));
-			const repositoryId = (await hash(`${workspaceId}:${body.idempotencyKey}`)).slice(0, 32);
-			const old = (await workspace.snapshot(grant)).repositories.find((r) => r.id === repositoryId);
-			if (old && (old.name !== body.name || old.source.kind !== body.source || old.defaultBranch !== body.defaultBranch))
-				throw new DomainError(409, "Creation key reused");
+			const repositoryId = (await hash(`${namespaceId}:${body.idempotencyKey}`)).slice(0, 32);
+			const old = (await namespace.snapshot(grant)).repositories.find((r) => r.id === repositoryId);
+			if (old && (old.name !== body.name || old.defaultBranch !== body.defaultBranch)) throw new DomainError(409, "Creation key reused");
 			const repo: Repository = old ?? {
 				id: repositoryId,
-				workspaceId,
+				namespaceId,
 				name: body.name,
 				defaultBranch: body.defaultBranch,
 				createdAt: Date.now(),
-				source: { kind: body.source, ...(body.source === "artifacts" ? { storageName: `repo-${repositoryId}` } : {}) },
+				storageName: `repo-${repositoryId}`,
 				grants: [],
 				policy: { protectedPaths: [], requiredEvidence: ["tests"], resourceRules: {} },
 			};
-			if (!old) await workspace.saveRepository(grant, repo);
-			if (body.source === "artifacts")
-				await env.CONTROL_TOWER.getByName(repo.id).command(
-					repo,
-					{ tool: "provision_repository", repositoryId: repo.id, workspaceId, idempotencyKey: body.idempotencyKey },
-					grant,
-				);
+			if (!old) await namespace.saveRepository(grant, repo);
+			await env.CONTROL_TOWER.getByName(repo.id).command(
+				repo,
+				{ tool: "provision_repository", repositoryId: repo.id, namespaceId, idempotencyKey: body.idempotencyKey },
+				grant,
+			);
 			return json(repo, 201);
 		}
 	}
 	const repositoryId = parts[4],
-		repo = await workspace.repository(grant, repositoryId);
+		repo = await namespace.repository(grant, repositoryId);
 	if (parts.length === 5 && request.method === "PATCH") {
-		const auth = await workspace.authority(grant, repositoryId);
+		const auth = await namespace.authority(grant, repositoryId);
 		if (auth.repositoryRole !== "maintain") throw new DomainError(403, "Repository maintainer required");
 		const body = z
 			.object({
@@ -270,7 +282,7 @@ export async function platformRoute(
 			})
 			.parse(await input(request));
 		const updated = { ...repo, ...body, policy: { ...repo.policy, ...body.policy } };
-		return json(await workspace.saveRepository(grant, updated));
+		return json(await namespace.saveRepository(grant, updated));
 	}
 	if (request.method === "GET") {
 		const tower = env.CONTROL_TOWER.getByName(repo.id);
@@ -284,11 +296,11 @@ export async function platformRoute(
 				headers: { "content-type": "application/x-git-packed-objects", "x-cruce-revision": revision },
 			});
 		}
-		const snapshot = (await tower.command(repo, { tool: "get_repository", workspaceId, repositoryId }, grant)) as Record<string, unknown>;
+		const snapshot = (await tower.command(repo, { tool: "get_repository", namespaceId, repositoryId }, grant)) as Record<string, unknown>;
 		const section = parts[5];
 		if (!section) return json(snapshot);
 		const collections: Record<string, string> = {
-			sessions: "sessions",
+			workspaces: "workspaces",
 			changes: "proposals",
 			artifacts: "artifacts",
 			environments: "environments",
@@ -303,6 +315,6 @@ export async function platformRoute(
 		return json(record);
 	}
 	if (parts[5] === "command" && request.method === "POST")
-		return json(await execute({ ...z.record(z.string(), z.unknown()).parse(await input(request)), workspaceId, repositoryId }));
+		return json(await execute({ ...z.record(z.string(), z.unknown()).parse(await input(request)), namespaceId, repositoryId }));
 	throw new DomainError(404, "Not found");
 }
