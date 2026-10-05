@@ -33,6 +33,20 @@ describe("resource boundary", () => {
 		boundary.disconnect();
 		expect(boundary.account()).toBeUndefined();
 	});
+	it("trims pasted credentials before verifying and sealing them", async () => {
+		const headers: string[] = [];
+		const send = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+			headers.push(new Headers(init?.headers).get("authorization") ?? "");
+			return ok({});
+		}) as unknown as typeof fetch;
+		const boundary = new ResourceBoundary(memory(), { CRUCE_SECRET: "test-secret-value" }, { namespace: "cruce" }, send);
+		const view = await boundary.connect(
+			{ accountId: ` ${ACCOUNT.toUpperCase()}\n`, token: "  cf-api-token-value-for-tests-only\n" },
+			"owner",
+		);
+		expect(headers).toEqual(["Bearer cf-api-token-value-for-tests-only"]);
+		expect(view.accountId).toBe(ACCOUNT);
+	});
 	it("rejects tokens that cannot read Artifacts", async () => {
 		const send = (async () =>
 			new Response(JSON.stringify({ success: false, errors: [{ message: "Authentication error" }] }), {

@@ -231,7 +231,9 @@ export class ResourceBoundary {
 		}
 		return undefined;
 	}
-	async connect(input: { accountId: string; token: string; label?: string }, actor: string): Promise<ResourceAccount> {
+	async connect(raw: { accountId: string; token: string; label?: string }, actor: string): Promise<ResourceAccount> {
+		// Pasted credentials often carry surrounding whitespace that Cloudflare reports as an authentication error.
+		const input = { ...raw, accountId: raw.accountId.trim().toLowerCase(), token: raw.token.trim() };
 		if (!/^[0-9a-f]{32}$/.test(input.accountId)) throw new DomainError(400, "Cloudflare account ID required");
 		if (input.token.length < 20 || input.token.length > 400) throw new DomainError(400, "Cloudflare API token required");
 		await cloudflare(this.send, input.token, `/accounts/${input.accountId}/artifacts/namespaces?limit=1`);

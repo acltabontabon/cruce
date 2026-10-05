@@ -22,6 +22,38 @@ The scenario scripts fix commit timestamps and isolate signing/hooks for their d
 
 The [timeout fixture](../demo/convergence/README.md) uses injected delay capture without timers or network calls. A shared driver exercises ordinary Git against disposable bare repositories served over loopback HTTP and the real in-process Cruce runtime. Only the provider adapter is substituted; Git fetch/push, publication, retained source/evidence, readiness and non-forced promotion run normally. Fixture grants and human attestations do not establish actual authenticated participation. `pnpm verify:scenario` replays the driver twice and checks identical revisions and behavioral outcomes, then writes non-secret results to ignored `dist/scenario-verification/result.json`, including the tested Cruce commit and working-tree-dirty flag.
 
+## Deployed multi-tool participation (D2)
+
+On **2026-10-06**, the participation journey ran end to end through the deployed test Worker (version `9e63bfe6-e5b4-4f6d-8089-6194fab838a8`, built from `e61b1f8` plus the credential and OAuth fixes below). It used real **Claude Code** and **Codex** (the ChatGPT-bundled `codex-cli 0.160.0`) sessions run by the owner, the real Artifacts provider in the owner's connected account, and repository `d2-proof` (namespace `22b5c94f4b1908e6263fb68948edfeee`, repository `e0ea9d54fab24610914af0c7f349a7da`). A separate read-only auditor ([tools/verify-participation.ts](../tools/verify-participation.ts), `cruce:read` only) recorded seven snapshots and independently read canonical over native Git. Receipts are in the ignored `dist/d2-participation/`.
+
+| Step | Observed result |
+| --- | --- |
+| Concurrent work | Claude Code started "Retry policy" and Codex started "Request timeouts" at canonical `c1bef890`, each in its own worktree and direct fork. They published `c058c36c` and `48b142d9`. Cruce reported advisory overlap on `README.md` |
+| Trust | Both proposals were blocked until human approval and trusted tests evidence existed; the agents' own tests reports stayed `reported` |
+| Continuation | Workspace A was detached from the `primary` checkout (lock released, worktree, fork and head kept), resumed in a separate `second` clone under the Codex connection, and fast-forwarded from its fork to Claude's `c058c36c`. Codex published `26aedbb7` on top. Workspace A then had published revisions from two tools on two checkouts, with an unchanged baseline |
+| First promotion | The owner attested tests, approved the exact revision `26aedbb7` and promoted it. Canonical moved `c1bef890 → 26aedbb7`, and the recorded state matched an independent Git read |
+| Stale detection | B's open proposal immediately reported "Base revision changed" |
+| Reconciliation | Codex fetched canonical, merged without rebasing, resolved the `README.md` conflict and published merge `4e07c4d3`, with its review base pinned to the accepted `26aedbb7`. An independent run passed 8/8 tests |
+| Second promotion | Human approval of the exact revision, then promotion `26aedbb7 → 4e07c4d3`. The independent Git read matched |
+| Auditor judgement | All 8 invariants passed: baselines unchanged, two client labels, cross-checkout and cross-connection continuation, stale detection, two human-approved exact promotions, a pinned reconciliation base, recorded canonical equal to remote canonical, and no agent approval or promotion |
+
+**Limits.**
+- Both checkouts are on one Mac and report the same machine ID, so this proves continuation across checkouts, connections and tools, not across physical machines.
+- Fork cleanup and retained-source retrieval after cleanup were not run in this pass; deleting the forks is left to the owner.
+- Response loss and membership or grant revocation (M1) were not exercised.
+- Client labels come from each tool's own OAuth registration.
+
+**Defects found and fixed.**
+- *OAuth refresh outside login.* MCP SDK 2.3.0 treats a provider without a redirect URL as non-interactive and never uses its refresh token. Cruce set the redirect URL only during login, so the Git credential helper always failed, and the bridge would fail once its access token expired. `Credentials.load()` now restores the registered callback; a regression test was added.
+- *Pasted credentials.* Connecting an account did not trim the API token, and Chrome could autofill a saved password into the token field. Both are fixed and tested.
+
+**Defects found, not yet fixed.**
+- A provider failure during repository creation leaves a registered repository with no canonical storage, and the console has no retry (`d2-participation` remains in that state).
+- Provider errors show the raw Cloudflare API path, including the account ID, in the console (roadmap F5).
+- Codex does not load the project `.codex/config.toml` that `connect --client codex` writes, so the run used a per-launch `-c mcp_servers.cruce…` override.
+- The signed-in console still sets the tab title to "Common ground for coding agents".
+- Workspace worktrees live under `.git/cruce/worktrees`; both tools worked there with permission prompts.
+
 ## Product boundary reset verification
 
 On **2026-10-06** the [product boundary reset](decisions/0001-product-boundary-reset.md) and [workspace ownership change](decisions/0002-workspace-ownership-and-execution-attachment.md) were verified locally against a working tree based on `c783295`. Typecheck, lint, **127 unit/integration tests**, **49 browser journeys**, deterministic scenario replay, the offline build (with the existing unavailable-Docker notice) and release metadata passed. A local check resolved 286 documentation links and anchors.
@@ -165,7 +197,7 @@ Earlier local evidence recorded 88 unit/integration tests and 13 browser journey
 | Native Git, local protocol fixture | Clone canonical, push/fetch isolated fork, reject canonical push | Does not prove live Access routing or deployed OAuth |
 | Earlier real Artifacts adapter | Revision `3e72f788d0e6a8f4b1851277e6ae296c7fbbab78`, namespace `cruce-check-muuga1hc`; isolated fork, exact publication, independent fetch and retention | Preceded current namespace/native-Git refactor; does not verify the current gateway or reconciliation flow |
 | Earlier live control plane | Version `2d7cbe7d-bdcd-48f1-b21e-4cd7324d9314`; owner sign-in/provisioning and authentication rejection checks | Older model; current code and Git transport exception not recorded as deployed |
-| Multi-tool, multi-session participation | Pending | Roadmap D2: real tools in separate workspaces, a workspace continued from a second checkout or machine, deployed |
+| Multi-tool, multi-session participation | Deployed, 2026-10-06 ([D2](#deployed-multi-tool-participation-d2)) | Same physical machine; fork cleanup, response loss and authority revocation not exercised in that run |
 
 The provider-backed convergence check passed with explicitly authorized test-account credentials as recorded above. Historical counts describe their tested revision, not a promise about every future checkout.
 

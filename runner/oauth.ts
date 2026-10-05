@@ -35,6 +35,13 @@ export class Credentials implements OAuthClientProvider {
 	}
 	async load() {
 		this.data = await read(this.path, {});
+		// The SDK treats a provider without a redirect URL as a non-interactive client and never
+		// refreshes. Restore the registered callback so later processes (bridge, Git helper) refresh.
+		const registered = (this.data.client as { redirect_uris?: string[] } | undefined)?.redirect_uris?.[0];
+		if (registered && !this.redirectUrl) {
+			this.redirectUrl = String(registered);
+			this.clientMetadata.redirect_uris = [this.redirectUrl];
+		}
 	}
 	clientInformation() {
 		return this.data.client;

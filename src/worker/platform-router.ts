@@ -213,7 +213,16 @@ export async function platformRoute(
 		const body = z
 			.union([
 				z.object({ disconnect: z.literal(true) }),
-				z.object({ accountId: z.string().regex(/^[0-9a-f]{32}$/), token: z.string().min(20).max(400), label: displayName.optional() }),
+				z.object({
+					accountId: z
+						.string()
+						.trim()
+						.toLowerCase()
+						.pipe(z.string().regex(/^[0-9a-f]{32}$/)),
+					// Copied tokens often carry surrounding whitespace, which Cloudflare rejects as an authentication error.
+					token: z.string().trim().pipe(z.string().min(20).max(400)),
+					label: displayName.optional(),
+				}),
 			])
 			.parse(await input(request));
 		return json(await namespace.account(grant, "disconnect" in body ? null : body));

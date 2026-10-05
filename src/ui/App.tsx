@@ -680,11 +680,11 @@ export function App() {
 										</label>
 										<label>
 											Account ID
-											<input name="accountId" required autoComplete="off" />
+											<input name="accountId" required autoComplete="off" spellCheck={false} />
 										</label>
 										<label>
 											API token
-											<input name="token" type="password" required autoComplete="off" />
+											<input name="token" type="password" required autoComplete="new-password" spellCheck={false} />
 										</label>
 										<p className="muted">Credentials are sealed and never returned to agents.</p>
 									</Form>
