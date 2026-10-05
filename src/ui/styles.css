@@ -9,7 +9,7 @@
 	--ink: #202c26;
 	--accent: #c8f478;
 	--green: #356745;
-	--muted: #737e74;
+	--muted: #657166;
 	--line: #dfe4db;
 }
 * {
@@ -204,7 +204,7 @@ aside button {
 }
 aside button:hover {
 	color: #fff;
-	background: #2f3b32;
+	background: #ffffff0a;
 	border-color: transparent;
 }
 aside button:focus-visible {
@@ -336,7 +336,9 @@ aside nav button.selected {
 .sidebar-note {
 	font-size: 16px;
 	letter-spacing: -0.35px;
-	margin: 20px 12px 30px;
+	margin: 20px 12px 12px;
+	padding-bottom: 20px;
+	border-bottom: 1px solid #ffffff12;
 	color: #c5d0be;
 	line-height: 1.5;
 }
@@ -347,10 +349,17 @@ aside nav button.selected {
 	display: flex;
 	align-items: center;
 	gap: 10px;
-	border-top: 1px solid #3d4a3b;
-	border-radius: 0;
+	border: 1px solid transparent;
+	border-radius: 10px;
 	width: 100%;
-	padding: 18px 8px 0;
+	padding: 12px 10px;
+}
+.account-trigger:hover {
+	background: #ffffff0a;
+	border-color: #ffffff0d;
+}
+.account-trigger[aria-current="page"] {
+	background: #ffffff08;
 }
 .account-avatar {
 	display: grid;
@@ -1226,7 +1235,8 @@ dd {
 	.account-trigger {
 		width: auto;
 		border: 0;
-		padding: 0;
+		padding: 4px;
+		border-radius: 50%;
 	}
 	.account-trigger > span:nth-child(2),
 	.account-trigger > .icon {
@@ -1383,21 +1393,26 @@ dd {
 	color: var(--green);
 }
 .home-title {
-	align-items: flex-end;
-	margin: 50px 0 40px;
+	align-items: center;
+	margin: 36px 0 28px;
 }
 .home-title h1 {
-	font-size: clamp(42px, 4.5vw, 64px);
+	font-size: clamp(36px, 3.5vw, 52px);
 	font-weight: 500;
 	line-height: 1.05;
-	letter-spacing: -3px;
-	margin: 20px 0;
+	letter-spacing: -2px;
+	margin: 0 0 18px;
 }
 .home-title h1 > span {
 	color: #849578;
 }
 .home-title .primary {
-	margin-bottom: 5px;
+	flex-shrink: 0;
+}
+.home-title .page-description {
+	max-width: 560px;
+	font-size: 13px;
+	color: #65715e;
 }
 .home-toolbar {
 	display: flex;
@@ -1413,12 +1428,6 @@ dd {
 	color: #7c8972;
 	margin: 0;
 }
-.home-toolbar strong {
-	color: var(--ink);
-	font-family: "JetBrains Mono Variable", monospace;
-	font-size: 11px;
-	font-weight: 500;
-}
 .toolbar-dot {
 	color: #c0c8b8;
 	margin: 0 15px;
@@ -1428,18 +1437,31 @@ dd {
 	align-items: center;
 	gap: 9px;
 	margin: 0;
-	min-width: min(310px, 100%);
-	color: #87937d;
+	width: 340px;
+	max-width: 100%;
+	padding: 0 12px;
+	border: 1px solid #cfd7c9;
+	border-radius: 8px;
+	background: #fff;
+	color: #65715e;
 }
 .namespace-search .icon {
-	width: 16px;
+	width: 18px;
+	height: 18px;
+}
+.namespace-search:focus-within {
+	outline: 2px solid var(--green);
+	outline-offset: 3px;
 }
 .namespace-search input {
 	border: 0;
 	background: none;
-	min-height: 36px;
-	padding: 6px;
-	font-size: 11px;
+	min-width: 0;
+	min-height: 44px;
+	margin: 0;
+	padding: 10px 0;
+	font-size: 12px;
+	outline: none;
 }
 .namespace-grid {
 	display: grid;
@@ -1463,7 +1485,7 @@ dd {
 	display: flex;
 	align-items: center;
 	gap: 12px;
-	margin-bottom: 28px;
+	margin-bottom: 20px;
 }
 .namespace-card .namespace-avatar {
 	background: #e6eedb;
@@ -1479,12 +1501,6 @@ dd {
 .space-kind {
 	font-size: 10px;
 	color: #738467;
-}
-.space-index {
-	margin-left: auto;
-	font-family: "JetBrains Mono Variable", monospace;
-	font-size: 10px;
-	color: #b0bca5;
 }
 .namespace-card-title {
 	display: flex;
@@ -1520,20 +1536,20 @@ dd {
 	overflow-wrap: anywhere;
 }
 .namespace-card-body {
-	min-height: 130px;
+	min-height: 110px;
 }
 .namespace-card-meta {
-	font-size: 10px;
-	margin: 0 0 18px;
-	color: #6c7e5d;
+	font-size: 12px;
+	margin: 0 0 16px;
+	color: #65715e;
 }
 .namespace-card-meta span {
 	text-transform: capitalize;
-	color: #94a188;
+	color: #65715e;
 }
 .namespace-card-empty {
 	font-size: 11px;
-	color: #8a987d;
+	color: #65715e;
 	line-height: 1.8;
 	margin: 22px 0;
 	max-width: 270px;
@@ -1754,7 +1770,7 @@ dd {
 		gap: 22px;
 	}
 	.home-title h1 {
-		font-size: 46px;
+		font-size: 40px;
 	}
 }
 @media (max-width: 600px) {
@@ -1765,8 +1781,8 @@ dd {
 		margin: 32px 0;
 	}
 	.home-title h1 {
-		font-size: 48px;
-		letter-spacing: -2.7px;
+		font-size: 38px;
+		letter-spacing: -1.5px;
 	}
 	.home-toolbar {
 		gap: 14px;
@@ -1929,7 +1945,6 @@ dd {
 .open-namespace {
 	font-size: 12px;
 }
-.namespace-card-meta,
 .space-kind {
 	font-size: 11px;
 }
@@ -1974,9 +1989,6 @@ aside nav button {
 	.section-heading h2 {
 		font-size: 17px;
 	}
-	.home-title h1 {
-		font-size: 42px;
-	}
 	.workspace-list > button {
 		font-size: 11px;
 	}
@@ -1992,7 +2004,7 @@ aside nav button {
 }
 @media (max-width: 600px) {
 	.shell > aside {
-		grid-template-columns: auto minmax(0, 1fr) 26px 29px;
+		grid-template-columns: auto minmax(0, 1fr) 26px 37px;
 		gap: 10px;
 	}
 	.sidebar-bottom {

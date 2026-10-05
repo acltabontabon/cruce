@@ -15,7 +15,7 @@ import { BranchArt, Dialog, Icon } from "./design.tsx";
 import { ArtifactInspection, Code, WorkspaceUpdateInspection } from "./inspect.tsx";
 import "./styles.css";
 
-const count = (n: number, label: string) => `${n} ${label}${n === 1 ? "" : "s"}`;
+const count = (n: number, label: string, plural = `${label}s`) => `${n} ${n === 1 ? label : plural}`;
 const short = (s?: string) => s?.slice(0, 8) ?? "—";
 const time = (n: number) => new Date(n).toLocaleString();
 const namespaceTabs = ["repositories", "members", "teams", "settings"];
@@ -434,7 +434,13 @@ export function App() {
 						<br />
 						<span>Shared direction.</span>
 					</p>
-					<button type="button" className="account-trigger" aria-label="Your account" onClick={() => navigatePage("account")}>
+					<button
+						type="button"
+						className="account-trigger"
+						aria-current={route.screen === "account" ? "page" : undefined}
+						aria-label="Your account"
+						onClick={() => navigatePage("account")}
+					>
 						<span className="account-avatar">{me.user.name.slice(0, 1).toUpperCase()}</span>
 						<span>
 							<strong>{me.user.name}</strong>
@@ -1294,7 +1300,6 @@ function NamespaceHome({
 		<>
 			<div className="page-title home-title">
 				<div>
-					<p className="eyebrow">All namespaces</p>
 					<h1>
 						Agent work.
 						<br />
@@ -1309,8 +1314,14 @@ function NamespaceHome({
 			</div>
 			<div className="home-toolbar">
 				<p>
-					<strong>{me.namespaces.length}</strong> namespaces <span className="toolbar-dot">/</span>{" "}
-					<strong>{loading ? "—" : Object.values(spaces).reduce((n, w) => n + w.repositories.length, 0)}</strong> repositories
+					{count(me.namespaces.length, "namespace")} <span className="toolbar-dot">/</span>{" "}
+					{loading
+						? "— repositories"
+						: count(
+								Object.values(spaces).reduce((n, w) => n + w.repositories.length, 0),
+								"repository",
+								"repositories",
+							)}
 					{Object.keys(failures).length > 0 && <small>Counts include available namespaces.</small>}
 				</p>
 				<label className="namespace-search">
@@ -1347,7 +1358,7 @@ function NamespaceHome({
 								<strong>{row.repository!.name}</strong>
 								<small>{row.namespace.name}</small>
 							</span>
-							<span className="motion-count">{row.active} active workspaces</span>
+							<span className="motion-count">{count(row.active, "active workspace")}</span>
 							<span className="surface-count">{count(row.overlaps, "shared surface")}</span>
 							<Icon name="arrow" />
 						</button>
@@ -1355,14 +1366,13 @@ function NamespaceHome({
 				</section>
 			)}
 			<div className="namespace-grid">
-				{matches.map((w, index) => {
+				{matches.map((w) => {
 					const data = spaces[w.id];
 					return (
 						<section className={`namespace-card ${w.kind}`} key={w.id}>
 							<div className="namespace-card-top">
 								<span className="namespace-avatar">{w.name.slice(0, 1).toUpperCase()}</span>
 								<span className="space-kind">{w.kind === "personal" ? "Personal" : "Shared"}</span>
-								<span className="space-index">{String(index + 1).padStart(2, "0")}</span>
 							</div>
 							<button className="namespace-card-title" type="button" onClick={() => open(w.id)}>
 								<h2>{w.name}</h2>
@@ -1380,7 +1390,7 @@ function NamespaceHome({
 								) : data ? (
 									<>
 										<p className="namespace-card-meta">
-											{data.repositories.length} repositories <span>· {data.role}</span>
+											{count(data.repositories.length, "repository", "repositories")} <span>· {data.role}</span>
 										</p>
 										{data.repositories.length ? (
 											data.repositories.slice(0, 3).map((r) => (

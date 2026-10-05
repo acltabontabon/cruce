@@ -24,6 +24,8 @@ The scenario scripts fix commit timestamps and isolate signing/hooks for their d
 
 After removing the deployment domain on 2026-10-05, typecheck, lint, all 95 unit/integration tests, 14 browser journeys, deterministic scenario verification, the offline build and release metadata checks passed. The five local walkthrough screenshots were refreshed. Cloudflare type generation, Git protocol tests and browser/build checks ran with local socket access after the sandbox blocked type generation. Lint reports an existing Biome configuration deprecation notice; it passes. No live verification was rerun.
 
+The console polish on 2026-10-05 also passed typecheck, lint, all 95 unit/integration tests, 14 browser journeys, deterministic scenario verification and the offline build. Desktop/mobile screenshots were inspected, the namespace search icon was measured as vertically centered, and the account hover was checked with rounded corners and balanced padding. The five walkthrough screenshots were refreshed. No live verification was rerun.
+
 Earlier local evidence recorded 88 unit/integration tests and 13 browser journeys before this removal. Provider results below are preserved from repository history at the canonical Git foundation (`8c1dfdd`); they do not verify this change.
 
 | Layer | Latest recorded evidence | Remaining boundary |

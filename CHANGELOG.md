@@ -12,6 +12,8 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Changed
 
+- Tidy console home hierarchy, compact spacing, readable namespace details, aligned search controls and subtle rounded account/sidebar hover states; correct singular repository/workspace counts.
+
 - Clarify provider versus source/evidence terminology, durable workspace/fork ownership, advisory overlap and exact-revision human promotion without changing domain behavior.
 
 - End Cruce coordination at human-reviewed reconciliation into canonical Git; CI, releases, deployments and runtimes remain external.
