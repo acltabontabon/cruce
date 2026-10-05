@@ -400,10 +400,10 @@ export function App() {
 						}}
 					>
 						<p className="cost">
-							Creates canonical Git storage in your connected Cloudflare account. Agent workspaces consume isolated forks under namespace
+							Creates canonical Git storage managed by this Cruce installation. Agent workspaces consume isolated forks under namespace
 							policy.
 						</p>
-						{!namespace.account && <p>Connect Cloudflare in namespace settings before creating a repository.</p>}
+						{!namespace.storage.ready && <p>{namespace.storage.reason}</p>}
 						<div className="form-fields">
 							<label>
 								Repository name

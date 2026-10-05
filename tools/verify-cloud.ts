@@ -1,6 +1,6 @@
 /** Explicit, opt-in real-provider convergence check; authentication and authority are fixtures. */
 import { mkdir, writeFile } from "node:fs/promises";
-import { ResourceBoundary } from "../src/worker/artifacts.ts";
+import { ArtifactsRestHost } from "../src/worker/artifacts.ts";
 import { CONVERGENCE_BUDGET, convergenceRuntime, nativeGit, runConvergenceScenario } from "./verification/convergence.ts";
 
 const accountId = process.env.CRUCE_TEST_ACCOUNT_ID,
@@ -11,13 +11,12 @@ console.log(
 );
 const namespace = `cruce-check-${Date.now().toString(36)}`;
 const fixture = convergenceRuntime(namespace);
-const boundary = new ResourceBoundary(fixture.store, fixture.env, { namespace });
+const host = new ArtifactsRestHost(accountId, namespace, token);
 const testedCommit = await nativeGit(["rev-parse", "HEAD"]);
 const workingTreeDirty = Boolean(await nativeGit(["status", "--porcelain"]));
 await mkdir("dist/live-verification", { recursive: true });
 try {
-	await boundary.connect({ accountId, token, label: "Explicit two-writer convergence verification" }, fixture.human.actor.id);
-	const result = await runConvergenceScenario(fixture, await boundary.host());
+	const result = await runConvergenceScenario(fixture, host);
 	await writeFile(
 		"dist/live-verification/result.json",
 		JSON.stringify(

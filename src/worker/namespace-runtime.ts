@@ -12,15 +12,14 @@ import type {
 	ResourcePolicy,
 	User,
 } from "../shared/platform.ts";
-import { ResourceBoundary } from "./artifacts.ts";
-import { Serial, sqlStore } from "./store.ts";
+import { ResourceBoundary, type StorageEnv } from "./artifacts.ts";
+import { sqlStore } from "./store.ts";
 export interface ConnectionGrant {
 	actor: Actor;
 	scopes?: string[];
 	repositories?: string[];
 }
-export class NamespaceRuntime extends DurableObject<{ CRUCE_SECRET?: string }> {
-	private accounts = new Serial();
+export class NamespaceRuntime extends DurableObject<StorageEnv> {
 	private store = sqlStore(this.ctx.storage.sql);
 	private controller() {
 		const state = this.store.get<NamespaceState>("namespace");
@@ -63,7 +62,7 @@ export class NamespaceRuntime extends DurableObject<{ CRUCE_SECRET?: string }> {
 			members: maintain ? c.state.members : {},
 			teams: maintain ? c.state.teams : [],
 			policy: c.state.policy,
-			account: new ResourceBoundary(this.store, this.env, { namespace: c.state.namespace.id }).account(),
+			storage: new ResourceBoundary(this.store, this.env, { namespace: c.state.namespace.id }).storage(),
 			reservations: maintain ? c.state.reservations : [],
 			budget: c.budget(),
 			permissions: { maintain, owner: maintain && a.role === "owner" },
@@ -105,33 +104,11 @@ export class NamespaceRuntime extends DurableObject<{ CRUCE_SECRET?: string }> {
 		c.setPolicy(c.authority(grant.actor), policy);
 		this.save(c);
 	}
-	async account(grant: ConnectionGrant, input: { accountId: string; token: string; label?: string } | null) {
-		return this.accounts.run(async () => {
-			const c = this.controller(),
-				a = c.authority(grant.actor);
-			if (a.actor.kind !== "human" || a.role !== "owner") throw new DomainError(403, "Namespace owner required");
-			const boundary = new ResourceBoundary(this.store, this.env, { namespace: c.state.namespace.id });
-			if (input) {
-				const old = boundary.account();
-				if (old && old.accountId !== input.accountId && c.state.reservations.some((r) => r.state !== "released"))
-					throw new DomainError(409, "An account with retained resources cannot be replaced");
-				return boundary.connect(input, a.actor.id);
-			}
-			boundary.disconnect();
-			return null;
-		});
-	}
-	async verifyAccount(grant: ConnectionGrant) {
-		const c = this.controller(),
-			a = c.authority(grant.actor);
-		if (a.actor.kind !== "human" || !["owner", "maintainer"].includes(a.role)) throw new DomainError(403, "Namespace maintainer required");
-		return new ResourceBoundary(this.store, this.env, { namespace: c.state.namespace.id }).verify();
-	}
 	reserve(grant: ConnectionGrant, repositoryId: string, id: string, fingerprint: string, action: ResourceAction, workspaceId?: string) {
 		const c = this.controller(),
 			a = c.authority(grant.actor, repositoryId, grant.scopes, grant.repositories);
-		if (!this.store.get("resource-account")) throw new DomainError(409, "Connect the namespace Cloudflare account first");
 		const reservation = c.reserve(a, id, fingerprint, action, workspaceId);
+		new ResourceBoundary(this.store, this.env, { namespace: c.state.namespace.id }).bind();
 		this.save(c);
 		return reservation;
 	}
@@ -142,11 +119,12 @@ export class NamespaceRuntime extends DurableObject<{ CRUCE_SECRET?: string }> {
 		r.state = state;
 		this.save(c);
 	}
-	/** Internal DO RPC only; never returned by an HTTP route. The credential remains sealed. */
+	/** Internal DO RPC only: pinned storage identity, never credentials. */
 	resourceConfiguration() {
 		return {
 			namespace: this.controller().state.namespace.id,
-			account: this.store.get("resource-account"),
+			binding: this.store.get("storage-binding"),
+			legacyAccount: Boolean(this.store.get("resource-account")),
 			policy: this.controller().state.policy,
 		};
 	}

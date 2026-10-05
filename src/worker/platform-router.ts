@@ -209,25 +209,6 @@ export async function platformRoute(
 		await namespace.invite(grant, { id: crypto.randomUUID(), ...body, tokenHash: await hash(token), expiresAt: Date.now() + 7 * 86400000 });
 		return json({ url: `${url.origin}/invite/${namespaceId}#${token}` });
 	}
-	if (parts[3] === "account" && parts[4] === "verify" && request.method === "POST") return json(await namespace.verifyAccount(grant));
-	if (parts[3] === "account" && request.method === "POST") {
-		const body = z
-			.union([
-				z.object({ disconnect: z.literal(true) }),
-				z.object({
-					accountId: z
-						.string()
-						.trim()
-						.toLowerCase()
-						.pipe(z.string().regex(/^[0-9a-f]{32}$/)),
-					// Copied tokens often carry surrounding whitespace, which Cloudflare rejects as an authentication error.
-					token: z.string().trim().pipe(z.string().min(20).max(400)),
-					label: displayName.optional(),
-				}),
-			])
-			.parse(await input(request));
-		return json(await namespace.account(grant, "disconnect" in body ? null : body));
-	}
 	if (parts[3] === "policy" && request.method === "POST") {
 		const body = z
 			.object({

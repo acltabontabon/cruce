@@ -1,9 +1,8 @@
 import { DomainError } from "../core/errors.ts";
-import type { ResourceAccount } from "../shared/platform.ts";
-import { type SealingEnv, seal, unseal } from "./sealing.ts";
+import type { ResourceStorage } from "../shared/platform.ts";
 import type { Store } from "./store.ts";
 
-/** Resource calls use only the namespace's explicitly connected, sealed credential. */
+/** Resource calls use the explicitly configured installation storage. */
 export interface RepoRef {
 	name: string;
 	id: string;
@@ -29,7 +28,7 @@ type Send = typeof fetch;
  */
 export function providerMessage(status: number, codes: number[]) {
 	if (status === 401 || status === 403 || codes.some((c) => c === 10000 || c === 1000 || c === 9109))
-		return "Cloudflare rejected the namespace's API token. Check that it is active and grants Artifacts edit on this account, then reconnect it in namespace settings.";
+		return "Cloudflare rejected storage access. Ask the installation administrator to check Artifacts permissions.";
 	if (status === 404) return "Cloudflare could not find the requested storage.";
 	if (status === 409) return "Cloudflare reported a conflicting change. Retry the same operation.";
 	if (status === 429) return "Cloudflare is rate limiting requests. Retry the same operation shortly.";
@@ -60,7 +59,7 @@ async function cloudflare<T>(send: Send, token: string, path: string, init: Requ
 	return body.result as T;
 }
 
-/** Artifacts in a connected account, through the public REST API. Same credential discipline as the binding host. */
+/** Explicit REST provider-test harness; production uses ArtifactsBindingHost. */
 export class ArtifactsRestHost implements RepositoryHost {
 	constructor(
 		readonly accountId: string,
@@ -161,54 +160,8 @@ export class ArtifactsRestHost implements RepositoryHost {
 			throw error;
 		}
 	}
-	async gitRequest(name: string, request: Request, expectedId?: string): Promise<Response> {
-		const info = await this.info(name);
-		if (expectedId && info.id !== expectedId) throw new DomainError(409, "Artifacts repository identity changed");
-		const remote = new URL(info.remote);
-		if (
-			remote.protocol !== "https:" ||
-			remote.hostname !== `${this.accountId}.artifacts.cloudflare.net` ||
-			remote.username ||
-			remote.password ||
-			remote.search ||
-			remote.hash
-		)
-			throw new DomainError(502, "Invalid Artifacts Git remote");
-		const input = new URL(request.url);
-		const endpoint = input.pathname.endsWith("/info/refs") ? "info/refs" : input.pathname.split("/").at(-1)!;
-		const service = endpoint === "info/refs" ? input.searchParams.get("service") : endpoint;
-		if (
-			!["git-upload-pack", "git-receive-pack"].includes(service ?? "") ||
-			(endpoint === "info/refs" ? request.method !== "GET" : request.method !== "POST")
-		)
-			throw new DomainError(400, "Unsupported Git request");
-		const target = `${remote.href}/${endpoint}${endpoint === "info/refs" ? `?service=${service}` : ""}`;
-		return (
-			await this.withToken(name, service === "git-receive-pack" ? "write" : "read", async (token) => {
-				const headers = new Headers({ authorization: `Bearer ${token}` });
-				for (const key of ["content-type", "content-encoding", "git-protocol"]) {
-					const value = request.headers.get(key);
-					if (value) headers.set(key, value);
-				}
-				// Native Worker fetch requires its global receiver, not the host instance.
-				const send = this.send;
-				const response = await send(target, {
-					method: request.method,
-					headers,
-					body: request.method === "POST" ? await boundedBody(request) : undefined,
-					redirect: "manual",
-				});
-				// Consume before revoking the token; return only Git payload headers, never cookies or redirects.
-				if (!response.ok) {
-					await response.body?.cancel();
-					throw new DomainError(502, "Artifacts Git request failed");
-				}
-				const bytes = await boundedBody(response);
-				return new Response(bytes, {
-					headers: { "content-type": response.headers.get("content-type") ?? "application/octet-stream", "cache-control": "no-store" },
-				});
-			})
-		).result;
+	gitRequest(name: string, request: Request, expectedId?: string) {
+		return forwardGit(this, this.accountId, this.send, name, request, expectedId);
 	}
 
 	async withToken<T>(name: string, scope: "read" | "write", fn: (token: string) => Promise<T>) {
@@ -231,71 +184,248 @@ export class ArtifactsRestHost implements RepositoryHost {
 	}
 }
 
-interface StoredAccount extends ResourceAccount {
-	sealed?: string;
+async function forwardGit(
+	host: RepositoryHost,
+	accountId: string,
+	send: Send,
+	name: string,
+	request: Request,
+	expectedId?: string,
+): Promise<Response> {
+	const info = await host.info(name);
+	if (expectedId && info.id !== expectedId) throw new DomainError(409, "Artifacts repository identity changed");
+	const remote = new URL(info.remote);
+	if (
+		remote.protocol !== "https:" ||
+		remote.hostname !== `${accountId}.artifacts.cloudflare.net` ||
+		remote.username ||
+		remote.password ||
+		remote.search ||
+		remote.hash
+	)
+		throw new DomainError(502, "Invalid Artifacts Git remote");
+	const input = new URL(request.url);
+	const endpoint = input.pathname.endsWith("/info/refs") ? "info/refs" : input.pathname.split("/").at(-1)!;
+	const service = endpoint === "info/refs" ? input.searchParams.get("service") : endpoint;
+	if (
+		!["git-upload-pack", "git-receive-pack"].includes(service ?? "") ||
+		(endpoint === "info/refs" ? request.method !== "GET" : request.method !== "POST")
+	)
+		throw new DomainError(400, "Unsupported Git request");
+	const target = `${remote.href}/${endpoint}${endpoint === "info/refs" ? `?service=${service}` : ""}`;
+	return (
+		await host.withToken(name, service === "git-receive-pack" ? "write" : "read", async (token) => {
+			const headers = new Headers({ authorization: `Bearer ${token}` });
+			for (const key of ["content-type", "content-encoding", "git-protocol"]) {
+				const value = request.headers.get(key);
+				if (value) headers.set(key, value);
+			}
+			// Native Worker fetch requires its global receiver, not the host instance.
+			const response = await send(target, {
+				method: request.method,
+				headers,
+				body: request.method === "POST" ? await boundedBody(request) : undefined,
+				redirect: "manual",
+			});
+			// Consume before revoking the token; return only Git payload headers, never cookies or redirects.
+			if (!response.ok) {
+				await response.body?.cancel();
+				throw new DomainError(502, "Artifacts Git request failed");
+			}
+			const bytes = await boundedBody(response);
+			return new Response(bytes, {
+				headers: { "content-type": response.headers.get("content-type") ?? "application/octet-stream", "cache-control": "no-store" },
+			});
+		})
+	).result;
+}
+
+export interface StorageEnv {
+	ARTIFACTS?: Artifacts;
+	CRUCE_STORAGE_ACCOUNT_ID?: string;
+	CRUCE_ARTIFACTS_NAMESPACE?: string;
 }
 export interface NamespaceResources {
 	namespace: string;
 }
+export interface StorageBinding {
+	accountId: string;
+	namespace: string;
+}
 
+/** No provider calls or writes when inspecting configuration. */
 export class ResourceBoundary {
 	constructor(
 		readonly store: Store,
-		readonly env: SealingEnv,
+		readonly env: StorageEnv,
 		readonly resources: NamespaceResources,
 		readonly send: Send = fetch,
 	) {}
-	/** Public view: never includes the credential. */
-	account(): ResourceAccount | undefined {
-		const stored = this.store.get<StoredAccount>("resource-account");
-		if (stored) {
-			const { sealed: _secret, ...view } = stored;
-			return view;
-		}
-		return undefined;
+	storage(): ResourceStorage {
+		if (this.store.get("resource-account"))
+			return {
+				mode: "deployment",
+				ready: false,
+				reason: "Existing connected-account storage requires an explicit storage transition by the administrator",
+			};
+		const accountId = this.env.CRUCE_STORAGE_ACCOUNT_ID;
+		const namespace = this.env.CRUCE_ARTIFACTS_NAMESPACE;
+		if (
+			!this.env.ARTIFACTS ||
+			!accountId ||
+			!/^[0-9a-f]{32}$/.test(accountId) ||
+			!namespace ||
+			!/^[a-z0-9][a-z0-9._-]{0,62}$/.test(namespace)
+		)
+			return { mode: "deployment", ready: false, reason: "Installation storage is unavailable; contact the administrator" };
+		const pinned = this.store.get<StorageBinding>("storage-binding");
+		if (pinned && (pinned.accountId !== accountId || pinned.namespace !== namespace))
+			return { mode: "deployment", ready: false, reason: "Installation storage identity changed; restore the recorded configuration" };
+		return { mode: "deployment", ready: true };
 	}
-	async connect(raw: { accountId: string; token: string; label?: string }, actor: string): Promise<ResourceAccount> {
-		// Pasted credentials often carry surrounding whitespace that Cloudflare reports as an authentication error.
-		const input = { ...raw, accountId: raw.accountId.trim().toLowerCase(), token: raw.token.trim() };
-		if (!/^[0-9a-f]{32}$/.test(input.accountId)) throw new DomainError(400, "Cloudflare account ID required");
-		if (input.token.length < 20 || input.token.length > 400) throw new DomainError(400, "Cloudflare API token required");
-		await cloudflare(this.send, input.token, `/accounts/${input.accountId}/artifacts/namespaces?limit=1`);
-		const account: StoredAccount = {
-			mode: "connected",
-			accountId: input.accountId,
-			label: input.label?.slice(0, 80) || "Connected Cloudflare account",
-			credential: "stored",
-			connectedBy: actor,
-			at: Date.now(),
-			sealed: await seal(this.env, { token: input.token }),
-		};
-		this.store.put("resource-account", account);
-		return this.account()!;
+	binding(): StorageBinding {
+		const storage = this.storage();
+		if (!storage.ready) throw new DomainError(409, storage.reason);
+		return { accountId: this.env.CRUCE_STORAGE_ACCOUNT_ID!, namespace: this.env.CRUCE_ARTIFACTS_NAMESPACE! };
 	}
-	/** Re-checks the sealed credential against Artifacts without changing anything. */
-	async verify(): Promise<{ ok: boolean; checkedAt: number; error?: string }> {
-		const account = this.account();
-		if (!account) throw new DomainError(409, "No Cloudflare account connected");
-		try {
-			await cloudflare(this.send, await this.token(), `/accounts/${account.accountId}/artifacts/namespaces?limit=1`);
-			return { ok: true, checkedAt: Date.now() };
-		} catch (error) {
-			if (!(error instanceof DomainError)) throw error;
-			return { ok: false, checkedAt: Date.now(), error: error.message };
-		}
-	}
-	disconnect() {
-		this.store.delete("resource-account");
-	}
-	private async token(): Promise<string> {
-		const stored = this.store.get<StoredAccount>("resource-account");
-		if (!stored?.sealed) throw new DomainError(409, "Connect a Cloudflare account with an Artifacts token first");
-		return (await unseal<{ token: string }>(this.env, stored.sealed)).token;
+	/** Called only by explicit resource mutations after the namespace policy gate. */
+	bind() {
+		const binding = this.binding();
+		if (!this.store.get("storage-binding")) this.store.put("storage-binding", binding);
 	}
 	async host(): Promise<RepositoryHost> {
-		const account = this.account();
-		if (!account) throw new DomainError(409, "No Cloudflare account connected");
-		return new ArtifactsRestHost(account.accountId, this.resources.namespace, await this.token(), this.send);
+		const binding = this.binding();
+		return new ArtifactsBindingHost(this.env.ARTIFACTS!, binding.accountId, binding.namespace, this.resources.namespace, this.send);
+	}
+}
+
+function providerCode(error: unknown): string | undefined {
+	return error && typeof error === "object" && "code" in error ? String(error.code) : undefined;
+}
+
+/** One deployment binding; stable application namespace IDs isolate physical repo names. */
+export class ArtifactsBindingHost implements RepositoryHost {
+	constructor(
+		private readonly artifacts: Artifacts,
+		readonly accountId: string,
+		readonly storageNamespace: string,
+		readonly namespaceId: string,
+		private readonly send: Send = fetch,
+	) {}
+	private physical(name: string) {
+		if (!/^[a-zA-Z0-9._-]+$/.test(name) || !/^[a-zA-Z0-9_-]+$/.test(this.namespaceId))
+			throw new DomainError(400, "Invalid storage identity");
+		return `ns-${this.namespaceId}-${name}`;
+	}
+	private async provider<T>(run: () => Promise<T>): Promise<T> {
+		try {
+			return await run();
+		} catch (error) {
+			if (error instanceof DomainError) throw error;
+			const code = providerCode(error);
+			if (code === "NOT_FOUND") throw new DomainError(404, "Artifacts repository unavailable");
+			if (code === "ALREADY_EXISTS") throw new DomainError(409, "Artifacts repository already exists; retry the same operation");
+			throw new DomainError(code === "RATE_LIMITED" ? 429 : 502, "Artifacts operation unavailable; retry the same operation identity");
+		}
+	}
+	private async repository<T>(name: string, run: (repo: ArtifactsRepo) => Promise<T>) {
+		using repo = await this.provider(() => this.artifacts.get(this.physical(name)));
+		return await run(repo);
+	}
+	async info(name: string) {
+		const info = await this.repository(name, (repo) => this.provider(() => repo.info()));
+		const remote = new URL(info.remote);
+		if (
+			remote.protocol !== "https:" ||
+			remote.hostname !== `${this.accountId}.artifacts.cloudflare.net` ||
+			remote.username ||
+			remote.password ||
+			remote.search ||
+			remote.hash ||
+			remote.pathname !== `/git/${this.storageNamespace}/${this.physical(name)}.git`
+		)
+			throw new DomainError(409, "Installation storage account mismatch");
+		if (info.name !== this.physical(name)) throw new DomainError(409, "Artifacts repository address mismatch");
+		return { ...info, name };
+	}
+	private async revokeOutstanding(name: string) {
+		await this.repository(name, async (repo) => {
+			for (let page = 0; page < 20; page++) {
+				const { tokens, total } = await this.provider(() => repo.listTokens());
+				if (total > tokens.length) throw new DomainError(503, "Repository token inventory is incomplete; cleanup cannot be confirmed");
+				const active = tokens.filter((token) => token.state === "active");
+				for (const token of active) await this.provider(() => repo.revokeToken(token.id));
+				if (!active.length) return;
+			}
+			throw new DomainError(503, "Repository token reconciliation needs another retry");
+		});
+	}
+	async ensure(name: string, description: string, defaultBranch = "main"): Promise<RepoRef> {
+		let created = false;
+		try {
+			await this.info(name);
+		} catch (error) {
+			if (!(error instanceof DomainError) || error.status !== 404) throw error;
+			try {
+				const initial = await this.provider(() =>
+					this.artifacts.create(this.physical(name), { description, setDefaultBranch: defaultBranch }),
+				);
+				await this.repository(name, (repo) => this.provider(() => repo.revokeToken(initial.token)));
+				created = true;
+			} catch (error) {
+				if (!(error instanceof DomainError) || error.status !== 409) throw error;
+			}
+		}
+		const info = await this.info(name);
+		if (info.description !== description) throw new DomainError(409, "Artifacts repository ownership mismatch");
+		await this.revokeOutstanding(name);
+		return { name, id: info.id, remote: info.remote, created };
+	}
+	async fork(source: string, target: string, description: string): Promise<RepoRef> {
+		let created = false;
+		try {
+			await this.info(target);
+		} catch (error) {
+			if (!(error instanceof DomainError) || error.status !== 404) throw error;
+			try {
+				const initial = await this.repository(source, (repo) =>
+					this.provider(() => repo.fork(this.physical(target), { description, defaultBranchOnly: true, readOnly: false })),
+				);
+				await this.repository(target, (repo) => this.provider(() => repo.revokeToken(initial.token)));
+				created = true;
+			} catch (error) {
+				if (!(error instanceof DomainError) || error.status !== 409) throw error;
+			}
+		}
+		const info = await this.info(target);
+		if (info.description !== description || info.source !== `artifacts:${this.storageNamespace}/${this.physical(source)}`)
+			throw new DomainError(409, "Fork ownership or parent mismatch");
+		await this.revokeOutstanding(target);
+		return { name: target, id: info.id, remote: info.remote, created };
+	}
+	async remove(name: string, expectedId?: string) {
+		try {
+			const info = await this.info(name);
+			if (!expectedId || info.id !== expectedId) throw new DomainError(409, "Artifacts repository identity changed");
+			await this.provider(() => this.artifacts.delete(this.physical(name)));
+			return false;
+		} catch (error) {
+			if (error instanceof DomainError && error.status === 404) return true;
+			throw error;
+		}
+	}
+	async withToken<T>(name: string, scope: "read" | "write", fn: (token: string) => Promise<T>) {
+		return this.repository(name, async (repo) => {
+			const token = await this.provider(() => repo.createToken(scope, 60));
+			try {
+				return { result: await fn(token.plaintext), tokenId: token.id };
+			} finally {
+				await this.provider(() => repo.revokeToken(token.id));
+			}
+		});
+	}
+	gitRequest(name: string, request: Request, expectedId?: string) {
+		return forwardGit(this, this.accountId, this.send, name, request, expectedId);
 	}
 }
 

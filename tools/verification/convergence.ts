@@ -87,7 +87,7 @@ export function convergenceRuntime(namespace: string) {
 		policy: { protectedPaths: [], requiredEvidence: ["tests"], resourceRules: {} },
 	};
 	controller.repository(controller.authority(owner), repository);
-	const env = { CRUCE_SECRET: crypto.randomUUID() };
+	const env = {};
 	const runtime = new RepositoryRuntime(
 		store,
 		new GitWorkspace(new MemoryFs() as never),
@@ -103,7 +103,7 @@ export function convergenceRuntime(namespace: string) {
 			settle: (id, state) => {
 				controller.state.reservations.find((r) => r.id === id)!.state = state;
 			},
-			resourceConfiguration: () => ({ namespace, account: store.get("resource-account"), policy: controller.state.policy }),
+			resourceConfiguration: () => ({ namespace, binding: undefined, legacyAccount: false, policy: controller.state.policy }),
 		},
 		env,
 		() => CONVERGENCE_TIME,

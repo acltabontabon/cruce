@@ -8,5 +8,6 @@ Focused records of consequential decisions whose rationale is larger than its ow
 | --- | --- | --- |
 | [0001 — Product boundary reset](0001-product-boundary-reset.md) | Accepted 2026-10-06 | Cruce is the durable Git coordination plane for parallel agentic development; execution, messaging, scheduling and CI/CD are out of scope. Includes the alignment audit and the keep/change/remove/defer analysis |
 | [0002 — Workspace ownership and execution attachment](0002-workspace-ownership-and-execution-attachment.md) | Accepted 2026-10-06 | Workspaces are owned by users, not agent connections; execution attachments are replaceable |
+| [0003 — Deployment-managed storage](0003-deployment-managed-storage.md) | Accepted 2026-10-06 | Installation Artifacts binding replaces namespace account connections; namespace permissions, budgets and durable storage identity remain |
 
 Add a record only for a decision that changes the product boundary, the domain model, authority or a core dependency. Number records sequentially, and never rewrite an accepted record's decision. Supersede it with a new one.

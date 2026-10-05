@@ -16,14 +16,17 @@ Cruce's first alpha, **0.1.0-alpha.1**, was released on 2026-10-05. Future relea
 
 ## One-time GitHub setup
 
-The workflow in `.github/workflows/release.yml` deploys Cruce's own Worker, `cruce`, in the account already named in `cloudflare.config.ts`. It hosts Cruce itself; it does not implement deployment for repositories coordinated by Cruce.
+The workflow in `.github/workflows/release.yml` deploys Cruce's own Worker, `cruce`, in the account supplied through `CLOUDFLARE_ACCOUNT_ID`. It hosts Cruce itself; it does not implement deployment for repositories coordinated by Cruce.
 
-1. Configure the GitHub `production` environment. Add `CLOUDFLARE_API_TOKEN` as an environment secret, scoped to the existing Cloudflare account and the deployment permissions needed by this Worker and its bindings. Use a deployment token, not the namespace's connected-account credential or an Artifacts repository write token.
+1. Configure the GitHub `production` environment. Add `CLOUDFLARE_API_TOKEN` as an environment secret, scoped to the existing Cloudflare account and the deployment permissions needed by this Worker and its bindings. The runtime Artifacts binding requires no customer API token. Never use an Artifacts repository Git token for deployment.
 2. Set these environment variables in the GitHub `production` environment (Settings → Environments → production → Environment variables):
 
    | Variable | Value |
    | --- | --- |
-   | `CRUCE_PUBLIC_ORIGIN` | `https://cruce.acltabontabon.com` |
+   | `CLOUDFLARE_ACCOUNT_ID` | Your installation account ID |
+   | `CRUCE_ARTIFACTS_NAMESPACE` | Stable storage namespace, e.g. `cruce` |
+   | `CRUCE_WORKER_NAME` | Worker name, e.g. `cruce` |
+   | `CRUCE_PUBLIC_ORIGIN` | Your installation HTTPS origin |
    | `CRUCE_ACCESS_ISSUER` | Existing Access team URL from `.env.test` |
    | `CRUCE_ACCESS_AUD` | Existing Access application audience from `.env.test` |
 
@@ -53,4 +56,4 @@ To restore older code, prepare a new version on `main` with a concise rollback c
 
 ## Direct test deployment without a release
 
-An explicit request may update the single configured test Worker without bumping the package version or creating a release tag. Run the contributor checks, load `.env.test`, validate with `cf deploy --dry-run`, and use `pnpm deploy:test`. The current config attaches `cruce.acltabontabon.com`; keep the origin and Access destinations consistent with that hostname. This manual path does not create a GitHub release or change any published tag. Record the source commit, deployment version and hosted verification limits in the test environment guide.
+An explicit request may update the single configured test Worker without bumping the package version or creating a release tag. Run the contributor checks, load `.env.test`, validate with `cf deploy --dry-run`, and use `pnpm deploy:test`. The account, Worker name, storage namespace and hostname come from installation environment variables; keep the origin and Access destinations consistent with that hostname. This manual path does not create a GitHub release or change any published tag. Record the source commit, deployment version and hosted verification limits in the test environment guide.

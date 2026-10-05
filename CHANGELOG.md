@@ -30,6 +30,9 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Changed
 
+- Configure Cloudflare Artifacts once per installation through cf; repositories and workspaces inherit storage without namespace account/token setup. Storage identity changes and existing connected-account source fail closed pending an explicit administrator transition.
+- Deployment account, origin, Worker name and storage namespace use portable installation settings for self-hosted/open-source installs.
+
 - Redesign the console around what needs a person. Home lists your repositories sorted by attention. A repository opens with an attention bar ("1 change needs your review", "1 workspace behind canonical") and four tabs: Changes, Workspaces, History and Settings. Old Overview, Code, Work and Artifacts links redirect.
 - Review a change as one checklist for its exact revision: built on current canonical, policy checks a maintainer confirms in one click, concerns, approval, then **Promote to *branch***, which explains exactly what it moves. The diff opens with the first file shown. Stale and superseded changes are labelled and collapsed.
 - Describe workspaces by state (Active, Not reporting, Detached), canonical relation (Up to date, Behind canonical) and overlap in a sentence, and show continuation as "Started in Claude Code · continued in Codex". Release a checkout and delete a fork from the workspace page.

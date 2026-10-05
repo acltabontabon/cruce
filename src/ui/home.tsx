@@ -160,7 +160,7 @@ export function NamespaceHome({
 										{w.kind === "personal" ? "Personal" : "Shared"}
 										{data && ` · ${data.role}`}
 										{data && ` · ${plural(data.repositories.length, "repository", "repositories")}`}
-										{data && !data.account && " · Cloudflare account not connected"}
+										{data && !data.storage.ready && " · Installation storage unavailable"}
 									</small>
 								</span>
 								<Icon name="arrow" />

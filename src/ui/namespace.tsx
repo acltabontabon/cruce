@@ -1,10 +1,9 @@
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import type { Namespace, Team } from "../shared/platform.ts";
 import { Empty, Form, value } from "./controls.tsx";
 import { Icon } from "./design.tsx";
 import { AttentionPills } from "./home.tsx";
 import type { Mutate } from "./repository.tsx";
-import { request } from "./request.ts";
 import { activityText, ago } from "./status.ts";
 import type { NamespaceView } from "./types.ts";
 
@@ -16,82 +15,18 @@ const actionLabels: Record<string, { label: string; detail: string }> = {
 	"workspace.cleanup": { label: "Delete workspace forks", detail: "Only after every ref is retained." },
 };
 
-function AccountCard({ namespace, base, mutate }: { namespace: NamespaceView; base: string; mutate: Mutate }) {
-	const [replacing, setReplacing] = useState(false),
-		[check, setCheck] = useState<{ ok: boolean; error?: string; checkedAt: number }>(),
-		[checking, setChecking] = useState(false),
-		[error, setError] = useState("");
-	const account = namespace.account;
+function StorageCard({ namespace }: { namespace: NamespaceView }) {
 	return (
 		<section className="settings-card">
-			<h2>Cloudflare account</h2>
-			{account ? (
-				<p>
-					<strong>Connected</strong> · {account.label} · <code>{account.accountId}</code>
-					{account.at ? ` · since ${ago(account.at)}` : ""}
-				</p>
-			) : (
-				<p>
-					<strong>Not connected.</strong> Repositories and workspaces keep their Git in your own Cloudflare account. Connect one to create
-					repositories.
-				</p>
-			)}
-			{account && namespace.permissions.maintain && (
-				<div className="actions">
-					<button
-						type="button"
-						disabled={checking}
-						onClick={() => {
-							setChecking(true);
-							setError("");
-							void request<{ ok: boolean; error?: string; checkedAt: number }>(`${base}/account/verify`, {})
-								.then(setCheck)
-								.catch((e) => setError((e as Error).message))
-								.finally(() => setChecking(false));
-						}}
-					>
-						{checking ? "Checking…" : "Check connection"}
-					</button>
-					{namespace.permissions.owner && !replacing && (
-						<button type="button" className="text-button" onClick={() => setReplacing(true)}>
-							Replace token
-						</button>
-					)}
-				</div>
-			)}
-			{check && (
-				<p role="status" className={check.ok ? "check-ok" : "check-failed"}>
-					{check.ok ? "Working. Cruce can reach Artifacts with the stored token." : check.error}
-				</p>
-			)}
-			{error && <p role="alert">{error}</p>}
-			{namespace.permissions.owner && (!account || replacing) && (
-				<Form
-					label={account ? "Save new token" : "Connect account"}
-					submit={async (d) => {
-						await mutate(`${base}/account`, { accountId: value(d, "accountId"), token: value(d, "token"), label: value(d, "label") });
-						setReplacing(false);
-						setCheck(undefined);
-					}}
-				>
-					<label>
-						Label
-						<input name="label" required defaultValue={account?.label} placeholder="Team Cloudflare account" />
-					</label>
-					<label>
-						Account ID
-						<input name="accountId" required autoComplete="off" spellCheck={false} defaultValue={account?.accountId} />
-					</label>
-					<label>
-						API token
-						<input name="token" type="password" required autoComplete="new-password" spellCheck={false} />
-						<small className="muted">
-							Needs Account → Artifacts → Edit, with this account under Account Resources. The token is sealed and never shown again or
-							given to agents.
-						</small>
-					</label>
-				</Form>
-			)}
+			<h2>Git storage</h2>
+			<p>
+				{namespace.storage.ready
+					? "Managed by this Cruce installation. All repositories and workspaces inherit its storage."
+					: namespace.storage.reason}
+			</p>
+			<p className="muted">
+				Cloudflare Artifacts usage is billed to the installation's account. Namespace budgets apply across its repositories.
+			</p>
 		</section>
 	);
 }
@@ -115,7 +50,7 @@ function BudgetCard({ namespace, base, mutate }: { namespace: NamespaceView; bas
 				</>
 			)}
 			<p className="muted">
-				Each repository, workspace fork, push, publication and fork deletion uses one operation in your Cloudflare account. Retries of the
+				Each repository, workspace fork, push, publication and fork deletion uses one operation in this Cruce installation. Retries of the
 				same operation don't count twice.
 			</p>
 			{namespace.permissions.maintain && (
@@ -219,7 +154,7 @@ export function NamespacePage({
 					<h1>{ns.name}</h1>
 					<p className="canonical-line">
 						{ns.kind === "personal" ? "Personal namespace" : "Shared namespace"} · you're {namespace.role}
-						{!namespace.account && " · Cloudflare account not connected"}
+						{!namespace.storage.ready && " · Installation storage unavailable"}
 					</p>
 				</div>
 				{tab === "repositories" && namespace.permissions.maintain && (
@@ -265,12 +200,12 @@ export function NamespacePage({
 						<div className="empty-state">
 							<h2>No repositories yet</h2>
 							<p>
-								A repository gives concurrent work a canonical Git history in your Cloudflare account. Agents and developers then work in
+								A repository gives concurrent work a canonical Git history in this Cruce installation. Agents and developers then work in
 								their own workspaces and propose exact revisions for review.
 							</p>
-							{!namespace.account ? (
+							{!namespace.storage.ready ? (
 								<button type="button" onClick={() => open("", "settings")}>
-									Connect a Cloudflare account first
+									View storage setup
 								</button>
 							) : (
 								namespace.permissions.maintain && (
@@ -361,7 +296,7 @@ export function NamespacePage({
 			)}
 			{tab === "settings" && (
 				<div className="settings-screen">
-					<AccountCard namespace={namespace} base={base} mutate={mutate} />
+					<StorageCard namespace={namespace} />
 					<BudgetCard namespace={namespace} base={base} mutate={mutate} />
 					{namespace.permissions.maintain && (
 						<section className="settings-card">

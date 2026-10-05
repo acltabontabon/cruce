@@ -53,6 +53,9 @@ jobs:
       group: cruce-worker-release
       cancel-in-progress: false
     env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      CRUCE_ARTIFACTS_NAMESPACE: ${{ vars.CRUCE_ARTIFACTS_NAMESPACE }}
+      CRUCE_WORKER_NAME: ${{ vars.CRUCE_WORKER_NAME }}
       CRUCE_PUBLIC_ORIGIN: ${{ vars.CRUCE_PUBLIC_ORIGIN }}
       CRUCE_ACCESS_ISSUER: ${{ vars.CRUCE_ACCESS_ISSUER }}
       CRUCE_ACCESS_AUD: ${{ vars.CRUCE_ACCESS_AUD }}
@@ -69,11 +72,7 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Require live Access configuration
-        run: |
-          : "${CRUCE_PUBLIC_ORIGIN:?Set CRUCE_PUBLIC_ORIGIN in GitHub variables}"
-          : "${CRUCE_ACCESS_ISSUER:?Set CRUCE_ACCESS_ISSUER in GitHub variables}"
-          : "${CRUCE_ACCESS_AUD:?Set CRUCE_ACCESS_AUD in GitHub variables}"
+      - run: pnpm setup:check
       - run: pnpm exec cf build --mode production
       - run: pnpm exec cf deploy --prebuilt --mode production --dry-run
       - name: Deploy tagged revision

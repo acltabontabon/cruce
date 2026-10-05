@@ -179,16 +179,7 @@ export async function fixture() {
 					role: a.role,
 					people: [user],
 					permissions: { maintain: true, owner: true },
-					...(w.state.namespace.kind === "shared"
-						? {
-								account: {
-									mode: "connected",
-									accountId: "0123456789abcdef0123456789abcdef",
-									label: "Fixture account",
-									credential: "stored",
-								},
-							}
-						: {}),
+					storage: { mode: "deployment", ready: true },
 					budget: w.budget(),
 				});
 			}
@@ -196,7 +187,6 @@ export async function fixture() {
 				w.team(a, body.id, body.name, body.members);
 				return json(res, { saved: true });
 			}
-			if (parts[3] === "account" && parts[4] === "verify") return json(res, { ok: true, checkedAt: FIXED_TIME });
 			if (parts[3] === "invitations") return json(res, { url: `http://localhost/invite/${w.state.namespace.id}#fixture-invitation` });
 			if (parts[3] === "policy") {
 				w.setPolicy(a, body);

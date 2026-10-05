@@ -96,7 +96,7 @@ async function fixture(_hosted = true) {
 			settle: (id: string, state: "complete" | "uncertain" | "released") => {
 				w.state.reservations.find((r) => r.id === id)!.state = state;
 			},
-			resourceConfiguration: () => ({ namespace: "namespace", account: {}, policy: w.state.policy }),
+			resourceConfiguration: () => ({ namespace: "namespace", binding: undefined, legacyAccount: false, policy: w.state.policy }),
 		};
 	const runtime = new RepositoryRuntime(store, git, port, {}, () => 1000);
 	runtime.initialize(repository);

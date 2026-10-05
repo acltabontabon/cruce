@@ -2,5 +2,5 @@
 # Issuer/audience also configure cloudflare.config.ts via environment variables.
 CRUCE_ACCESS_ISSUER=https://YOUR_TEAM.cloudflareaccess.com
 CRUCE_ACCESS_AUD=YOUR_APPLICATION_AUDIENCE
-# Server-only identity and connected-account credential encryption.
+# Server-only identity credential encryption. Installation storage uses the Worker binding.
 CRUCE_SECRET=change-me-to-a-long-random-string

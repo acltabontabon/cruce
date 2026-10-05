@@ -499,13 +499,12 @@ test("home lists repositories by what needs attention and keeps its filter while
 	assert.equal(await namespaceNav().getByRole("button", { name: "Repositories", exact: true }).getAttribute("aria-current"), "page");
 	await page.getByRole("heading", { name: "Fernloop", exact: true, level: 1 }).waitFor();
 });
-test("an unconnected namespace leads with account setup and creation dialogs keep focus contained", async () => {
+test("empty namespaces inherit installation storage and creation dialogs keep focus contained", async () => {
 	await page.goto(server.origin);
 	await page.getByRole("button", { name: "Alex Morgan", exact: true }).click();
 	await page.getByRole("heading", { name: "No repositories yet", exact: true }).waitFor();
-	await page.getByRole("button", { name: "Connect a Cloudflare account first", exact: true }).click();
-	assert.equal(await namespaceNav().getByRole("button", { name: "Settings", exact: true }).getAttribute("aria-current"), "page");
-	await page.getByText("Not connected.", { exact: true }).waitFor();
+	assert.equal(await page.getByRole("button", { name: "View storage setup", exact: true }).count(), 0);
+	assert.equal(await page.getByRole("button", { name: "New repository", exact: true }).count(), 2);
 	await page.screenshot({ path: "dist/ui-checks/empty-namespace.png", fullPage: true });
 	await page.goto(`${server.origin}/?namespace=fernloop`);
 	const trigger = page.getByRole("button", { name: "New repository", exact: true });
@@ -1206,17 +1205,33 @@ test("teams and invitation links are functional", async () => {
 	await page.getByRole("button", { name: "Create invitation link" }).click();
 	await page.getByRole("status").filter({ hasText: "/invite/fernloop" }).waitFor();
 });
-test("namespace settings show account status, a connection check and today's operation budget", async () => {
+test("namespace settings inherit installation storage and show today's operation budget", async () => {
 	await page.goto(`${server.origin}/?namespace=fernloop#/settings`);
-	await page.getByText("Fixture account", { exact: false }).waitFor();
-	await page.getByRole("button", { name: "Check connection", exact: true }).click();
-	await page.getByRole("status").filter({ hasText: "Working." }).waitFor();
+	await page.getByRole("heading", { name: "Git storage", exact: true }).waitFor();
+	await page.getByText("Managed by this Cruce installation.", { exact: false }).waitFor();
 	await page.getByText(/of 100/).waitFor();
 	await page.getByText("Create workspace forks", { exact: false }).waitFor();
 	assert.equal(await page.getByLabel("API token", { exact: false }).count(), 0);
-	await page.getByRole("button", { name: "Replace token", exact: true }).click();
-	await page.getByLabel("API token", { exact: false }).waitFor();
-	assert.equal(await page.getByLabel("API token", { exact: false }).getAttribute("autocomplete"), "new-password");
+	assert.equal(await page.getByRole("button", { name: "Connect account", exact: true }).count(), 0);
+	assert.equal(await page.getByRole("button", { name: "Replace token", exact: true }).count(), 0);
+});
+test("unavailable installation storage explains administrator setup without requesting customer credentials", async () => {
+	await page.route("**/api/namespaces/fernloop", async (route) => {
+		const response = await route.fetch();
+		const data = await response.json();
+		await route.fulfill({
+			response,
+			json: {
+				...data,
+				storage: { mode: "deployment", ready: false, reason: "Installation storage is unavailable; contact the administrator" },
+			},
+		});
+	});
+	await page.goto(`${server.origin}/?namespace=fernloop#/settings`);
+	await page.getByText("Installation storage is unavailable; contact the administrator", { exact: true }).waitFor();
+	assert.equal(await page.getByLabel("API token", { exact: false }).count(), 0);
+	assert.equal(await page.getByLabel("Account ID", { exact: true }).count(), 0);
+	await page.unroute("**/api/namespaces/fernloop");
 });
 test("namespace home, account and creation remain usable on mobile", async () => {
 	await page.setViewportSize({ width: 390, height: 844 });

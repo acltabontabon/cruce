@@ -1,64 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { ArtifactsRestHost, ResourceBoundary } from "../../src/worker/artifacts.ts";
-import type { Store } from "../../src/worker/store.ts";
+import { ArtifactsRestHost } from "../../src/worker/artifacts.ts";
 
 const ok = (result: unknown) => new Response(JSON.stringify({ success: true, errors: [], messages: [], result }), { status: 200 });
-const memory = (): Store => {
-	const data = new Map<string, unknown>();
-	return {
-		get: <T>(k: string) => structuredClone(data.get(k)) as T | undefined,
-		put: (k, v) => void data.set(k, structuredClone(v)),
-		delete: (k) => void data.delete(k),
-	};
-};
 const ACCOUNT = "0123456789abcdef0123456789abcdef";
 
 describe("resource boundary", () => {
-	it("verifies and seals a connected account token and never returns it", async () => {
-		const store = memory();
-		const send = vi.fn(async (url: string | URL | Request) => {
-			expect(new URL(String(url)).pathname).toBe(`/client/v4/accounts/${ACCOUNT}/artifacts/namespaces`);
-			return ok({});
-		}) as unknown as typeof fetch;
-		const boundary = new ResourceBoundary(store, { CRUCE_SECRET: "test-secret-value" }, { namespace: "cruce" }, send);
-		expect(boundary.account()).toBeUndefined();
-		const token = "cf-api-token-value-for-tests-only";
-		const view = await boundary.connect({ accountId: ACCOUNT, token }, "owner");
-		expect(send).toHaveBeenCalledTimes(1);
-		expect(view).not.toHaveProperty("capabilities");
-		expect(view).toMatchObject({ mode: "connected", accountId: ACCOUNT, credential: "stored" });
-		expect(JSON.stringify(view)).not.toContain(token);
-		expect(JSON.stringify(store.get("resource-account"))).not.toContain(token);
-		expect(await boundary.host()).toBeInstanceOf(ArtifactsRestHost);
-		boundary.disconnect();
-		expect(boundary.account()).toBeUndefined();
-	});
-	it("trims pasted credentials before verifying and sealing them", async () => {
-		const headers: string[] = [];
-		const send = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-			headers.push(new Headers(init?.headers).get("authorization") ?? "");
-			return ok({});
-		}) as unknown as typeof fetch;
-		const boundary = new ResourceBoundary(memory(), { CRUCE_SECRET: "test-secret-value" }, { namespace: "cruce" }, send);
-		const view = await boundary.connect(
-			{ accountId: ` ${ACCOUNT.toUpperCase()}\n`, token: "  cf-api-token-value-for-tests-only\n" },
-			"owner",
-		);
-		expect(headers).toEqual(["Bearer cf-api-token-value-for-tests-only"]);
-		expect(view.accountId).toBe(ACCOUNT);
-	});
-	it("rejects tokens that cannot read Artifacts", async () => {
-		const send = (async () =>
-			new Response(JSON.stringify({ success: false, errors: [{ message: "Authentication error" }] }), {
-				status: 403,
-			})) as unknown as typeof fetch;
-		const boundary = new ResourceBoundary(memory(), { CRUCE_SECRET: "s" }, { namespace: "cruce" }, send);
-		const failure = await boundary.connect({ accountId: ACCOUNT, token: "x".repeat(40) }, "owner").catch((e: Error) => e);
-		expect(failure).toBeInstanceOf(Error);
-		expect((failure as Error).message).toMatch(/rejected the namespace's API token/);
-		// Public errors never echo provider paths, account IDs or raw provider text.
-		expect((failure as Error).message).not.toMatch(new RegExp(`${ACCOUNT}|/accounts/|Authentication error`));
-	});
 	it("uses 60-second repository tokens through the REST API and revokes them", async () => {
 		const calls: string[] = [];
 		const send = (async (url: string | URL | Request, init?: RequestInit) => {

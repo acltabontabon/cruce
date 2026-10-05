@@ -4,7 +4,7 @@
 
 This is the workflow supported by the current implementation. Real-provider convergence and some deployed setup/authentication boundaries have evidence, but authenticated deployed publication/promotion and multi-tool, multi-session participation remain pending; check [verification status](local-verification.md). The [architecture audit](architecture.md#architecture-contradictions-and-correctness-gaps) records the remaining gaps. For a no-cloud tour, use the [local fixture](../CONTRIBUTING.md#set-up-and-explore).
 
-Use Git, Node 22.18+ and installed Cruce dependencies. Sign in through Access, connect the namespace's Cloudflare account with Artifacts access, and create a repository. Cruce initializes its configured default branch. Repository creation and writer attachment consume Artifacts resources. CI, releases and deployments remain external.
+Use Git, Node 22.18+ and installed Cruce dependencies. Once the administrator has configured installation storage, sign in through Access and create a repository. No developer Cloudflare account or API token is required. Cruce initializes its configured default branch. Repository creation and writer attachment consume Artifacts resources. CI, releases and deployments remain external.
 
 ## Authenticate and clone with Git
 

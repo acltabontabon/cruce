@@ -1,5 +1,7 @@
 # Configured test environment
 
+The deployment-managed storage branch ([ADR 0003](decisions/0003-deployment-managed-storage.md)) requires `CLOUDFLARE_ACCOUNT_ID` in the installation environment and an Artifacts binding. Existing connected-account source cannot be switched by deploying that branch: retained source must be preserved and an explicit transition planned. This change has not been deployed into this environment; the receipts below retain their original implementation scope.
+
 [Documentation map](../README.md#documentation-map) · [Cloudflare setup](cloudflare-setup.md) · [Verification](local-verification.md)
 
 The configured control-plane test Worker is [cruce.acltabontabon.com](https://cruce.acltabontabon.com). The repository records one hosted environment; local fixtures are isolated from it. This page records configuration and last-known evidence, not a fresh live inspection.
@@ -56,7 +58,7 @@ After a separately authorized hosted rollout, verify signed-out document/asset/s
 
 ## Repeat deployment
 
-`.env.test` holds the configured origin and Access issuer/audience; it is not the namespace resource-account credential. Keep `CRUCE_SECRET` on the Worker and do not rotate it incidentally. Review configuration and run [contributor checks](../CONTRIBUTING.md#verify) before a deployment.
+`.env.test` holds the configured origin, installation account ID and Access issuer/audience; runtime storage access comes from the Artifacts binding. Keep `CRUCE_SECRET` on the Worker and do not rotate it incidentally. Review configuration and run [contributor checks](../CONTRIBUTING.md#verify) before a deployment.
 
 ```sh
 node --env-file=.env.test node_modules/cf/bin/cf deploy --dry-run
@@ -65,4 +67,4 @@ pnpm deploy:test
 
 The second command publishes to the configured test Worker. A dry run validates a build, not hosted behavior. Cloudflare's build mode named `production` and the GitHub environment named `production` do not themselves establish a second deployed Cruce service. Normal release-tag deployment is described in [releases](releases.md).
 
-Namespace resources use their explicitly connected account, even when the CLI is logged into the control-plane account. The real-provider script and its costs are documented in [verification](local-verification.md#opt-in-real-provider-check). Repository deployment, runtime observation and rollback are outside Cruce’s product boundary.
+New deployment-managed installations use the explicit Artifacts binding in the deployment account. Existing connected-account namespaces in the deployed test version retain their original storage and must not be rebound implicitly. The real-provider script and its costs are documented in [verification](local-verification.md#opt-in-real-provider-check). Repository deployment, runtime observation and rollback are outside Cruce’s product boundary.

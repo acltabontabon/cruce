@@ -8,8 +8,8 @@
 	"scripts": {
 		"dev": "cf dev",
 		"build": "cf build",
-		"deploy": "cf deploy",
-		"deploy:test": "node --env-file=.env.test node_modules/cf/bin/cf deploy",
+		"deploy": "pnpm setup:check && cf deploy --mode production",
+		"deploy:test": "node --env-file=.env.test tools/installation-config.mjs && node --env-file=.env.test node_modules/cf/bin/cf deploy --mode production",
 		"typecheck": "cf workers types && tsc -p tsconfig.worker.json && tsc -p tsconfig.ui.json && tsc -p tsconfig.test.json",
 		"test": "vitest run",
 		"test:watch": "vitest",
@@ -21,7 +21,8 @@
 		"test:browser": "node --test test/browser/console.browser.mjs",
 		"verify:cloud": "tsx tools/verify-cloud.ts",
 		"verify:scenario": "tsx tools/verify-scenario.ts && bash demo/scripts/verify-scenario.sh",
-		"dev:fixture": "node test/browser/server.mjs"
+		"dev:fixture": "node test/browser/server.mjs",
+		"setup:check": "node tools/installation-config.mjs"
 	},
 	"dependencies": {
 		"@cloudflare/workers-oauth-provider": "^1.2.1",

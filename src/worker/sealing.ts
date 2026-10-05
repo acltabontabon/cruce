@@ -1,6 +1,6 @@
 import { DomainError } from "../core/errors.ts";
 
-/** AES-GCM sealing with a key derived from CRUCE_SECRET: identity cookies and connected-account credentials. */
+/** AES-GCM sealing with a key derived from CRUCE_SECRET: identity cookies and credentials. */
 export interface SealingEnv {
 	CRUCE_SECRET?: string;
 }

@@ -19,7 +19,7 @@ Canonical lifecycle, the namespace/repository/workspace model, fork lifecycle, e
 | F5 | Diagnosable operations and safe errors | Next | **Safe errors done** 2026-10-06; structured correlation open |
 | F6 | Bounded state, transfers and explicit retention operations | Later | Open |
 
-**F2 — Durable provider ownership and identity.** Publication and retention do not consistently compare recorded provider repository IDs. Disconnecting credentials deletes the account record that prevents rebinding retained resources. *Target:* account, namespace and repository identity persists independently of credentials and is validated on every provider operation. *Acceptance:* disconnect then connect another account, recreate canonical, fork or retention names with different IDs, and retry an interrupted operation. Each mismatch is rejected before source access. Reconnecting the original binding works without losing provenance or reservations.
+**F2 — Durable provider ownership and identity.** Deployment-managed storage now pins the account and physical namespace on first resource use and rejects changed configuration or legacy connected-account state. Publication and retention still do not consistently compare recorded provider repository IDs. *Target:* validate stable provider IDs on every resource operation. *Acceptance:* recreate canonical, fork or retention names with different IDs and retry an interrupted operation; reject each mismatch before source access. Restoring the original installation binding preserves provenance and reservations.
 
 **F3 — Pure coordination reads.** HTTP/MCP routing calls `Directory.login` and repository initialization on reads, and both persist metadata. *Target:* established coordination reads cause no domain or storage mutation and no provider call. Initialization becomes an explicit step.
 
@@ -147,4 +147,4 @@ Count deliberate review separately from routine coordination. If value concentra
 
 ## Open feasibility questions
 
-Account-scoped Artifacts event delivery into a separately hosted control plane, bindings to dynamically connected accounts, Artifacts event identity and replay guarantees, and private-import transport are unresolved. Resolve them with current primary documentation and bounded verification before choosing a mechanism. Record an unknown rather than inferring a guarantee from an example.
+Artifacts event delivery, event identity and replay guarantees, and private-import transport are unresolved. Resolve them with current primary documentation and bounded verification before choosing a mechanism. Record an unknown rather than inferring a guarantee from an example.

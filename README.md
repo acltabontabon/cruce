@@ -39,7 +39,7 @@ pnpm install --frozen-lockfile
 pnpm dev:fixture
 ```
 
-Open the printed loopback URL. The fixed-clock fixture uses the real console and controllers with deterministic Git source; identity and provider behavior are simulated, and it consumes no cloud resources. The [local console walkthrough](docs/local-demo.md) has screenshots. To use real repositories, follow [Git and bridge setup](docs/native-setup.md). Hosted repositories require a namespace's explicitly connected Cloudflare account. Cloud hosting of Git does not mean cloud execution of agents.
+Open the printed loopback URL. The fixed-clock fixture uses the real console and controllers with deterministic Git source; identity and provider behavior are simulated, and it consumes no cloud resources. The [local console walkthrough](docs/local-demo.md) has screenshots. To use real repositories, follow [Git and bridge setup](docs/native-setup.md). Hosted storage is configured once by the installation administrator; developers and agents do not need Cloudflare accounts. See [installation setup](docs/cloudflare-setup.md#installation-configuration). Cloud hosting of Git does not mean cloud execution of agents.
 
 ## Status
 

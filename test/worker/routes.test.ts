@@ -77,6 +77,13 @@ function fixture() {
 	return { call, path, repo, directory, controller, command, user, namespace, getDirectory, retired };
 }
 describe("namespace repository contracts", () => {
+	it.each(["account", "account/verify"])("rejects the retired namespace storage endpoint %s", async (endpoint) => {
+		const f = fixture();
+		await expect(
+			f.call(`/api/namespaces/${f.repo.namespaceId}/${endpoint}`, { accountId: "a".repeat(32), token: "private" }),
+		).rejects.toMatchObject({ status: 404 });
+		expect(f.command).not.toHaveBeenCalled();
+	});
 	it("namespace attention summaries are authorized coordination reads and recheck revoked membership", async () => {
 		const f = fixture();
 		const url = `/api/namespaces/${f.repo.namespaceId}`;

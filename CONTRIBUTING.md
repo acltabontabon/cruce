@@ -21,7 +21,7 @@ To run the actual Worker locally:
 pnpm exec cf dev --mode offline
 ```
 
-Offline mode avoids configured cloud provisioning; it does not bypass Access. Use the fixture for unauthenticated UI development. For authenticated Worker work, configure the public origin, Access issuer/audience and server secret as described in [Cloudflare setup](docs/cloudflare-setup.md). [.env.example](.env.example) and [.dev.vars.example](.dev.vars.example) document configuration names; keep real credentials out of tracked files. Hosted checks require a separately configured namespace resource account.
+Offline mode avoids configured cloud provisioning; it does not bypass Access. Use the fixture for unauthenticated UI development. For authenticated Worker work, configure the public origin, Access issuer/audience and server secret as described in [Cloudflare setup](docs/cloudflare-setup.md). [.env.example](.env.example) and [.dev.vars.example](.dev.vars.example) document configuration names; keep real credentials out of tracked files. Hosted binding checks require an explicitly authorized installation environment. The opt-in REST provider harness still uses its separately authorized test credentials; it does not verify the deployed binding.
 
 ## Locate a change
 

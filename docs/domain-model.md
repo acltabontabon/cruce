@@ -25,7 +25,7 @@ Namespace → Repository → Workspace
 
 | Term | Meaning | Not to be confused with |
 | --- | --- | --- |
-| **Namespace** | Owns repositories, membership, teams, the connected Cloudflare account, resource policy and shared budgets. Personal (one owner) or shared (Owner, Maintainer, Developer, Viewer) | A Cloudflare account; an organization on a forge |
+| **Namespace** | Owns repositories, membership, teams, resource policy and shared budgets. Storage comes from the installation binding. Personal (one owner) or shared (Owner, Maintainer, Developer, Viewer) | A Cloudflare account; an organization on a forge |
 | **Repository** | A Cruce-managed Git repository with a stable ID, default branch, grants and policy. Names are mutable addresses | A local clone; an upstream forge repository |
 | **Canonical repository** | The authoritative Git repository for a Cruce repository, stored in Cloudflare Artifacts. Its default branch advances only through promotion | A workspace fork; retained source storage; `origin` on someone's laptop |
 | **Upstream** | An external forge repository (GitHub, GitLab, …) that may remain the public or organizational source | A second canonical authority |
@@ -187,7 +187,7 @@ Authority is derived on every request, including retries, from the authenticated
 
 | Operation | Who may perform it |
 | --- | --- |
-| Manage namespace membership, teams, resource account, policy | Namespace Owner (Maintainer where policy allows) |
+| Manage namespace membership, teams and policy | Namespace Owner (Maintainer where policy allows) |
 | Create a repository / provision canonical | Authenticated human with Maintain |
 | Read repository state, source, provenance; clone or fetch canonical and forks | Read grant; agents need `cruce:read` |
 | Start a workspace | Write grant; agents need `workspace:write` |

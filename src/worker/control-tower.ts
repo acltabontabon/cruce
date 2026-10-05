@@ -1,12 +1,13 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Command, Repository } from "../shared/platform.ts";
+import type { StorageEnv } from "./artifacts.ts";
 import { SqlFs } from "./git/sql-fs.ts";
 import { GitWorkspace } from "./git/workspace.ts";
 import type { ConnectionGrant, NamespaceRuntime } from "./namespace-runtime.ts";
 import { RepositoryRuntime } from "./repository-runtime.ts";
 import { sqlStore } from "./store.ts";
 
-interface Env {
+interface Env extends StorageEnv {
 	NAMESPACE: DurableObjectNamespace<NamespaceRuntime>;
 	CRUCE_SECRET?: string;
 }

@@ -1,23 +1,18 @@
 import { bindings, defineConfig, exports } from "cf/config";
 import * as entrypoint from "./src/worker/index.ts" with { type: "cf-worker" };
+import { installationConfig } from "./tools/installation-config.mjs";
 
-/**
- * Cruce on Cloudflare.
- *
- *   cf dev                              local Worker; source resources require explicit namespace configuration
- *   cf dev --mode offline               local Worker with no Artifacts provisioning
- *   pnpm deploy:test                    the single live MVP test environment
- */
-
+/** Installation infrastructure is configured once; namespaces never supply provider credentials. */
 export default defineConfig(({ mode }) => {
-	const offline = mode === "offline";
 	const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
+	const config = installationConfig(env, mode === "production");
+	const offline = mode === "offline";
 	return {
-		accountId: offline ? undefined : "YOUR_32_CHARACTER_ACCOUNT_ID",
+		accountId: offline ? undefined : config.accountId,
 		worker: {
-			name: "cruce",
-			domains: offline ? [] : ["cruce.acltabontabon.com"],
-			workersDev: offline,
+			name: config.workerName,
+			domains: offline || !config.domain ? [] : [config.domain],
+			workersDev: offline || !config.domain,
 			compatibilityDate: "2026-10-01",
 			compatibilityFlags: ["nodejs_compat"],
 			entrypoint,
@@ -32,16 +27,16 @@ export default defineConfig(({ mode }) => {
 				NamespaceRuntime: exports.durableObject({ storage: "sqlite" }),
 			},
 			env: {
-				CONTROL_TOWER: bindings.durableObject({ worker: "cruce", exportName: "ControlTower" }),
-				DIRECTORY: bindings.durableObject({ worker: "cruce", exportName: "Directory" }),
-				NAMESPACE: bindings.durableObject({ worker: "cruce", exportName: "NamespaceRuntime" }),
+				CONTROL_TOWER: bindings.durableObject({ worker: config.workerName, exportName: "ControlTower" }),
+				DIRECTORY: bindings.durableObject({ worker: config.workerName, exportName: "Directory" }),
+				NAMESPACE: bindings.durableObject({ worker: config.workerName, exportName: "NamespaceRuntime" }),
 				OAUTH_KV: bindings.kv(),
-				CRUCE_PUBLIC_ORIGIN: bindings.text(
-					env.CRUCE_PUBLIC_ORIGIN ?? (offline ? "http://localhost:5173" : "https://cruce.acltabontabon.com"),
-				),
+				...(offline ? {} : { ARTIFACTS: bindings.artifacts({ namespace: config.artifactsNamespace }) }),
+				CRUCE_STORAGE_ACCOUNT_ID: bindings.text(offline ? "" : (config.accountId ?? "")),
+				CRUCE_ARTIFACTS_NAMESPACE: bindings.text(config.artifactsNamespace),
+				CRUCE_PUBLIC_ORIGIN: bindings.text(config.origin),
 				CRUCE_ACCESS_ISSUER: bindings.text(env.CRUCE_ACCESS_ISSUER ?? ""),
 				CRUCE_ACCESS_AUD: bindings.text(env.CRUCE_ACCESS_AUD ?? ""),
-
 				CRUCE_SECRET: bindings.secret(),
 			},
 			triggers: [],

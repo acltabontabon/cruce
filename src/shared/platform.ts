@@ -81,14 +81,7 @@ export interface ResourceReservation {
 	at: number;
 	state: "reserved" | "complete" | "uncertain" | "released";
 }
-export interface ResourceAccount {
-	mode: "connected";
-	accountId: string;
-	label: string;
-	credential: "stored" | "none";
-	connectedBy?: string;
-	at?: number;
-}
+export type ResourceStorage = { mode: "deployment"; ready: true } | { mode: "deployment"; ready: false; reason: string };
 export interface NamespaceState {
 	namespace: Namespace;
 	members: Record<string, NamespaceRole>;

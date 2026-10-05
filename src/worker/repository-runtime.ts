@@ -4,7 +4,7 @@ import { initialRepository, RepositoryController } from "../core/platform.ts";
 import { gitRemotePath, parseGitRoute } from "../shared/git-access.ts";
 import type { Artifact, Command, Repository, RepositoryState, ResourceAction, WorkspaceUpdateDetails } from "../shared/platform.ts";
 import { authorizeMachine, HUMAN_TOOLS, toolByName } from "../shared/tools.ts";
-import { boundedBody, type RepositoryHost, ResourceBoundary } from "./artifacts.ts";
+import { boundedBody, type RepositoryHost, ResourceBoundary, type StorageEnv } from "./artifacts.ts";
 import { GitUpdateRejected, type GitWorkspace } from "./git/workspace.ts";
 import type { ConnectionGrant, NamespaceRuntime } from "./namespace-runtime.ts";
 import { hash, Serial, type Store } from "./store.ts";
@@ -20,7 +20,7 @@ export class RepositoryRuntime {
 		readonly store: Store,
 		readonly git: GitWorkspace,
 		readonly namespace: NamespacePort,
-		readonly env: { CRUCE_SECRET?: string },
+		readonly env: StorageEnv,
 		readonly now = Date.now,
 	) {}
 	initialize(repository: Repository) {
@@ -38,12 +38,15 @@ export class RepositoryRuntime {
 	private async resources() {
 		const config = await this.namespace.resourceConfiguration();
 		const local: Store = {
-			get: <T>() => config.account as T,
+			get: <T>(key: string) =>
+				(key === "storage-binding" ? config.binding : key === "resource-account" && config.legacyAccount ? true : undefined) as
+					| T
+					| undefined,
 			put: () => {
-				throw new Error("Credentials are owned by the namespace");
+				throw new Error("Storage identity is owned by the namespace");
 			},
 			delete: () => {
-				throw new Error("Credentials are owned by the namespace");
+				throw new Error("Storage identity is owned by the namespace");
 			},
 		};
 		return new ResourceBoundary(local, this.env, { namespace: config.namespace });

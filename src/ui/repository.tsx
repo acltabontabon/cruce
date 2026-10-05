@@ -28,7 +28,7 @@ function CanonicalSetup({ view, execute }: { view: RepositorySnapshot; execute: 
 		<div className="alert canonical-setup" role="status">
 			<p>
 				<strong>Canonical storage was not created.</strong> Repository creation stopped before Cruce could set up this repository's
-				canonical Git storage in the connected Cloudflare account, so cloning and workspaces are unavailable.{" "}
+				canonical Git storage in this Cruce installation, so cloning and workspaces are unavailable.{" "}
 				{view.canonicalSetup.retry
 					? "Retrying reuses the original setup operation and its budget reservation."
 					: "A repository maintainer can retry setup."}
@@ -340,7 +340,7 @@ function ConnectGuide({ view }: { view: RepositorySnapshot }) {
 					text={`node ${CRUCE}/runner/cruce.mjs human --server ${origin} --namespace ${view.repository.namespaceId} --repository ${view.repository.id}\nnode ${CRUCE}/runner/cruce.mjs start --title "Describe your work"`}
 				/>
 			</details>
-			<p className="cost">Each workspace creates a fork in your Cloudflare account and counts toward the namespace's daily operations.</p>
+			<p className="cost">Each workspace creates a fork in this Cruce installation and counts toward the namespace's daily operations.</p>
 		</div>
 	);
 }
@@ -482,7 +482,7 @@ function RepositorySettings({
 					<code>{view.repository.id}</code>
 				</dd>
 				<dt>Storage</dt>
-				<dd>Cloudflare Artifacts in the namespace's connected account</dd>
+				<dd>Cloudflare Artifacts managed by this installation</dd>
 			</dl>
 		</section>
 	);

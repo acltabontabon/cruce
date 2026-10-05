@@ -51,7 +51,7 @@ The slim forest header uses a 56px content row with a smaller wordmark and inlin
 
 The avatar opens a compact profile card with name, email and Sign out, preserving the current page. Saved account links open it on Home with history replacement. The Alpha label sits quietly in the footer.
 
-**Home** lists your repositories across namespaces, sorted by what needs a person (changes to review or promote, stale changes, workspaces behind canonical), then your namespaces. A namespace without a connected Cloudflare account says so.
+**Home** lists your repositories across namespaces, sorted by what needs a person (changes to review or promote, stale changes, workspaces behind canonical), then your namespaces. A namespace whose installation storage is unavailable says so, without asking users for provider credentials.
 
 **A repository** opens on a header (name, canonical branch and revision, last promotion, Connect an agent, Clone) and an attention bar: one plain sentence per thing that needs someone, each linking to where it is handled, or "Nothing needs you right now". Four tabs follow:
 
