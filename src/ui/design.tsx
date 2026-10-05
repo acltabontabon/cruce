@@ -39,6 +39,11 @@ const paths: Record<string, ReactNode> = {
 	plus: <path d="M12 5v14M5 12h14" />,
 	close: <path d="m6 6 12 12M6 18 18 6" />,
 	arrow: <path d="M4 12h16m-6-6 6 6-6 6" />,
+	logout: (
+		<>
+			<path d="M10 4H4v16h6M10 12h10m-4-4 4 4-4 4" />
+		</>
+	),
 	local: (
 		<>
 			<rect x="3" y="4" width="18" height="13" rx="2" />

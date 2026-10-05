@@ -5,10 +5,5 @@ export const BRAND = {
 	wordmark: "/brand/wordmark-white.svg",
 };
 export function Brand() {
-	return (
-		<>
-			<img className="brand-wordmark" src={BRAND.wordmark} alt={BRAND.name} />
-			<span className="alpha">ALPHA</span>
-		</>
-	);
+	return <img className="brand-wordmark" src={BRAND.wordmark} alt={BRAND.name} />;
 }

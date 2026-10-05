@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Command, Namespace, Repository, RepositorySnapshot, Team, User } from "../shared/platform.ts";
-import { BRAND, Brand } from "./brand.tsx";
+import { BRAND } from "./brand.tsx";
 import { Empty, Form, time, value } from "./controls.tsx";
 import { BranchArt, Dialog, Icon } from "./design.tsx";
-import { AccountPage, NamespaceHome } from "./home.tsx";
+import { NamespaceHome } from "./home.tsx";
 import { Code } from "./inspect.tsx";
+import { ConsoleHeader } from "./navigation.tsx";
 import { RepositoryOverview, WorkScreen } from "./repository.tsx";
 import { request } from "./request.ts";
 import { Shell } from "./shell.tsx";
@@ -16,19 +17,23 @@ const tabs = ["overview", "code", "work", "settings"];
 function readRoute() {
 	const query = new URLSearchParams(location.search),
 		[tab, id] = location.hash.replace(/^#\/?/, "").split("/");
+	const screen =
+		query.get("page") === "account" || query.get("page") === "namespaces" || !query.has("namespace") ? "namespaces" : "namespace";
 	return {
-		namespaceId: query.get("namespace") ?? "",
-		screen:
-			query.get("page") === "account"
-				? "account"
-				: query.get("page") === "namespaces" || !query.has("namespace")
-					? "namespaces"
-					: "namespace",
-		repositoryId: query.get("repository") ?? "",
-		tab: query.get("repository") && tab === "artifacts" ? tab : [...tabs, ...namespaceTabs].includes(tab) ? tab : "overview",
+		screen,
+		accountRequested: query.get("page") === "account",
+		namespaceId: screen === "namespace" ? (query.get("namespace") ?? "") : "",
+		repositoryId: screen === "namespace" ? (query.get("repository") ?? "") : "",
+		tab:
+			screen === "namespace" && query.get("repository") && tab === "artifacts"
+				? tab
+				: [...tabs, ...namespaceTabs].includes(tab)
+					? tab
+					: "overview",
 		id: id ?? "",
 	};
 }
+
 export function App() {
 	const [route, setRoute] = useState(readRoute),
 		[me, setMe] = useState<{ user: User; namespaces: Namespace[] }>(),
@@ -37,12 +42,7 @@ export function App() {
 		[error, setError] = useState<Error>(),
 		[notice, setNotice] = useState(""),
 		[refresh, setRefresh] = useState(0),
-		[finder, setFinder] = useState(false),
-		[search, setSearch] = useState(""),
-		[finderLoading, setFinderLoading] = useState(false),
-		[finderError, setFinderError] = useState(""),
-		[catalog, setCatalog] = useState<{ namespace: Namespace; repository: Repository }[]>([]),
-		[overlay, setOverlay] = useState<"namespace" | "create-namespace" | "repository">();
+		[overlay, setOverlay] = useState<"create-namespace" | "repository">();
 	const namespaceTab = namespaceTabs.includes(route.tab) ? route.tab : "repositories";
 	const routeRef = useRef(route);
 	routeRef.current = route;
@@ -63,31 +63,26 @@ export function App() {
 			generation.current++;
 			setView(undefined);
 		}
+		if (previous.namespaceId !== namespaceId) setNamespace(undefined);
 		setNotice("");
 		setError(undefined);
 		setRoute(readRoute());
-		setFinder(false);
 		setOverlay(undefined);
 	}, []);
-	const navigatePage = useCallback(
-		(screen: "namespaces" | "account") => {
-			const url = new URL(location.href);
-			url.pathname = "/";
-			url.search = "";
-			url.hash = "";
-			url.searchParams.set("page", screen);
-			if (route.namespaceId) url.searchParams.set("namespace", route.namespaceId);
-			history.pushState(null, "", url);
-			generation.current++;
-			setView(undefined);
-			setNotice("");
-			setError(undefined);
-			setFinder(false);
-			setOverlay(undefined);
-			setRoute(readRoute());
-		},
-		[route.namespaceId],
-	);
+	const navigateHome = useCallback(() => {
+		const url = new URL(location.href);
+		url.pathname = "/";
+		url.search = "";
+		url.hash = "";
+		history.pushState(null, "", url);
+		generation.current++;
+		setView(undefined);
+		setNamespace(undefined);
+		setNotice("");
+		setError(undefined);
+		setOverlay(undefined);
+		setRoute(readRoute());
+	}, []);
 
 	useEffect(() => {
 		if (route.tab !== "artifacts" || view?.repository.id !== route.repositoryId || view.repository.namespaceId !== route.namespaceId)
@@ -111,25 +106,16 @@ export function App() {
 				generation.current++;
 				setView(undefined);
 			}
+			if (next.namespaceId !== routeRef.current.namespaceId) setNamespace(undefined);
 			setRoute(next);
 			setNotice("");
 			setOverlay(undefined);
-			setFinder(false);
-		};
-		const key = (e: KeyboardEvent) => {
-			if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-				e.preventDefault();
-				setFinder((v) => !v);
-			}
-			if (e.key === "Escape") setFinder(false);
 		};
 		window.addEventListener("popstate", change);
 		window.addEventListener("hashchange", change);
-		window.addEventListener("keydown", key);
 		return () => {
 			window.removeEventListener("popstate", change);
 			window.removeEventListener("hashchange", change);
-			window.removeEventListener("keydown", key);
 		};
 	}, []);
 	useEffect(() => {
@@ -137,7 +123,6 @@ export function App() {
 		void request<{ user: User; namespaces: Namespace[] }>("/api/me", undefined, "GET", controller.signal)
 			.then((data) => {
 				setMe(data);
-				if (!readRoute().namespaceId) setRoute((r) => ({ ...r, namespaceId: data.user.personalNamespaceId }));
 			})
 			.catch((e) => {
 				if (e.name !== "AbortError") setError(e);
@@ -145,14 +130,27 @@ export function App() {
 		return () => controller.abort();
 	}, []);
 	useEffect(() => {
-		if (me && !route.namespaceId) setRoute((current) => ({ ...current, namespaceId: me.user.personalNamespaceId }));
-	}, [me, route.namespaceId]);
+		if (route.screen === "namespace") return;
+		const url = new URL(location.href);
+		if (url.searchParams.get("page") === "account") {
+			url.search = "";
+			url.hash = "";
+			history.replaceState(null, "", url);
+			setRoute({ ...readRoute(), accountRequested: true });
+			return;
+		}
+		if (!url.searchParams.has("namespace") && !url.searchParams.has("repository")) return;
+		url.searchParams.delete("namespace");
+		url.searchParams.delete("repository");
+		url.hash = "";
+		history.replaceState(null, "", url);
+	}, [route.screen]);
 
 	useEffect(() => {
+		setNamespace(undefined);
 		if (!route.namespaceId) return;
 		void refresh; // Explicit invalidation after a successful mutation.
 		const controller = new AbortController();
-		setNamespace(undefined);
 		const load = () =>
 			request<NamespaceView>(`/api/namespaces/${route.namespaceId}`, undefined, "GET", controller.signal)
 				.then((data) => {
@@ -202,32 +200,6 @@ export function App() {
 			clearInterval(timer);
 		};
 	}, [route.namespaceId, route.repositoryId, refresh]);
-	useEffect(() => {
-		if (!finder || !me) return;
-		void refresh;
-		const controller = new AbortController();
-		setFinderLoading(true);
-		setFinderError("");
-		setCatalog([]);
-		void Promise.all(
-			me.namespaces.map(async (w) => {
-				try {
-					return (await request<Repository[]>(`/api/namespaces/${w.id}/repositories`, undefined, "GET", controller.signal)).map(
-						(repository) => ({ namespace: w, repository }),
-					);
-				} catch (e) {
-					if (!controller.signal.aborted) setFinderError((e as Error).message);
-					return [];
-				}
-			}),
-		).then((rows) => {
-			if (!controller.signal.aborted) {
-				setCatalog(rows.flat());
-				setFinderLoading(false);
-			}
-		});
-		return () => controller.abort();
-	}, [finder, me, refresh]);
 
 	const mutate = async <T,>(url: string, body: Record<string, unknown>, method = "POST") => {
 		const fingerprint = JSON.stringify({ url, body, method }),
@@ -290,101 +262,31 @@ export function App() {
 		);
 	return (
 		<Shell
-			routeKey={`${route.screen}/${route.namespaceId}/${route.repositoryId}/${route.tab}/${route.id}`}
 			navigation={
-				<>
-					<a
-						className="brand"
-						href="/?page=namespaces"
-						onClick={(e) => {
-							if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
-								e.preventDefault();
-								navigatePage("namespaces");
-							}
-						}}
-					>
-						<Brand />
-					</a>
-					<button
-						type="button"
-						className="namespace-switcher"
-						aria-label="Switch namespace"
-						aria-haspopup="dialog"
-						onClick={() => setOverlay("namespace")}
-					>
-						<span className="namespace-avatar">{(namespace?.namespace.name ?? "W").slice(0, 1).toUpperCase()}</span>
-						<span>
-							<strong>{namespace?.namespace.name ?? "Namespace"}</strong>
-							<small>{namespace?.namespace.kind === "shared" ? "Shared namespace" : "Personal namespace"}</small>
-						</span>
-						<Icon name="chevron" />
-					</button>
-					{view && (
-						<div className="current-repository">
-							<p className="nav-label">Current repository</p>
-							<button type="button" onClick={() => setFinder(true)}>
-								<Icon name="branch" />
-								<span>{view.repository.name}</span>
-								<Icon name="chevron" />
-							</button>
-						</div>
-					)}
-					<button type="button" className="finder-trigger" onClick={() => setFinder(true)}>
-						<Icon name="search" />
-						Find repository <kbd>⌘K</kbd>
-					</button>
-					<button
-						type="button"
-						className={`all-namespaces ${route.screen === "namespaces" ? "selected" : ""}`}
-						onClick={() => navigatePage("namespaces")}
-					>
-						<Icon name="repositories" />
-						All namespaces
-						<Icon name="arrow" />
-					</button>
-					{route.screen === "namespace" && (
-						<>
-							<p className="nav-label">Namespace</p>
-							<nav aria-label="Namespace navigation">
-								{["repositories", ...(namespace?.namespace.kind === "shared" ? ["members", "teams"] : []), "settings"].map((tab) => (
-									<button
-										type="button"
-										key={tab}
-										className={route.screen === "namespace" && !route.repositoryId && namespaceTab === tab ? "selected" : ""}
-										aria-current={route.screen === "namespace" && !route.repositoryId && namespaceTab === tab ? "page" : undefined}
-										onClick={() => navigate(route.namespaceId, "", tab)}
-									>
-										<Icon name={tab} />
-										{tab}
-										{tab === "repositories" && <span className="nav-count">{namespace?.repositories.length ?? "—"}</span>}
-									</button>
-								))}
-							</nav>
-						</>
-					)}
-
-					<div className="sidebar-bottom">
-						<p className="sidebar-note">
-							{BRAND.tagline[0]}
-							<br />
-							<span>{BRAND.tagline[1]}</span>
-						</p>
-						<button
-							type="button"
-							className="account-trigger"
-							aria-current={route.screen === "account" ? "page" : undefined}
-							aria-label="Your account"
-							onClick={() => navigatePage("account")}
-						>
-							<span className="account-avatar">{me.user.name.slice(0, 1).toUpperCase()}</span>
-							<span>
-								<strong>{me.user.name}</strong>
-								<small>Account</small>
-							</span>
-							<Icon name="chevron" />
-						</button>
-					</div>
-				</>
+				<ConsoleHeader
+					me={me}
+					screen={route.screen}
+					namespaceId={route.namespaceId}
+					namespace={
+						namespace?.namespace.id === route.namespaceId
+							? namespace.namespace
+							: me.namespaces.find((item) => item.id === route.namespaceId)
+					}
+					repositoryId={route.repositoryId}
+					repository={
+						view?.repository.id === route.repositoryId && view.repository.namespaceId === route.namespaceId
+							? view.repository
+							: namespace?.namespace.id === route.namespaceId
+								? namespace.repositories.find((item) => item.id === route.repositoryId)
+								: undefined
+					}
+					repositories={namespace?.namespace.id === route.namespaceId ? namespace.repositories : []}
+					routeKey={`${route.screen}/${route.namespaceId}/${route.repositoryId}/${route.tab}/${route.id}`}
+					open={navigate}
+					home={navigateHome}
+					accountRequested={route.accountRequested}
+					create={() => setOverlay("create-namespace")}
+				/>
 			}
 		>
 			<main
@@ -392,28 +294,6 @@ export function App() {
 				tabIndex={-1}
 				data-screen={route.screen === "namespace" ? (route.repositoryId ? route.tab : namespaceTab) : route.screen}
 			>
-				<header>
-					<div className="breadcrumb">
-						<button
-							type="button"
-							onClick={() =>
-								route.screen === "namespace" ? navigate(route.namespaceId) : navigatePage(route.screen as "namespaces" | "account")
-							}
-						>
-							{route.screen === "namespaces"
-								? "All namespaces"
-								: route.screen === "account"
-									? "Your account"
-									: (namespace?.namespace.handle ?? "Namespace")}
-						</button>
-						{view && (
-							<>
-								{" "}
-								/ <strong>{view.repository.name}</strong>
-							</>
-						)}
-					</div>
-				</header>
 				{error && (
 					<div role="alert" className="alert">
 						{error.message}
@@ -425,8 +305,6 @@ export function App() {
 				{notice && <p role="status">{notice}</p>}
 				{route.screen === "namespaces" ? (
 					<NamespaceHome me={me} refresh={refresh} open={navigate} create={() => setOverlay("create-namespace")} />
-				) : route.screen === "account" ? (
-					<AccountPage me={me} open={navigate} />
 				) : route.repositoryId ? (
 					<>
 						<nav className="tabs" aria-label="Repository navigation">
@@ -587,6 +465,20 @@ export function App() {
 					</>
 				) : namespace ? (
 					<>
+						<nav className="tabs" aria-label="Namespace navigation">
+							{["repositories", ...(namespace.namespace.kind === "shared" ? ["members", "teams"] : []), "settings"].map((tab) => (
+								<button
+									type="button"
+									key={tab}
+									className={namespaceTab === tab ? "selected" : ""}
+									aria-current={namespaceTab === tab ? "page" : undefined}
+									onClick={() => navigate(route.namespaceId, "", tab)}
+								>
+									{tab}
+								</button>
+							))}
+						</nav>
+
 						<div className="page-title namespace-title">
 							<div>
 								<p className="eyebrow">Your namespace, connected</p>
@@ -831,30 +723,6 @@ export function App() {
 					<Empty>Loading namespace…</Empty>
 				)}
 			</main>
-			{overlay === "namespace" && (
-				<Dialog title="Switch namespace" close={() => setOverlay(undefined)} className="namespace-picker">
-					<p className="muted">Choose where you work.</p>
-					<button type="button" className="namespace-option all-option" onClick={() => navigatePage("namespaces")}>
-						<Icon name="repositories" />
-						<span>View all namespaces</span>
-						<Icon name="arrow" />
-					</button>
-					{me.namespaces.map((w) => (
-						<button className="namespace-option" type="button" key={w.id} onClick={() => navigate(w.id)}>
-							<span className="namespace-avatar">{w.name.slice(0, 1).toUpperCase()}</span>
-							<span>
-								<strong>{w.name}</strong>
-								<small>{w.kind === "personal" ? "Personal namespace" : "Shared namespace"}</small>
-							</span>
-							{route.namespaceId === w.id && <Icon name="check" />}
-						</button>
-					))}
-					<button type="button" className="create-namespace-trigger" onClick={() => setOverlay("create-namespace")}>
-						<Icon name="plus" />
-						Create namespace
-					</button>
-				</Dialog>
-			)}
 			{overlay === "create-namespace" && (
 				<Dialog title="Create namespace" close={() => setOverlay(undefined)}>
 					<p className="muted">A shared place for your team's repositories.</p>
@@ -906,54 +774,6 @@ export function App() {
 							</label>
 						</div>
 					</Form>
-				</Dialog>
-			)}
-
-			{finder && (
-				<Dialog title="Find repository" close={() => setFinder(false)} className="finder">
-					<fieldset
-						onKeyDown={(e) => {
-							if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-								e.preventDefault();
-								const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("input,button"));
-								const current = items.indexOf(document.activeElement as HTMLElement);
-								items[(current + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
-							}
-						}}
-					>
-						<label>
-							Find repository
-							<input
-								ref={(node) => {
-									node?.focus();
-								}}
-								value={search}
-								onChange={(e) => setSearch(e.target.value)}
-								placeholder="namespace/repository"
-							/>
-						</label>
-						{finderLoading && <p className="muted">Finding repositories…</p>}
-						{finderError && (
-							<div role="alert">
-								{finderError}
-								<button type="button" onClick={reload}>
-									Retry
-								</button>
-							</div>
-						)}
-						{!finderLoading &&
-							!finderError &&
-							!catalog.some((r) => `${r.namespace.handle}/${r.repository.name}`.toLowerCase().includes(search.toLowerCase())) && (
-								<p className="muted">No matching repositories.</p>
-							)}
-						{catalog
-							.filter((r) => `${r.namespace.handle}/${r.repository.name}`.toLowerCase().includes(search.toLowerCase()))
-							.map((r) => (
-								<button type="button" key={r.repository.id} onClick={() => navigate(r.namespace.id, r.repository.id)}>
-									{r.namespace.handle}/{r.repository.name}
-								</button>
-							))}
-					</fieldset>
 				</Dialog>
 			)}
 		</Shell>

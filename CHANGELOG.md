@@ -12,6 +12,12 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Changed
 
+- Give the avatar menu a compact Cruce profile card with the junction motif, an initial tile and a distinct sign-out row.
+
+- Make repository search a real header input with compact anchored results instead of a modal, and use an unboxed mobile search icon beside the avatar. Cmd/Ctrl K focuses the same field; preserve page context, keyboard selection, partial results, retries and a compact mobile search panel.
+
+- Replace the sidebar and modal scope picker with a slim header, balanced logo/search/avatar controls and searchable namespace/repository dropdowns. Home clears scope; the avatar opens an identity-and-sign-out menu in place without duplicate namespace navigation, and Alpha moves to the footer. Preserve keyboard access, saved links and Back navigation.
+
 - Simplify repository navigation to Overview, Code, Work and Settings. Browse published revisions and provenance in Code, and inspect stored revision evidence alongside changes and workspaces in Work; reserve Cloudflare Artifacts naming for infrastructure.
 
 - Redesign the console around independent workspace paths, exact-revision review and human decisions: interlaced Cruce identity, compact namespace home, truthful shared-surface topology, focused work/artifact inspection and accessible mobile navigation. Add local-checkout guidance and preserve canonical authority, permissions and retry behavior.

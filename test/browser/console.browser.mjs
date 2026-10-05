@@ -25,7 +25,7 @@ async function openRepo() {
 	await page.goto(`${server.origin}/?namespace=fernloop&repository=payments`);
 	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
 }
-test("first login lands in a personal namespace with honest repository creation", async () => {
+test("home lets the user choose a namespace before honest repository creation", async () => {
 	await page.goto(server.origin);
 	await page.getByRole("button", { name: "Alex Morgan", exact: true }).click();
 	await page.getByText("No repositories yet.", { exact: false }).waitFor();
@@ -36,7 +36,7 @@ test("first login lands in a personal namespace with honest repository creation"
 	await page.getByText("No active workspaces.", { exact: false }).waitFor();
 	assert.equal(await page.getByText("Production Healthy").count(), 0);
 });
-test("namespace home filters repositories and account navigation survives Back and reload", async () => {
+test("namespace home retains its filter while the avatar menu opens, and scoped navigation survives Back and reload", async () => {
 	await page.goto(server.origin);
 	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
 	await page.locator(".home-repo").filter({ hasText: "payment-service" }).waitFor();
@@ -46,11 +46,12 @@ test("namespace home filters repositories and account navigation survives Back a
 	await page.getByLabel("Filter namespaces").fill("payment-service");
 	assert.equal(await page.locator(".namespace-card").count(), 1);
 	await page.getByRole("button", { name: "Your account", exact: true }).click();
-	await page.getByRole("heading", { name: "Your account", exact: true }).waitFor();
+	await page.getByRole("region", { name: "Your account", exact: true }).waitFor();
+	assert.equal(new URL(page.url()).search, "");
+	assert.equal(await page.getByLabel("Filter namespaces").inputValue(), "payment-service");
 	await page.screenshot({ path: "dist/ui-checks/account.png", fullPage: true });
+	await page.keyboard.press("Escape");
 	await page.reload();
-	await page.getByRole("heading", { name: "Your account", exact: true }).waitFor();
-	await page.goBack();
 	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
 	await page.getByRole("button", { name: "Fernloop", exact: true }).click();
 	await page.getByRole("navigation", { name: "Namespace navigation" }).getByRole("button", { name: "teams", exact: true }).click();
@@ -85,6 +86,131 @@ test("creation dialogs keep focus contained and explain unavailable cloud setup"
 	await page.getByRole("button", { name: "Switch namespace" }).filter({ hasText: "Design team" }).waitFor();
 	await page.getByRole("navigation", { name: "Namespace navigation" }).getByRole("button", { name: "members", exact: true }).waitFor();
 });
+test("brand navigation reaches an unscoped Home and Back restores the repository", async () => {
+	await openRepo();
+	await page.getByRole("link", { name: "Cruce home", exact: true }).click();
+	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
+	assert.equal(new URL(page.url()).search, "");
+	await page.getByRole("navigation", { name: "Current location" }).getByText("Home", { exact: true }).waitFor();
+	assert.equal(await page.getByRole("button", { name: "Switch namespace", exact: true }).count(), 0);
+	assert.equal(await page.getByRole("button", { name: "All namespaces", exact: true }).count(), 0);
+	assert.equal(await page.getByRole("navigation", { name: "Namespace navigation" }).count(), 0);
+	await page.reload();
+	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
+	await page.goBack();
+	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
+	await page.getByRole("button", { name: "Switch namespace", exact: true }).filter({ hasText: "Fernloop" }).waitFor();
+});
+test("saved global URLs cannot select or fetch a hidden repository or namespace scope", async () => {
+	let repositoryReads = 0;
+	await page.route("**/api/namespaces/fernloop/repositories/payments", (route) => {
+		repositoryReads++;
+		return route.continue();
+	});
+	await page.goto(`${server.origin}/?page=namespaces&namespace=fernloop&repository=payments#/work`);
+	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
+	assert.equal(new URL(page.url()).searchParams.has("namespace"), false);
+	assert.equal(new URL(page.url()).searchParams.has("repository"), false);
+	assert.equal(await page.getByRole("button", { name: "Switch namespace", exact: true }).count(), 0);
+	assert.equal(repositoryReads, 0);
+	await page.getByRole("button", { name: "Your account", exact: true }).click();
+	await page.getByRole("region", { name: "Your account", exact: true }).waitFor();
+	assert.equal(new URL(page.url()).search, "?page=namespaces");
+	assert.equal(await page.getByRole("button", { name: "Switch namespace", exact: true }).count(), 0);
+});
+test("avatar menu preserves repository context and keyboard focus; saved account links open it on Home", async () => {
+	await openRepo();
+	const current = page.url();
+	const trigger = page.getByRole("button", { name: "Your account", exact: true });
+	await trigger.click();
+	const menu = page.getByRole("region", { name: "Your account", exact: true });
+	await menu.getByText("Alex Morgan", { exact: true }).waitFor();
+	await menu.getByText("alex@example.com", { exact: true }).waitFor();
+	await page.screenshot({ path: "dist/ui-checks/account-card.png", clip: { x: 980, y: 35, width: 460, height: 240 } });
+	assert.equal(await menu.getByRole("link", { name: "Sign out", exact: true }).getAttribute("href"), "/auth/logout");
+	assert.deepEqual(
+		(await menu.getByRole("link").allTextContents()).map((text) => text.trim()),
+		["Sign out"],
+	);
+	assert.equal(page.url(), current);
+	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
+	assert.equal(await page.getByRole("dialog").count(), 0);
+	assert.equal(await page.locator("header").getByText("Alpha", { exact: false }).count(), 0);
+	await page.getByRole("contentinfo").getByText("Cruce · Alpha", { exact: true }).waitFor();
+	await page.keyboard.press("Escape");
+	assert.equal(await trigger.evaluate((element) => element === document.activeElement), true);
+	assert.equal(await menu.count(), 0);
+	await page.goto(`${server.origin}/?page=account&namespace=fernloop&repository=payments`);
+	await menu.waitFor();
+	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
+	assert.equal(new URL(page.url()).search, "");
+	assert.equal(await page.getByRole("button", { name: "Switch namespace", exact: true }).count(), 0);
+	await page.reload();
+	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
+	assert.equal(await menu.count(), 0);
+});
+test("avatar menu fits a narrow screen and tabbing out dismisses it without trapping focus", async () => {
+	await page.setViewportSize({ width: 320, height: 700 });
+	await page.goto(server.origin);
+	const trigger = page.getByRole("button", { name: "Your account", exact: true });
+	await trigger.click();
+	const menu = page.getByRole("region", { name: "Your account", exact: true });
+	const bounds = await menu.boundingBox();
+	assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 320);
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+	await page.screenshot({ path: "dist/ui-checks/account-narrow.png", fullPage: true });
+	await page.keyboard.press("Tab");
+	assert.equal(await menu.count(), 0);
+});
+test("namespace dropdown switches scope with keyboard selection and restores focus after cancelling creation", async () => {
+	await openRepo();
+	let trigger = page.getByRole("button", { name: "Switch namespace", exact: true });
+	await trigger.click();
+	const dropdown = page.getByRole("region", { name: "Switch namespace", exact: true });
+	assert.equal(await page.getByRole("dialog").count(), 0);
+	assert.equal(await page.locator("main").evaluate((element) => element.inert), false);
+	await dropdown
+		.getByRole("link", { name: "Fernloop Shared namespace", exact: true })
+		.getAttribute("aria-current")
+		.then((current) => assert.equal(current, "true"));
+	await page.getByLabel("Search namespaces").fill("No matching namespace");
+	await page.keyboard.press("Enter");
+	assert.equal(await page.getByRole("dialog").count(), 0);
+	await page.getByLabel("Search namespaces").fill("Alex");
+	await page.keyboard.press("Enter");
+	await page.getByRole("heading", { name: "Repositories", exact: true }).waitFor();
+	await trigger.filter({ hasText: "Alex Morgan" }).waitFor();
+	assert.equal(await page.getByRole("button", { name: "Switch repository", exact: true }).count(), 0);
+	assert.deepEqual(
+		(await page.getByRole("navigation", { name: "Namespace navigation" }).getByRole("button").allTextContents()).map((text) => text.trim()),
+		["repositories", "settings"],
+	);
+	await page.goBack();
+	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
+	trigger = page.getByRole("button", { name: "Switch namespace", exact: true });
+	await trigger.click();
+	await dropdown.getByRole("button", { name: "Create namespace", exact: true }).click();
+	await page.getByRole("dialog", { name: "Create namespace", exact: true }).waitFor();
+	await page.keyboard.press("Escape");
+	assert.equal(await trigger.evaluate((element) => element === document.activeElement), true);
+});
+test("repository dropdown stays within its namespace and can return to the namespace's repositories", async () => {
+	await openRepo();
+	const trigger = page.getByRole("button", { name: "Switch repository", exact: true });
+	await trigger.click();
+	const dropdown = page.getByRole("region", { name: "Switch repository", exact: true });
+	await dropdown.getByRole("link", { name: "payment-service main", exact: true }).waitFor();
+	await page.screenshot({ path: "dist/ui-checks/repository-dropdown.png", fullPage: true });
+	await page.getByLabel("Search repositories").fill("payment");
+	assert.equal(await dropdown.getByRole("link").count(), 1);
+	await page.keyboard.press("Escape");
+	await trigger.click();
+	await dropdown.getByRole("link", { name: "All repositories Fernloop", exact: true }).click();
+	await page.getByRole("heading", { name: "Repositories", exact: true }).waitFor();
+	assert.equal(new URL(page.url()).searchParams.has("repository"), false);
+	await page.goBack();
+	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
+});
 test("overview shows human and agent workspaces, reported overlap and published revision", async () => {
 	await openRepo();
 	await page.getByRole("heading", { name: "Shared surfaces" }).waitFor();
@@ -112,19 +238,158 @@ test("repository navigation ends at source coordination and removed routes use t
 	await page.getByRole("heading", { name: "Shared resource budgets", exact: true }).waitFor();
 	assert.equal(await page.getByLabel("Previews per workspace").count(), 0);
 });
-test("repository switcher supports keyboard selection and Back navigation", async () => {
+test("header search accepts typing directly and supports keyboard selection and Back navigation", async () => {
 	await openRepo();
-	await page.keyboard.press("Meta+k");
-	const dialog = page.getByRole("dialog");
-	await dialog.getByRole("textbox").fill("fernloop/payment");
-	await dialog.getByRole("button", { name: "fernloop/payment-service", exact: true }).waitFor();
+	const search = page.getByRole("combobox", { name: "Find repository", exact: true });
+	await search.click();
+	await search.fill("  FERNLOOP payment  ");
+	await page.getByRole("option", { name: "fernloop/payment-service", exact: true }).waitFor();
+	assert.equal(await page.getByRole("dialog").count(), 0);
+	assert.equal(await page.locator("main").evaluate((element) => element.inert), false);
+	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
 	await page.screenshot({ path: "dist/ui-checks/finder.png", fullPage: true });
+	await page.screenshot({ path: "dist/ui-checks/search-header.png", clip: { x: 0, y: 0, width: 1440, height: 250 } });
 	await page.keyboard.press("ArrowDown");
+	assert.equal(await search.evaluate((element) => element === document.activeElement), true);
+	assert.ok(await search.getAttribute("aria-activedescendant"));
 	await page.keyboard.press("Enter");
+	assert.equal(await page.getByRole("region", { name: "Repository search", exact: true }).count(), 0);
 	await page.getByRole("navigation", { name: "Repository navigation" }).getByRole("button", { name: "work", exact: true }).click();
 	await page.getByRole("heading", { name: "Work", exact: true }).waitFor();
 	await page.goBack();
 	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
+});
+test("search shortcuts focus the same field, Escape and Tab dismiss results, and empty matches do not navigate", async () => {
+	await page.goto(server.origin);
+	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
+	const current = page.url();
+	const search = page.getByRole("combobox", { name: "Find repository", exact: true });
+	await page.keyboard.press("Meta+k");
+	assert.equal(await search.evaluate((element) => element === document.activeElement), true);
+	await page.getByRole("option", { name: "fernloop/payment-service", exact: true }).waitFor();
+	await search.fill("nothing-matches-this-repository");
+	await page
+		.getByRole("region", { name: "Repository search", exact: true })
+		.getByText("No matching repositories.", { exact: true })
+		.waitFor();
+	await page.keyboard.press("Enter");
+	assert.equal(page.url(), current);
+	await page.keyboard.press("Escape");
+	assert.equal(await search.getAttribute("aria-expanded"), "false");
+	assert.equal(await search.evaluate((element) => element === document.activeElement), true);
+	await page.keyboard.press("Control+k");
+	assert.equal(await search.getAttribute("aria-expanded"), "true");
+	await search.fill("payment");
+	await page.getByRole("option", { name: "fernloop/payment-service", exact: true }).waitFor();
+	await page.keyboard.press("Tab");
+	assert.equal(await page.getByRole("region", { name: "Repository search", exact: true }).count(), 0);
+	assert.equal(
+		await page.getByRole("button", { name: "Your account", exact: true }).evaluate((element) => element === document.activeElement),
+		true,
+	);
+	assert.equal(page.url(), current);
+});
+test("search preserves partial results and retries unavailable namespaces without moving the page", async () => {
+	let fail = true;
+	await page.route("**/api/namespaces/*/repositories", (route) => {
+		if (!route.request().url().includes("/fernloop/") && fail)
+			return route.fulfill({ status: 503, json: { error: "Temporarily unavailable" } });
+		return route.continue();
+	});
+	await page.goto(server.origin);
+	await page.getByRole("combobox", { name: "Find repository", exact: true }).fill("payment");
+	const panel = page.getByRole("region", { name: "Repository search", exact: true });
+	await panel.getByRole("alert").getByText("Some repositories are unavailable.", { exact: true }).waitFor();
+	await panel.getByRole("option", { name: "fernloop/payment-service", exact: true }).waitFor();
+	assert.equal(await panel.getByText("No matching repositories.", { exact: true }).count(), 0);
+	await panel.getByRole("button", { name: "Retry", exact: true }).focus();
+	await page.keyboard.press("Escape");
+	assert.equal(await panel.count(), 0);
+	const search = page.getByRole("combobox", { name: "Find repository", exact: true });
+	assert.equal(await search.evaluate((element) => element === document.activeElement), true);
+	await search.click();
+	await panel.getByRole("alert").waitFor();
+	fail = false;
+	await panel.getByRole("button", { name: "Retry", exact: true }).click();
+	await panel.getByRole("option", { name: "fernloop/payment-service", exact: true }).waitFor();
+	assert.equal(await panel.getByRole("alert").count(), 0);
+	assert.equal(new URL(page.url()).search, "");
+	await page.getByRole("heading", { name: "Agent work. Shared direction." }).click();
+	assert.equal(await panel.count(), 0);
+});
+test("mobile search is anchored below the compact header and keeps navigation available", async () => {
+	await page.setViewportSize({ width: 320, height: 700 });
+	await openRepo();
+	const current = page.url();
+	const trigger = page.getByRole("button", { name: "Find repository", exact: true });
+	await trigger.click();
+	const search = page.getByRole("combobox", { name: "Find repository", exact: true });
+	const panel = page.getByRole("region", { name: "Repository search", exact: true });
+	await search.fill("fernloop/payment");
+	await panel.getByRole("option", { name: "fernloop/payment-service", exact: true }).waitFor();
+	assert.equal(await page.getByRole("dialog").count(), 0);
+	assert.equal(await search.evaluate((element) => element === document.activeElement), true);
+	const bounds = await page.locator(".search-content").boundingBox();
+	assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 320);
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+	await page.screenshot({ path: "dist/ui-checks/search-mobile.png", fullPage: true });
+	await page.keyboard.press("Escape");
+	assert.equal(await trigger.evaluate((element) => element === document.activeElement), true);
+	assert.equal(await panel.count(), 0);
+	assert.equal(page.url(), current);
+	await page.keyboard.press("Control+k");
+	await panel.getByRole("option", { name: "fernloop/payment-service", exact: true }).waitFor();
+	await panel.getByRole("option", { name: "fernloop/payment-service", exact: true }).click();
+	assert.equal(await panel.count(), 0);
+	assert.equal(await page.getByRole("button", { name: "Switch namespace", exact: true }).isVisible(), true);
+});
+test("dismissed search requests cannot replace a newer search and shortcuts leave creation forms alone", async () => {
+	let release;
+	const delayed = new Promise((resolve) => {
+		release = resolve;
+	});
+	let delivered;
+	const delivery = new Promise((resolve) => {
+		delivered = resolve;
+	});
+	let first = true;
+	const data = await (await page.request.get(`${server.origin}/api/namespaces/fernloop/repositories`)).json();
+	await page.route("**/api/namespaces/fernloop/repositories", async (route) => {
+		if (!first) return route.continue();
+		first = false;
+		await delayed;
+		try {
+			await route.fulfill({ json: [{ ...data[0], id: "stale", name: "stale-repository" }] });
+		} finally {
+			delivered();
+		}
+	});
+	await openRepo();
+	const search = page.getByRole("combobox", { name: "Find repository", exact: true });
+	await search.click();
+	const panel = page.getByRole("region", { name: "Repository search", exact: true });
+	await panel.getByText("Finding repositories…", { exact: true }).waitFor();
+	await page.keyboard.press("Escape");
+	await search.click();
+	await panel.getByRole("option", { name: "fernloop/payment-service", exact: true }).waitFor();
+	release();
+	await delivery;
+	await panel.getByRole("option", { name: "fernloop/payment-service", exact: true }).waitFor();
+	assert.equal(await panel.getByRole("option", { name: /stale-repository/ }).count(), 0);
+	await page.getByRole("button", { name: "Switch namespace", exact: true }).click();
+	await page
+		.getByRole("region", { name: "Switch namespace", exact: true })
+		.getByRole("button", { name: "Create namespace", exact: true })
+		.click();
+	const dialog = page.getByRole("dialog", { name: "Create namespace", exact: true });
+	await dialog.getByLabel("Name", { exact: true }).fill("Keep my place");
+	await page.keyboard.press("Meta+k");
+	assert.equal(await dialog.getByLabel("Name", { exact: true }).evaluate((element) => element === document.activeElement), true);
+	assert.equal(await panel.count(), 0);
+	await page.keyboard.press("Escape");
+	await search.click();
+	await panel.getByRole("option", { name: "fernloop/payment-service", exact: true }).waitFor();
+	assert.equal(await panel.getByRole("option", { name: /stale-repository/ }).count(), 0);
 });
 test("workspace detail preserves base, actor and execution provenance", async () => {
 	await openRepo();
@@ -323,13 +588,11 @@ test("namespace home, account and creation remain usable on mobile", async () =>
 	await page.getByRole("button", { name: "Fernloop", exact: true }).waitFor();
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
 	await page.screenshot({ path: "dist/ui-checks/namespaces-mobile.png", fullPage: true });
-	await page.getByRole("button", { name: "Open navigation" }).click();
 	await page.getByRole("button", { name: "Your account", exact: true }).click();
-	await page.getByRole("heading", { name: "Your account", exact: true }).waitFor();
+	await page.getByRole("region", { name: "Your account", exact: true }).waitFor();
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
-	await page.getByRole("button", { name: "Open navigation" }).click();
-	await page.getByRole("button", { name: "Switch namespace" }).click();
-	await page.getByRole("dialog").getByRole("button", { name: "Alex Morgan", exact: false }).click();
+	await page.keyboard.press("Escape");
+	await page.getByRole("button", { name: "Alex Morgan", exact: true }).click();
 	await page.getByRole("button", { name: "New repository", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "New repository" });
 	await dialog.getByLabel("Repository name", { exact: true }).fill("mobile-tools");
@@ -464,18 +727,36 @@ test("late source responses cannot overwrite a newer history inspection", async 
 	assert.equal(await page.locator(".commit-history").count(), 1);
 });
 
-test("mobile drawer traps focus, restores trigger and honors reduced motion", async () => {
+test("mobile dropdowns support keyboard navigation, Escape, outside clicks and reduced motion without trapping focus", async () => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.emulateMedia({ reducedMotion: "reduce" });
 	await openRepo();
-	const trigger = page.getByRole("button", { name: "Open navigation" });
-	await trigger.click();
-	for (let i = 0; i < 18; i++) {
-		await page.keyboard.press("Tab");
-		assert.equal(await page.evaluate(() => !!document.activeElement?.closest("dialog")), true);
-	}
+	const trigger = page.getByRole("button", { name: "Switch namespace", exact: true });
+	await trigger.focus();
+	await page.keyboard.press("ArrowDown");
+	const dropdown = page.getByRole("region", { name: "Switch namespace", exact: true });
+	await dropdown.waitFor();
+	assert.equal(await page.getByRole("dialog").count(), 0);
+	assert.equal(await page.getByLabel("Search namespaces").evaluate((e) => e === document.activeElement), true);
+	await page.screenshot({ path: "dist/ui-checks/namespace-dropdown-mobile.png", fullPage: true });
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
 	await page.keyboard.press("Escape");
 	assert.equal(await trigger.evaluate((e) => e === document.activeElement), true);
+	assert.equal(await dropdown.count(), 0);
+	await trigger.click();
+	const bounds = await dropdown.boundingBox();
+	await page.mouse.click(bounds.x + bounds.width + 8, bounds.y + 8);
+	assert.equal(await dropdown.count(), 0);
+	await trigger.click();
+	await page.getByLabel("Search namespaces").fill("fernloop");
+	await page.keyboard.press("ArrowDown");
+	await page.keyboard.press("Tab");
+	await page.keyboard.press("Tab");
+	assert.equal(await dropdown.count(), 0);
+	assert.equal(
+		await page.getByRole("button", { name: "Switch repository", exact: true }).evaluate((e) => e === document.activeElement),
+		true,
+	);
 	assert.equal(
 		await page
 			.locator(".topology-lane")
@@ -501,13 +782,16 @@ test("screen families remain readable across desktop, tablet, mobile and 200 per
 		["members", `${server.origin}/?namespace=fernloop#/members`, "Members"],
 		["teams", `${server.origin}/?namespace=fernloop#/teams`, "Teams"],
 		["namespace-settings", `${server.origin}/?namespace=fernloop#/settings`, "Settings"],
-		["account", `${server.origin}/?page=account`, "Your account"],
+		["account", `${server.origin}/?page=account`, "Agent work. Shared direction."],
 	];
 	for (const width of [1440, 1024, 390]) {
 		await page.setViewportSize({ width, height: 1000 });
 		for (const [name, url, title] of routes) {
 			await page.goto(url);
 			await page.getByRole("heading", { name: title, exact: true }).waitFor();
+			if (name === "account") {
+				await page.getByRole("region", { name: "Your account", exact: true }).waitFor();
+			}
 			if (name === "code") {
 				await page.getByRole("button", { name: "Browse source", exact: true }).click();
 				await page.locator(".source-browser").waitFor();
@@ -532,7 +816,7 @@ test("screen families remain readable across desktop, tablet, mobile and 200 per
 		document.documentElement.style.zoom = "2";
 	});
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
-	assert.equal(await page.getByRole("button", { name: "Open navigation" }).isVisible(), true);
+	assert.equal(await page.getByRole("button", { name: "Switch namespace" }).isVisible(), true);
 	assert.ok((await page.locator(".topology-panel").boundingBox()).width >= 500);
 	await page.screenshot({ path: "dist/ui-checks/overview-zoom.png", fullPage: true });
 	await page.evaluate(() => {

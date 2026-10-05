@@ -18,7 +18,7 @@ Brand display name, tagline and application asset references live in `src/ui/bra
 
 | Token | Value | Use |
 | --- | --- | --- |
-| Forest | `#17251F` | Sidebar, primary text and decisive actions |
+| Forest | `#17251F` | Header, primary text and decisive actions |
 | Paper | `#F5F5EF` | Main canvas |
 | White | `#FFFFFF` | Working surfaces and inputs |
 | Lime | `#B5E86A` | Brand and selection against forest |
@@ -46,11 +46,13 @@ Namespace summary topology is a minimal projection of already-authorized reposit
 
 ## Screens and interaction
 
-Desktop keeps namespace/repository selection grouped in the forest sidebar. Repository navigation remains Overview, Code, Work and Settings. Namespace Members/Teams are shared-namespace controls; account settings remain separate. The repository finder retains Command/Ctrl K and keyboard selection.
+The slim forest header uses a 56px content row with a smaller wordmark and inline repository search field. Avatar, scope controls and the unboxed mobile search icon retain 44px targets. Search uses a compact 300px desktop result panel and tighter result rows; the mobile panel uses a 40px input. It follows the current scope: Home, namespace, or namespace/repository. The Cruce mark returns to unscoped Home, where namespace cards provide the selection surface. Scoped names are anchored searchable dropdowns, with native links, arrow-key selection, normal Tab navigation, Escape dismissal and trigger restoration. Navigation does not require a modal or a second All namespaces action. Repository navigation remains Overview, Code, Work and Settings; namespace tabs appear only at namespace level, with Members/Teams limited to shared namespaces. Repository search accepts typing directly in the header, with namespace-labelled results underneath. Command/Ctrl K focuses this same field; arrows and Enter select a result, while Escape, Tab and outside clicks dismiss the results without trapping focus or changing the page. Loading, partial failures and retry stay in the result panel. On narrow screens the search icon reveals the field and results together in an anchored panel under the header.
+
+The avatar opens a compact profile card: a forest cap carries the junction watermark, an initial tile anchors the name and email, and a pale action row contains Sign out while preserving the current page and URL. Namespace selection stays in Home and the scope dropdown; the identity menu does not duplicate namespace membership or introduce an account page. Saved account links open the menu on Home with history replacement. Authentication identity and namespace/repository authority remain separate. The Alpha label sits quietly in the footer; the header carries only navigation and identity.
 
 Work separates Changes, Workspaces and Revision evidence. Deep links open focused change, workspace and evidence details. Change detail presents pinned source, controller readiness, diff/revision access, exact-revision evidence, reviews/concerns and the human decision area. Stored evidence is associated by workspace and exact revision, or an explicit revision-matched verification link; unrelated or stale reports do not appear on a change. Work also lists evidence stored before a change is proposed. Code lists Published revisions and provides focused provenance inspection plus read-only source, history and diff controls. Overview highlights the latest published source revision, independently of evidence publication. Source approval, attestation and explicit promotion remain distinct actions.
 
-Layout breakpoints use the available root container width, including reflow at 200% zoom. At narrow widths the sidebar becomes a modal navigation drawer with focus containment, Escape dismissal and trigger restoration. Repository tabs stay visible. At intermediate widths the decision queue follows topology; wider screens place them side by side. Forms, settings, empty states and account views use the same type, surface and control system.
+Layout breakpoints use the available root container width, including reflow at 200% zoom. At narrow widths the scoped names move to a second header row; anchored dropdowns stay within the viewport, including at 320px. Repository tabs stay visible. Explicit creation forms use dialogs with focus containment; search and scope navigation stay anchored to the header. At intermediate widths the decision queue follows topology; wider screens place them side by side. Forms, settings, empty states and identity menus use the same type, surface and control system.
 
 Transitions run for 140–150ms. A changed observation receives one brief emphasis; mounting or polling unchanged state does not restart it. Reduced-motion preference disables animation and transitions. Every topology action has a normal keyboard-accessible button and a textual equivalent; SVG cues are supplemental.
 

@@ -19,7 +19,7 @@ Open the loopback URL printed by the server. The port changes between runs. Keep
 
 ## 1. Find your namespace and repository
 
-The opening view shows the personal **Alex Morgan** namespace and shared **Fernloop** namespace. Namespaces group compact repository rows. **Work in motion** shows miniature workspace paths and their reported shared surface, and provides a route into the active sample repository. Click **payment-service** to inspect it.
+The Cruce mark always returns to this unscoped Home view. Inside a namespace or repository, use the named header dropdowns to switch scope without opening a modal. The opening view shows the personal **Alex Morgan** namespace and shared **Fernloop** namespace. Namespaces group compact repository rows. **Work in motion** shows miniature workspace paths and their reported shared surface, and provides a route into the active sample repository. Click **payment-service** to inspect it. From any page, type in **Find repository** in the header (or press Cmd/Ctrl K) to see matches underneath; on mobile, the search icon reveals a compact search panel. Search leaves the current page visible, and Escape dismisses the results.
 
 ![Namespace home with personal and shared namespaces and the sample repository](images/local-demo/namespaces.jpg)
 
@@ -53,9 +53,9 @@ Cruce’s coordination boundary ends at reviewed reconciliation into canonical G
 
 ## 5. Keep account and namespace access distinct
 
-Open **Your account** at the bottom of the sidebar (inside Navigation on mobile). This view shows the sample identity and namespace membership links. In the real system, sign-in identity and namespace/repository permissions are separate. **Members** and **Teams** live under the shared namespace, while repository settings live in repository navigation.
+Click the avatar at the top right. **Your account** opens a compact profile card with the Cruce junction motif, an initial tile, the sample name and email, and a distinct **Sign out** row. Namespace selection stays in Home and the named header dropdown. The current page stays in place; Escape closes the menu and returns focus to the avatar. In the real system, sign-in identity and namespace/repository permissions are separate. **Members** and **Teams** live in shared-namespace navigation, while repository settings live in repository navigation. Development status appears quietly in the footer.
 
-![Sample account identity with personal and shared namespace links](images/local-demo/account.jpg)
+![Avatar identity menu with sign-out](images/local-demo/account.jpg)
 
 ## Refresh these screenshots
 
