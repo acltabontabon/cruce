@@ -1,6 +1,12 @@
 # AGENTS.md — working on Cruce
 
-Cruce is Git-native collaboration for developers and agents, organized as **Namespace → Repository → Workspace**. This direction supersedes the former project/mission model. The working name should remain easy to change.
+Cruce is a Git-native platform for coordinating multiple heterogeneous AI coding agents working concurrently on the same repository, organized as **Namespace → Repository → Workspace**. It starts where individual-agent isolation ends: worktrees isolate work; Cruce coordinates independent workers. The working name should remain easy to change.
+
+Read the [principles and guardrails](docs/principles.md), [architecture](docs/architecture.md) and [contributor guide](CONTRIBUTING.md) before changing domain behavior. [MCP participation](docs/mcp.md) describes the shared tool boundary. These documents own current constraints/design; [roadmap](ROADMAP.md) contains future candidates, not commitments or work instructions, [verification](docs/local-verification.md) records evidence, and [CHANGELOG](CHANGELOG.md) summarizes user-facing changes. Git history preserves implementation history; do not maintain a separate progress log.
+
+- If Git already has a primitive, use Git instead of inventing another one. Commit, clone, fetch, pull, push, branch, diff and log remain normal Git. Publication adds exact-revision retention/review, not source transport.
+- Coordinate across independent tools without launching agents or owning their runtimes. Cruce is not a Git/worktree replacement, a vendor-specific worktree manager, a GitHub/GitLab clone, an IDE, a cloud coding environment, a CI/CD replacement or a general agent orchestrator.
+- Keep architectural constraints, current implementation, proposed features and local/live verification distinct. Update the owning documentation with architectural changes; merge duplicate material and remove superseded instructions.
 
 ## Domain and boundaries
 
@@ -33,4 +39,4 @@ Cruce is Git-native collaboration for developers and agents, organized as **Name
 
 Preserve pre-existing working changes. `demo/auth-service` and `demo/scenario` are reusable source fixtures: do not reformat them. Historic overlay directory names are fixture paths, not domain entities. Keep demo commit IDs reproducible.
 
-Before committing run `pnpm typecheck && pnpm lint && pnpm test`, `pnpm test:browser`, `pnpm verify:scenario` and `pnpm exec cf build --mode offline`. Validate hosted publication/deployment in the configured test environment before describing them as live-verified. Record short dated progress in `docs/PROGRESS.md`.
+Before committing run `pnpm typecheck && pnpm lint && pnpm test`, `pnpm test:browser`, `pnpm verify:scenario` and `pnpm exec cf build --mode offline`. Validate hosted publication/deployment in the configured test environment before describing them as live-verified. Update `CHANGELOG.md` for user-facing changes and `docs/local-verification.md` when verification status changes. Record checks and limitations in the review description.

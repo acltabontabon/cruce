@@ -1,51 +1,159 @@
 # Architecture
 
-The initial product focus is one developer coordinating several agents on one repository. Connected tools share repository participation, upstream observations and exact-revision decisions through Cruce; agents still execute in their existing environments. This architecture supports the [product thesis](product-thesis.md), whose coordination benefit remains subject to the [usage pilot](PLAN.md). Shared namespaces and multiple repositories remain part of the ownership model.
+[Documentation map](../README.md#documentation-map) · [Principles](principles.md) · [Verification status](local-verification.md)
 
-Cruce organizes Git-native collaboration as Namespace → Repository → Workspace. The Worker authenticates requests and dispatches them to three ownership boundaries:
+This describes the current Namespace → Repository → Workspace design. It is not a deployment claim. Cruce maintains shared repository state and exact-revision decisions across independently running agents; their execution remains outside the control plane.
 
-```text
-Access browser / OAuth agent / browser-authorized human bridge
-                       ↓
-Directory DO — stable users, personal/shared namespaces, handle lookup
-                       ↓
-Namespace DO — membership, teams, repository grants, sealed account, budget reservations
-                       ↓
-Repository Control Tower — workspaces, observed refs, changes, artifacts, deployments, Git objects
-                       ↓
-Local Git bridge                         Namespace Cloudflare account
-persistent checkout locks                Artifacts REST → Workers Builds
-isolated agent worktrees                 short-lived server-side Git tokens
+## Domain vocabulary and ownership
+
+```mermaid
+flowchart TD
+    N[Namespace: access, resources, budgets] --> R[Repository: canonical Git and policy]
+    R --> W[Workspace: actor, task, immutable base]
+    W --> F[One reusable hosted writer fork]
+    W --> E[Execution context: local worktree or clone]
+    W --> A[Retained source and evidence artifacts]
+    A --> C[Change: exact revision and review base]
+    C --> V[Reviews and verification]
+    A --> D[Optional artifact-derived deployment]
 ```
+
+| Term | Meaning and boundary |
+| --- | --- |
+| Namespace | Owns repositories, membership, teams, connected Cloudflare credentials, resource policy and atomic shared budgets; personal or shared |
+| Repository | Stable code identity, configured default branch and mandatory canonical Artifacts storage; names and URLs are mutable addresses |
+| Actor | Human or agent identity derived from authentication; an agent belongs to an authorized user and connection |
+| Workspace | One actor's bounded repository work: title/context, immutable starting revision, presence, reported changes and writer fork |
+| Execution context | Local materialization with checkout/machine identity, ownership and branch; not the durable task or hosted storage owner |
+| Fork | Mutable Artifacts Git repository isolated for one writer workspace; read-only observers need no fork |
+| Source artifact | Retained exact source revision plus its pinned review base, provenance, content hash and storage reference |
+| Change | Proposal of a source artifact for exact-revision review; the code type and MCP names use `Proposal`/`*_proposal` |
+| Deployment | Attempt to deploy an artifact's exact revision into a configured environment, with build/runtime observations and predecessor |
+
+A workspace is neither a namespace nor a temporary process session. Multiple workspaces from one tool remain independent. Directory identities and provider repository IDs prevent mutable addresses from becoming proof of ownership. Full contracts are in [src/shared/platform.ts](../src/shared/platform.ts).
+
+## Components and trust boundaries
+
+```mermaid
+flowchart TB
+    subgraph Participants[Participant environments]
+        H[Human console]
+        B[Agent tool and local bridge]
+        T[Browser-approved human terminal]
+        G[Ordinary Git client]
+    end
+    subgraph Control[Cruce control plane]
+        W[Worker: Access, OAuth, terminal authentication]
+        D[Directory DO: users and address lookup]
+        N[Namespace DO: membership, grants, reservations]
+        R[Repository Control Tower: work, review, source cache]
+        O[Deployment Workflow: build and runtime observation]
+    end
+    subgraph Account[Explicitly connected namespace account]
+        A[Cloudflare Artifacts: canonical, forks, retained source]
+        K[Workers Builds and target Worker]
+    end
+    H -->|HTTPS and Access| W
+    B -->|MCP and OAuth| W
+    T -->|Restricted terminal credential| W
+    G -->|Git smart HTTP and Cruce credential| W
+    W --> D
+    W --> N
+    W --> R
+    R -->|Current authority and resource reservations| N
+    R -->|Server-side provider tokens| A
+    R --> O
+    O --> K
+    A -->|Separate deployment repository| K
+```
+
+The operator's account hosts the control plane. Each namespace explicitly connects the account used for its source and deployment resources. The two may happen to be the same account, but configuration for one never authorizes the other.
+
+| Implementation boundary | Responsibility |
+| --- | --- |
+| [src/core/ownership.ts](../src/core/ownership.ts) | Pure Directory/Namespace decisions: identity, membership, grants and reservations |
+| [src/core/platform.ts](../src/core/platform.ts), [capabilities.ts](../src/core/capabilities.ts) | Pure repository decisions, permissions, workspace presence, overlap, review readiness and deployment eligibility |
+| [src/worker](../src/worker) | Authentication, Durable Object persistence, serialization, Git/provider I/O and deployment observation |
+| [src/worker/git](../src/worker/git) | Git object cache in SQLite and exact source inspection/transport; not a competing canonical remote |
+| [src/shared/tools.ts](../src/shared/tools.ts), [src/shared/platform.ts](../src/shared/platform.ts) | Single MCP catalog and shared contracts |
+| [runner](../runner) | OAuth, local observation, checkout locks, worktree isolation and Git credential helper |
+| [src/ui](../src/ui) | Console rendering of controller-derived decisions; navigation, retries and protection against late responses |
+| [src/intelligence](../src/intelligence) | Babel source structure at pinned revisions; contextual analysis, never authority |
+| [test/browser](../test/browser) | Separate fixed-clock console fixture; simulated identity/provider behavior |
+
+Core controllers receive state, time and IDs. Adapters persist their results and perform external work. Directory DO serializes identity/address decisions; Namespace DO serializes shared budgets across repositories; each Repository Control Tower owns its workspaces, changes, artifacts and deployments.
 
 ## Identity and authorization
 
-Directory writes run synchronously in one Durable Object. Concurrent first logins for the same verified issuer/subject resolve to one user and personal namespace. Handles are unique mutable labels; storage uses IDs. Namespace membership is independent of Access admission. Shared membership and explicit user/team repository grants are rechecked on requests and retries. Owners and maintainers administer all repositories; developers receive at most Write and viewers at most Read.
+Access verifies issuer, subject, audience, signature and expiry. Directory first-login provisioning idempotently creates a user, human actor identity and personal namespace. Authentication admission is separate from namespace membership. Shared invitations are expiring links bound to verified email.
 
-Agent actors are derived from the authenticated user and OAuth connection; labels supplied during client registration are display metadata. OAuth consent selects repositories and scopes. Effective access is the intersection with current membership and repository grants. Human terminal pairing is browser-approved, short-lived and bound to one workspace; it cannot authorize production or forge a human actor through MCP.
+Personal namespaces have one owner. In shared namespaces, Owner and Maintainer have repository Maintain authority. Developer and Viewer access comes from direct/team grants, capped at Write and Read respectively. Repository roles are Read, Write and Maintain.
 
-## Git and workspaces
+Agent authority intersects the user's current membership, repository grants, OAuth-approved repositories and capability scopes. It is re-evaluated on requests and retries before saved mutation results are returned. A client label or Git author cannot assert identity. Browser-approved human terminal credentials bind participation to one workspace and cannot exercise console promotion or production authority.
 
-Every repository has canonical Artifacts storage. Workspace forks are direct forks of canonical; no extra baseline repository is created. The provider cannot fork at an exact commit, so each workspace pins its immutable base in metadata and a dedicated fork ref. ExecutionContext contains local materialization only. Agent/task/fork identity survives client disconnection.
+## Git and workspace lifecycle
 
-Workspaces pin a starting revision and track head, optional ref, actor, execution context, observed changes and lifecycle. Writer checkout identity combines realpath and Git worktree identity. The bridge holds a persistent exclusive local lock and the controller reserves the context. Presence expires after 90 seconds; lock ownership does not. Agent writers get dedicated branches/worktrees. Read-only observers share safely. End/cancel releases participation but retains commits and records; local cleanup requires Cruce ownership, a clean checkout and no unpublished head.
+The bridge registers a workspace at an exact local commit. Writer attachment checks known retained source, reserves the checkout and provisions a direct canonical fork. Artifacts forks inherit refs at fork time; the API has no exact-commit selector. Cruce pins the workspace base in metadata and a `cruce-base` fork ref, and creates the local checkout at that exact commit. There is no extra baseline repository. See the [Artifacts fork API](https://developers.cloudflare.com/artifacts/api/rest-api/).
 
-Workspace forks persist across source publications. Upstream awareness uses Cruce's accepted canonical source, with those trust levels kept distinct. Reads compare uploaded source and reported touched paths without provider calls. Normal Git fetch imports canonical source; Git merge or rebase performs reconciliation. The authenticated smart-HTTP gateway restricts writes to the caller’s workspace fork. Cloudflare tokens remain server-side. Publication validates the integrated upstream against Git ancestry and records it separately from the immutable starting revision. Every source artifact pins its review base; later Workspace integrations cannot rewrite existing proposals. The next proposal can therefore be reviewed and promoted against current source after an explicit local merge and fresh verification.
+Agent writers get Cruce-owned worktrees; adapters may also supply isolated clones. Humans can attach existing checkouts. Local locks use real checkout/worktree identity and persist across process exits; server reservations prevent another workspace claiming the same context. MCP or `watch` renews presence every 30 seconds. After 90 seconds without activity, active presence becomes disconnected, while the writer reservation remains.
 
-Overlap compares reported touched paths across active workspaces, including both sides of renames and binary/deleted paths. It carries evidence trust and observation time. Babel structural indexing enriches pinned source context. Neither overlap nor a stale base blocks local editing. Protected-path policy, authorization, resource budget and revision review still govern Cruce operations.
+Writer state progresses from `preparing` to `active`, then `completed` or `cancelled`. Disconnected is derived from freshness and can recover on heartbeat. A failed attachment remains retryable. Ending participation releases the bridge lock and server participation without merging, deleting source or automatically cleaning up.
 
-## Changes and artifacts
+The Git gateway serves ordinary smart HTTP at `/mcp/git/<namespace-id>/<repository-id>/<canonical-or-workspace-id>.git`. It supports `info/refs`, `git-upload-pack` and `git-receive-pack`. Canonical is read-only through this path. Fork writes require the owning active writer and, for agents, read, workspace-write and revision-publication scopes. See [setup](native-setup.md) for credentials and transfer limits.
 
-A proposed change names an immutable source artifact and exact base/head. Reviews, disagreement resolution and verification name that revision. Agent evidence remains reported; authenticated human attestation is labelled separately from runtime verification. Readiness is computed in the controller. Hosted promotion checks current source and performs a non-forced push after human approval. External integration records are bridge observations with timestamps, not verified remote pushes.
+Cloudflare credentials stay server-side: creation/fork tokens are revoked, and Git operations use 60-second scoped tokens revoked after use. The gateway validates destinations, rejects redirects and does not forward client cookies or authorization to Artifacts. Push retries replay the Git protocol against current refs, using request content to identify budget accounting; a cached success never substitutes for a remote ref check.
 
-Artifacts identify namespace, repository, workspace, actor, exact revision, SHA-256 content hash, immutable storage and trust. Source artifacts retain Git objects. Evidence artifacts retain content separately. No workspace cleanup deletes retained source. Lineage traverses workspaces, artifacts, changes, reviews and deployments in both directions.
+## Concurrent work and convergence
 
-## Resources and deployment
+```mermaid
+sequenceDiagram
+    participant A as Agent A / workspace A
+    participant B as Agent B / workspace B
+    participant C as Cruce
+    participant H as Human reviewer
+    participant G as Canonical Git
+    A->>C: Register at S0 and report paths
+    B->>C: Register at S0 and report paths
+    C-->>A: Shared work and advisory overlap
+    C-->>B: Shared work and advisory overlap
+    A->>A: Commit and push revision A1 to own fork
+    A->>C: Publish A1, propose artifact, record evidence
+    H->>C: Review A1 and approve promotion
+    C->>G: Check current base S0, non-forced push A1
+    B->>C: Inspect workspace updates
+    C-->>B: Accepted source A1 and available comparison
+    B->>G: Normal Git fetch
+    B->>B: Explicit merge, resolve, verify, commit B2
+    B->>B: Push B2 to own fork
+    B->>C: Publish B2 with review base A1
+    H->>C: Fresh review and promotion decision for B2
+    C->>G: Check current base A1, non-forced push B2
+```
 
-The Namespace DO owns one sealed account and serializes reservations across repositories. Operation IDs and exact input fingerprints make retries idempotent. Reservations remain held on uncertain provider outcomes; retries inspect existing state and reuse named resources before continuing. No fallback to the control-plane account is available. Control operations do not spend resources.
+These are three different revision references:
 
-Deployments require a source artifact and derive its revision, retaining requester, environment, build, runtime observation and predecessor. The deployment repository is separate from accepted source; only its environment ref is forced for an explicit rollback. Production requires human authority and revision-bound review/evidence. Rollback names a prior deployed artifact. Durable Workflows observe builds, time out boundedly and stop superseded deployments; smoke checks remain runtime evidence. Provider observations have timestamps and absent data stays unavailable.
+- `Workspace.baseRevision` is the immutable starting point, S0 in the example.
+- `Workspace.integratedRevision` records the review base of its latest publication; local fetch alone does not advance it.
+- `Artifact.baseRevision` pins that artifact's review base, A1 for B2 above. Later publications cannot change it.
 
-Pure decisions live in `src/core` with injected clock and IDs. Worker adapters perform persistence and infrastructure. The console renders controller permissions/readiness and protects navigation from late responses. The bridge never launches participants. The fixed-clock fixture server is separate from the deployed Worker. Disposable old state is not converted.
+A new source publication must descend from the workspace base and its previous publication. Merge upstream explicitly when needed; rewriting already published history by rebase can make later publication fail ancestry checks. Local Git can manipulate unpublished work, but publication must preserve retained ancestry.
 
-The gateway supports ordinary HTTPS Git at `/mcp/git/<namespace>/<repository>/<canonical-or-workspace>.git`, with stable IDs and OAuth or a browser-authorized human terminal credential. Canonical writes require reviewed human promotion. See [native setup](native-setup.md) for authentication, the 32 MiB transfer limit and deployment prerequisites.
+`inspect_overlap` compares paths reported by currently present writers, including both sides of reported renames, deleted paths and binary files. `get_workspace_updates` compares accepted source against the workspace's publication baseline using available cached Git objects. A reported local ref never advances accepted source. Missing objects produce unavailable comparison, not a provider fetch during a coordination read.
+
+## Publication, review and retention
+
+Publication fetches the named pushed fork ref and verifies it equals the requested commit. It checks ancestry and protected-path policy, pins the review base, then retains the exact source under a unique artifact ref in a separate per-repository Artifacts repository. Workspace forks remain mutable; retained artifact refs and Cruce records are not exposed as agent-writable remotes. Immutability is an application/storage-access invariant, not a claim that ordinary Git refs are intrinsically immutable.
+
+Every artifact identifies namespace, repository, workspace, actor, source revision, SHA-256 content hash, storage and trust. Evidence content lives separately from source. The `build` kind does not imply output capture is implemented. Reported test results remain `reported`; authenticated human attestation is `human_attested`; actual runtime checks produce `runtime_verified` evidence. Retaining source does not upgrade its correctness claims.
+
+Changes bind an artifact, base and head. Controller readiness requires current base, human approval for the exact revision, reasoned resolution of concerns and policy-required trusted passing evidence without unresolved failures. Promotion rechecks canonical source and makes a non-forced Git push. A moved base requires reconciliation and a new proposal, not rewriting the existing review.
+
+Hosted cleanup requires an ended workspace. The runtime checks every fork ref against retained canonical/artifact history; unretained commits, annotated tags and non-commit refs conservatively block deletion. Deletion intent is persisted and asynchronous provider absence is reconciled on retry. Workspace records, source artifacts and lineage survive. Local cleanup separately requires Cruce ownership, clean files and a published or retained-base head.
+
+## Resources and optional deployment
+
+Namespace reservations serialize operation budgets across repositories. Mutation IDs and exact input fingerprints prevent accidental identity reuse. Unknown provider outcomes retain their reservation and named resource identity until reconciliation. Coordination reads do not provision or mutate; explicit Git reads contact the provider and have provider costs even though Cruce's reservation model is not a meter of every request.
+
+Deployment names a source artifact and derives its revision. A separate deployment repository feeds Workers Builds, keeping preview/rollback ref movement away from accepted source. Production requires authenticated human authority and exact-revision review/evidence. Rollback selects a prior successful deployment of the same artifact in the same environment. The durable observer correlates build and runtime results, records timeouts/failures and stops superseded attempts. Build/deploy commands remain configured in Cloudflare, not generated by an agent orchestration engine.
+
+See [Cloudflare setup](cloudflare-setup.md) for provider configuration and limits. Events, native file/history retrieval, Git-note mirroring and ArtifactFS are optional future evaluations in the [roadmap](../ROADMAP.md); no current event subscription or agent notification-delivery capability is implied.

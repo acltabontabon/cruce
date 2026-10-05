@@ -1,5 +1,7 @@
 # Releases
 
+[Documentation map](../README.md#documentation-map) · [Changelog](../CHANGELOG.md) · [Verification](local-verification.md)
+
 Cruce's first alpha, **0.1.0-alpha.1**, was released on 2026-10-05. Future releases are deployed by pushing a checked release tag. This is experimental software; alpha interfaces may change.
 
 ## Versioning and changelog
@@ -7,7 +9,7 @@ Cruce's first alpha, **0.1.0-alpha.1**, was released on 2026-10-05. Future relea
 - `package.json` is the version source for Cruce and its MCP interfaces.
 - Use SemVer: `0.1.0-alpha.1`, `0.1.0-alpha.2`, then beta/rc versions as needed and `0.1.0` for the stable release.
 - During `0.x`, increment the minor version for breaking changes and the patch for compatible fixes. From `1.0.0`, use major/minor/patch for breaking changes/features/fixes.
-- Keep brief user-facing changes under `[Unreleased]` in `CHANGELOG.md`. Before release, move them into a heading matching the package version. Mention changes, not implementation history; use `docs/PROGRESS.md` for detailed work records.
+- Follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): group brief user-facing changes under `[Unreleased]` using applicable `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed` or `Security` headings; omit empty categories and maintain release/comparison links. Before release, move them into a heading matching the package version. Summarize user-facing changes; Git history and review descriptions retain implementation details. Keep current local/live verification evidence in [verification](local-verification.md).
 - Release tags are `v` plus the exact package version. Never move or reuse a published tag; fix a release with a new version.
 
 `pnpm release:check` checks the version and changelog. `pnpm release:check v0.1.0-alpha.1` also checks the tag. A matching entry with release notes is required.
@@ -37,12 +39,13 @@ GitHub Actions uses standard Ubuntu runners, Node 24 and pnpm 12.4.2 with the fr
 Commit the version and changelog with the intended release changes, merge into `main`, and verify the checks pass. From a clean, current `main` checkout:
 
 ```sh
-pnpm release:check v0.1.0-alpha.1
-git tag -a v0.1.0-alpha.1 -m "Cruce 0.1.0-alpha.1"
-git push origin v0.1.0-alpha.1
+release_tag="v$(node -p 'require("./package.json").version')"
+pnpm release:check "$release_tag"
+git tag -a "$release_tag" -m "Cruce $release_tag"
+git push origin "$release_tag"
 ```
 
-For later releases, substitute the new version in all three commands.
+First set a new, unreleased package version and matching changelog entry. The commands derive that version; do not rerun them against the already released `0.1.0-alpha.1`.
 
 Pull requests and pushes to `main` run checks and an offline build. Only pushed `v*` tags can deploy. A release must match the package version and changelog, be contained in `main`, and pass typecheck, lint, tests, demo verification and builds. Deployments are serialized and record the release tag and commit in the Cloudflare Worker version. Ordinary commits and GitHub draft releases do not deploy; pushing a tag does, even if a GitHub release remains a draft.
 

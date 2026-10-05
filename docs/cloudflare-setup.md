@@ -1,25 +1,46 @@
 # Cloudflare setup
 
-Cruce uses `cf` with `cloudflare.config.ts`. The control plane requires a Worker, Directory/NamespaceRuntime/ControlTower SQLite Durable Objects, OAuth KV, DeploymentWorkflow and the `CRUCE_SECRET` server secret. Access issuer, audience and public origin are ordinary configuration. Use the configured single test environment in [test-environment.md](test-environment.md).
+[Documentation map](../README.md#documentation-map) · [Architecture](architecture.md) · [Test environment](test-environment.md)
 
-Canonical repositories and writer workspace forks require a connected namespace Cloudflare account with Artifacts access. Workers Builds permission is optional for Git hosting and required only for deployment.
+Cruce uses Cloudflare Artifacts for canonical Git, workspace forks and retained source. Cloudflare hosts storage and the coordination control plane; agent execution stays in participants' existing environments. Optional Workers Builds integration records deployment provenance without making Cruce a CI/CD replacement.
 
-See the [Cloudflare strategy](cloudflare-strategy.md) for the product-driven capability roadmap. Push-event reconciliation, native source-read optimization, Git-note mirroring and ArtifactFS are planned evaluations, not additional setup steps or currently deployed features.
+## Control plane
+
+Use the installed `cf` CLI and [cloudflare.config.ts](../cloudflare.config.ts). The configuration declares the Worker and assets, SQLite Durable Objects (`Directory`, `NamespaceRuntime`, `ControlTower`), OAuth KV and `DeploymentWorkflow`. There is no current event-subscription trigger.
+
+Configure `CRUCE_PUBLIC_ORIGIN`, `CRUCE_ACCESS_ISSUER` and `CRUCE_ACCESS_AUD` as ordinary values, and `CRUCE_SECRET` as a server secret for sealed credentials and identity operations. Example configuration is in [.env.example](../.env.example) and [.dev.vars.example](../.dev.vars.example). Retain the existing secret when updating a Worker; replacing it is not routine setup. Use the recorded [test environment](test-environment.md) for current deployment procedures and pending changes.
+
+Access protects browser sign-in, consent, the console and namespace APIs. Native Git requires the narrow `/mcp/git/*` browser-challenge exception in [tools/access-agent-transport.json](../tools/access-agent-transport.json); Cruce still authenticates and authorizes each Git request. The checked-in exception is not recorded as applied to live Access. See the test-environment endpoint list before changing transport configuration.
 
 ## Namespace resource account
 
-In Namespace Settings, an Owner connects an account ID and an account-scoped API token. The token must allow Artifacts reads/edits. Deployment additionally needs Workers Builds and Workers Scripts reads to observe builds and runtime versions. Workers Builds deployments also require a separately configured build token in Cloudflare. Cruce verifies Artifacts access, detects optional Builds access, seals the credential with `CRUCE_SECRET`, and returns only account metadata. It does not borrow the account running the control plane.
+In namespace Settings, an Owner connects an account ID and account-scoped API token with Artifacts read/edit permission. Cruce checks access, seals the credential and exposes account metadata only. It never borrows the account running the control plane. Workers Builds permission is optional for Git hosting and needed only for deployment integration.
 
-Stable namespace IDs provide Artifacts namespaces. Repository IDs, immutable revisions and workspace IDs determine storage names, so renames cannot move ownership. Resource policy and operation budgets belong to the namespace and apply across repositories. Limits count resource operations, not an estimated dollar bill. Uncertain operations keep reservations; retry the same operation identity to reconcile rather than spending again.
+The namespace ID maps storage ownership to a Cloudflare Artifacts namespace. Stable repository and workspace IDs determine storage names, so display-name changes do not move ownership. Canonical storage, direct workspace forks, source-artifact and evidence repositories are created as needed; optional deployments use a separate repository. Workspace forks persist across publications. Retained source has separate refs so a mutable writer fork cannot rewrite a review artifact.
 
-Artifacts REST creates canonical, workspace fork, immutable source-artifact, evidence and deploy repositories as needed. Cruce immediately revokes creation/fork tokens and mints 60-second tokens for server-side Git operations, revoking them afterwards. Native Git authenticates to Cruce; Cloudflare repository credentials never reach the client.
+Resource operations pass namespace policy and atomic operation reservations across repositories; repository policy can narrow them. Uncertain outcomes retain their reservation and must be reconciled with the original operation identity. These budgets are policy limits, not a dollar estimator. Git reads and provider token requests can incur costs beyond the logical reservation count.
 
-## Workers Builds integration
+Creation/fork tokens are revoked. Server-side Git operations use repository-scoped 60-second tokens and revoke them after use. Native Git clients authenticate to Cruce with OAuth or restricted terminal credentials, never the namespace's Cloudflare token. [Artifacts REST documentation](https://developers.cloudflare.com/artifacts/api/rest-api/) defines provider token and fork behavior.
 
-Configure the target Worker and connect its Cruce deployment repository using Cloudflare's [Artifacts–Workers Builds integration](https://developers.cloudflare.com/artifacts/guides/build-and-deploy-on-push/). The deploy repository name is recorded on the Cruce environment. Its production ref is `main`; preview refs are `cruce/<environment-id>`. This is independent of the source repository's configured default branch.
+## Limits and costs
 
-Set the build/deploy commands and build token in Cloudflare. Cruce does not invent a build configuration or administer unrelated Cloudflare products. Choose an immutable source artifact in Deployments. Cruce pushes that exact revision to the deployment ref, then observes the matching build by commit and branch. Production requires a human console decision and exact-revision review/verification. Failure, timeout, supersession, smoke results and rollback remain visible. A source artifact is a retained source snapshot, not a compiled downloadable output.
+As reviewed on 2026-10-05, Artifacts documents a maximum of 1 GB per repository and 32 MB per file/blob, with separate Git and namespace request-rate limits. See [current limits](https://developers.cloudflare.com/artifacts/platform/limits/). Cruce additionally bounds each gateway request and response to **32 MiB**; this aggregate transfer limit is separate from the per-blob limit. Larger transfers need a gateway change, and larger repositories may not fit the current hosted model.
 
-Consult current [Artifacts REST](https://developers.cloudflare.com/artifacts/api/rest-api/), [Workers Builds API](https://developers.cloudflare.com/workers/ci-cd/builds/api-reference/) and [cf](https://developers.cloudflare.com/cf/llms.txt) documentation before changing these adapters. Mocked provider tests and an offline build are not live publication/deployment verification.
+Consult [current pricing](https://developers.cloudflare.com/artifacts/platform/pricing/) before estimating costs or changing setup disclosures. Account plan, operations, retained storage and other Cloudflare services all matter. Do not copy an old price table into product policy or suggest local-only canonical hosting as an available fallback.
 
-Native Git requires the narrow `/mcp/git/*` transport exception in `tools/access-agent-transport.json`; all requests still require Cruce authentication and current repository grants. This local configuration change has not been applied to the live Access application. The renamed NamespaceRuntime Durable Object uses fresh early-development state; existing ownership records are not migrated.
+## Optional Workers Builds integration
+
+Configure a target Worker and connect the Cruce deployment repository using Cloudflare's [Artifacts–Workers Builds integration](https://developers.cloudflare.com/artifacts/guides/build-and-deploy-on-push/). Set build/deploy commands and the build token in Cloudflare. The connected namespace token additionally needs Builds access and Workers Scripts reads for build/runtime observation. Cruce does not configure unrelated Cloudflare products or infer a build recipe.
+
+The deployment repository name is recorded on the Cruce environment. Its production ref is `main`; preview refs are `cruce/<environment-id>`, independent of the canonical repository's default branch. Cruce updates the deployment ref to the selected artifact's exact revision and correlates build and runtime observations. The deployment adapter may force these environment refs; canonical source promotion remains non-forced.
+
+Production requires an authenticated human console decision and exact-revision review/evidence. Rollback names a prior successful artifact deployment in the same environment. Source acceptance, source retention and deployment remain separate. A build success does not create a downloadable compiled artifact. End-to-end Workers Builds success remains an open [verification gate](local-verification.md).
+
+## Platform references
+
+Before platform changes, read the current [Artifacts index](https://developers.cloudflare.com/artifacts/llms.txt) and [cf index](https://developers.cloudflare.com/cf/llms.txt), then the relevant primary documentation:
+
+- [Artifacts Git protocol](https://developers.cloudflare.com/artifacts/api/git-protocol/) and [REST API](https://developers.cloudflare.com/artifacts/api/rest-api/) for storage and token operations.
+- [cf configuration](https://developers.cloudflare.com/cf/projects/cloudflare-config/) for Worker configuration; use `cf`, not wrangler project commands.
+- [Workers Builds API](https://developers.cloudflare.com/workers/ci-cd/builds/api-reference/) for build observation.
+- [Events](https://developers.cloudflare.com/artifacts/guides/event-subscriptions/) and [ArtifactFS](https://developers.cloudflare.com/artifacts/guides/artifact-fs/) only for the conditional evaluations in the [roadmap](../ROADMAP.md); neither is a current setup step.

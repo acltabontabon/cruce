@@ -1,35 +1,40 @@
-# Single live MVP test environment
+# Configured test environment
 
-Cruce's configured test Worker is [cruce.acltabontabon.workers.dev](https://cruce.acltabontabon.workers.dev). There is no second production deployment. Local fixtures are explicitly isolated from this service.
+[Documentation map](../README.md#documentation-map) · [Cloudflare setup](cloudflare-setup.md) · [Verification](local-verification.md)
 
-## Foundation deployment — 2026-10-05
+The configured control-plane test Worker is [cruce.acltabontabon.workers.dev](https://cruce.acltabontabon.workers.dev). The repository records one hosted environment; local fixtures are isolated from it. This page records configuration and last-known evidence, not a fresh live inspection.
 
-The Workspace → Repository → Session replacement deploys Directory and WorkspaceRuntime SQLite Durable Objects alongside the repository ControlTower, OAuth KV and DeploymentWorkflow. The sealing secret is preserved. ProjectDirectory was retired through a temporary Cloudflare export tombstone, now removed; disposable old records are not converted. The obsolete artifact-event queue consumer was detached so no legacy event handler is retained. Old hosted source is not deleted or treated as native sessions.
+## Deployment status — 2026-10-05
 
-The current foundation deployment version is `2d7cbe7d-bdcd-48f1-b21e-4cd7324d9314`. The signed-in owner browser verified personal-workspace provisioning and the new console's empty repository state.
+Last recorded foundation deployment: `2d7cbe7d-bdcd-48f1-b21e-4cd7324d9314`. That deployment used the superseded Workspace → Repository → Session naming. Its signed-in owner browser verified personal ownership provisioning and the empty repository console. OAuth discovery returned 200, unauthenticated MCP and forged terminal credentials returned 401, and signed-out ownership APIs redirected to Access.
+
+The current checkout uses Namespace → Repository → Workspace, mandatory canonical Artifacts storage, `NamespaceRuntime` and a native Git gateway. Those changes and the required `/mcp/git/*` Access exception are **not recorded as deployed or live-verified**. Earlier deployment/provider successes do not establish their behavior. Old state is disposable; there is no migration adapter. The obsolete artifact-event consumer was detached, and current configuration has no event trigger.
 
 ## Authentication boundary
 
-Access verifies issuer, audience, signature and expiry. Workspace membership and repository grants separately authorize access. The configured Access application currently admits the owner's email. Other shared-workspace users need admission to this Access application as well as a Cruce invitation/grant; an invitation alone cannot bypass Access.
+The recorded Access application admits the owner's email. Additional users need both Access admission and Cruce membership/repository grants. An invitation does not bypass Access. Current authentication and authority rules are in [architecture](architecture.md#identity-and-authorization).
 
-The existing user-approved [transport configuration](../tools/access-agent-transport.json) has six exact public paths: `/mcp`, `/oauth/token`, `/oauth/register`, `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/mcp`. Preserve those narrow exceptions. `/authorize`, `/bridge/approve`, the console and `/api/workspaces` remain behind Access. Agent MCP requires OAuth. Human terminal pairing uses `/mcp?terminal=start|poll|command`, with separate browser approval and a proof-bound token; it requires no additional Access bypass.
+The checked-in [transport configuration](../tools/access-agent-transport.json) declares six exact machine endpoints plus the pending Git path:
 
-Registration identifies an OAuth client, not a human or repository member. Agent consent selects repositories and capabilities. Revoked membership invalidates access on subsequent requests. Production remains a console decision.
+- `/mcp`
+- `/oauth/token`
+- `/oauth/register`
+- `/.well-known/oauth-authorization-server`
+- `/.well-known/oauth-protected-resource`
+- `/.well-known/oauth-protected-resource/mcp`
+- `/mcp/git/*` — required for current native Git; application to live Access remains pending.
 
-Live post-deployment checks returned 200 for OAuth discovery, 401 for unauthenticated MCP, an Access redirect for signed-out workspace APIs, and 401 for a forged human-bridge token.
+These bypass Access's browser challenge, not Cruce authentication. Discovery/registration are protocol endpoints; MCP requires OAuth and current grants. `/authorize`, `/bridge/approve`, the console and `/api/namespaces` stay behind Access. Human pairing uses `/mcp?terminal=start|poll|command`, browser approval and a proof-bound token. Do not widen the exception to the console, all APIs or consent pages.
 
 ## Repeat deployment
 
-`.env.test` contains the configured public origin and Access issuer/audience, not resource credentials. `pnpm deploy:test` uses `cf` and preserves server secrets. Run the documented checks first. `node --env-file=.env.test node_modules/cf/bin/cf deploy --dry-run` validates the live build without publishing. Do not rotate the sealing secret incidentally.
+`.env.test` holds the configured origin and Access issuer/audience; it is not the namespace resource-account credential. Keep `CRUCE_SECRET` on the Worker and do not rotate it incidentally. Review configuration and run [contributor checks](../CONTRIBUTING.md#verify) before a deployment.
 
-Cloudflare's compiler calls its optimized mode `production`; that label does not create another environment. Workspace resource accounts are explicitly connected by their owners. The operator CLI account is never an application fallback.
+```sh
+node --env-file=.env.test node_modules/cf/bin/cf deploy --dry-run
+pnpm deploy:test
+```
 
-## Provider verification
+The second command publishes to the configured test Worker. A dry run validates a build, not hosted behavior. Cloudflare's build mode named `production` and the GitHub environment named `production` do not themselves establish a second deployed Cruce service. Normal release-tag deployment is described in [releases](releases.md).
 
-The real Artifacts adapter passed a separate opt-in integration run in namespace `cruce-check-muuga1hc`: `trunk` default branch, isolated hosted fork, exact Git-pack publication, independent fetch and retention after session completion. Details are in [verification](local-verification.md).
-
-The prior project-based test environment had no preview or production environment configured. A test Worker and Workers Builds connection are still required to verify successful artifact deployment, runtime version observation, smoke checks and rollback end to end. Those results are not implied by an uploaded control-plane Worker or by the fixed-clock demo.
-
-## Local Git foundation refactor — 2026-10-05
-
-The current working tree replaces ownership Workspace with Namespace and Session with durable Workspace. All repositories now use canonical Artifacts storage. The new native Git gateway requires `/mcp/git/*` in the transport configuration, still protected by Cruce authentication. These code/configuration changes have not been deployed; the earlier version and provider checks above do not verify them. No existing records are migrated.
+Namespace resources use their explicitly connected account, even when the CLI is logged into the control-plane account. The real-provider script and its costs are documented in [verification](local-verification.md#opt-in-real-provider-check). A target Worker and Workers Builds connection are still needed to verify artifact deployment, runtime checks and rollback. No successful end-to-end deployment is claimed here.

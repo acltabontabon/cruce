@@ -1,60 +1,65 @@
 # Cruce
 
-Cruce helps one developer keep several agents working coherently on the same repository, with clear human control over what lands. It is Git-native collaboration for developers and agents, starting with the developer who already runs concurrent agent workspaces and spends time relaying updates, reconciling work and reviewing results.
+Cruce is a Git-native platform for coordinating multiple heterogeneous AI coding agents working concurrently on the same repository. Agents work in their own tools and isolated checkouts; Cruce gives connected participants shared context about work in progress, exact revisions, review and human-controlled convergence into canonical source.
 
-A **namespace** owns repositories and access. A **repository** owns canonical Git history in Cloudflare Artifacts. A **workspace** records a human or agent's isolated work from an exact starting commit. Personal and shared namespaces remain supported; the initial product focus is one developer and one repository.
+**Cruce starts where individual-agent isolation ends.** An agent can already manage several of its own tasks with Git worktrees. Cruce addresses the next problem: independent agents and tools working on the same codebase need to remain isolated, learn about one another's work and reconcile their results.
 
-Git remains normal Git: real commits, branches, history, diffs, merges and rollback. Cruce adds shared presence across connected participants, advisory path overlap, upstream revision awareness, revision-bound reviews, immutable artifacts and deployment provenance. Agents run locally with their own tools; Cruce does not launch them. Worktree isolation is an existing Git capability; Cruce's value must come from reducing coordination work around it.
+Codex, Claude Code, Cursor, Gemini CLI and internal or future agents belong in this model. That is a product boundary, not a claim of tested interoperability with every client. The current bridge writes configuration for Codex, Claude Code and Cursor; other clients need a compatible adapter. See [MCP and agent participation](docs/mcp.md).
 
-Hosted writer Workspaces reuse one dedicated Artifacts fork across publications. A Workspace can inspect upstream changes, fetch exact uploaded objects without changing its working files, then merge explicitly and publish a reconciled artifact for fresh review. The original starting revision stays fixed. Forks are the durable isolation boundary; semantic dependency detection and automatic conflict resolution are not current capabilities.
+```mermaid
+flowchart TB
+    A[Agent in tool A] --> WA[Isolated workspace A]
+    B[Agent in tool B] --> WB[Isolated workspace B]
+    WA <-->|Context, reports, exact artifacts| C[Cruce coordination]
+    WB <-->|Context, reports, exact artifacts| C
+    C --> R[Human review of exact revisions]
+    R -->|Non-forced Git promotion| G[Canonical repository]
+```
 
-The product hypothesis is less manual relaying, less duplicated or stale work and less effort deciding what to accept. See the [product thesis](docs/product-thesis.md) and [validation plan](docs/PLAN.md) for how we will test that against ordinary worktrees and Git review. Parallel-agent adoption and a measurable advantage for Cruce remain hypotheses.
+Worktrees isolate work. Cruce coordinates workers. Cruce does not launch agents, host an editor or require scheduling clearance before local edits. Overlap is advisory; it does not prove a semantic conflict or guarantee compatibility.
 
-The [implementation plan](docs/git-foundation-plan.md) records the architecture, changes and verification boundaries.
+## Git stays Git
 
-The [Cloudflare strategy](docs/cloudflare-strategy.md) maps Artifacts forks, Git transport, event subscriptions and source inspection to those outcomes, with clear implementation status and platform costs/limits.
+> If Git already has a primitive for something, Cruce should use Git instead of inventing another one.
 
-## Start locally
+Keep using `git clone`, `git fetch`, `git pull`, `git push`, `git commit`, `git branch`, `git diff` and `git log`. Cruce adds participation, authorization, shared observations and revision-bound decisions. It does not add a replacement Git command language.
+
+The ownership model is **Namespace → Repository → Workspace**. A namespace owns access and budgets. Every repository has canonical Cloudflare Artifacts storage. Each writer workspace owns one reusable fork and records an actor, task and immutable starting commit; a worktree or clone holds its local files. Existing checkout attachment preserves remotes and never silently uploads history.
+
+Normal pushes go to the writer's fork. Publication retains an exact pushed revision as a source artifact; human-reviewed promotion advances canonical source. Deployment is a separate, optional decision. See the [architecture](docs/architecture.md) for the complete flow and its trust boundaries.
+
+## Try the local console
+
+Use Git, Node 22.18+ and pnpm (CI uses Node 24 and pnpm 12.4.2):
 
 ```sh
-pnpm install
+pnpm install --frozen-lockfile
 pnpm dev:fixture
 ```
 
-The fixture console is a loopback-only, fixed-clock demonstration with human and agent workspaces, overlapping work, exact Git commits, a source artifact and a proposed change. It uses the real controllers and cannot access live namespaces. For the actual Worker, run `pnpm exec cf dev --mode offline`; authenticated work requires configured Cloudflare Access.
+Open the printed loopback URL. The fixed-clock fixture uses the real console and controllers with deterministic Git source; identity and provider behavior are simulated. It does not connect to live namespaces or consume cloud resources.
 
-## Connect a repository
+To use Cruce with real repositories, follow [Git and bridge setup](docs/native-setup.md). Hosted repositories require a namespace's explicitly connected Cloudflare account and consume resources. Cloud hosting does not imply cloud execution of agents.
 
-Sign in with Access. Your first verified login creates a personal namespace. Create a shared namespace if needed, invite verified emails by copyable links, and assign repository access directly or through teams.
+## Status
 
-Connect your namespace’s Cloudflare account and choose **New repository**. Clone its canonical remote with ordinary Git using the [OAuth credential helper](docs/native-setup.md). In that checkout, connect optional coordination tooling:
+Cruce is early, experimental software, and its name remains provisional. The current foundation has local controller, Git, bridge and browser coverage. The native Git gateway and current namespace model have **not been verified in the configured live Worker**; earlier provider checks covered an older implementation. Successful Workers Builds deployment and a heterogeneous-agent workflow pilot remain open. [Verification](docs/local-verification.md) records the evidence and limits.
 
-```sh
-node /path/to/cruce/runner/cruce.mjs connect --server https://YOUR_HOST --namespace NAMESPACE_ID --repository REPOSITORY_ID --client codex
-node /path/to/cruce/runner/cruce.mjs start --title "Improve retries"
-```
+Cruce is not a Git/Git-worktree replacement, a Claude Code worktree manager, a GitHub/GitLab clone, a remote IDE, a cloud coding environment, an agent runtime, a general agent orchestrator or a CI/CD replacement. Its scope is coordination of concurrent repository work. See [product boundaries](docs/product-thesis.md).
 
-Agent writers receive a dedicated working directory. Use that directory for all work. Commits use ordinary Git. Run `git push` to your workspace fork before `publish`, which seals the exact pushed revision into a retained source artifact for review. Existing remotes are preserved. Other checkouts attach by the same stable repository ID.
+## Documentation map
 
-For human participation, use `human` instead of `connect` and approve the terminal connection in the browser. Human bridge credentials are restricted to one workspace; production decisions remain in the console. See [bridge setup](docs/native-setup.md).
+| I want to… | Read |
+| --- | --- |
+| Understand the problem, audience and scope | [Product thesis](docs/product-thesis.md) |
+| Make or review an architectural decision | [Principles and guardrails](docs/principles.md) |
+| Understand ownership, components and source convergence | [Architecture](docs/architecture.md) |
+| Connect a checkout and participate | [Git and bridge setup](docs/native-setup.md) |
+| Integrate an agent or change the tool surface | [MCP and agent participation](docs/mcp.md) |
+| Develop and verify a contribution | [Contributing](CONTRIBUTING.md), [verification](docs/local-verification.md) |
+| Configure hosted resources | [Cloudflare setup](docs/cloudflare-setup.md), [test environment](docs/test-environment.md) |
+| Explore future ideas | [Future direction and ideas](ROADMAP.md) |
+| Work as a coding agent in this repository | [AGENTS.md](AGENTS.md) |
+| Inspect change history or release procedures | [Changelog](CHANGELOG.md), [releases](docs/releases.md) |
 
-## Resources and deployment
-
-Repositories, workspace forks, artifact publication and deployments consume resources in the **namespace's explicitly connected account**. Owners manage sealed credentials; shared budgets are reserved atomically across repositories. Repository policy may narrow those permissions.
-
-Deployments name an immutable source artifact. Workers Builds consumes its exact revision from a separate deployment repository. Reviews/source acceptance and deployment remain separate records. Source snapshots and evidence are labelled distinctly; Cruce does not claim that a source snapshot is a downloadable compiled build. See [Cloudflare setup](docs/cloudflare-setup.md).
-
-## Verify
-
-```sh
-pnpm typecheck
-pnpm lint
-pnpm test
-pnpm test:browser
-pnpm verify:scenario
-pnpm exec cf build --mode offline
-```
-
-[Architecture](docs/architecture.md) · [Access and test environment](docs/test-environment.md) · [Demo](docs/demo.md) · [Progress](docs/PROGRESS.md) · [Releases](docs/releases.md)
-
-Private namespaces/repositories and Access-based sign-in are the defaults. GitHub/GitLab integrations, public signup and automated external pushes are outside this foundation. Cruce is experimental; no compatibility or data-conversion layer is provided for the replaced project/mission architecture.
+Principles state the constraints; architecture describes the current design; the roadmap contains future candidates; verification records evidence; the changelog summarizes changes. Git history preserves implementation history. A historical success or future plan is not evidence of a current capability.

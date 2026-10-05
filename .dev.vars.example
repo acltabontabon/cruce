@@ -4,5 +4,3 @@ CRUCE_ACCESS_ISSUER=https://YOUR_TEAM.cloudflareaccess.com
 CRUCE_ACCESS_AUD=YOUR_APPLICATION_AUDIENCE
 # Server-only identity and connected-account credential encryption.
 CRUCE_SECRET=change-me-to-a-long-random-string
-# Optional event-subscription token in non-offline deployments.
-# CF_EVENTS_API_TOKEN=
