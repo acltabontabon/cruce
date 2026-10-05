@@ -11,7 +11,7 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Added
 
-- Reproducible two-writer convergence verification using real local Git: independently passing branches merge cleanly but fail a behavioral assertion, then require repair, exact-revision evidence and fresh human review. The opt-in Artifacts verifier runs the same scenario with an explicit 20-operation resource budget; hosted execution remains pending.
+- Reproducible two-writer convergence verification using real local Git: independently passing branches merge cleanly but fail a behavioral assertion, then require repair, exact-revision evidence and fresh human review. The same scenario passed against real Artifacts within its explicit 20-reservation budget, including retained source/evidence after fork cleanup. Review authority remains an in-process fixture; deployed authentication and actual client participation are separate verification gaps.
 
 - Public early-development homepage with an illustrative hero showing independent workspace paths, advisory crossings, exact revisions and deliberate canonical convergence, with mobile recomposition and reduced-motion support.
 - Cookie-verified public session detection, a lazy-loaded authenticated console, Cruce-only sign-out and a reviewable Cloudflare Access configuration for the public front door.
