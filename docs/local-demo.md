@@ -1,0 +1,60 @@
+# Local console walkthrough
+
+[Documentation map](../README.md#documentation-map) · [Contributor setup](../CONTRIBUTING.md#set-up-and-explore) · [Verification status](local-verification.md)
+
+Use this walkthrough to explore Cruce while it is in development. Screenshots were captured on 2026-10-05 from the local browser fixture. They illustrate the current console, not a stable UI contract or evidence of a live deployment.
+
+The fixture runs the real console and controllers with fixed time and deterministic Git objects. All names, account details and workspaces below are sample data. Authentication, Cloudflare storage and deployment behavior are simulated; no cloud resources are used. Storage identifiers and content hashes shown in artifact details are fixture placeholders.
+
+## Start the demo
+
+With Git, Node 22.18+ and pnpm installed, run from the repository root:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm dev:fixture
+```
+
+Open the loopback URL printed by the server. The port changes between runs. Keep the server running while browsing; stop it with Ctrl+C. Restarting the fixture starts a fresh sample session. For real repository participation, use [Git and bridge setup](native-setup.md).
+
+## 1. Find your namespace and repository
+
+The opening view shows the personal **Alex Morgan** namespace and shared **Fernloop** namespace. **Work in motion** provides a route into the active sample repository. Click **payment-service** to inspect it.
+
+![Namespace home with personal and shared namespaces and the sample repository](images/local-demo/namespaces.jpg)
+
+## 2. Inspect concurrent work
+
+The repository **Overview** shows two active workspaces: Codex is implementing a retry policy, and Alex Morgan is inspecting a payment timeout. Both report changes to `src/retry.ts`. **Shared surfaces** makes that overlap visible; it does not establish a Git conflict or semantic incompatibility.
+
+The review queue names an exact revision, `9461bc8e`, rather than only a branch. Click **Bounded retry policy** to open its review. Click a workspace row to explore its actor, starting revision and execution details.
+
+![Repository overview with two active workspaces, advisory overlap and a review queue](images/local-demo/overview.jpg)
+
+## 3. Read the review requirements
+
+The expanded change in **Work** pins base `4906343f` and head `9461bc8e`. It offers a reasoned review and verification attestation. **Promote source** is disabled in this sample state because human approval and trusted passing test evidence are still required.
+
+Review decisions concern this exact revision. An authenticated human attestation and an agent's reported evidence have different trust. The fixture lets you explore the controls, but it does not prove hosted Git promotion works. **Inspect diff** leads to the Code view; **Code** also provides source and history controls.
+
+![Expanded change with pinned revisions, review controls, verification and disabled promotion](images/local-demo/review.jpg)
+
+## 4. Follow the source artifact
+
+Open **Artifacts**, then **Bounded retry policy**. Its details identify the exact revision, producing workspace, storage reference and content hash. **Trace lineage** provides provenance context. Here the storage and hash values are simulated placeholders, and the artifact is marked **reported**.
+
+Source acceptance and deployment are separate decisions. The starting fixture has no deployment environments configured; an empty **Deployments** view is expected.
+
+![Source artifact details identifying its revision, workspace and fixture storage](images/local-demo/artifact.jpg)
+
+## 5. Keep account and namespace access distinct
+
+Open **Your account** at the bottom of the sidebar. This view shows the sample identity and namespace membership links. In the real system, sign-in identity and namespace/repository permissions are separate. **Members** and **Teams** live under the shared namespace, while repository settings live in repository navigation.
+
+![Sample account identity with personal and shared namespace links](images/local-demo/account.jpg)
+
+## Refresh these screenshots
+
+Keep the walkthrough and images together when visible console behavior changes. Start a fresh `pnpm dev:fixture` session and follow the steps above without submitting reviews or changing the seeded data. Capture full-page browser screenshots, retain the fixture banner, and replace the matching files under `docs/images/local-demo/`. Use only sample identities; never capture credentials or a live account for this guide. Update the capture date and captions, then check every image and relative link.
+
+Automated browser checks write disposable screenshots to ignored `dist/ui-checks/`; the curated images in this guide are tracked documentation assets. See [verification](local-verification.md) for what the checks establish and which live boundaries remain unverified.

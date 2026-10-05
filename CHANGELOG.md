@@ -6,6 +6,7 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Added
 
+- Illustrated local console walkthrough covering namespaces, concurrent work, exact-revision review, source artifacts and account access.
 - Local bridge worktrees, advisory overlap, upstream reconciliation and artifact-bound deployment provenance.
 - Architectural principles and guardrails, Mermaid diagrams, contributor/MCP guidance and a roadmap of future candidates.
 
