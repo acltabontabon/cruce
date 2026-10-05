@@ -15,6 +15,8 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Changed
 
+- Host the public homepage at `cruce.acltabontabon.com` with protected sign-in and private API routes; direct test deployment leaves the alpha release version unchanged.
+
 - Show each illustration note subtly beneath its active progress dot, replacing that step’s label and keeping the diagram clear. Narrow layouts show only the note title.
 
 - Align product documentation and diagrams around proactive coordination across independent coding agents, with a two-vendor validation pilot and explicit limits. Put intent/dependency tracking, decision acknowledgements and opt-in supported controls in the roadmap; no runtime capabilities or promotion authority change.

@@ -23,7 +23,7 @@ The workflow in `.github/workflows/release.yml` deploys Cruce's own Worker, `cru
 
    | Variable | Value |
    | --- | --- |
-   | `CRUCE_PUBLIC_ORIGIN` | `https://cruce.acltabontabon.workers.dev` |
+   | `CRUCE_PUBLIC_ORIGIN` | `https://cruce.acltabontabon.com` |
    | `CRUCE_ACCESS_ISSUER` | Existing Access team URL from `.env.test` |
    | `CRUCE_ACCESS_AUD` | Existing Access application audience from `.env.test` |
 
@@ -50,3 +50,7 @@ First set a new, unreleased package version and matching changelog entry. The co
 Pull requests and pushes to `main` run checks and an offline build. Only pushed `v*` tags can deploy. A release must match the package version and changelog, be contained in `main`, and pass typecheck, lint, tests, demo verification and builds. Deployments are serialized and record the release tag and commit in the Cloudflare Worker version. Ordinary commits and GitHub draft releases do not deploy; pushing a tag does, even if a GitHub release remains a draft.
 
 To restore older code, prepare a new version on `main` with a concise rollback changelog entry and push its new tag. Existing Cloudflare Worker version rollback is also available as an explicit human operation.
+
+## Direct test deployment without a release
+
+An explicit request may update the single configured test Worker without bumping the package version or creating a release tag. Run the contributor checks, load `.env.test`, validate with `cf deploy --dry-run`, and use `pnpm deploy:test`. The current config attaches `cruce.acltabontabon.com`; keep the origin and Access destinations consistent with that hostname. This manual path does not create a GitHub release or change any published tag. Record the source commit, deployment version and hosted verification limits in the test environment guide.

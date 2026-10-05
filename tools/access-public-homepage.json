@@ -2,22 +2,22 @@
 	"publicApplication": {
 		"name": "Cruce test public homepage",
 		"type": "self_hosted",
-		"domain": "cruce.acltabontabon.workers.dev",
+		"domain": "cruce.acltabontabon.com",
 		"app_launcher_visible": false,
 		"policies": [{ "name": "Public document and static assets", "decision": "bypass", "include": [{ "everyone": {} }] }]
 	},
 	"protectedApplicationPatch": {
-		"domain": "cruce.acltabontabon.workers.dev/api",
+		"domain": "cruce.acltabontabon.com/api",
 		"destinations": [
-			{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/api" },
-			{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/api/*" },
-			{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/auth/login" },
-			{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/auth/logout" },
-			{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/authorize" },
-			{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/bridge" },
-			{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/bridge/*" },
-			{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/invite" },
-			{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/invite/*" }
+			{ "type": "public", "uri": "cruce.acltabontabon.com/api" },
+			{ "type": "public", "uri": "cruce.acltabontabon.com/api/*" },
+			{ "type": "public", "uri": "cruce.acltabontabon.com/auth/login" },
+			{ "type": "public", "uri": "cruce.acltabontabon.com/auth/logout" },
+			{ "type": "public", "uri": "cruce.acltabontabon.com/authorize" },
+			{ "type": "public", "uri": "cruce.acltabontabon.com/bridge" },
+			{ "type": "public", "uri": "cruce.acltabontabon.com/bridge/*" },
+			{ "type": "public", "uri": "cruce.acltabontabon.com/invite" },
+			{ "type": "public", "uri": "cruce.acltabontabon.com/invite/*" }
 		]
 	}
 }

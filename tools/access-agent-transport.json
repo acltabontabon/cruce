@@ -1,15 +1,15 @@
 {
 	"name": "Cruce test agent transport",
 	"type": "self_hosted",
-	"domain": "cruce.acltabontabon.workers.dev/mcp",
+	"domain": "cruce.acltabontabon.com/mcp",
 	"destinations": [
-		{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/mcp/git/*" },
-		{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/mcp" },
-		{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/oauth/token" },
-		{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/oauth/register" },
-		{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/.well-known/oauth-authorization-server" },
-		{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/.well-known/oauth-protected-resource" },
-		{ "type": "public", "uri": "cruce.acltabontabon.workers.dev/.well-known/oauth-protected-resource/mcp" }
+		{ "type": "public", "uri": "cruce.acltabontabon.com/mcp/git/*" },
+		{ "type": "public", "uri": "cruce.acltabontabon.com/mcp" },
+		{ "type": "public", "uri": "cruce.acltabontabon.com/oauth/token" },
+		{ "type": "public", "uri": "cruce.acltabontabon.com/oauth/register" },
+		{ "type": "public", "uri": "cruce.acltabontabon.com/.well-known/oauth-authorization-server" },
+		{ "type": "public", "uri": "cruce.acltabontabon.com/.well-known/oauth-protected-resource" },
+		{ "type": "public", "uri": "cruce.acltabontabon.com/.well-known/oauth-protected-resource/mcp" }
 	],
 	"app_launcher_visible": false,
 	"policies": [

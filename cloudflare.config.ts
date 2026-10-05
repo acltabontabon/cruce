@@ -16,6 +16,8 @@ export default defineConfig(({ mode }) => {
 		accountId: offline ? undefined : "YOUR_32_CHARACTER_ACCOUNT_ID",
 		worker: {
 			name: "cruce",
+			domains: offline ? [] : ["cruce.acltabontabon.com"],
+			workersDev: offline,
 			compatibilityDate: "2026-10-01",
 			compatibilityFlags: ["nodejs_compat"],
 			entrypoint,
@@ -35,7 +37,7 @@ export default defineConfig(({ mode }) => {
 				NAMESPACE: bindings.durableObject({ worker: "cruce", exportName: "NamespaceRuntime" }),
 				OAUTH_KV: bindings.kv(),
 				CRUCE_PUBLIC_ORIGIN: bindings.text(
-					env.CRUCE_PUBLIC_ORIGIN ?? (offline ? "http://localhost:5173" : "https://cruce.acltabontabon.workers.dev"),
+					env.CRUCE_PUBLIC_ORIGIN ?? (offline ? "http://localhost:5173" : "https://cruce.acltabontabon.com"),
 				),
 				CRUCE_ACCESS_ISSUER: bindings.text(env.CRUCE_ACCESS_ISSUER ?? ""),
 				CRUCE_ACCESS_AUD: bindings.text(env.CRUCE_ACCESS_AUD ?? ""),
