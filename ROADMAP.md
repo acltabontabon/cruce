@@ -16,7 +16,7 @@ Canonical lifecycle, the namespace/repository/workspace model, fork lifecycle, e
 | F2 | Durable provider ownership and identity | Now | Open |
 | F3 | Pure coordination reads | Now | Open |
 | F4 | Bounded source inspection and recoverable cache | Next | Open |
-| F5 | Diagnosable operations and safe errors | Next | Open |
+| F5 | Diagnosable operations and safe errors | Next | **Safe errors done** 2026-10-06; structured correlation open |
 | F6 | Bounded state, transfers and explicit retention operations | Later | Open |
 
 **F2 — Durable provider ownership and identity.** Publication and retention do not consistently compare recorded provider repository IDs. Disconnecting credentials deletes the account record that prevents rebinding retained resources. *Target:* account, namespace and repository identity persists independently of credentials and is validated on every provider operation. *Acceptance:* disconnect then connect another account, recreate canonical, fork or retention names with different IDs, and retry an interrupted operation. Each mismatch is rejected before source access. Reconnecting the original binding works without losing provenance or reservations.
@@ -25,7 +25,7 @@ Canonical lifecycle, the namespace/repository/workspace model, fork lifecycle, e
 
 **F4 — Bounded source inspection and recoverable cache.** The SQLite Git object cache supports ancestry, diffs and transport, but has no eviction or cold-cache rehydration. *Target:* use Artifacts file/history APIs where they are equivalent, keep bounded Git data only where ancestry, packs or retention need it, and recover retained source after a cache loss. First-parent history is not complete ancestry.
 
-**F5 — Diagnosable operations and safe errors.** *Target:* allowlisted public errors across HTTP and MCP, and redacted correlation of namespace, repository, workspace, proposal, promotion, revision and reservation through retries and uncertainty. No credentials, OAuth payloads or source in logs.
+**F5 — Diagnosable operations and safe errors.** *Done:* one public-error mapper for HTTP and MCP. Authored domain messages pass through, validation errors name the field, and anything else is generic. Provider failures return plain, actionable text without API paths, account IDs or raw provider messages, and are logged with the account redacted. *Remaining target:* allowlisted public errors across HTTP and MCP, and redacted correlation of namespace, repository, workspace, proposal, promotion, revision and reservation through retries and uncertainty. No credentials, OAuth payloads or source in logs.
 
 **F6 — Bounded state and retention operations.** Directory scans, whole-state JSON records, growing receipts and activity, and the 32 MiB gateway limit constrain scale. Pending fork deletion needs caller retries. *Target:* measured limits, inspectable retention blockers, and recovery of explicitly authorized operations after interruption. Expiry never triggers deletion.
 

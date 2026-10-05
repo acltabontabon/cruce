@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Artifact, RepositorySnapshot } from "../shared/platform.ts";
 import { Form, short, time, value } from "./controls.tsx";
 import type { Execute } from "./inspect.tsx";
+import { actorLabel } from "./status.ts";
 
 export function RetainedRecordRow({ record: a, open }: { record: Artifact; open: (id: string) => void }) {
 	return (
@@ -11,7 +12,7 @@ export function RetainedRecordRow({ record: a, open }: { record: Artifact; open:
 				{a.kind === "source" ? "Published revision" : "Evidence"} · <code>{short(a.revision)}</code>
 			</span>
 			<small>
-				{a.actor.name} · {a.trust.replaceAll("_", " ")}
+				{actorLabel(a.actor)} · {a.trust === "reported" ? "reported" : "confirmed by a person"}
 			</small>
 		</button>
 	);
@@ -80,7 +81,8 @@ function RecordInspection({ record, execute }: { record: Artifact; execute: Exec
 							<span className="eyebrow">{type === "artifact" ? (record.kind === "source" ? "published revision" : "evidence") : type}</span>
 							<strong>{record.title ?? record.summary ?? record.state ?? record.id}</strong>
 							<p>
-								{record.actor?.name} · <code>{short(record.revision ?? record.headRevision)}</code>
+								{record.actor ? actorLabel(record.actor as { name: string; kind: "agent" }) : ""} ·{" "}
+								<code>{short(record.revision ?? record.headRevision)}</code>
 							</p>
 						</li>
 					))}
@@ -106,16 +108,16 @@ export function RetainedRecordDetail({
 	return (
 		<section>
 			<p className="eyebrow">
-				{a.kind === "source" ? "Published revision" : "Evidence"} · {a.trust.replaceAll("_", " ")}
+				{a.kind === "source" ? "Published revision" : "Evidence"} · {a.trust === "reported" ? "reported" : "confirmed by a person"}
 			</p>
 			<h2 className="detail-title">{a.title}</h2>
 			<p className="muted">
 				{a.kind === "source"
 					? "Publication preserves this exact source for review; approval and acceptance are separate decisions."
-					: "Evidence concerns this exact revision. Its trust describes who supplied or attested the claim."}
+					: "Evidence about this exact revision. Reported evidence is a participant's claim; Cruce does not run checks."}
 			</p>
 			<p>
-				Produced by {a.actor.name} · {time(a.at)}
+				Produced by {actorLabel(a.actor)} · {time(a.at)}
 			</p>
 			<dl>
 				<dt>Revision</dt>
@@ -124,7 +126,7 @@ export function RetainedRecordDetail({
 				</dd>
 				<dt>Workspace</dt>
 				<dd>
-					<button type="button" className="text-button" onClick={() => open("work", a.workspaceId)}>
+					<button type="button" className="text-button" onClick={() => open("workspaces", a.workspaceId)}>
 						{view.workspaces.find((s) => s.id === a.workspaceId)?.title ?? "View workspace"}
 					</button>
 				</dd>
@@ -153,7 +155,7 @@ export function RetainedRecordDetail({
 					view.artifacts
 						.filter((source) => source.kind === "source" && source.workspaceId === a.workspaceId && source.revision === a.revision)
 						.map((source) => (
-							<button type="button" className="text-button" key={source.id} onClick={() => open("code", source.id)}>
+							<button type="button" className="text-button" key={source.id} onClick={() => open("history", source.id)}>
 								View revision →
 							</button>
 						))}
@@ -166,14 +168,14 @@ export function RetainedRecordDetail({
 									view.verifications.some((v) => v.proposalId === p.id && v.revision === p.revision && v.artifactId === a.id)),
 					)
 					.map((p) => (
-						<button type="button" className="text-button" key={p.id} onClick={() => open("work", p.id)}>
+						<button type="button" className="text-button" key={p.id} onClick={() => open("changes", p.id)}>
 							View change #{p.number} →
 						</button>
 					))}
 			</div>
 			<RecordInspection key={id} record={a} execute={execute} />
-			{view.permissions.write && a.kind === "source" && (
-				<Form label="Propose change" submit={(d) => execute({ tool: "create_proposal", artifactId: a.id, title: value(d, "title") })}>
+			{view.permissions.write && a.kind === "source" && !view.proposals.some((p) => p.artifactId === a.id) && (
+				<Form label="Propose for review" submit={(d) => execute({ tool: "create_proposal", artifactId: a.id, title: value(d, "title") })}>
 					<label>
 						Change title
 						<input name="title" defaultValue={a.title} required />

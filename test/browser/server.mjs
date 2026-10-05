@@ -18,7 +18,7 @@ export async function startFixtureServer() {
 				},
 			},
 		],
-		server: { host: "127.0.0.1", port: 0, watch: { ignored: ["**/.cloudflare/**", "**/dist/**"] } },
+		server: { host: "127.0.0.1", port: Number(process.env.PORT ?? 0), watch: { ignored: ["**/.cloudflare/**", "**/dist/**"] } },
 		appType: "spa",
 	});
 	const { fixture } = await server.ssrLoadModule("/test/browser/fixture.ts");

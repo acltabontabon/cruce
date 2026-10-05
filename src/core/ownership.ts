@@ -167,6 +167,15 @@ export class NamespaceController {
 		this.state.policy = policy;
 		this.state.version++;
 	}
+	/** Today's charged operations (UTC day), the same count the reservation gate enforces. */
+	budget() {
+		const day = Math.floor(this.now / 86400000);
+		return {
+			used: this.state.reservations.filter((r) => r.state !== "released" && Math.floor(r.at / 86400000) === day).length,
+			limit: this.state.policy.dailyLimit,
+			resetsAt: (day + 1) * 86400000,
+		};
+	}
 	reserve(a: Authority, id: string, fingerprint: string, action: ResourceAction, workspaceId?: string) {
 		const repo = this.state.repositories.find((r) => r.id === a.repositoryId);
 		if (!repo || !a.repositoryRole || a.repositoryRole === "read") throw new DomainError(403, "Repository write permission required");
@@ -181,9 +190,7 @@ export class NamespaceController {
 			if (previous.fingerprint !== full) throw new DomainError(409, "Resource operation identity reused");
 			return previous;
 		}
-		const day = Math.floor(this.now / 86400000);
-		const used = this.state.reservations.filter((r) => r.state !== "released" && Math.floor(r.at / 86400000) === day);
-		if (used.length >= this.state.policy.dailyLimit)
+		if (this.budget().used >= this.state.policy.dailyLimit)
 			throw new DomainError(403, "Namespace daily resource budget reached; update the namespace limit explicitly");
 		const reservation = {
 			id: key,

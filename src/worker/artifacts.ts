@@ -23,17 +23,40 @@ export interface RepositoryHost {
 const API = "https://api.cloudflare.com/client/v4";
 type Send = typeof fetch;
 
+/**
+ * Public text for a failed provider call. Provider paths, account IDs and raw provider messages stay out of
+ * responses; they are logged for operators instead.
+ */
+export function providerMessage(status: number, codes: number[]) {
+	if (status === 401 || status === 403 || codes.some((c) => c === 10000 || c === 1000 || c === 9109))
+		return "Cloudflare rejected the namespace's API token. Check that it is active and grants Artifacts edit on this account, then reconnect it in namespace settings.";
+	if (status === 404) return "Cloudflare could not find the requested storage.";
+	if (status === 409) return "Cloudflare reported a conflicting change. Retry the same operation.";
+	if (status === 429) return "Cloudflare is rate limiting requests. Retry the same operation shortly.";
+	return "Cloudflare could not complete the request. Retry the same operation.";
+}
 async function cloudflare<T>(send: Send, token: string, path: string, init: RequestInit = {}): Promise<T> {
 	const response = await send(`${API}${path}`, {
 		...init,
 		headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...init.headers },
 	});
-	const body = (await response.json().catch(() => ({}))) as { success?: boolean; result?: T; errors?: { message: string }[] };
-	if (!response.ok || body.success === false)
-		throw new DomainError(
-			[404, 409, 429].includes(response.status) ? response.status : 502,
-			`Cloudflare API ${path.split("?")[0]}: ${body.errors?.map((e) => e.message).join("; ") || response.status}`,
+	const body = (await response.json().catch(() => ({}))) as {
+		success?: boolean;
+		result?: T;
+		errors?: { code?: number; message: string }[];
+	};
+	if (!response.ok || body.success === false) {
+		const codes = (body.errors ?? []).map((e) => e.code ?? 0);
+		console.error(
+			JSON.stringify({
+				event: "provider_error",
+				status: response.status,
+				codes,
+				operation: path.split("?")[0].replace(/^\/accounts\/[0-9a-f]{32}/, "/accounts/:account"),
+			}),
 		);
+		throw new DomainError([404, 409, 429].includes(response.status) ? response.status : 502, providerMessage(response.status, codes));
+	}
 	return body.result as T;
 }
 
@@ -248,6 +271,18 @@ export class ResourceBoundary {
 		};
 		this.store.put("resource-account", account);
 		return this.account()!;
+	}
+	/** Re-checks the sealed credential against Artifacts without changing anything. */
+	async verify(): Promise<{ ok: boolean; checkedAt: number; error?: string }> {
+		const account = this.account();
+		if (!account) throw new DomainError(409, "No Cloudflare account connected");
+		try {
+			await cloudflare(this.send, await this.token(), `/accounts/${account.accountId}/artifacts/namespaces?limit=1`);
+			return { ok: true, checkedAt: Date.now() };
+		} catch (error) {
+			if (!(error instanceof DomainError)) throw error;
+			return { ok: false, checkedAt: Date.now(), error: error.message };
+		}
 	}
 	disconnect() {
 		this.store.delete("resource-account");

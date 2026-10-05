@@ -29,3 +29,18 @@ export function domainStatus(error: unknown): number | undefined {
 		return Number(error.name.slice(10));
 	return undefined;
 }
+
+/**
+ * The only error text that crosses the HTTP or MCP boundary. Domain errors carry authored, safe messages;
+ * validation errors name the offending field; anything else is reported generically and logged by the caller.
+ */
+export function publicError(error: unknown): { status: number; message: string } {
+	const status = domainStatus(error);
+	if (status) return { status, message: (error as Error).message };
+	const issues = (error as { issues?: { path: (string | number)[]; message: string }[] })?.issues;
+	if (error instanceof Error && error.name === "ZodError" && Array.isArray(issues)) {
+		const first = issues[0];
+		return { status: 400, message: first ? `Invalid ${first.path.join(".") || "request"}: ${first.message}` : "Invalid request" };
+	}
+	return { status: 500, message: "Operation unavailable; retry with the same operation identity" };
+}

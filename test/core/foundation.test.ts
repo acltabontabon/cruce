@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_AGENT_SCOPES, SCOPE_LABELS, SCOPES } from "../../src/core/capabilities.ts";
+import { DomainError, publicError } from "../../src/core/errors.ts";
 import { DirectoryController, initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
 import { initialRepository, RepositoryController, WORKSPACE_TTL } from "../../src/core/platform.ts";
 import type { Actor, Authority, Command, Repository, Workspace } from "../../src/shared/platform.ts";
@@ -441,5 +442,17 @@ describe("revision-bound review", () => {
 		const expected = [s.id, "source", p.id, verification.id, "promotion"];
 		for (const subject of [s.id, "source", "promotion"])
 			expect(c.trace(subject).map(({ record }) => record.id)).toEqual(expect.arrayContaining(expected));
+	});
+});
+describe("public errors", () => {
+	it("passes authored domain messages, names invalid fields and hides unexpected internals", () => {
+		expect(publicError(new DomainError(409, "Workspace has ended"))).toEqual({ status: 409, message: "Workspace has ended" });
+		const invalid = CommandInput.safeParse({ tool: "start_workspace", baseRevision: "not-a-sha" });
+		expect(invalid.success).toBe(false);
+		expect(publicError(invalid.error)).toEqual({ status: 400, message: expect.stringMatching(/^Invalid baseRevision: /) });
+		expect(publicError(new Error("Cloudflare API /accounts/0123/artifacts: token secret"))).toEqual({
+			status: 500,
+			message: "Operation unavailable; retry with the same operation identity",
+		});
 	});
 });

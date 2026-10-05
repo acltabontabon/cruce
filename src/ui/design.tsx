@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId, useRef } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 
 const paths: Record<string, ReactNode> = {
 	menu: <path d="M4 7h16M4 12h16M4 17h16" />,
@@ -139,6 +139,36 @@ export function Dialog({
 			</div>
 			{children}
 		</dialog>
+	);
+}
+export function Pill({ tone, children }: { tone: string; children: ReactNode }) {
+	return <span className={`pill ${tone}`}>{children}</span>;
+}
+/** A shell command with a copy button. Values shown are addresses and IDs, never credentials. */
+export function CopyCommand({ text, label }: { text: string; label?: string }) {
+	const [copied, setCopied] = useState(false);
+	return (
+		<div className="copy-command">
+			{label && <span className="copy-label">{label}</span>}
+			<pre>
+				<code>{text}</code>
+			</pre>
+			<button
+				type="button"
+				className="text-button"
+				onClick={() =>
+					void navigator.clipboard
+						?.writeText(text)
+						.then(() => {
+							setCopied(true);
+							setTimeout(() => setCopied(false), 1500);
+						})
+						.catch(() => undefined)
+				}
+			>
+				{copied ? "Copied" : "Copy"}
+			</button>
+		</div>
 	);
 }
 export function BranchArt() {

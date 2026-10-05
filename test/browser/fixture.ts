@@ -85,6 +85,9 @@ export async function fixture() {
 		storage: { repository: "fixture-source", revision: head },
 		at: FIXED_TIME,
 	});
+	// The runtime records the published revision and its review base when it retains source.
+	workspace.publishedRevision = head;
+	workspace.integratedRevision = base;
 	run("create_proposal", { artifactId: "source" }, agent);
 	c.addArtifact({
 		id: "test-report",
@@ -170,12 +173,30 @@ export async function fixture() {
 					const snapshot = runtimes.get(r.id)!.snapshot({ ...a, repositoryId: r.id, repositoryRole: "maintain" });
 					return repositorySummary(snapshot);
 				});
-				return json(res, { ...w.state, repositorySummaries, role: a.role, people: [user], permissions: { maintain: true, owner: true } });
+				return json(res, {
+					...w.state,
+					repositorySummaries,
+					role: a.role,
+					people: [user],
+					permissions: { maintain: true, owner: true },
+					...(w.state.namespace.kind === "shared"
+						? {
+								account: {
+									mode: "connected",
+									accountId: "0123456789abcdef0123456789abcdef",
+									label: "Fixture account",
+									credential: "stored",
+								},
+							}
+						: {}),
+					budget: w.budget(),
+				});
 			}
 			if (parts[3] === "teams") {
 				w.team(a, body.id, body.name, body.members);
 				return json(res, { saved: true });
 			}
+			if (parts[3] === "account" && parts[4] === "verify") return json(res, { ok: true, checkedAt: FIXED_TIME });
 			if (parts[3] === "invitations") return json(res, { url: `http://localhost/invite/${w.state.namespace.id}#fixture-invitation` });
 			if (parts[3] === "policy") {
 				w.setPolicy(a, body);
@@ -193,7 +214,12 @@ export async function fixture() {
 					storageName: `repo-${body.idempotencyKey}`,
 				};
 				w.repository(a, r);
-				runtimes.set(r.id, new RepositoryController(initialRepository(r), FIXED_TIME, next));
+				const created = new RepositoryController(initialRepository(r), FIXED_TIME, next);
+				// Real creation provisions canonical storage with an initial commit; the fixture reuses the seeded base.
+				created.state.canonical = { id: `canonical-${r.id}`, name: r.storageName, remote: `https://fixture.invalid/${r.id}.git` };
+				created.state.sourceHead = base;
+				created.event(a.actor, "repository_created", `Created ${r.name}`, [r.id, base]);
+				runtimes.set(r.id, created);
 				return json(res, r);
 			}
 			const runtime = runtimes.get(parts[4]);
@@ -232,6 +258,26 @@ export async function fixture() {
 							? "Reported tests: 12 passed for the bounded retry revision. Fixture evidence only."
 							: undefined,
 				});
+			if (cmd.tool === "promote_proposal") {
+				// Simulated canonical update: the real Worker pushes with a non-forced Git update. Readiness still gates it.
+				const proposal = runtime.proposal(cmd.proposalId);
+				const readiness = runtime.readiness(proposal);
+				if (!readiness.ready) return json(res, { error: readiness.reasons.join("; ") }, 409);
+				const promotion = {
+					id: `promotion-${proposal.id}`,
+					proposalId: proposal.id,
+					from: proposal.base,
+					to: proposal.revision,
+					actor: authority.actor,
+					at: FIXED_TIME,
+					state: "complete" as const,
+				};
+				runtime.state.promotions.push(promotion);
+				proposal.state = "promoted";
+				runtime.state.sourceHead = proposal.revision;
+				runtime.event(authority.actor, "source_promoted", proposal.title, [proposal.id, proposal.revision, promotion.id]);
+				return json(res, promotion);
+			}
 			return json(res, runtime.command(cmd, authority));
 		} catch (e) {
 			return json(res, { error: (e as Error).message }, 400);

@@ -77,11 +77,11 @@ function fixture() {
 	return { call, path, repo, directory, controller, command, user, namespace, getDirectory, retired };
 }
 describe("namespace repository contracts", () => {
-	it("namespace topology is an authorized coordination read and rechecks revoked membership", async () => {
+	it("namespace attention summaries are authorized coordination reads and recheck revoked membership", async () => {
 		const f = fixture();
 		const url = `/api/namespaces/${f.repo.namespaceId}`;
-		const result = (await (await f.call(url))!.json()) as { repositorySummaries: { topology: unknown }[] };
-		expect(result.repositorySummaries[0].topology).toEqual({ workspaces: [], intersections: [] });
+		const result = (await (await f.call(url))!.json()) as { repositorySummaries: { attention: unknown }[] };
+		expect(result.repositorySummaries[0].attention).toEqual({ review: 0, ready: 0, stale: 0, behind: 0 });
 		expect(f.command).toHaveBeenCalledTimes(1);
 		expect(f.command.mock.calls[0][1].tool).toBe("get_repository");
 		delete f.namespace.state.members[f.user.id];

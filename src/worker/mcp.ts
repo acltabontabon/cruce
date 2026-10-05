@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { createMcpHandler } from "agents/mcp/server";
 import { COST_LABELS, type Scope } from "../core/capabilities.ts";
-import { domainStatus } from "../core/errors.ts";
+import { publicError } from "../core/errors.ts";
 import type { Command } from "../shared/platform.ts";
 import { CRUCE_INSTRUCTIONS, CRUCE_TOOLS, toInternalCommand, toolInputShape } from "../shared/tools.ts";
 import { CRUCE_VERSION } from "../shared/version.ts";
@@ -38,11 +38,8 @@ export function cruceServer(execute: (command: MachineCommand) => Promise<unknow
 						structuredContent: result as Record<string, unknown>,
 					};
 				} catch (error) {
-					return {
-						isError: true,
-						structuredContent: { status: domainStatus(error) ?? 500 },
-						content: [{ type: "text" as const, text: (error as Error).message }],
-					};
+					const { status, message } = publicError(error);
+					return { isError: true, structuredContent: { status }, content: [{ type: "text" as const, text: message }] };
 				}
 			},
 		);

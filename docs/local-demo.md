@@ -2,9 +2,9 @@
 
 [Documentation map](../README.md#documentation-map) · [Contributor setup](../CONTRIBUTING.md#set-up-and-explore) · [Verification status](local-verification.md)
 
-Use this walkthrough to explore Cruce while it is in development. Screenshots were captured on 2026-10-05 from the local browser fixture. They illustrate the current console, not a stable UI contract or evidence of a live deployment.
+Use this walkthrough to explore Cruce while it is in development. The screenshots come from the local browser fixture. They illustrate the current console, not a stable UI contract or evidence of a live deployment.
 
-The fixture runs the real console and controllers with fixed time and deterministic Git objects. All names, account details and workspaces below are sample data. Authentication and Cloudflare storage are simulated; no cloud resources are used. Storage identifiers and content hashes shown in published revision and evidence details are fixture placeholders.
+The fixture runs the real console and controllers with fixed time and deterministic Git objects. All names, accounts and workspaces are sample data. Authentication and Cloudflare storage are simulated, promotion is simulated in place of the real non-forced Git update, and no cloud resources are used. Storage identifiers and content hashes are fixture placeholders.
 
 ## Start the demo
 
@@ -15,50 +15,60 @@ pnpm install --frozen-lockfile
 pnpm dev:fixture
 ```
 
-Open the loopback URL printed by the server. The port changes between runs. Keep the server running while browsing; stop it with Ctrl+C. Restarting the fixture starts a fresh sample session. For real repository participation, use [Git and bridge setup](native-setup.md).
+Open the loopback URL the server prints. Set `PORT` to choose a fixed port. Restarting the fixture starts a fresh sample session. For real repository participation, use [Git and bridge setup](native-setup.md).
 
-## 1. Find your namespace and repository
+## 1. See what needs you
 
-The Cruce mark always returns to this unscoped Home view. Inside a namespace or repository, use the named header dropdowns to switch scope without opening a modal. The opening view shows the personal **Alex Morgan** namespace and shared **Fernloop** namespace. Namespaces group compact repository rows. **Work in motion** shows miniature workspace paths and their reported shared surface, and provides a route into the active sample repository. Click **payment-service** to inspect it. From any page, type in **Find repository** in the header (or press Cmd/Ctrl K) to see matches underneath; on mobile, the search icon reveals a compact search panel. Search leaves the current page visible, and Escape dismisses the results.
+**Home** lists your repositories across namespaces, most urgent first. The sample **payment-service** in the shared **Fernloop** namespace shows **1 to review**. Below are your namespaces: your personal **Alex Morgan** namespace has no Cloudflare account connected, and Home says so. Type in **Find repository** in the header, or press Cmd/Ctrl K, to jump anywhere.
 
-![Namespace home with personal and shared namespaces and the sample repository](images/local-demo/namespaces.jpg)
+![Home listing payment-service with one change to review, and the two namespaces](images/local-demo/home.jpg)
 
-## 2. Inspect concurrent work
+## 2. Open the repository
 
-The repository **Overview** shows two active workspaces: Codex is implementing a retry policy, and Alex Morgan is inspecting a payment timeout. Both report changes to `src/retry.ts`. **Shared surfaces** makes that overlap visible; it does not establish a Git conflict or semantic incompatibility.
+Click **payment-service**. The header shows canonical `main` and its exact revision. Below it, the attention bar says in plain words what needs someone: **1 change needs your review** and **1 file changed in more than one workspace**. Each item links to where it's handled. The **Changes** tab lists the change that needs attention, **Bounded retry policy #1**, with its exact revision, pinned base, workspace and the tool that published it.
 
-Canonical source has its own line; writer lanes show immutable starting revisions and reported heads. A copper bracket identifies the shared surface without joining Git histories. Select the surface to see its participating workspaces.
+![Repository Changes tab with the attention bar and one change marked Needs review](images/local-demo/changes.jpg)
 
-The review queue names an exact revision, `9461bc8e`, rather than only a branch. Click **Bounded retry policy** to open its review. Click a workspace row to explore its actor, starting revision and execution details.
+## 3. Review and promote the exact revision
 
-![Repository overview with two active workspaces, advisory overlap and a review queue](images/local-demo/overview.jpg)
+Open **Bounded retry policy #1**. The review is a checklist for this exact revision:
 
-## 3. Read the review requirements
+1. **Built on the current canonical revision**: already checked.
+2. **Confirm tests**: repository policy needs a maintainer to confirm the tests. Click **Confirm tests pass**; the note is optional.
+3. **Approve this exact revision**: click **Approve**. Approval covers `9461bc8e` only; a new revision needs a new review.
 
-The focused change detail in **Work** pins base `4906343f` and head `9461bc8e`. It offers a reasoned review and verification attestation. **Promote source** is disabled in this sample state because human approval and trusted passing test evidence are still required.
+When every item is checked, the change shows **Ready to promote** and **Promote to main** explains exactly what it does: move canonical `main` from `4906343f` to `9461bc8e` with a non-forced Git update. Raising a concern, recording a failure or closing the change asks for a reason. The files changed and the evidence (including Codex's stored test report) are below the checklist.
 
-Review decisions concern this exact revision. An authenticated human attestation and an agent's reported evidence have different trust. The fixture lets you explore the controls, but it does not prove hosted Git promotion works. **Inspect diff** leads to the Code view; **Code** also provides source and history controls.
+Promote it. The change becomes **Promoted**, the header shows the new canonical revision, and the attention bar now reports workspaces **behind canonical**: the other concurrent work has something to merge.
 
-![Focused change with pinned revisions, readiness reasons, evidence and separate human decisions](images/local-demo/review.jpg)
+![Review checklist with Promote to main, the diff and evidence](images/local-demo/review.jpg)
 
-## 4. Follow the published revision and evidence
+## 4. Follow concurrent workspaces
 
-Repository navigation has four tabs: **Overview**, **Code**, **Work** and **Settings**. Open **Code**, then **Bounded retry policy** under **Published revisions**. Its details identify the exact revision, pinned review base, producing workspace, storage reference and content hash. **Trace lineage** provides provenance context; **Browse source**, **Commit history** and **Change diff** inspect the retained Git revision. **Storage details** reveals the retained storage reference and content hash. Here storage and hash values are simulated placeholders, and trust is **reported**.
+The **Workspaces** tab lists each workspace with its state, its relation to canonical and what it overlaps with. Open **Inspect payment timeout**: it shows the fixed starting revision, the reported head, whether it is up to date with canonical, and that `src/retry.ts` is also changed in **Implement retry policy**. Shared files are a heads-up, not a conflict. **Checkout and storage** shows the attached checkout (with **Release checkout**, so the workspace can continue elsewhere) and the workspace fork, which can be deleted only after the workspace ends and every ref is retained.
 
-Open **Work**, then the change to see **Retry policy test report** alongside verification for that exact revision. **Read evidence** displays the stored fixture report; its reported results do not satisfy the trusted passing test requirement. The **Revision evidence** collection in Work also exposes reports before a change is proposed.
+![Workspace page with baseline, canonical relation, overlap and checkout](images/local-demo/workspace.jpg)
 
-Cruce’s coordination boundary ends at reviewed reconciliation into canonical Git. External systems own subsequent builds, releases, deployments and runtime operation.
+## 5. Look back through history
 
-![Published revision in Code identifying its review base, workspace and provenance](images/local-demo/revision.jpg)
+The **History** tab shows canonical promotions as a timeline, published revisions, stored evidence and activity in plain sentences. Open the published **Bounded retry policy** revision to see its exact revision, pinned review base, producing workspace and storage details. **Trace lineage** connects it to its workspace and change; **Browse files** and **Commit history** inspect the retained revision read-only. Publication proves which source was retained, not that it is correct.
 
-## 5. Keep account and namespace access distinct
+![Published revision with review base, provenance and source browser](images/local-demo/history.jpg)
 
-Click the avatar at the top right. **Your account** opens a compact profile card with the Cruce junction motif, an initial tile, the sample name and email, and a distinct **Sign out** row. Namespace selection stays in Home and the named header dropdown. The current page stays in place; Escape closes the menu and returns focus to the avatar. In the real system, sign-in identity and namespace/repository permissions are separate. **Members** and **Teams** live in shared-namespace navigation, while repository settings live in repository navigation. Development status appears quietly in the footer.
+## 6. Connect an agent
 
-![Avatar identity menu with sign-out](images/local-demo/account.jpg)
+**Connect an agent** (in the repository header and in Settings) is a three-step guide with copyable commands: clone canonical, connect Claude Code, Codex or Cursor, and the sentence to give your tool. Cruce doesn't run agents; each tool runs on your machine and works in its own Cruce workspace. Each workspace creates a fork in your Cloudflare account and counts toward the namespace's daily operations, as namespace **Settings** shows next to the account status and **Check connection**.
+
+![Connect an agent guide with copyable clone, connect and start commands](images/local-demo/connect.jpg)
+
+## 7. Account and access
+
+Click the avatar for a compact card with your name, email and **Sign out**; the current page stays put. Sign-in identity and namespace or repository permissions are separate. **Members** and **Teams** are in shared-namespace navigation; repository access is in the repository's **Settings**.
+
+![Account card with sign-out](images/local-demo/account.jpg)
+
+Cruce's coordination boundary ends at reviewed reconciliation into canonical Git. External systems own builds, releases, deployments and runtime operation.
 
 ## Refresh these screenshots
 
-Keep the walkthrough and images together when visible console behavior changes. Start a fresh `pnpm dev:fixture` session and follow the steps above without submitting reviews or changing the seeded data. Capture full-page browser screenshots, retain the fixture banner, and replace the matching files under `docs/images/local-demo/`. Use only sample identities; never capture credentials or a live account for this guide. Update the capture date and captions, then check every image and relative link.
-
-Automated browser checks write disposable screenshots to ignored `dist/ui-checks/`; the curated images in this guide are tracked documentation assets. See [verification](local-verification.md) for what the checks establish and which live boundaries remain unverified.
+Keep this walkthrough and its images together when visible console behaviour changes. `pnpm test:browser` writes fresh captures to the ignored `dist/ui-checks/`. Convert the matching captures (`home-1440`, `changes-1440`, `review`, `workspace-1440`, `revision-1440`, `connect-agent`, `account`) into the JPEG files under `docs/images/local-demo/`, for example with `sips -s format jpeg`. Use only sample identities, never capture credentials or a live account, and check every image and relative link.

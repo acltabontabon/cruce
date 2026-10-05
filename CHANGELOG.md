@@ -6,6 +6,7 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Fixed
 
+- Return safe errors over HTTP and MCP. Provider failures no longer expose Cloudflare API paths, account IDs or raw provider text, validation errors name the invalid field, and unexpected errors stay generic.
 - Recover repositories whose creation failed before canonical storage existed. The console explains the missing setup and lets maintainers retry the original setup operation, reusing its budget reservation instead of creating a duplicate.
 - Refresh OAuth credentials in later processes. The Git credential helper and long-running bridges now restore the registered callback, so the MCP SDK refreshes tokens instead of failing as a non-interactive client.
 - Trim pasted Cloudflare account IDs and API tokens before verifying them, and keep browsers from autofilling saved passwords into the API token field.
@@ -28,6 +29,13 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 - Architectural principles and guardrails, Mermaid diagrams, contributor/MCP guidance and a roadmap of future candidates.
 
 ### Changed
+
+- Redesign the console around what needs a person. Home lists your repositories sorted by attention. A repository opens with an attention bar ("1 change needs your review", "1 workspace behind canonical") and four tabs: Changes, Workspaces, History and Settings. Old Overview, Code, Work and Artifacts links redirect.
+- Review a change as one checklist for its exact revision: built on current canonical, policy checks a maintainer confirms in one click, concerns, approval, then **Promote to *branch***, which explains exactly what it moves. The diff opens with the first file shown. Stale and superseded changes are labelled and collapsed.
+- Describe workspaces by state (Active, Not reporting, Detached), canonical relation (Up to date, Behind canonical) and overlap in a sentence, and show continuation as "Started in Claude Code · continued in Codex". Release a checkout and delete a fork from the workspace page.
+- Add a **Connect an agent** guide with copyable clone, connect and start commands for Claude Code, Codex and Cursor.
+- Namespace settings show the Cloudflare account as a status card with **Check connection** and **Replace token**, today's operation usage against the daily limit, and readable policy names.
+- Plain operational language throughout: activity reads as sentences, tool names replace OAuth client labels, and tab titles name the page. The console hero, taglines, topology drawings and getting-started blurbs are gone.
 
 - Reset the product direction: Cruce is Git coordination for parallel agentic development, the durable coordination plane for Git work by independent humans and agents. New authoritative [product](docs/product.md) and [domain model](docs/domain-model.md) documents, rewritten principles, MCP guide and roadmap, and [decision records](docs/decisions/README.md) that state what was superseded. Agent execution, scheduling, pause/resume, messaging and acknowledgement protocols are explicitly out of scope.
 - **Breaking:** a workspace is owned by a user, not by the agent connection that started it. Any of the owner's authorized connections and tools may continue it. Workspaces record `ownerId` and `createdBy` (provenance) instead of `actor`, and the free-text `context` field is now `description`.

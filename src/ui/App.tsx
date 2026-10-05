@@ -1,19 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Command, Namespace, Repository, RepositorySnapshot, Team, User } from "../shared/platform.ts";
+import type { Command, Namespace, Repository, RepositorySnapshot, User } from "../shared/platform.ts";
 import { BRAND } from "./brand.tsx";
-import { Empty, Form, time, value } from "./controls.tsx";
-import { BranchArt, Dialog, Icon } from "./design.tsx";
+import { Empty, Form, value } from "./controls.tsx";
+import { Dialog } from "./design.tsx";
 import { NamespaceHome } from "./home.tsx";
-import { Code } from "./inspect.tsx";
+import { NamespacePage, namespaceTabsFor } from "./namespace.tsx";
 import { ConsoleHeader } from "./navigation.tsx";
-import { RepositoryOverview, WorkScreen } from "./repository.tsx";
+import { RepositoryPage, repositoryTabs } from "./repository.tsx";
 import { request } from "./request.ts";
 import { Shell } from "./shell.tsx";
 import type { NamespaceView } from "./types.ts";
 import "./styles.css";
 
 const namespaceTabs = ["repositories", "members", "teams", "settings"];
-const tabs = ["overview", "code", "work", "settings"];
+const tabs: readonly string[] = repositoryTabs;
+/** Retired repository routes resolve to their new homes so saved links keep working. */
+const legacyTabs: Record<string, string> = { overview: "changes", code: "history", artifacts: "history" };
 function readRoute() {
 	const query = new URLSearchParams(location.search),
 		[tab, id] = location.hash.replace(/^#\/?/, "").split("/");
@@ -25,11 +27,13 @@ function readRoute() {
 		namespaceId: screen === "namespace" ? (query.get("namespace") ?? "") : "",
 		repositoryId: screen === "namespace" ? (query.get("repository") ?? "") : "",
 		tab:
-			screen === "namespace" && query.get("repository") && tab === "artifacts"
-				? tab
-				: [...tabs, ...namespaceTabs].includes(tab)
+			screen === "namespace" && query.get("repository")
+				? tab === "work"
 					? tab
-					: "overview",
+					: (legacyTabs[tab] ?? (tabs.includes(tab) ? tab : "changes"))
+				: namespaceTabs.includes(tab)
+					? tab
+					: "repositories",
 		id: id ?? "",
 	};
 }
@@ -50,7 +54,8 @@ export function App() {
 		generation = useRef(0),
 		[busy, setBusy] = useState(false);
 	const reload = useCallback(() => setRefresh((n) => n + 1), []);
-	const navigate = useCallback((namespaceId: string, repositoryId = "", tab = "overview", id = "") => {
+	const navigate = useCallback((namespaceId: string, repositoryId = "", tab = "", id = "") => {
+		tab ||= repositoryId ? "changes" : "repositories";
 		const url = new URL(location.href);
 		url.pathname = "/";
 		url.search = "";
@@ -85,11 +90,18 @@ export function App() {
 	}, []);
 
 	useEffect(() => {
-		if (route.tab !== "artifacts" || view?.repository.id !== route.repositoryId || view.repository.namespaceId !== route.namespaceId)
-			return;
-		const record = view.artifacts.find((a) => a.id === route.id);
+		// Retired work/<id> links point at a change, a workspace or a stored record; resolve once the snapshot is known.
+		if (route.tab !== "work" || view?.repository.id !== route.repositoryId || view.repository.namespaceId !== route.namespaceId) return;
+		const tab = view.proposals.some((p) => p.id === route.id)
+			? "changes"
+			: view.workspaces.some((w) => w.id === route.id)
+				? "workspaces"
+				: view.artifacts.some((a) => a.id === route.id)
+					? "history"
+					: "changes";
 		const url = new URL(location.href);
-		url.hash = `/${record?.kind === "evidence" ? "work" : "code"}${route.id ? `/${route.id}` : ""}`;
+		const known = tab !== "changes" || view.proposals.some((p) => p.id === route.id);
+		url.hash = `/${tab}${route.id && known ? `/${route.id}` : ""}`;
 		history.replaceState(null, "", url);
 		setRoute(readRoute());
 	}, [route, view]);
@@ -98,6 +110,21 @@ export function App() {
 		void route;
 		document.getElementById("content")?.focus({ preventScroll: true });
 	}, [route]);
+	useEffect(() => {
+		// Tab titles name the thing on screen so several open tabs stay distinguishable.
+		const repo = view?.repository.id === route.repositoryId ? view : undefined;
+		const change = repo && route.tab === "changes" ? repo.proposals.find((p) => p.id === route.id) : undefined;
+		const workspace = repo && route.tab === "workspaces" ? repo.workspaces.find((w) => w.id === route.id) : undefined;
+		const parts = repo
+			? [
+					change ? `Review #${change.number}` : workspace ? workspace.title : route.tab[0].toUpperCase() + route.tab.slice(1),
+					repo.repository.name,
+				]
+			: namespace?.namespace.id === route.namespaceId && route.namespaceId
+				? [namespace.namespace.name]
+				: ["Your repositories"];
+		document.title = [...parts, BRAND.name].join(" · ");
+	}, [route, view, namespace]);
 
 	useEffect(() => {
 		const change = () => {
@@ -306,423 +333,33 @@ export function App() {
 				{route.screen === "namespaces" ? (
 					<NamespaceHome me={me} refresh={refresh} open={navigate} create={() => setOverlay("create-namespace")} />
 				) : route.repositoryId ? (
-					<>
-						<nav className="tabs" aria-label="Repository navigation">
-							{tabs.map((tab) => (
-								<button
-									type="button"
-									key={tab}
-									className={route.tab === tab ? "selected" : ""}
-									aria-current={route.tab === tab ? "page" : undefined}
-									onClick={() => navigate(route.namespaceId, route.repositoryId, tab)}
-								>
-									{tab}
-								</button>
-							))}
-						</nav>
-						{view ? (
-							<>
-								{route.tab === "overview" && (
-									<RepositoryOverview
-										view={view}
-										execute={execute}
-										open={(tab, id) => navigate(route.namespaceId, route.repositoryId, tab, id)}
-									/>
-								)}
-								{route.tab === "work" && (
-									<WorkScreen
-										view={view}
-										id={route.id}
-										execute={execute}
-										busy={busy}
-										open={(tab, id) => navigate(route.namespaceId, route.repositoryId, tab, id)}
-									/>
-								)}
-								{route.tab === "code" && (
-									<Code
-										key={`${view.repository.id}-${route.id}`}
-										view={view}
-										execute={execute}
-										id={route.id}
-										open={(tab, id) => navigate(route.namespaceId, route.repositoryId, tab, id)}
-									/>
-								)}
-								{route.tab === "settings" && (
-									<>
-										<h1>Repository settings</h1>
-										<p>
-											<code>{view.repository.id}</code> · Cloudflare Artifacts
-										</p>
-										<h2>Connect your checkout</h2>
-										<pre>{`node /path/to/cruce/runner/cruce.mjs connect --namespace ${route.namespaceId} --repository ${route.repositoryId} --server ${location.origin} --client codex`}</pre>
-										<p>
-											For a human workspace, use <code>human</code> instead of <code>connect</code>, then{" "}
-											<code>start --title "Your work"</code>.
-										</p>
-										{view.permissions.maintain && namespace && (
-											<>
-												<Form
-													label="Rename repository"
-													submit={(d) => mutate(`${base}/repositories/${route.repositoryId}`, { name: value(d, "name") }, "PATCH")}
-												>
-													<label>
-														Repository name
-														<input name="name" defaultValue={view.repository.name} required />
-													</label>
-												</Form>
-												<h2>Repository access</h2>
-												{view.repository.grants.map((g) => (
-													<p key={`${g.subject}:${g.id}`}>
-														{g.subject}:{" "}
-														{namespace.people.find((p) => p.id === g.id)?.name ?? namespace.teams.find((t) => t.id === g.id)?.name ?? g.id}{" "}
-														· {g.role}{" "}
-														<button
-															type="button"
-															onClick={() =>
-																void mutate(
-																	`${base}/repositories/${route.repositoryId}`,
-																	{ grants: view.repository.grants.filter((x) => x !== g) },
-																	"PATCH",
-																).catch(setError)
-															}
-														>
-															Remove
-														</button>
-													</p>
-												))}
-												<Form
-													label="Grant access"
-													submit={(d) => {
-														const [subject, id] = value(d, "subject").split(":");
-														return mutate(
-															`${base}/repositories/${route.repositoryId}`,
-															{
-																grants: [
-																	...view.repository.grants.filter((g) => g.subject !== subject || g.id !== id),
-																	{ subject, id, role: value(d, "role") },
-																],
-															},
-															"PATCH",
-														);
-													}}
-												>
-													<label>
-														Member or team
-														<select name="subject">
-															{namespace.people.map((p) => (
-																<option key={p.id} value={`user:${p.id}`}>
-																	{p.name}
-																</option>
-															))}
-															{namespace.teams.map((t) => (
-																<option key={t.id} value={`team:${t.id}`}>
-																	Team: {t.name}
-																</option>
-															))}
-														</select>
-													</label>
-													<label>
-														Access
-														<select name="role">
-															<option value="read">Read</option>
-															<option value="write">Write</option>
-															<option value="maintain">Maintain</option>
-														</select>
-													</label>
-												</Form>
-												<Form
-													label="Save repository policy"
-													submit={(d) =>
-														mutate(
-															`${base}/repositories/${route.repositoryId}`,
-															{
-																policy: {
-																	...view.repository.policy,
-																	protectedPaths: value(d, "paths").split("\n").filter(Boolean),
-																	requiredEvidence: value(d, "evidence")
-																		.split(",")
-																		.map((s) => s.trim())
-																		.filter(Boolean),
-																},
-															},
-															"PATCH",
-														)
-													}
-												>
-													<label>
-														Protected paths, one per line
-														<textarea name="paths" defaultValue={view.repository.policy.protectedPaths.join("\n")} />
-													</label>
-													<label>
-														Required evidence kinds
-														<input name="evidence" defaultValue={view.repository.policy.requiredEvidence.join(",")} />
-													</label>
-												</Form>
-											</>
-										)}
-									</>
-								)}
-							</>
-						) : (
-							<Empty>Loading repository…</Empty>
-						)}
-					</>
+					view ? (
+						<RepositoryPage
+							view={view}
+							namespace={namespace?.namespace.id === route.namespaceId ? namespace : undefined}
+							tab={route.tab === "work" ? "changes" : route.tab}
+							id={route.tab === "work" ? "" : route.id}
+							execute={execute}
+							busy={busy}
+							open={(tab, id) => navigate(route.namespaceId, route.repositoryId, tab, id)}
+							mutate={mutate}
+							base={base}
+							onError={setError}
+						/>
+					) : (
+						<Empty>Loading repository…</Empty>
+					)
 				) : namespace ? (
-					<>
-						<nav className="tabs" aria-label="Namespace navigation">
-							{["repositories", ...(namespace.namespace.kind === "shared" ? ["members", "teams"] : []), "settings"].map((tab) => (
-								<button
-									type="button"
-									key={tab}
-									className={namespaceTab === tab ? "selected" : ""}
-									aria-current={namespaceTab === tab ? "page" : undefined}
-									onClick={() => navigate(route.namespaceId, "", tab)}
-								>
-									{tab}
-								</button>
-							))}
-						</nav>
-
-						<div className="page-title namespace-title">
-							<div>
-								<p className="eyebrow">Your namespace, connected</p>
-								<h1>{namespaceTab === "repositories" ? "Repositories" : namespaceTab[0].toUpperCase() + namespaceTab.slice(1)}</h1>
-								<p className="page-description">
-									{namespaceTab === "repositories"
-										? "Repositories, agent workspaces, and the changes ready for your attention."
-										: `Manage ${namespaceTab} for ${namespace.namespace.name}.`}
-								</p>
-							</div>
-							{namespaceTab === "repositories" && namespace.permissions.maintain && namespace.repositories.length > 0 && (
-								<button className="primary" type="button" onClick={() => setOverlay("repository")}>
-									<Icon name="plus" />
-									New repository
-								</button>
-							)}
-						</div>
-						{namespaceTab === "repositories" && (
-							<>
-								{namespace.repositories.length ? (
-									<div className="repo-list">
-										{namespace.repositories.map((r) => (
-											<button type="button" key={r.id} onClick={() => navigate(namespace.namespace.id, r.id)}>
-												<span className="repo-symbol">
-													<Icon name="cloud" />
-												</span>
-												<strong>{r.name}</strong>
-												<span>
-													Cloudflare Artifacts · {r.defaultBranch}
-													{namespace.repositorySummaries?.find((s) => s.id === r.id) && (
-														<small>
-															{namespace.repositorySummaries.find((s) => s.id === r.id)!.active} active workspaces ·{" "}
-															{namespace.repositorySummaries.find((s) => s.id === r.id)!.overlaps} overlaps
-														</small>
-													)}
-												</span>
-												<Icon name="arrow" />
-											</button>
-										))}
-									</div>
-								) : (
-									<section className="repository-empty">
-										<BranchArt />
-										<div className="empty-copy">
-											<span className="eyebrow">Great work starts here</span>
-											<h2>
-												Independent agents.
-												<br />
-												Connected work.
-											</h2>
-											<p>
-												No repositories yet. Bring your local Git into Cruce to coordinate developers and agents, with context that follows
-												the commit.
-											</p>
-											{namespace.permissions.maintain && (
-												<button type="button" className="primary" onClick={() => setOverlay("repository")}>
-													<Icon name="plus" />
-													New repository
-													<Icon name="arrow" />
-												</button>
-											)}
-										</div>
-									</section>
-								)}
-								{namespace.activity?.length ? (
-									<section>
-										<h2>Recent activity</h2>
-										<ol className="activity">
-											{namespace.activity.map((e) => (
-												<li key={`${e.repositoryId}:${e.id}`}>
-													<time>{time(e.at)}</time>
-													<span>
-														<button type="button" onClick={() => navigate(namespace.namespace.id, e.repositoryId)}>
-															{e.repositoryName}
-														</button>{" "}
-														{e.summary}
-													</span>
-												</li>
-											))}
-										</ol>
-									</section>
-								) : null}
-								<div className="namespace-guide">
-									<div>
-										<span className="guide-number">01</span>
-										<h3>Bring your Git</h3>
-										<p>Create a repository, then clone it with Git.</p>
-									</div>
-									<div>
-										<span className="guide-number">02</span>
-										<h3>Connect your agents</h3>
-										<p>Authorize a local agent connection. Each writer gets its own worktree and workspace.</p>
-									</div>
-									<div>
-										<span className="guide-number">03</span>
-										<h3>Review the exact change</h3>
-										<p>Inspect agent commits and evidence. Human approval controls promotion.</p>
-									</div>
-								</div>
-							</>
-						)}
-						{namespaceTab === "members" && (
-							<>
-								{namespace.people.map((p) => (
-									<div className="record" key={p.id}>
-										<strong>{p.name}</strong> {p.email} · {namespace.members[p.id]}
-										{namespace.permissions.maintain && namespace.members[p.id] !== "owner" && (
-											<Form
-												label="Update member"
-												submit={(d) =>
-													mutate(`${base}/members`, { userId: p.id, ...(value(d, "role") === "remove" ? {} : { role: value(d, "role") }) })
-												}
-											>
-												<label>
-													Namespace role
-													<select name="role" defaultValue={namespace.members[p.id]}>
-														<option value="viewer">Viewer</option>
-														<option value="developer">Developer</option>
-														{namespace.permissions.owner && <option value="maintainer">Maintainer</option>}
-														<option value="remove">Remove member</option>
-													</select>
-												</label>
-											</Form>
-										)}
-									</div>
-								))}
-								{namespace.permissions.maintain && (
-									<Form
-										label="Create invitation link"
-										submit={async (d) => {
-											const result = await mutate<{ url: string }>(`${base}/invitations`, {
-												email: value(d, "email"),
-												role: value(d, "role"),
-											});
-											setNotice(result.url);
-										}}
-									>
-										<label>
-											Email
-											<input name="email" type="email" required />
-										</label>
-										<label>
-											Role
-											<select name="role">
-												<option value="developer">Developer</option>
-												<option value="viewer">Viewer</option>
-												{namespace.permissions.owner && <option value="maintainer">Maintainer</option>}
-											</select>
-										</label>
-									</Form>
-								)}
-							</>
-						)}
-						{namespaceTab === "teams" && (
-							<>
-								{!namespace.teams.length && <Empty>No teams yet. Teams group namespace members for repository access.</Empty>}
-								{[...namespace.teams, { id: "", name: "", members: [] }].map((t) => (
-									<TeamForm key={t.id || "new"} team={t} namespace={namespace} save={(body) => mutate(`${base}/teams`, body)} />
-								))}
-							</>
-						)}
-						{namespaceTab === "settings" && (
-							<>
-								<h2>Namespace settings</h2>
-								{namespace.permissions.maintain && (
-									<Form
-										label="Save namespace"
-										submit={async (d) => {
-											const w = await mutate<Namespace>(base, { name: value(d, "name"), handle: value(d, "handle") }, "PATCH");
-											setMe({ ...me, namespaces: me.namespaces.map((old) => (old.id === w.id ? w : old)) });
-										}}
-									>
-										<label>
-											Name
-											<input name="name" defaultValue={namespace.namespace.name} required />
-										</label>
-										<label>
-											Handle
-											<input name="handle" defaultValue={namespace.namespace.handle} required />
-										</label>
-									</Form>
-								)}
-								<h2>Cloudflare account</h2>
-								<p>
-									{namespace.account
-										? `${namespace.account.label} · ${namespace.account.accountId}`
-										: "Not connected. Connect a Cloudflare account to create repositories and workspaces."}
-								</p>
-								{namespace.permissions.owner && (
-									<Form
-										label="Connect account"
-										submit={(d) =>
-											mutate(`${base}/account`, { accountId: value(d, "accountId"), token: value(d, "token"), label: value(d, "label") })
-										}
-									>
-										<label>
-											Label
-											<input name="label" required />
-										</label>
-										<label>
-											Account ID
-											<input name="accountId" required autoComplete="off" spellCheck={false} />
-										</label>
-										<label>
-											API token
-											<input name="token" type="password" required autoComplete="new-password" spellCheck={false} />
-										</label>
-										<p className="muted">Credentials are sealed and never returned to agents.</p>
-									</Form>
-								)}
-								{namespace.permissions.maintain && (
-									<Form
-										label="Save resource policy"
-										submit={(d) =>
-											mutate(`${base}/policy`, {
-												dailyLimit: Number(value(d, "dailyLimit")),
-												rules: Object.fromEntries(Object.keys(namespace.policy.rules).map((key) => [key, value(d, key)])),
-											})
-										}
-									>
-										<h2>Shared resource budgets</h2>
-										<label>
-											Daily operations
-											<input name="dailyLimit" type="number" min="0" max="10000" defaultValue={namespace.policy.dailyLimit} />
-										</label>
-										{Object.entries(namespace.policy.rules).map(([key, rule]) => (
-											<label key={key}>
-												{key}
-												<select name={key} defaultValue={rule}>
-													<option value="allow">Allow</option>
-													<option value="approval">Human approval</option>
-													<option value="deny">Deny</option>
-												</select>
-											</label>
-										))}
-									</Form>
-								)}
-							</>
-						)}
-					</>
+					<NamespacePage
+						namespace={namespace}
+						tab={namespaceTabsFor(namespace).includes(namespaceTab) ? namespaceTab : "repositories"}
+						base={base}
+						mutate={mutate}
+						open={(repositoryId, tab) => navigate(route.namespaceId, repositoryId, tab)}
+						newRepository={() => setOverlay("repository")}
+						notify={setNotice}
+						renamed={(w) => setMe({ ...me, namespaces: me.namespaces.map((old) => (old.id === w.id ? w : old)) })}
+					/>
 				) : (
 					<Empty>Loading namespace…</Empty>
 				)}
@@ -781,37 +418,5 @@ export function App() {
 				</Dialog>
 			)}
 		</Shell>
-	);
-}
-function TeamForm({
-	team,
-	namespace,
-	save,
-}: {
-	team: Team;
-	namespace: NamespaceView;
-	save: (body: Record<string, unknown>) => Promise<unknown>;
-}) {
-	const stableId = useRef(team.id || crypto.randomUUID());
-	if (!namespace.permissions.maintain) return <p>{team.name}</p>;
-	return (
-		<details>
-			<summary>{team.name || "Create team"}</summary>
-			<Form
-				label={team.id ? "Save team" : "Create team"}
-				submit={(d) => save({ id: stableId.current, name: value(d, "name"), members: d.getAll("members").map(String) })}
-			>
-				<label>
-					Team name
-					<input name="name" defaultValue={team.name} required />
-				</label>
-				{namespace.people.map((p) => (
-					<label className="checkbox" key={p.id}>
-						<input type="checkbox" name="members" value={p.id} defaultChecked={team.members.includes(p.id)} />
-						{p.name}
-					</label>
-				))}
-			</Form>
-		</details>
 	);
 }

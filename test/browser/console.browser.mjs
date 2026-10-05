@@ -11,11 +11,14 @@ before(async () => {
 	await mkdir("dist/ui-checks", { recursive: true });
 });
 after(async () => {
+	await page?.unrouteAll({ behavior: "ignoreErrors" });
 	await page?.close();
 	await browser?.close();
 	await server?.close();
 });
 beforeEach(async () => {
+	// Polling can leave a route handler mid-flight; drop routes quietly before closing the previous page.
+	await page?.unrouteAll({ behavior: "ignoreErrors" });
 	await page?.close();
 	page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 	page.setDefaultTimeout(7000);
@@ -139,7 +142,7 @@ test("sign-out hands off to Access, and returning home keeps the Cruce console s
 	// to verify the console navigation without simulating revocation as evidence.
 	await openHomepage();
 	await page.getByRole("link", { name: "Sign in", exact: true }).first().click();
-	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
 	await page.getByRole("button", { name: "Your account", exact: true }).click();
 	await page.getByRole("link", { name: "Sign out", exact: true }).click();
 	await page.getByRole("heading", { name: "Fixture Access logout boundary" }).waitFor();
@@ -179,7 +182,7 @@ test("session failures retain a retry state and stale confirmation cannot remoun
 	await page.evaluate(() => window.dispatchEvent(new Event("cruce:session-expired")));
 	await page.getByRole("heading", { name: "Many agents. One repository. Common ground." }).waitFor();
 	await page.waitForTimeout(650);
-	assert.equal(await page.getByRole("heading", { name: "Agent work. Shared direction." }).count(), 0);
+	assert.equal(await page.getByRole("heading", { name: "Your repositories", exact: true }).count(), 0);
 });
 test("expired console requests clear private views and public anchors do not rewrite console deep links", async () => {
 	await openRepo();
@@ -455,26 +458,32 @@ test("active progress caption fits its step without covering the diagram through
 		}
 	}
 });
-test("home lets the user choose a namespace before honest repository creation", async () => {
+const repoNav = () => page.getByRole("navigation", { name: "Repository navigation" });
+const namespaceNav = () => page.getByRole("navigation", { name: "Namespace navigation" });
+const root = () => `${server.origin}/?namespace=fernloop&repository=payments`;
+async function openChange() {
+	await openRepo();
+	await page.locator(".change-row").filter({ hasText: "Bounded retry policy" }).click();
+	await page.getByRole("heading", { name: /Bounded retry policy/, level: 1 }).waitFor();
+}
+const workspaceRow = (title) => page.locator(".workspace-row").filter({ has: page.getByText(title, { exact: true }) });
+async function openWorkspace(title) {
+	await openRepo();
+	await repoNav()
+		.getByRole("button", { name: /^Workspaces/ })
+		.click();
+	await workspaceRow(title).click();
+	await page.getByRole("heading", { name: title, exact: true, level: 1 }).waitFor();
+}
+
+test("home lists repositories by what needs attention and keeps its filter while the account menu opens", async () => {
 	await page.goto(server.origin);
-	await page.getByRole("button", { name: "Alex Morgan", exact: true }).click();
-	await page.getByText("No repositories yet.", { exact: false }).waitFor();
-	await page.getByText("New repository", { exact: true }).click();
-	await page.getByLabel("Repository name", { exact: true }).fill("local-tools");
-	await page.getByRole("button", { name: "Add repository", exact: true }).click();
-	await page.getByRole("heading", { name: "local-tools", exact: true }).waitFor();
-	await page.getByText("No active workspaces.", { exact: false }).waitFor();
-	assert.equal(await page.getByText("Production Healthy").count(), 0);
-});
-test("namespace home retains its filter while the avatar menu opens, and scoped navigation survives Back and reload", async () => {
-	await page.goto(server.origin);
-	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
-	await page.locator(".home-repo").filter({ hasText: "payment-service" }).waitFor();
-	await page.getByRole("heading", { name: "Work in motion", exact: true }).waitFor();
-	await page.locator(".motion-row").getByText("2 active workspaces", { exact: true }).waitFor();
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
+	const row = page.locator(".repo-row").filter({ hasText: "payment-service" });
+	await row.getByText("1 to review", { exact: true }).waitFor();
 	await page.screenshot({ path: "dist/ui-checks/namespaces.png", fullPage: true });
 	await page.getByLabel("Filter namespaces").fill("payment-service");
-	assert.equal(await page.locator(".namespace-card").count(), 1);
+	assert.equal(await page.locator(".namespace-row").count(), 1);
 	await page.getByRole("button", { name: "Your account", exact: true }).click();
 	await page.getByRole("region", { name: "Your account", exact: true }).waitFor();
 	assert.equal(new URL(page.url()).search, "");
@@ -482,24 +491,27 @@ test("namespace home retains its filter while the avatar menu opens, and scoped 
 	await page.screenshot({ path: "dist/ui-checks/account.png", fullPage: true });
 	await page.keyboard.press("Escape");
 	await page.reload();
-	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
 	await page.getByRole("button", { name: "Fernloop", exact: true }).click();
-	await page.getByRole("navigation", { name: "Namespace navigation" }).getByRole("button", { name: "teams", exact: true }).click();
+	await namespaceNav().getByRole("button", { name: "Teams", exact: true }).click();
 	await page.reload();
-	await page.getByRole("heading", { name: "Teams", exact: true, level: 1 }).waitFor();
+	assert.equal(await namespaceNav().getByRole("button", { name: "Teams", exact: true }).getAttribute("aria-current"), "page");
 	await page.goBack();
-	await page.getByRole("heading", { name: "Repositories", exact: true }).waitFor();
+	assert.equal(await namespaceNav().getByRole("button", { name: "Repositories", exact: true }).getAttribute("aria-current"), "page");
+	await page.getByRole("heading", { name: "Fernloop", exact: true, level: 1 }).waitFor();
 });
-test("creation dialogs keep focus contained and explain unavailable cloud setup", async () => {
+test("an unconnected namespace leads with account setup and creation dialogs keep focus contained", async () => {
 	await page.goto(server.origin);
 	await page.getByRole("button", { name: "Alex Morgan", exact: true }).click();
+	await page.getByRole("heading", { name: "No repositories yet", exact: true }).waitFor();
+	await page.getByRole("button", { name: "Connect a Cloudflare account first", exact: true }).click();
+	assert.equal(await namespaceNav().getByRole("button", { name: "Settings", exact: true }).getAttribute("aria-current"), "page");
+	await page.getByText("Not connected.", { exact: true }).waitFor();
 	await page.screenshot({ path: "dist/ui-checks/empty-namespace.png", fullPage: true });
+	await page.goto(`${server.origin}/?namespace=fernloop`);
 	const trigger = page.getByRole("button", { name: "New repository", exact: true });
 	await trigger.click();
 	const dialog = page.getByRole("dialog", { name: "New repository", exact: true });
-	assert.equal(await dialog.getByRole("radio").count(), 0);
 	await dialog.getByText("Creates canonical Git storage", { exact: false }).waitFor();
-	await dialog.getByText("Connect Cloudflare in namespace settings before creating a repository.").waitFor();
 	await page.screenshot({ path: "dist/ui-checks/create-repository.png", fullPage: true });
 	for (let i = 0; i < 10; i++) {
 		await page.keyboard.press("Tab");
@@ -514,19 +526,34 @@ test("creation dialogs keep focus contained and explain unavailable cloud setup"
 	await page.getByLabel("Namespace handle").fill("design-team");
 	await page.getByRole("button", { name: "Create namespace", exact: true }).click();
 	await page.getByRole("button", { name: "Switch namespace" }).filter({ hasText: "Design team" }).waitFor();
-	await page.getByRole("navigation", { name: "Namespace navigation" }).getByRole("button", { name: "members", exact: true }).waitFor();
+	await namespaceNav().getByRole("button", { name: "Members", exact: true }).waitFor();
+});
+test("a new repository opens on Changes with a way to connect an agent", async () => {
+	await page.goto(`${server.origin}/?namespace=fernloop`);
+	await page.getByRole("button", { name: "New repository", exact: true }).click();
+	await page.getByLabel("Repository name", { exact: true }).fill("local-tools");
+	await page.getByRole("button", { name: "Add repository", exact: true }).click();
+	await page.getByRole("heading", { name: "local-tools", exact: true }).waitFor();
+	await page.getByRole("heading", { name: "No changes yet", exact: true }).waitFor();
+	await page.getByText("Nothing needs you right now.", { exact: true }).waitFor();
+	await page.locator(".changes-screen").getByRole("button", { name: "Connect an agent", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "Connect an agent", exact: true });
+	await dialog.getByRole("button", { name: "Codex", exact: true }).click();
+	await dialog.getByText(/--client codex/).waitFor();
+	assert.equal(await dialog.getByRole("button", { name: "Codex", exact: true }).getAttribute("aria-pressed"), "true");
+	await page.waitForTimeout(250); // Let the 140ms selection transition finish before capturing.
+	await page.screenshot({ path: "dist/ui-checks/connect-agent.png", fullPage: true });
 });
 test("brand navigation reaches an unscoped Home and Back restores the repository", async () => {
 	await openRepo();
 	await page.getByRole("link", { name: "Cruce home", exact: true }).click();
-	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
 	assert.equal(new URL(page.url()).search, "");
 	await page.getByRole("navigation", { name: "Current location" }).getByText("Home", { exact: true }).waitFor();
 	assert.equal(await page.getByRole("button", { name: "Switch namespace", exact: true }).count(), 0);
-	assert.equal(await page.getByRole("button", { name: "All namespaces", exact: true }).count(), 0);
-	assert.equal(await page.getByRole("navigation", { name: "Namespace navigation" }).count(), 0);
+	assert.equal(await namespaceNav().count(), 0);
 	await page.reload();
-	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
 	await page.goBack();
 	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
 	await page.getByRole("button", { name: "Switch namespace", exact: true }).filter({ hasText: "Fernloop" }).waitFor();
@@ -538,7 +565,7 @@ test("saved global URLs cannot select or fetch a hidden repository or namespace 
 		return route.continue();
 	});
 	await page.goto(`${server.origin}/?page=namespaces&namespace=fernloop&repository=payments#/work`);
-	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
 	assert.equal(new URL(page.url()).searchParams.has("namespace"), false);
 	assert.equal(new URL(page.url()).searchParams.has("repository"), false);
 	assert.equal(await page.getByRole("button", { name: "Switch namespace", exact: true }).count(), 0);
@@ -572,11 +599,11 @@ test("avatar menu preserves repository context and keyboard focus; saved account
 	assert.equal(await menu.count(), 0);
 	await page.goto(`${server.origin}/?page=account&namespace=fernloop&repository=payments`);
 	await menu.waitFor();
-	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
 	assert.equal(new URL(page.url()).search, "");
 	assert.equal(await page.getByRole("button", { name: "Switch namespace", exact: true }).count(), 0);
 	await page.reload();
-	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
 	assert.equal(await menu.count(), 0);
 });
 test("avatar menu fits a narrow screen and tabbing out dismisses it without trapping focus", async () => {
@@ -608,12 +635,12 @@ test("namespace dropdown switches scope with keyboard selection and restores foc
 	assert.equal(await page.getByRole("dialog").count(), 0);
 	await page.getByLabel("Search namespaces").fill("Alex");
 	await page.keyboard.press("Enter");
-	await page.getByRole("heading", { name: "Repositories", exact: true }).waitFor();
+	await page.getByRole("heading", { name: "Alex Morgan", exact: true, level: 1 }).waitFor();
 	await trigger.filter({ hasText: "Alex Morgan" }).waitFor();
 	assert.equal(await page.getByRole("button", { name: "Switch repository", exact: true }).count(), 0);
 	assert.deepEqual(
 		(await page.getByRole("navigation", { name: "Namespace navigation" }).getByRole("button").allTextContents()).map((text) => text.trim()),
-		["repositories", "settings"],
+		["Repositories", "Settings"],
 	);
 	await page.goBack();
 	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
@@ -636,61 +663,14 @@ test("repository dropdown stays within its namespace and can return to the names
 	await page.keyboard.press("Escape");
 	await trigger.click();
 	await dropdown.getByRole("link", { name: "All repositories Fernloop", exact: true }).click();
-	await page.getByRole("heading", { name: "Repositories", exact: true }).waitFor();
+	await page.getByRole("heading", { name: "Fernloop", exact: true, level: 1 }).waitFor();
 	assert.equal(new URL(page.url()).searchParams.has("repository"), false);
-	await page.goBack();
-	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
-});
-test("overview shows human and agent workspaces, reported overlap and published revision", async () => {
-	await openRepo();
-	await page.getByRole("heading", { name: "Shared surfaces" }).waitFor();
-	await page.getByRole("heading", { name: "Review queue", exact: true }).waitFor();
-	await page.getByText("2 active workspaces", { exact: true }).waitFor();
-	await page.getByText("Overlap is awareness, not a Git conflict.").waitFor();
-	await page.screenshot({ path: "dist/ui-checks/repository.png", fullPage: true });
-});
-test("repository navigation ends at source coordination and removed routes use the normal fallback", async () => {
-	await openRepo();
-	const navigation = page.getByRole("navigation", { name: "Repository navigation" });
-	assert.deepEqual(
-		(await navigation.getByRole("button").allTextContents()).map((text) => text.trim().toLowerCase()),
-		["overview", "code", "work", "settings"],
-	);
-	assert.equal(await page.getByRole("heading", { name: "Environments", exact: true }).count(), 0);
-	await navigation.getByRole("button", { name: "work", exact: true }).click();
-	await page.goto(page.url().replace(/#.*$/, "#deployments"));
-	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
-	assert.equal(await page.getByRole("heading", { name: "Deployments", exact: true }).count(), 0);
-	await page.goBack();
-	await page.getByRole("heading", { name: "Work", exact: true }).waitFor();
-	await page.goto(`${server.origin}/?namespace=fernloop#settings`);
-	await page.getByRole("heading", { name: "Shared resource budgets", exact: true }).waitFor();
-	assert.equal(await page.getByLabel("Previews per workspace").count(), 0);
-});
-test("header search accepts typing directly and supports keyboard selection and Back navigation", async () => {
-	await openRepo();
-	const search = page.getByRole("combobox", { name: "Find repository", exact: true });
-	await search.click();
-	await search.fill("  FERNLOOP payment  ");
-	await page.getByRole("option", { name: "fernloop/payment-service", exact: true }).waitFor();
-	assert.equal(await page.getByRole("dialog").count(), 0);
-	assert.equal(await page.locator("main").evaluate((element) => element.inert), false);
-	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
-	await page.screenshot({ path: "dist/ui-checks/finder.png", fullPage: true });
-	await page.screenshot({ path: "dist/ui-checks/search-header.png", clip: { x: 0, y: 0, width: 1440, height: 250 } });
-	await page.keyboard.press("ArrowDown");
-	assert.equal(await search.evaluate((element) => element === document.activeElement), true);
-	assert.ok(await search.getAttribute("aria-activedescendant"));
-	await page.keyboard.press("Enter");
-	assert.equal(await page.getByRole("region", { name: "Repository search", exact: true }).count(), 0);
-	await page.getByRole("navigation", { name: "Repository navigation" }).getByRole("button", { name: "work", exact: true }).click();
-	await page.getByRole("heading", { name: "Work", exact: true }).waitFor();
 	await page.goBack();
 	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
 });
 test("search shortcuts focus the same field, Escape and Tab dismiss results, and empty matches do not navigate", async () => {
 	await page.goto(server.origin);
-	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
 	const current = page.url();
 	const search = page.getByRole("combobox", { name: "Find repository", exact: true });
 	await page.keyboard.press("Meta+k");
@@ -743,7 +723,7 @@ test("search preserves partial results and retries unavailable namespaces withou
 	await panel.getByRole("option", { name: "fernloop/payment-service", exact: true }).waitFor();
 	assert.equal(await panel.getByRole("alert").count(), 0);
 	assert.equal(new URL(page.url()).search, "");
-	await page.getByRole("heading", { name: "Agent work. Shared direction." }).click();
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).click();
 	assert.equal(await panel.count(), 0);
 });
 test("mobile search is anchored below the compact header and keeps navigation available", async () => {
@@ -820,313 +800,12 @@ test("dismissed search requests cannot replace a newer search and shortcuts leav
 	await panel.getByRole("option", { name: "fernloop/payment-service", exact: true }).waitFor();
 	assert.equal(await panel.getByRole("option", { name: /stale-repository/ }).count(), 0);
 });
-test("workspace detail preserves base, actor and execution provenance, and the owner can release the execution", async () => {
-	await openRepo();
-	await page.getByRole("button", { name: /Codex.*Implement retry policy/ }).click();
-	await page.getByRole("heading", { name: "Implement retry policy", exact: true }).waitFor();
-	await page.getByText("Started from", { exact: false }).waitFor();
-	await page.getByText("started by Codex · attached through Codex", { exact: false }).waitFor();
-	await page.getByText("Execution details", { exact: true }).click();
-	await page.getByText(/worktree attached/).waitFor();
-	await page.getByRole("button", { name: "Release execution", exact: true }).click();
-	await page.getByText("Detached · continue from another checkout", { exact: false }).waitFor();
-	assert.equal(await page.getByRole("button", { name: "Release execution", exact: true }).count(), 0);
-	assert.match(await page.getByText("Started from", { exact: false }).textContent(), /[0-9a-f]{40}/);
-});
-test("workspaces disclose upstream updates and inspect advisory overlap without changing their starting revision", async () => {
-	await page.request.post(`${server.origin}/__fixture/upstream`);
-	await openRepo();
-	await page.getByRole("button", { name: /Codex.*Implement retry policy/ }).click();
-	await page.getByRole("heading", { name: "Implement retry policy", exact: true }).waitFor();
-	const start = await page.getByText("Started from", { exact: false }).textContent();
-	await page.getByText("Upstream updates available", { exact: false }).last().waitFor();
-	await page.getByRole("button", { name: "Inspect upstream changes", exact: true }).click();
-	await page.getByText("overlaps reported workspace work", { exact: false }).waitFor();
-	assert.equal(await page.getByText("Started from", { exact: false }).textContent(), start);
-});
-test("exact revision review and attestation update readiness", async () => {
-	await openRepo();
-	await page.getByRole("navigation", { name: "Repository navigation" }).getByRole("button", { name: "work", exact: true }).click();
-	await page.getByRole("button", { name: /#1.*Bounded retry policy/ }).click();
-	await page.getByLabel("Reason", { exact: true }).fill("Inspected exact commit");
-	await page.getByRole("button", { name: "Submit review" }).click();
-	await page.getByLabel("What you inspected").fill("Verified local test run against this commit");
-	await page.getByRole("button", { name: "Attest verification" }).click();
-	await page.getByText("Ready for human promotion").waitFor();
-	assert.equal(await page.getByRole("button", { name: "Promote source", exact: true }).isEnabled(), true);
-});
-test("published revision lineage links the exact commit and originating workspace", async () => {
-	await openRepo();
-	await page.getByRole("button", { name: /Bounded retry policy.*Published revision/ }).click();
-	await page.getByRole("button", { name: "Trace lineage" }).click();
-	await page.locator(".lineage").filter({ hasText: "Implement retry policy" }).waitFor();
-});
-test("Code lists source publications and keeps exact revision, diff and review links through reload and Back", async () => {
-	const data = await (await page.request.get(`${server.origin}/api/namespaces/fernloop/repositories/payments`)).json();
-	const source = data.artifacts.find((a) => a.kind === "source");
-	await openRepo();
-	await page.getByText("1 published revision", { exact: true }).waitFor();
-	await page.getByRole("navigation", { name: "Repository navigation" }).getByRole("button", { name: "code", exact: true }).click();
-	await page.getByRole("heading", { name: "Published revisions", exact: true }).waitFor();
-	assert.equal(await page.getByRole("button", { name: /Retry policy test report/ }).count(), 0);
-	await page.getByRole("button", { name: /Bounded retry policy.*Published revision/ }).click();
-	assert.ok(page.url().endsWith(`#/code/${source.id}`));
-	assert.equal(await page.getByLabel("Revision", { exact: true }).inputValue(), source.revision);
-	await page.getByText("Review base", { exact: true }).waitFor();
-	await page.getByText("Storage details", { exact: true }).click();
-	await page.getByText(source.contentHash, { exact: true }).waitFor();
-	await page.getByRole("button", { name: "Browse source", exact: true }).click();
-	await page.getByRole("navigation", { name: "Repository files" }).getByRole("button", { name: "src/retry.ts", exact: true }).click();
-	await page.locator(".source-browser pre").getByText("export const retries = 3;", { exact: false }).waitFor();
-	await page.getByRole("button", { name: "Change diff", exact: true }).click();
-	await page
-		.getByRole("navigation", { name: "Changed files" })
-		.getByRole("button", { name: /src\/retry.ts/ })
-		.click();
-	await page.locator(".patch").waitFor();
-	await page.reload();
-	assert.equal(await page.getByLabel("Revision", { exact: true }).inputValue(), source.revision);
-	await page.getByRole("button", { name: "View change #1 →", exact: true }).click();
-	await page.getByRole("heading", { name: "Bounded retry policy", exact: true, level: 1 }).waitFor();
-	await page.getByRole("button", { name: "View revision →", exact: true }).click();
-	await page.getByRole("heading", { name: "Code", exact: true }).waitFor();
-	await page.goBack();
-	await page.getByRole("heading", { name: "Bounded retry policy", exact: true, level: 1 }).waitFor();
-});
-test("saved inspection links resolve into Code or Work without adding a Back history entry", async () => {
-	await openRepo();
-	const root = `${server.origin}/?namespace=fernloop&repository=payments`;
-	await page.goto(`${root}#/artifacts/source`);
-	await page.getByRole("heading", { name: "Code", exact: true }).waitFor();
-	await page.getByRole("heading", { name: "Bounded retry policy", exact: true }).waitFor();
-	assert.ok(page.url().endsWith("#/code/source"));
-	await page.reload();
-	await page.getByRole("heading", { name: "Bounded retry policy", exact: true }).waitFor();
-	await page.goBack();
-	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
-	await page.goto(`${root}#/artifacts/test-report`);
-	await page.getByRole("heading", { name: "Retry policy test report", exact: true }).waitFor();
-	assert.ok(page.url().endsWith("#/work/test-report"));
-	await page.goto(`${root}#/artifacts`);
-	await page.getByRole("heading", { name: "Published revisions", exact: true }).waitFor();
-	assert.ok(page.url().endsWith("#/code"));
-});
-test("stored evidence is readable beside its change and discoverable from Work and its workspace", async () => {
-	await openRepo();
-	await page.getByRole("button", { name: /#1.*Bounded retry policy/ }).click();
-	await page.getByRole("button", { name: /Retry policy test report.*Evidence/ }).click();
-	assert.ok(page.url().endsWith("#/work/test-report"));
-	await page.getByRole("button", { name: "Read evidence", exact: true }).click();
-	await page.locator("pre").getByText("Reported tests: 12 passed", { exact: false }).waitFor();
-	await page.getByRole("button", { name: "Trace lineage", exact: true }).click();
-	await page.locator(".lineage").getByText("Implement retry policy", { exact: true }).waitFor();
-	await page.reload();
-	await page.getByRole("heading", { name: "Retry policy test report", exact: true }).waitFor();
-	await page.getByRole("button", { name: "View change #1 →", exact: true }).click();
-	assert.equal(await page.getByRole("button", { name: "Promote source", exact: true }).isDisabled(), true);
-	await page.getByRole("button", { name: "← All work", exact: true }).click();
-	await page.getByRole("heading", { name: "Revision evidence", exact: true }).waitFor();
-	await page.getByRole("button", { name: /Retry policy test report.*Evidence/ }).click();
-	await page.getByRole("button", { name: "Implement retry policy", exact: true }).click();
-	await page.getByRole("heading", { name: "Implement retry policy", exact: true }).waitFor();
-	await page.getByRole("button", { name: /Bounded retry policy.*Published revision/ }).waitFor();
-	await page.getByRole("button", { name: /Retry policy test report.*Evidence/ }).waitFor();
-});
-test("changes exclude stale and unrelated reports while preserving explicitly linked evidence and unproposed reports", async () => {
-	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
-		const data = await (await route.fetch()).json();
-		const report = data.artifacts.find((a) => a.kind === "evidence"),
-			proposal = data.proposals[0];
-		data.artifacts.push(
-			{ ...report, id: "stale", title: "Earlier revision report", revision: proposal.base },
-			{ ...report, id: "unrelated", title: "Unrelated workspace report", workspaceId: data.workspaces[0].id },
-			{ ...report, id: "linked", title: "Explicitly linked report", workspaceId: data.workspaces[0].id },
-		);
-		data.verifications.push({
-			id: "linked-check",
-			proposalId: proposal.id,
-			revision: proposal.revision,
-			artifactId: "linked",
-			kind: "tests",
-			outcome: "pass",
-			trust: "reported",
-			summary: "Linked reported check",
-		});
-		await route.fulfill({ json: data });
-	});
-	await openRepo();
-	await page.getByRole("button", { name: /#1.*Bounded retry policy/ }).click();
-	await page.getByRole("button", { name: /Explicitly linked report/ }).waitFor();
-	assert.equal(await page.getByRole("button", { name: /Earlier revision report|Unrelated workspace report/ }).count(), 0);
-	await page.getByRole("button", { name: /Explicitly linked report/ }).click();
-	await page.getByRole("button", { name: "View change #1 →", exact: true }).waitFor();
-	await page.getByRole("button", { name: "← All work", exact: true }).click();
-	await page.getByRole("button", { name: /Earlier revision report/ }).click();
-	assert.equal(await page.getByRole("button", { name: "View change #1 →", exact: true }).count(), 0);
-	await page.route("**/command", async (route) =>
-		route.request().postDataJSON().tool === "read_artifact" ? route.fulfill({ json: {} }) : route.continue(),
-	);
-	await page.getByRole("button", { name: "Read evidence", exact: true }).click();
-	await page.getByText("Evidence content is unavailable.", { exact: true }).waitFor();
-});
-test("late evidence responses cannot appear after navigating to a published revision", async () => {
-	await page.goto(`${server.origin}/?namespace=fernloop&repository=payments#/work/test-report`);
-	await page.getByRole("heading", { name: "Retry policy test report", exact: true }).waitFor();
-	let release, received;
-	const gate = new Promise((resolve) => {
-		release = resolve;
-	});
-	const ready = new Promise((resolve) => {
-		received = resolve;
-	});
-	await page.route("**/command", async (route) => {
-		if (route.request().postDataJSON().tool !== "read_artifact") return route.continue();
-		received();
-		await gate;
-		await route.fulfill({ json: { content: "STALE EVIDENCE RESPONSE" } });
-	});
-	await page.getByRole("button", { name: "Read evidence", exact: true }).click();
-	await ready;
-	await page.getByRole("button", { name: "View revision →", exact: true }).click();
-	await page.getByRole("heading", { name: "Code", exact: true }).waitFor();
-	const response = page.waitForResponse((r) => r.request().postData()?.includes("read_artifact"));
-	release();
-	await response;
-	await page.getByRole("button", { name: "Trace lineage", exact: true }).click();
-	await page.locator(".lineage").waitFor();
-	assert.equal(await page.getByText("STALE EVIDENCE RESPONSE", { exact: true }).count(), 0);
-});
-test("teams and invitation links are functional", async () => {
-	await page.goto(`${server.origin}/?namespace=fernloop`);
-	await page.getByRole("navigation", { name: "Namespace navigation" }).getByRole("button", { name: "teams", exact: true }).click();
-	await page.locator("summary").filter({ hasText: "Create team" }).click();
-	await page.getByLabel("Team name").fill("Platform");
-	await page.getByRole("checkbox", { name: "Alex Morgan" }).check();
-	await page.getByRole("button", { name: "Create team", exact: true }).click();
-	await page.locator("summary").filter({ hasText: "Platform" }).waitFor();
-	await page.getByRole("navigation", { name: "Namespace navigation" }).getByRole("button", { name: "members", exact: true }).click();
-	await page.getByLabel("Email", { exact: true }).fill("alex@example.com");
-	await page.getByRole("button", { name: "Create invitation link" }).click();
-	await page.getByRole("status").filter({ hasText: "/invite/fernloop" }).waitFor();
-});
 test("mobile view has no horizontal page overflow", async () => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	await openRepo();
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
 	await page.screenshot({ path: "dist/ui-checks/mobile.png", fullPage: true });
 });
-
-test("namespace home, account and creation remain usable on mobile", async () => {
-	await page.setViewportSize({ width: 390, height: 844 });
-	await page.goto(server.origin);
-	await page.getByRole("button", { name: "Fernloop", exact: true }).waitFor();
-	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
-	await page.screenshot({ path: "dist/ui-checks/namespaces-mobile.png", fullPage: true });
-	await page.getByRole("button", { name: "Your account", exact: true }).click();
-	await page.getByRole("region", { name: "Your account", exact: true }).waitFor();
-	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
-	await page.keyboard.press("Escape");
-	await page.getByRole("button", { name: "Alex Morgan", exact: true }).click();
-	await page.getByRole("button", { name: "New repository", exact: true }).click();
-	const dialog = page.getByRole("dialog", { name: "New repository" });
-	await dialog.getByLabel("Repository name", { exact: true }).fill("mobile-tools");
-	await page.screenshot({ path: "dist/ui-checks/create-mobile.png", fullPage: true });
-	await dialog.getByRole("button", { name: "Add repository", exact: true }).click();
-	await page.getByRole("heading", { name: "mobile-tools", exact: true }).waitFor();
-});
-
-test("repository clone uses normal Git and workspace fork cleanup is unavailable while active", async () => {
-	await openRepo();
-	await page.getByText("Clone", { exact: true }).click();
-	await page.getByText(`git clone ${server.origin}/mcp/git/fernloop/payments/canonical.git`, { exact: true }).waitFor();
-	await page.keyboard.press("Escape");
-	await page.getByRole("button", { name: /Codex.*Implement retry policy/ }).click();
-	await page.getByText("Execution details", { exact: true }).click();
-	await page.getByText("Workspace fork · ready", { exact: true }).waitFor();
-	assert.equal(await page.getByRole("button", { name: "Clean up retained fork" }).isDisabled(), true);
-});
-
-test("surface selection and keyboard focus preserve independent workspace identities", async () => {
-	await openRepo();
-	const surface = page.getByRole("button", { name: "src/retry.ts 2 workspaces" });
-	await surface.focus();
-	await page.keyboard.press("Enter");
-	assert.equal(await surface.getAttribute("aria-expanded"), "true");
-	assert.equal(await page.locator(".topology-lane.highlighted").count(), 2);
-	await page.locator(".surface-detail").getByRole("button", { name: "Implement retry policy" }).click();
-	await page.getByRole("heading", { name: "Implement retry policy", exact: true }).waitFor();
-	assert.equal(await page.locator(".workspace-list").count(), 0);
-	await page.reload();
-	await page.getByText("Started from", { exact: false }).waitFor();
-	await page.goBack();
-	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
-	const lane = page.getByRole("button", { name: /Codex.*Implement retry policy/ });
-	await lane.focus();
-	assert.equal(await page.locator(".surface-button.highlighted").count(), 1);
-});
-
-test("failed promotion preserves canonical source and reuses retry identity", async () => {
-	await openRepo();
-	const before = await page.locator(".canonical-track").innerText();
-	await page.getByRole("button", { name: /#1.*Bounded retry policy/ }).click();
-	await page.getByLabel("Reason", { exact: true }).fill("Exact revision inspected");
-	await page.getByRole("button", { name: "Submit review" }).click();
-	await page.getByText("Trusted passing tests evidence required", { exact: false }).waitFor();
-	assert.equal(await page.getByRole("button", { name: "Promote source", exact: true }).isDisabled(), true);
-	await page.getByLabel("What you inspected").fill("Checked the exact source");
-	await page.getByRole("button", { name: "Attest verification" }).click();
-	await page.getByText("Ready for human promotion").waitFor();
-	const keys = [];
-	await page.route("**/command", async (route) => {
-		const body = route.request().postDataJSON();
-		if (body.tool !== "promote_proposal") return route.continue();
-		keys.push(body.idempotencyKey);
-		await route.fulfill({ status: 503, json: { error: "Canonical update unavailable" } });
-	});
-	await page.getByRole("button", { name: "Promote source", exact: true }).click();
-	await page.getByRole("alert").filter({ hasText: "Canonical update unavailable" }).waitFor();
-	await page.getByRole("button", { name: "Promote source", exact: true }).click();
-	await page.getByRole("alert").filter({ hasText: "Canonical update unavailable" }).waitFor();
-	assert.equal(keys.length, 2);
-	assert.equal(keys[0], keys[1]);
-	await page.getByRole("navigation", { name: "Repository navigation" }).getByRole("button", { name: "overview", exact: true }).click();
-	assert.equal(await page.locator(".canonical-track").innerText(), before);
-	assert.equal(await page.locator(".promotion-link").count(), 0);
-});
-
-test("interrupted promotion can reconcile after reload with its persisted operation identity", async () => {
-	let command;
-	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
-		const response = await route.fetch(),
-			data = await response.json();
-		const proposal = data.proposals[0];
-		proposal.state = "promoting";
-		command = {
-			tool: "promote_proposal",
-			namespaceId: "fernloop",
-			repositoryId: "payments",
-			proposalId: proposal.id,
-			idempotencyKey: "durable-promotion-key",
-		};
-		data.readiness[proposal.id] = { ready: false, reasons: ["Promotion in progress"] };
-		data.promotionRecovery = { [proposal.id]: { ready: true, reasons: [], command } };
-		await route.fulfill({ response, json: data });
-	});
-	await openRepo();
-	await page.getByRole("navigation", { name: "Repository navigation" }).getByRole("button", { name: "work", exact: true }).click();
-	await page.getByRole("button", { name: /#1.*Bounded retry policy/ }).click();
-	await page.reload();
-	await page.getByRole("button", { name: "Reconcile promotion", exact: true }).waitFor();
-	let sent;
-	await page.route("**/command", async (route) => {
-		sent = route.request().postDataJSON();
-		await route.fulfill({ status: 200, json: { state: "complete" } });
-	});
-	await page.getByRole("button", { name: "Reconcile promotion", exact: true }).click();
-	await page.getByRole("status").filter({ hasText: "Saved." }).waitFor();
-	assert.deepEqual(sent, command);
-});
-
 test("a repository whose creation stopped before canonical setup offers a maintainer retry of the original operation", async () => {
 	let retried = false;
 	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
@@ -1170,68 +849,6 @@ test("viewers without maintain authority see why setup is missing but no retry c
 	await page.locator(".canonical-setup").getByText("A repository maintainer can retry setup.").waitFor();
 	assert.equal(await page.getByRole("button", { name: "Retry setup", exact: true }).count(), 0);
 });
-test("unknown canonical, disconnected and detached workspaces stay distinct from accepted source", async () => {
-	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
-		const response = await route.fetch(),
-			data = await response.json();
-		delete data.sourceHead;
-		data.workspaces[0].state = "disconnected";
-		const { execution: _, ...detached } = data.workspaces[0];
-		data.workspaces.push({ ...detached, id: "detached", state: "detached" });
-		await route.fulfill({ json: data });
-	});
-	await openRepo();
-	await page.locator(".canonical-track").getByText("Unavailable", { exact: true }).waitFor();
-	assert.equal(await page.locator(".topology-lane.disconnected").count(), 1);
-	assert.equal(await page.locator(".topology-lane.detached").count(), 1);
-	assert.equal(await page.locator(".topology-lane").count(), 3);
-	assert.equal(await page.locator(".observers").count(), 0);
-	assert.equal(await page.getByRole("button", { name: "Clone", exact: true }).isDisabled(), true);
-});
-
-test("namespace failures remain unavailable and retry restores actual topology", async () => {
-	let fail = true;
-	await page.route("**/api/namespaces/fernloop", async (route) =>
-		fail ? route.fulfill({ status: 503, json: { error: "Namespace temporarily unavailable" } }) : route.continue(),
-	);
-	await page.goto(server.origin);
-	await page.getByRole("alert").filter({ hasText: "Namespace temporarily unavailable" }).waitFor();
-	assert.equal(await page.locator(".motion-row").count(), 0);
-	fail = false;
-	await page.getByRole("button", { name: "Retry", exact: true }).click();
-	await page.locator(".motion-row").getByText("2 active workspaces", { exact: true }).waitFor();
-	assert.equal(await page.locator(".mini-topology .crossing").count(), 1);
-});
-
-test("late source responses cannot overwrite a newer history inspection", async () => {
-	await openRepo();
-	await page.getByRole("navigation", { name: "Repository navigation" }).getByRole("button", { name: "code", exact: true }).click();
-	let release;
-	const gate = new Promise((resolve) => {
-		release = resolve;
-	});
-	let received;
-	const ready = new Promise((resolve) => {
-		received = resolve;
-	});
-	await page.route("**/command", async (route) => {
-		if (route.request().postDataJSON().tool !== "get_source") return route.continue();
-		received();
-		await gate;
-		await route.fulfill({ json: { files: { "late.ts": "SHOULD NOT REPLACE HISTORY" } } });
-	});
-	await page.getByRole("button", { name: "Browse source", exact: true }).click();
-	await ready;
-	await page.getByRole("button", { name: "Commit history", exact: true }).click();
-	await page.locator(".commit-history").waitFor();
-	const response = page.waitForResponse((r) => r.request().postData()?.includes("get_source"));
-	release();
-	await response;
-	await page.getByRole("heading", { name: "Code", exact: true }).waitFor();
-	assert.equal(await page.locator(".source-browser").count(), 0);
-	assert.equal(await page.locator(".commit-history").count(), 1);
-});
-
 test("mobile dropdowns support keyboard navigation, Escape, outside clicks and reduced motion without trapping focus", async () => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.emulateMedia({ reducedMotion: "reduce" });
@@ -1264,43 +881,433 @@ test("mobile dropdowns support keyboard navigation, Escape, outside clicks and r
 	);
 	assert.equal(
 		await page
-			.locator(".topology-lane")
+			.locator(".tabs button")
 			.first()
 			.evaluate((e) => getComputedStyle(e).transitionDuration),
 		"0s",
 	);
 });
-
+test("repository pages lead with what needs attention and retired routes resolve to their new homes", async () => {
+	await openRepo();
+	assert.deepEqual(
+		(await repoNav().getByRole("button").allTextContents()).map((text) => text.replace(/\d+$/, "").trim()),
+		["Changes", "Workspaces", "History", "Settings"],
+	);
+	await page.getByRole("button", { name: "1 change needs your review", exact: true }).waitFor();
+	await page.getByRole("button", { name: "1 file changed in more than one workspace", exact: true }).click();
+	assert.ok(page.url().endsWith("#/workspaces"));
+	await page.screenshot({ path: "dist/ui-checks/repository.png", fullPage: true });
+	await page.goto(`${root()}#/overview`);
+	await page.locator(".change-row").filter({ hasText: "Bounded retry policy" }).waitFor();
+	await page.goto(page.url().replace(/#.*$/, "#deployments"));
+	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
+	assert.equal(await page.getByRole("heading", { name: "Deployments", exact: true }).count(), 0);
+	await page.goto(`${server.origin}/?namespace=fernloop#settings`);
+	await page.getByRole("heading", { name: "Daily operations", exact: true }).waitFor();
+	assert.equal(await page.getByLabel("Previews per workspace").count(), 0);
+});
+test("header search accepts typing directly and supports keyboard selection and Back navigation", async () => {
+	await openRepo();
+	const search = page.getByRole("combobox", { name: "Find repository", exact: true });
+	await search.click();
+	await search.fill("  FERNLOOP payment  ");
+	await page.getByRole("option", { name: "fernloop/payment-service", exact: true }).waitFor();
+	assert.equal(await page.getByRole("dialog").count(), 0);
+	assert.equal(await page.locator("main").evaluate((element) => element.inert), false);
+	await page.screenshot({ path: "dist/ui-checks/finder.png", fullPage: true });
+	await page.screenshot({ path: "dist/ui-checks/search-header.png", clip: { x: 0, y: 0, width: 1440, height: 250 } });
+	await page.keyboard.press("ArrowDown");
+	assert.equal(await search.evaluate((element) => element === document.activeElement), true);
+	assert.ok(await search.getAttribute("aria-activedescendant"));
+	await page.keyboard.press("Enter");
+	assert.equal(await page.getByRole("region", { name: "Repository search", exact: true }).count(), 0);
+	await repoNav()
+		.getByRole("button", { name: /^Workspaces/ })
+		.click();
+	assert.equal(
+		await repoNav()
+			.getByRole("button", { name: /^Workspaces/ })
+			.getAttribute("aria-current"),
+		"page",
+	);
+	await page.goBack();
+	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
+	assert.equal(
+		await repoNav()
+			.getByRole("button", { name: /^Changes/ })
+			.getAttribute("aria-current"),
+		"page",
+	);
+});
+test("workspace detail explains who works on it, its baseline and overlap, and the owner can release its checkout", async () => {
+	await openWorkspace("Implement retry policy");
+	const facts = page.locator(".facts");
+	await facts.getByText("Started from", { exact: true }).waitFor();
+	await facts.getByText(/is also changed in Inspect payment timeout/).waitFor();
+	await page.locator(".change-meta").getByText("Codex", { exact: true }).waitFor();
+	await page.getByText(/Attached to a worktree through Codex/).waitFor();
+	const start = await facts.locator("dd").first().textContent();
+	await page.getByRole("button", { name: "Release checkout", exact: true }).click();
+	await page.getByText(/Not attached to a checkout\. Continue it anywhere with cruce resume --workspace/).waitFor();
+	assert.equal(await page.getByRole("button", { name: "Release checkout", exact: true }).count(), 0);
+	await page.locator(".change-header").getByText("Detached", { exact: true }).waitFor();
+	assert.equal(await facts.locator("dd").first().textContent(), start);
+});
+test("workspaces behind canonical say so and show canonical changes without moving their baseline", async () => {
+	await page.request.post(`${server.origin}/__fixture/upstream`);
+	await openRepo();
+	await page.getByRole("button", { name: "1 workspace behind canonical", exact: true }).click();
+	const row = workspaceRow("Inspect payment timeout");
+	await row.getByText("Behind canonical", { exact: true }).waitFor();
+	await row.click();
+	const start = await page.locator(".facts dd").first().textContent();
+	await page.getByText(/Canonical moved to/).waitFor();
+	await page.getByRole("button", { name: "See what changed on canonical", exact: true }).click();
+	await page.getByText("also changed in this workspace", { exact: false }).waitFor();
+	assert.equal(await page.locator(".facts dd").first().textContent(), start);
+});
+test("review is a checklist: confirm checks, approve the exact revision, then promote to main", async () => {
+	await openChange();
+	const promote = page.getByRole("button", { name: "Promote to main", exact: true });
+	assert.equal(await promote.isDisabled(), true);
+	await page.getByText("Finish the steps above to promote.", { exact: true }).waitFor();
+	await page.locator(".patch").waitFor();
+	await page.screenshot({ path: "dist/ui-checks/review.png", fullPage: true });
+	await page.getByRole("button", { name: "Confirm tests pass", exact: true }).click();
+	await page.getByText("Tests confirmed", { exact: false }).waitFor();
+	await page.getByRole("button", { name: "Approve", exact: true }).click();
+	await page.locator(".change-header").getByText("Ready to promote", { exact: true }).waitFor();
+	assert.equal(await promote.isEnabled(), true);
+	await promote.click();
+	await page.locator(".change-header").getByText("Promoted", { exact: true }).waitFor();
+	await page.locator(".canonical-line").getByText(/main/).waitFor();
+	await page.getByRole("button", { name: "1 workspace behind canonical", exact: true }).waitFor();
+});
+test("concerns and failures ask for a reason and block promotion until resolved", async () => {
+	await openChange();
+	await page.getByRole("button", { name: "Raise concern", exact: true }).click();
+	await page.getByLabel("Raise concern note", { exact: true }).fill("Retry bound needs a jitter test");
+	await page.locator(".note-action").getByRole("button", { name: "Raise concern", exact: true }).click();
+	await page.locator(".change-header").getByText("Has concerns", { exact: true }).waitFor();
+	await page.getByText("Retry bound needs a jitter test", { exact: false }).first().waitFor();
+	await page.getByRole("button", { name: "Resolve concern", exact: true }).click();
+	await page.getByLabel("Resolve concern note", { exact: true }).fill("Covered by the existing bound test");
+	await page.locator(".note-action").getByRole("button", { name: "Resolve concern", exact: true }).click();
+	await page.locator(".change-header").getByText("Needs review", { exact: true }).waitFor();
+});
+test("failed promotion preserves canonical source and reuses retry identity", async () => {
+	await openChange();
+	const before = await page.locator(".canonical-line").innerText();
+	await page.getByRole("button", { name: "Confirm tests pass", exact: true }).click();
+	await page.getByText("Tests confirmed", { exact: false }).waitFor();
+	await page.getByRole("button", { name: "Approve", exact: true }).click();
+	await page.locator(".change-header").getByText("Ready to promote", { exact: true }).waitFor();
+	const keys = [];
+	await page.route("**/command", async (route) => {
+		const body = route.request().postDataJSON();
+		if (body.tool !== "promote_proposal") return route.continue();
+		keys.push(body.idempotencyKey);
+		await route.fulfill({ status: 503, json: { error: "Canonical update unavailable" } });
+	});
+	const promote = page.getByRole("button", { name: "Promote to main", exact: true });
+	await promote.click();
+	await page.getByRole("alert").filter({ hasText: "Canonical update unavailable" }).first().waitFor();
+	await promote.click();
+	await page.getByRole("alert").filter({ hasText: "Canonical update unavailable" }).first().waitFor();
+	assert.equal(keys.length, 2);
+	assert.equal(keys[0], keys[1]);
+	assert.equal(await page.locator(".canonical-line").innerText(), before);
+	await page.locator(".change-header").getByText("Ready to promote", { exact: true }).waitFor();
+});
+test("interrupted promotion can reconcile after reload with its persisted operation identity", async () => {
+	let command;
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		const response = await route.fetch(),
+			data = await response.json();
+		const proposal = data.proposals[0];
+		proposal.state = "promoting";
+		command = {
+			tool: "promote_proposal",
+			namespaceId: "fernloop",
+			repositoryId: "payments",
+			proposalId: proposal.id,
+			idempotencyKey: "durable-promotion-key",
+		};
+		data.promotionRecovery = { [proposal.id]: { ready: true, reasons: [], command } };
+		await route.fulfill({ response, json: data });
+	});
+	await openChange();
+	await page.reload();
+	await page.getByRole("button", { name: "Reconcile promotion", exact: true }).waitFor();
+	let sent;
+	await page.route("**/command", async (route) => {
+		if (route.request().postDataJSON().tool !== "promote_proposal") return route.continue();
+		sent = route.request().postDataJSON();
+		await route.fulfill({ status: 200, json: { state: "complete" } });
+	});
+	await page.getByRole("button", { name: "Reconcile promotion", exact: true }).click();
+	await page.getByRole("status").filter({ hasText: "Saved." }).waitFor();
+	assert.deepEqual(sent, command);
+});
+test("History shows canonical, published revisions and lineage, and browses exact source", async () => {
+	const data = await (await page.request.get(`${server.origin}/api/namespaces/fernloop/repositories/payments`)).json();
+	const source = data.artifacts.find((a) => a.kind === "source");
+	await openRepo();
+	await repoNav().getByRole("button", { name: "History", exact: true }).click();
+	await page.getByRole("heading", { name: "Canonical main", exact: true }).waitFor();
+	await page.locator(".retained-row").filter({ hasText: "Bounded retry policy" }).click();
+	assert.ok(page.url().endsWith(`#/history/${source.id}`));
+	await page.getByText("Review base", { exact: true }).waitFor();
+	await page.getByText("Storage details", { exact: true }).click();
+	await page.getByText(source.contentHash, { exact: true }).waitFor();
+	await page.getByRole("button", { name: "Trace lineage" }).click();
+	await page.locator(".lineage").filter({ hasText: "Implement retry policy" }).waitFor();
+	await page.getByRole("button", { name: "Browse files", exact: true }).click();
+	await page.getByRole("navigation", { name: "Repository files" }).getByRole("button", { name: "src/retry.ts", exact: true }).click();
+	await page.locator(".source-browser pre").getByText("export const retries = 3;", { exact: false }).waitFor();
+	await page.reload();
+	await page.getByRole("button", { name: "View change #1 →", exact: true }).click();
+	await page.getByRole("heading", { name: /Bounded retry policy/, level: 1 }).waitFor();
+	await page.goBack();
+	await page.getByText("Review base", { exact: true }).waitFor();
+});
+test("saved links from the retired Code, Work and Artifacts views open the same records", async () => {
+	const data = await (await page.request.get(`${server.origin}/api/namespaces/fernloop/repositories/payments`)).json();
+	await openRepo();
+	await page.goto(`${root()}#/artifacts/source`);
+	await page.getByRole("heading", { name: "Bounded retry policy", exact: true }).waitFor();
+	await page.getByText("Review base", { exact: true }).waitFor();
+	await page.goto(`${root()}#/code/source`);
+	await page.getByText("Review base", { exact: true }).waitFor();
+	await page.goto(`${root()}#/work/test-report`);
+	await page.getByRole("heading", { name: "Retry policy test report", exact: true }).waitFor();
+	assert.ok(page.url().endsWith("#/history/test-report"));
+	await page.goto(`${root()}#/work/${data.proposals[0].id}`);
+	await page.getByRole("heading", { name: /Bounded retry policy/, level: 1 }).waitFor();
+	assert.ok(page.url().endsWith(`#/changes/${data.proposals[0].id}`));
+	await page.goto(`${root()}#/work/${data.workspaces[1].id}`);
+	await page.getByRole("heading", { name: data.workspaces[1].title, exact: true }).waitFor();
+	assert.ok(page.url().endsWith(`#/workspaces/${data.workspaces[1].id}`));
+});
+test("stored evidence is readable beside its change and links back to it", async () => {
+	await openChange();
+	await page.locator(".timeline").getByRole("button", { name: "Retry policy test report", exact: true }).click();
+	assert.ok(page.url().endsWith("#/history/test-report"));
+	await page.getByRole("button", { name: "Read evidence", exact: true }).click();
+	await page.locator("pre").getByText("Reported tests: 12 passed", { exact: false }).waitFor();
+	await page.getByRole("button", { name: "Trace lineage", exact: true }).click();
+	await page.locator(".lineage").getByText("Implement retry policy", { exact: true }).waitFor();
+	await page.reload();
+	await page.getByRole("heading", { name: "Retry policy test report", exact: true }).waitFor();
+	await page.getByRole("button", { name: "View change #1 →", exact: true }).click();
+	assert.equal(await page.getByRole("button", { name: "Promote to main", exact: true }).isDisabled(), true);
+});
+test("changes exclude stale and unrelated reports while keeping explicitly linked evidence", async () => {
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		const data = await (await route.fetch()).json();
+		const report = data.artifacts.find((a) => a.kind === "evidence"),
+			proposal = data.proposals[0];
+		data.artifacts.push(
+			{ ...report, id: "stale", title: "Earlier revision report", revision: proposal.base },
+			{ ...report, id: "unrelated", title: "Unrelated workspace report", workspaceId: data.workspaces[0].id },
+			{ ...report, id: "linked", title: "Explicitly linked report", workspaceId: data.workspaces[0].id },
+		);
+		data.verifications.push({
+			id: "linked-check",
+			proposalId: proposal.id,
+			revision: proposal.revision,
+			artifactId: "linked",
+			kind: "tests",
+			outcome: "pass",
+			trust: "reported",
+			actor: data.workspaces[1].createdBy,
+			summary: "Linked reported check",
+		});
+		await route.fulfill({ json: data });
+	});
+	await openChange();
+	const timeline = page.locator(".timeline");
+	await timeline.getByRole("button", { name: "Explicitly linked report", exact: true }).waitFor();
+	assert.equal(await timeline.getByRole("button", { name: /Earlier revision report|Unrelated workspace report/ }).count(), 0);
+	await page.getByText(/reported a pass: “Linked reported check”/).waitFor();
+	await page.goto(`${root()}#/history/stale`);
+	await page.getByRole("heading", { name: "Earlier revision report", exact: true }).waitFor();
+	assert.equal(await page.getByRole("button", { name: "View change #1 →", exact: true }).count(), 0);
+	await page.route("**/command", async (route) =>
+		route.request().postDataJSON().tool === "read_artifact" ? route.fulfill({ json: {} }) : route.continue(),
+	);
+	await page.getByRole("button", { name: "Read evidence", exact: true }).click();
+	await page.getByText("Evidence content is unavailable.", { exact: true }).waitFor();
+});
+test("late evidence responses cannot appear after navigating to a published revision", async () => {
+	await page.goto(`${root()}#/history/test-report`);
+	await page.getByRole("heading", { name: "Retry policy test report", exact: true }).waitFor();
+	let release, received;
+	const gate = new Promise((resolve) => {
+		release = resolve;
+	});
+	const ready = new Promise((resolve) => {
+		received = resolve;
+	});
+	await page.route("**/command", async (route) => {
+		if (route.request().postDataJSON().tool !== "read_artifact") return route.continue();
+		received();
+		await gate;
+		await route.fulfill({ json: { content: "STALE EVIDENCE RESPONSE" } });
+	});
+	await page.getByRole("button", { name: "Read evidence", exact: true }).click();
+	await ready;
+	await page.getByRole("button", { name: "View revision →", exact: true }).click();
+	await page.getByRole("heading", { name: "Bounded retry policy", exact: true }).waitFor();
+	const response = page.waitForResponse((r) => r.request().postData()?.includes("read_artifact"));
+	release();
+	await response;
+	await page.getByRole("button", { name: "Trace lineage", exact: true }).click();
+	await page.locator(".lineage").waitFor();
+	assert.equal(await page.getByText("STALE EVIDENCE RESPONSE", { exact: true }).count(), 0);
+});
+test("late source responses cannot overwrite a newer history inspection", async () => {
+	await page.goto(`${root()}#/history/canonical`);
+	await page.getByRole("heading", { name: "Browse source", exact: true }).waitFor();
+	let release;
+	const gate = new Promise((resolve) => {
+		release = resolve;
+	});
+	let received;
+	const ready = new Promise((resolve) => {
+		received = resolve;
+	});
+	await page.route("**/command", async (route) => {
+		if (route.request().postDataJSON().tool !== "get_source") return route.continue();
+		received();
+		await gate;
+		await route.fulfill({ json: { files: { "late.ts": "SHOULD NOT REPLACE HISTORY" } } });
+	});
+	await page.getByRole("button", { name: "Browse files", exact: true }).click();
+	await ready;
+	await page.getByRole("button", { name: "Commit history", exact: true }).click();
+	await page.locator(".commit-history").waitFor();
+	const response = page.waitForResponse((r) => r.request().postData()?.includes("get_source"));
+	release();
+	await response;
+	assert.equal(await page.locator(".source-browser").count(), 0);
+	assert.equal(await page.locator(".commit-history").count(), 1);
+});
+test("teams and invitation links are functional", async () => {
+	await page.goto(`${server.origin}/?namespace=fernloop`);
+	await namespaceNav().getByRole("button", { name: "Teams", exact: true }).click();
+	await page.locator("summary").filter({ hasText: "Create team" }).click();
+	await page.getByLabel("Team name").fill("Platform");
+	await page.getByRole("checkbox", { name: "Alex Morgan" }).check();
+	await page.getByRole("button", { name: "Create team", exact: true }).click();
+	await page.locator("summary").filter({ hasText: "Platform" }).waitFor();
+	await namespaceNav().getByRole("button", { name: "Members", exact: true }).click();
+	await page.getByLabel("Email", { exact: true }).fill("alex@example.com");
+	await page.getByRole("button", { name: "Create invitation link" }).click();
+	await page.getByRole("status").filter({ hasText: "/invite/fernloop" }).waitFor();
+});
+test("namespace settings show account status, a connection check and today's operation budget", async () => {
+	await page.goto(`${server.origin}/?namespace=fernloop#/settings`);
+	await page.getByText("Fixture account", { exact: false }).waitFor();
+	await page.getByRole("button", { name: "Check connection", exact: true }).click();
+	await page.getByRole("status").filter({ hasText: "Working." }).waitFor();
+	await page.getByText(/of 100/).waitFor();
+	await page.getByText("Create workspace forks", { exact: false }).waitFor();
+	assert.equal(await page.getByLabel("API token", { exact: false }).count(), 0);
+	await page.getByRole("button", { name: "Replace token", exact: true }).click();
+	await page.getByLabel("API token", { exact: false }).waitFor();
+	assert.equal(await page.getByLabel("API token", { exact: false }).getAttribute("autocomplete"), "new-password");
+});
+test("namespace home, account and creation remain usable on mobile", async () => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto(server.origin);
+	await page.getByRole("button", { name: "Fernloop", exact: true }).waitFor();
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+	await page.screenshot({ path: "dist/ui-checks/namespaces-mobile.png", fullPage: true });
+	await page.getByRole("button", { name: "Your account", exact: true }).click();
+	await page.getByRole("region", { name: "Your account", exact: true }).waitFor();
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+	await page.keyboard.press("Escape");
+	await page.getByRole("button", { name: "Fernloop", exact: true }).click();
+	await page.getByRole("button", { name: "New repository", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "New repository" });
+	await dialog.getByLabel("Repository name", { exact: true }).fill("mobile-tools");
+	await page.screenshot({ path: "dist/ui-checks/create-mobile.png", fullPage: true });
+	await dialog.getByRole("button", { name: "Add repository", exact: true }).click();
+	await page.getByRole("heading", { name: "mobile-tools", exact: true }).waitFor();
+});
+test("repository clone uses normal Git and fork deletion waits until the workspace ends", async () => {
+	await openRepo();
+	await page.getByRole("button", { name: "Clone", exact: true }).click();
+	await page.getByText(`git clone ${server.origin}/mcp/git/fernloop/payments/canonical.git`, { exact: true }).waitFor();
+	await page.keyboard.press("Escape");
+	await repoNav()
+		.getByRole("button", { name: /^Workspaces/ })
+		.click();
+	await workspaceRow("Implement retry policy").click();
+	await page.getByText("Workspace fork is available.", { exact: false }).waitFor();
+	assert.equal(await page.getByRole("button", { name: "Delete fork" }).isDisabled(), true);
+	await page.getByText("End the workspace before cleaning up its fork.", { exact: false }).waitFor();
+});
+test("unknown canonical, quiet and detached workspaces stay distinct from accepted source", async () => {
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		const response = await route.fetch(),
+			data = await response.json();
+		delete data.sourceHead;
+		data.workspaces[0].state = "disconnected";
+		const { execution: _, ...detached } = data.workspaces[0];
+		data.workspaces.push({ ...detached, id: "detached", title: "Paused elsewhere", state: "detached" });
+		await route.fulfill({ json: data });
+	});
+	await openRepo();
+	await page
+		.locator(".canonical-line")
+		.getByText(/Canonical revision unavailable/)
+		.waitFor();
+	await page.getByRole("button", { name: "1 workspace not reporting", exact: true }).click();
+	await workspaceRow("Paused elsewhere").getByText("Detached", { exact: true }).waitFor();
+	await page.locator(".workspace-row").getByText("Not reporting", { exact: true }).waitFor();
+	assert.equal(await page.locator(".workspace-row").count(), 3);
+	assert.equal(await page.getByRole("button", { name: "Clone", exact: true }).isDisabled(), true);
+});
+test("namespace failures remain unavailable on Home and retry restores attention counts", async () => {
+	let fail = true;
+	await page.route("**/api/namespaces/fernloop", async (route) =>
+		fail ? route.fulfill({ status: 503, json: { error: "Namespace temporarily unavailable" } }) : route.continue(),
+	);
+	await page.goto(server.origin);
+	await page.getByRole("alert").filter({ hasText: "Namespace temporarily unavailable" }).waitFor();
+	assert.equal(await page.locator(".repo-row").count(), 0);
+	fail = false;
+	await page.getByRole("button", { name: "Retry", exact: true }).click();
+	await page.locator(".repo-row").getByText("1 to review", { exact: true }).waitFor();
+});
 test("screen families remain readable across desktop, tablet, mobile and 200 percent zoom", async () => {
 	const data = await (await page.request.get(`${server.origin}/api/namespaces/fernloop/repositories/payments`)).json();
-	const root = `${server.origin}/?namespace=fernloop&repository=payments`;
 	const routes = [
-		["home", server.origin, "Agent work. Shared direction."],
-		["overview", root, "payment-service"],
-		["work", `${root}#/work`, "Work"],
-		["review", `${root}#/work/${data.proposals[0].id}`, "Bounded retry policy"],
-		["workspace", `${root}#/work/${data.workspaces[0].id}`, data.workspaces[0].title],
-		["revision", `${root}#/code/${data.artifacts[0].id}`, "Bounded retry policy"],
-		["evidence", `${root}#/work/test-report`, "Retry policy test report"],
-		["code", `${root}#/code`, "Code"],
-		["repository-settings", `${root}#/settings`, "Repository settings"],
-		["members", `${server.origin}/?namespace=fernloop#/members`, "Members"],
-		["teams", `${server.origin}/?namespace=fernloop#/teams`, "Teams"],
-		["namespace-settings", `${server.origin}/?namespace=fernloop#/settings`, "Settings"],
-		["account", `${server.origin}/?page=account`, "Agent work. Shared direction."],
+		["home", server.origin, "Your repositories"],
+		["changes", root(), "payment-service"],
+		["review", `${root()}#/changes/${data.proposals[0].id}`, /Bounded retry policy/],
+		["workspaces", `${root()}#/workspaces`, "payment-service"],
+		["workspace", `${root()}#/workspaces/${data.workspaces[0].id}`, data.workspaces[0].title],
+		["history", `${root()}#/history`, "Canonical main"],
+		["revision", `${root()}#/history/${data.artifacts[0].id}`, "Bounded retry policy"],
+		["evidence", `${root()}#/history/test-report`, "Retry policy test report"],
+		["repository-settings", `${root()}#/settings`, "Review policy"],
+		["members", `${server.origin}/?namespace=fernloop#/members`, "Fernloop"],
+		["teams", `${server.origin}/?namespace=fernloop#/teams`, "Fernloop"],
+		["namespace-settings", `${server.origin}/?namespace=fernloop#/settings`, "Daily operations"],
+		["account", `${server.origin}/?page=account`, "Your repositories"],
 	];
 	for (const width of [1440, 1024, 390]) {
 		await page.setViewportSize({ width, height: 1000 });
 		for (const [name, url, title] of routes) {
 			await page.goto(url);
-			await page.getByRole("heading", { name: title, exact: true }).waitFor();
-			if (name === "account") {
-				await page.getByRole("region", { name: "Your account", exact: true }).waitFor();
-			}
-			if (name === "code") {
-				await page.getByRole("button", { name: "Browse source", exact: true }).click();
-				await page.locator(".source-browser").waitFor();
-			}
+			await page
+				.getByRole("heading", { name: title, exact: typeof title === "string" })
+				.first()
+				.waitFor();
+			if (name === "account") await page.getByRole("region", { name: "Your account", exact: true }).waitFor();
 			if (name === "revision") {
 				await page.getByRole("button", { name: "Trace lineage", exact: true }).click();
 				await page.locator(".lineage").waitFor();
@@ -1315,14 +1322,13 @@ test("screen families remain readable across desktop, tablet, mobile and 200 per
 		}
 	}
 	await page.setViewportSize({ width: 1440, height: 1000 });
-	await page.goto(root);
+	await page.goto(root());
 	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
 	await page.evaluate(() => {
 		document.documentElement.style.zoom = "2";
 	});
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
 	assert.equal(await page.getByRole("button", { name: "Switch namespace" }).isVisible(), true);
-	assert.ok((await page.locator(".topology-panel").boundingBox()).width >= 500);
 	await page.screenshot({ path: "dist/ui-checks/overview-zoom.png", fullPage: true });
 	await page.evaluate(() => {
 		document.documentElement.style.zoom = "";
@@ -1339,8 +1345,7 @@ test("screen families remain readable across desktop, tablet, mobile and 200 per
 	await page.locator("img").evaluateAll((imgs) => Promise.all(imgs.map((img) => img.decode())));
 	await page.screenshot({ path: "dist/ui-checks/brand-sizes.png", fullPage: true });
 });
-
-test("many writers, long paths and read-only authority keep a usable bounded overview", async () => {
+test("many workspaces, long paths and read-only authority stay usable on a phone", async () => {
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
 		const data = await (await route.fetch()).json();
@@ -1368,13 +1373,18 @@ test("many writers, long paths and read-only authority keep a usable bounded ove
 		await route.fulfill({ json: data });
 	});
 	await openRepo();
-	assert.equal(await page.locator(".topology-lane").count(), 6);
-	await page.getByRole("button", { name: "View all work · 2 more writers" }).waitFor();
+	await repoNav()
+		.getByRole("button", { name: /^Workspaces/ })
+		.click();
+	assert.equal(await page.locator(".workspaces-screen > .rows > .workspace-row").count(), 8);
+	await page.getByText("1 ended workspace", { exact: true }).waitFor();
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
 	await page.screenshot({ path: "dist/ui-checks/many-writers-mobile.png", fullPage: true });
-	await page.getByRole("button", { name: /#1.*Bounded retry policy/ }).click();
-	assert.equal(await page.getByRole("button", { name: "Submit review" }).count(), 0);
-	assert.equal(await page.getByRole("button", { name: "Promote source" }).count(), 0);
-	await page.getByRole("button", { name: "← All work" }).click();
-	assert.equal(await page.locator(".workspace-list > button").count(), 9);
+	await repoNav()
+		.getByRole("button", { name: /^Changes/ })
+		.click();
+	await page.locator(".change-row").filter({ hasText: "Bounded retry policy" }).click();
+	assert.equal(await page.getByRole("button", { name: "Approve", exact: true }).count(), 0);
+	assert.equal(await page.getByRole("button", { name: "Promote to main", exact: true }).count(), 0);
+	await page.getByText("A repository maintainer confirms checks and promotes.", { exact: true }).waitFor();
 });

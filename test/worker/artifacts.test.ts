@@ -53,7 +53,11 @@ describe("resource boundary", () => {
 				status: 403,
 			})) as unknown as typeof fetch;
 		const boundary = new ResourceBoundary(memory(), { CRUCE_SECRET: "s" }, { namespace: "cruce" }, send);
-		await expect(boundary.connect({ accountId: ACCOUNT, token: "x".repeat(40) }, "owner")).rejects.toThrow("Authentication error");
+		const failure = await boundary.connect({ accountId: ACCOUNT, token: "x".repeat(40) }, "owner").catch((e: Error) => e);
+		expect(failure).toBeInstanceOf(Error);
+		expect((failure as Error).message).toMatch(/rejected the namespace's API token/);
+		// Public errors never echo provider paths, account IDs or raw provider text.
+		expect((failure as Error).message).not.toMatch(new RegExp(`${ACCOUNT}|/accounts/|Authentication error`));
 	});
 	it("uses 60-second repository tokens through the REST API and revokes them", async () => {
 		const calls: string[] = [];

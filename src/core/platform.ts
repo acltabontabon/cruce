@@ -114,6 +114,11 @@ export class RepositoryController {
 		if (!["completed", "cancelled"].includes(s.state)) reasons.push("End the workspace before cleaning up its fork");
 		return { ready: reasons.length === 0, reasons };
 	}
+	private recoveryReadiness(promotion: Promotion) {
+		const { ready, reasons } = this.readiness(this.proposal(promotion.proposalId), promotion);
+		return { ready, reasons };
+	}
+	/** Promotion readiness for an exact revision, with the structured checks the console renders as a review checklist. */
 	readiness(p: Proposal, promotion?: Promotion) {
 		const reasons: string[] = [];
 		const resuming =
@@ -135,17 +140,34 @@ export class RepositoryController {
 			reasons.push("Human approval required for this revision");
 		if ([...latest.values()].some((r) => r.outcome !== "approve" && !r.resolution))
 			reasons.push("Review concern requires a reasoned human resolution");
-		for (const kind of this.state.repository.policy.requiredEvidence) {
+		const evidenceChecks = this.state.repository.policy.requiredEvidence.map((kind) => {
 			const evidence = new Map<string, (typeof this.state.verifications)[number]>();
 			for (const v of this.state.verifications.filter((v) => v.proposalId === p.id && v.revision === p.revision && v.kind === kind))
 				evidence.set(v.actor.id, v);
-			if (
-				![...evidence.values()].some((v) => v.outcome === "pass" && v.trust !== "reported") ||
-				[...evidence.values()].some((v) => v.outcome === "fail")
-			)
-				reasons.push(`Trusted passing ${kind} evidence required`);
-		}
-		return { ready: !reasons.length, reasons };
+			const current = [...evidence.values()];
+			const check = {
+				kind,
+				trusted: current.some((v) => v.outcome === "pass" && v.trust !== "reported"),
+				reported: current.some((v) => v.outcome === "pass" && v.trust === "reported"),
+				failed: current.some((v) => v.outcome === "fail"),
+			};
+			if (!check.trusted || check.failed) reasons.push(`Trusted passing ${kind} evidence required`);
+			return check;
+		});
+		const reviews = [...latest.values()];
+		return {
+			ready: !reasons.length,
+			reasons,
+			checks: {
+				open: p.state === "open" || !!resuming,
+				current: !head || p.base === head,
+				canonical: head,
+				approved: reviews.some((r) => r.actor.kind === "human" && r.outcome === "approve"),
+				concerns: reviews.filter((r) => r.outcome !== "approve" && !r.resolution).length,
+				evidence: evidenceChecks,
+				blockedByPromotion: this.state.promotions.some((other) => other !== promotion && ["prepared", "uncertain"].includes(other.state)),
+			},
+		};
 	}
 	snapshot(a: Authority): RepositorySnapshot {
 		const { receipts: _, ...state } = structuredClone(this.state);
@@ -179,7 +201,7 @@ export class RepositoryController {
 						p.proposalId,
 						{
 							command: p.operation!.command,
-							...(p.state === "complete" ? { ready: true, reasons: [] } : this.readiness(this.proposal(p.proposalId), p)),
+							...(p.state === "complete" ? { ready: true, reasons: [] } : this.recoveryReadiness(p)),
 						},
 					]),
 			),
@@ -306,7 +328,10 @@ export class RepositoryController {
 				s.lastActivity = this.now;
 				s.state = "active";
 				if (before !== stable(changes))
-					this.event(a.actor, "changes_reported", `${a.actor.name} changed ${changes.length} files`, [s.id, s.headRevision]);
+					this.event(a.actor, "changes_reported", `${a.actor.name} changed ${changes.length} ${changes.length === 1 ? "file" : "files"}`, [
+						s.id,
+						s.headRevision,
+					]);
 				return s;
 			}
 			case "end_workspace": {

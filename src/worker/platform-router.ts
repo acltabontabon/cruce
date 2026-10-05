@@ -209,6 +209,7 @@ export async function platformRoute(
 		await namespace.invite(grant, { id: crypto.randomUUID(), ...body, tokenHash: await hash(token), expiresAt: Date.now() + 7 * 86400000 });
 		return json({ url: `${url.origin}/invite/${namespaceId}#${token}` });
 	}
+	if (parts[3] === "account" && parts[4] === "verify" && request.method === "POST") return json(await namespace.verifyAccount(grant));
 	if (parts[3] === "account" && request.method === "POST") {
 		const body = z
 			.union([

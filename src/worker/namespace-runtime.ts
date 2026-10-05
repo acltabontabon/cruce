@@ -65,6 +65,7 @@ export class NamespaceRuntime extends DurableObject<{ CRUCE_SECRET?: string }> {
 			policy: c.state.policy,
 			account: new ResourceBoundary(this.store, this.env, { namespace: c.state.namespace.id }).account(),
 			reservations: maintain ? c.state.reservations : [],
+			budget: c.budget(),
 			permissions: { maintain, owner: maintain && a.role === "owner" },
 		};
 	}
@@ -119,6 +120,12 @@ export class NamespaceRuntime extends DurableObject<{ CRUCE_SECRET?: string }> {
 			boundary.disconnect();
 			return null;
 		});
+	}
+	async verifyAccount(grant: ConnectionGrant) {
+		const c = this.controller(),
+			a = c.authority(grant.actor);
+		if (a.actor.kind !== "human" || !["owner", "maintainer"].includes(a.role)) throw new DomainError(403, "Namespace maintainer required");
+		return new ResourceBoundary(this.store, this.env, { namespace: c.state.namespace.id }).verify();
 	}
 	reserve(grant: ConnectionGrant, repositoryId: string, id: string, fingerprint: string, action: ResourceAction, workspaceId?: string) {
 		const c = this.controller(),

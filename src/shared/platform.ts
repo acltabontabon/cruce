@@ -256,12 +256,27 @@ export interface RepositoryState {
 	sourceHead?: string;
 	canonical?: { id: string; name: string; remote: string };
 }
+/** Controller-derived promotion readiness for one exact revision. */
+export interface Readiness {
+	ready: boolean;
+	reasons: string[];
+	checks: {
+		open: boolean;
+		/** The proposal's base is the current canonical revision. */
+		current: boolean;
+		canonical?: string;
+		approved: boolean;
+		concerns: number;
+		evidence: { kind: string; trusted: boolean; reported: boolean; failed: boolean }[];
+		blockedByPromotion: boolean;
+	};
+}
 export interface RepositorySnapshot extends Omit<RepositoryState, "receipts"> {
 	overlaps: Overlap[];
 	workspaceUpdates: Record<string, WorkspaceUpdates>;
 	permissions: { write: boolean; maintain: boolean; human: boolean };
 	sourceAvailable: boolean;
-	readiness: Record<string, { ready: boolean; reasons: string[] }>;
+	readiness: Record<string, Readiness>;
 	promotionRecovery: Record<string, { command: Command; ready: boolean; reasons: string[] }>;
 	forkCleanup: Record<string, { ready: boolean; reasons: string[] }>;
 	executionRelease: Record<string, { ready: boolean; reasons: string[] }>;

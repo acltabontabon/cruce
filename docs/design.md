@@ -2,7 +2,7 @@
 
 [Contributor guide](../CONTRIBUTING.md) · [Architecture](architecture.md) · [Local walkthrough](local-demo.md)
 
-Cruce's interface makes concurrent Git work legible: what is happening, who or what is advancing it, where each workspace started, what overlaps, what is stale, what can be reviewed and what reached canonical. Repository work is the center of the console; the namespace home is a compact way into it. “Agent work. Shared direction.” remains the brand line. Product language follows the [domain vocabulary](domain-model.md#vocabulary): Namespace, Repository, Workspace, baseline, published revision, evidence, change, review and promotion. The console stays developer-native and progressively disclosed; it is not a dashboard of cards, and it never presents a client brand as more than a label.
+Cruce's interface makes concurrent Git work legible: what is happening, who or what is advancing it, where each workspace started, what overlaps, what is stale, what can be reviewed and what reached canonical. Repository work is the center of the console, and Home lists your repositories by what needs attention. Product language follows the [domain vocabulary](domain-model.md#vocabulary): Namespace, Repository, Workspace, baseline, published revision, evidence, change, review and promotion. The console stays developer-native and progressively disclosed; it is not a dashboard of cards, and it never presents a client brand as more than a label. Copy is operational and plain: it says what happened, what is blocked and what to do next, never a tagline.
 
 ## Identity
 
@@ -12,7 +12,7 @@ The [vector study](../public/brand/study.svg) records four directions: a direct 
 
 [Ink symbol](../public/brand/symbol-ink.svg) · [White symbol](../public/brand/symbol-white.svg) · [Lime symbol](../public/brand/symbol.svg) · [Wordmark](../public/brand/wordmark.svg) · [Reversed wordmark](../public/brand/wordmark-white.svg) · [Favicon](../public/favicon.svg)
 
-Brand display name, tagline and application asset references live in `src/ui/brand.tsx`. When renaming, update that module and the editable SVG titles/wordmark text together with document titles. Standalone wordmarks embed the locally bundled Inter font, with its license retained in `public/brand/OFL.txt`; they require no third-party font request. The wordmark uses normal lettering while the symbol carries the topology.
+Brand display name and application asset references live in `src/ui/brand.tsx`. When renaming, update that module and the editable SVG titles/wordmark text together with document titles. Standalone wordmarks embed the locally bundled Inter font, with its license retained in `public/brand/OFL.txt`; they require no third-party font request. The wordmark uses normal lettering while the symbol carries the topology.
 
 ## Materials and hierarchy
 
@@ -32,29 +32,41 @@ The main text, muted text, green and copper achieve contrast ratios of approxima
 
 Inter supplies headings and interface copy; JetBrains Mono identifies exact revisions, branches and paths. The scale uses 4px spacing increments, 6–8px corners, thin separators and minimal shadows. Page hierarchy comes from typography and space rather than nested cards. Repository names and paths wrap; code panes scroll internally.
 
-## Topology semantics
+## Status language
 
-- A workspace lane identifies one workspace, its immutable baseline, its reported head and the actor currently attached (a client label, not an identity claim). It is a bounded relationship view, not a Git history reconstruction; its length does not encode time, commit count or completion.
-- Circular endpoints mark revisions. A diamond labels retained source separately from the reported head. Publication proves retention, not correctness.
-- Canonical has its own track, sourced only from `sourceHead`. Missing canonical state is unavailable; reported refs are never a fallback.
-- A copper bracket identifies reported shared surfaces without joining the revision paths. The gutter shows the selected surface, or the first surface initially. The complete surface list remains visible; selecting one names its participating workspaces. Hover and keyboard focus highlight related information equally.
-- Promotion continuation labels require a completed promotion record tied to the workspace's exact change revision. Approval and prepared/failed promotion cannot create one. These records describe past promotion, not a guarantee that the promoted revision remains the current canonical head.
-- Disconnected and detached workspaces remain present, with a dashed line and explicit state. Ended work remains available in Work. Reading a repository needs no workspace, so there are no observer lanes.
-- Overview displays six current writers in stable start-time/ID order. View all work exposes the full durable collection. Home miniatures display up to four active writers and three visible overlap brackets; adjacent counts always describe the complete summary. No relationships are invented between displayed workspaces.
+The console states facts in plain words, derived from controller decisions in [src/ui/status.ts](../src/ui/status.ts). Wording never grants authority; readiness, permissions and cleanup eligibility come from the controller snapshot.
 
-Namespace summary topology is a minimal projection of already-authorized repository snapshots. It contains workspace IDs, modes and states, and overlap IDs/membership. It does not add source fetches, infrastructure operations or a second authority model. Snapshot permissions, readiness and cleanup decisions remain authoritative.
+| Thing | States shown | Meaning |
+| --- | --- | --- |
+| Change | Needs review, Has concerns, Ready to promote, Stale, Superseded by #n, Promotion in progress, Promoted, Closed | Stale: canonical moved past the change's pinned base. Superseded: its workspace proposed a newer change |
+| Workspace | Active, Not reporting, Detached, Setting up, Completed, Cancelled | Not reporting is presence only; ownership and the attachment remain |
+| Canonical relation | Up to date, Behind canonical, Canonical unavailable | Computed from accepted canonical source, never from reported heads |
+| Overlap | "Shares path with workspace" | Advisory. Shared files are a heads-up, not a conflict |
+
+Tool names are shown as the tool ("Codex", "Claude Code"), derived from the OAuth client label. A continued workspace reads "Started in Claude Code · continued in Codex". Labels are provenance, not identity. Status pills always carry text; colour supports them but never stands alone.
 
 ## Screens and interaction
 
-The slim forest header uses a 56px content row with a smaller wordmark and inline repository search field. Avatar, scope controls and the unboxed mobile search icon retain 44px targets. Search uses a compact 300px desktop result panel and tighter result rows; the mobile panel uses a 40px input. It follows the current scope: Home, namespace, or namespace/repository. The Cruce mark returns to unscoped Home, where namespace cards provide the selection surface. Scoped names are anchored searchable dropdowns, with native links, arrow-key selection, normal Tab navigation, Escape dismissal and trigger restoration. Navigation does not require a modal or a second All namespaces action. Repository navigation remains Overview, Code, Work and Settings; namespace tabs appear only at namespace level, with Members/Teams limited to shared namespaces. Repository search accepts typing directly in the header, with namespace-labelled results underneath. Command/Ctrl K focuses this same field; arrows and Enter select a result, while Escape, Tab and outside clicks dismiss the results without trapping focus or changing the page. Loading, partial failures and retry stay in the result panel. On narrow screens the search icon reveals the field and results together in an anchored panel under the header.
+The slim forest header uses a 56px content row with a smaller wordmark and inline repository search field. Avatar, scope controls and the unboxed mobile search icon retain 44px targets. Search follows the current scope (Home, namespace, or namespace and repository). The Cruce mark returns to unscoped Home. Scoped names are anchored searchable dropdowns, with native links, arrow-key selection, normal Tab navigation, Escape dismissal and trigger restoration. Repository search accepts typing directly in the header, and Command/Ctrl K focuses the same field; arrows and Enter select a result, while Escape, Tab and outside clicks dismiss the results without trapping focus. Loading, partial failures and retry stay in the result panel. On narrow screens the search icon reveals the field and results together in an anchored panel.
 
-The avatar opens a compact profile card: a forest cap carries the junction watermark, an initial tile anchors the name and email, and a pale action row contains Sign out while preserving the current page and URL. Namespace selection stays in Home and the scope dropdown; the identity menu does not duplicate namespace membership or introduce an account page. Saved account links open the menu on Home with history replacement. Authentication identity and namespace/repository authority remain separate. The Alpha label sits quietly in the footer; the header carries only navigation and identity.
+The avatar opens a compact profile card with name, email and Sign out, preserving the current page. Saved account links open it on Home with history replacement. The Alpha label sits quietly in the footer.
 
-Work separates Changes, Workspaces and Revision evidence. Deep links open focused change, workspace and evidence details. Change detail presents pinned source, controller readiness, diff/revision access, exact-revision evidence, reviews/concerns and the human decision area. Stored evidence is associated by workspace and exact revision, or an explicit revision-matched verification link; unrelated or stale reports do not appear on a change. Work also lists evidence stored before a change is proposed. Code lists Published revisions and provides focused provenance inspection plus read-only source, history and diff controls. Overview highlights the latest published source revision, independently of evidence publication. Source approval, attestation and explicit promotion remain distinct actions.
+**Home** lists your repositories across namespaces, sorted by what needs a person (changes to review or promote, stale changes, workspaces behind canonical), then your namespaces. A namespace without a connected Cloudflare account says so.
 
-Layout breakpoints use the available root container width, including reflow at 200% zoom. At narrow widths the scoped names move to a second header row; anchored dropdowns stay within the viewport, including at 320px. Repository tabs stay visible. Explicit creation forms use dialogs with focus containment; search and scope navigation stay anchored to the header. At intermediate widths the decision queue follows topology; wider screens place them side by side. Forms, settings, empty states and identity menus use the same type, surface and control system.
+**A repository** opens on a header (name, canonical branch and revision, last promotion, Connect an agent, Clone) and an attention bar: one plain sentence per thing that needs someone, each linking to where it is handled, or "Nothing needs you right now". Four tabs follow:
 
-Transitions run for 140–150ms. A changed observation receives one brief emphasis; mounting or polling unchanged state does not restart it. Reduced-motion preference disables animation and transitions. Every topology action has a normal keyboard-accessible button and a textual equivalent; SVG cues are supplemental.
+- **Changes** lists changes that need attention first. Stale or superseded changes, and promoted or closed ones, are collapsed below. A change opens as a review: header, then one checklist (built on current canonical; each policy-required check, which a maintainer confirms in one click; concerns needing a resolution; approval of this exact revision), then **Promote to *branch***, which explains exactly which revisions it moves between. Approval and confirmation are single clicks with an optional note; raising a concern, recording a failure, resolving and closing ask for a reason. The diff loads straight away with the first file open, followed by evidence and reviews.
+- **Workspaces** lists live workspaces with their state, canonical relation, overlaps and latest change; ended ones are collapsed. A workspace page shows its fixed baseline, reported head, canonical relation (with "See what changed on canonical" when behind), overlap in a sentence, its changes, reported files, and checkout and storage actions (Release checkout, Delete fork with the reasons it is unavailable).
+- **History** shows canonical promotions as a timeline, published revisions, stored evidence and activity written as sentences. Records open with provenance, lineage, storage details and a read-only file and history browser at that exact revision; Browse files opens the current canonical revision.
+- **Settings** holds the Connect an agent guide, the review policy (required checks, protected paths), access grants, rename, and the repository's IDs.
+
+**Connect an agent** is a three-step guide with copyable commands: clone canonical, connect your tool (Claude Code, Codex or Cursor), and the sentence to give the tool. It states that Cruce does not run agents and that each workspace consumes a fork and budget operations.
+
+**Namespace settings** show the Cloudflare account as a status card (Connected, label, account ID) with **Check connection**, which re-verifies the sealed token, and **Replace token**. The daily operation budget shows today's usage against the limit and when it resets, and policy rules use readable names.
+
+Retired routes (`overview`, `code`, `work`, `artifacts`) resolve to Changes, Workspaces or History with history replacement, so saved links keep working. Deep links, Back, retries and late-response protection are preserved.
+
+Layout breakpoints use the root container width, including reflow at 200% zoom and at 320px. Rows wrap their status pills on narrow screens; tabs stay visible. Creation forms use dialogs with focus containment. Reduced-motion preference disables animation and transitions.
 
 ## Verification
 

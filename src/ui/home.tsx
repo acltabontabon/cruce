@@ -1,11 +1,30 @@
 import { useEffect, useState } from "react";
 import type { Namespace, User } from "../shared/platform.ts";
-import { BRAND } from "./brand.tsx";
-import { count, Empty } from "./controls.tsx";
-import { Icon } from "./design.tsx";
+import { Empty } from "./controls.tsx";
+import { Icon, Pill } from "./design.tsx";
 import { request } from "./request.ts";
-import { MiniTopology } from "./topology.tsx";
 import type { NamespaceView } from "./types.ts";
+
+export type Summary = NonNullable<NamespaceView["repositorySummaries"]>[number];
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** The short attention list for a repository row; empty when nothing needs a person. */
+export function AttentionPills({ summary }: { summary?: Summary }) {
+	if (!summary) return <span className="muted">Status unavailable</span>;
+	const { review, ready, stale, behind } = summary.attention;
+	const pills = [
+		review ? <Pill key="review" tone="accent">{`${review} to review`}</Pill> : null,
+		ready ? <Pill key="ready" tone="success">{`${ready} ready to promote`}</Pill> : null,
+		stale ? <Pill key="stale" tone="warning">{`${stale} stale`}</Pill> : null,
+		behind ? <Pill key="behind" tone="warning">{`${behind} behind canonical`}</Pill> : null,
+	].filter(Boolean);
+	return (
+		<span className="row-pills">
+			{pills.length ? pills : <span className="muted">{summary.active ? plural(summary.active, "active workspace") : "Quiet"}</span>}
+		</span>
+	);
+}
+
 export function NamespaceHome({
 	me,
 	refresh,
@@ -65,140 +84,99 @@ export function NamespaceHome({
 			clearInterval(timer);
 		};
 	}, [me.namespaces, refresh, retry]);
-	const motion = Object.values(spaces)
+	const needle = filter.trim().toLowerCase();
+	const rows = me.namespaces
 		.flatMap((w) =>
-			(w.repositorySummaries ?? [])
-				.filter((summary) => summary.active > 0 || summary.overlaps > 0)
-				.map((summary) => ({ ...summary, namespace: w.namespace, repository: w.repositories.find((r) => r.id === summary.id) })),
+			(spaces[w.id]?.repositories ?? []).map((repository) => ({
+				namespace: w,
+				repository,
+				summary: spaces[w.id]?.repositorySummaries?.find((s) => s.id === repository.id),
+			})),
 		)
-		.filter((row) => row.repository);
-
-	const matches = me.namespaces.filter((w) =>
-		`${w.name} ${w.handle} ${spaces[w.id]?.repositories.map((r) => r.name).join(" ") ?? ""}`.toLowerCase().includes(filter.toLowerCase()),
+		.filter((row) => `${row.repository.name} ${row.namespace.name} ${row.namespace.handle}`.toLowerCase().includes(needle))
+		.sort((a, b) => {
+			const score = (s?: Summary) => (s ? s.attention.review * 4 + s.attention.ready * 3 + s.attention.stale + s.attention.behind : 0);
+			return score(b.summary) - score(a.summary) || a.repository.name.localeCompare(b.repository.name);
+		});
+	const namespaces = me.namespaces.filter((w) =>
+		`${w.name} ${w.handle} ${spaces[w.id]?.repositories.map((r) => r.name).join(" ") ?? ""}`.toLowerCase().includes(needle),
 	);
 	return (
 		<>
-			<div className="page-title home-title">
-				<div>
-					<p className="eyebrow">Independent paths. Shared context.</p>
-					<h1>
-						{BRAND.tagline[0]}
-						<br />
-						<span>{BRAND.tagline[1]}</span>
-					</h1>
-					<p className="page-description">Follow the work. Inspect the revision. Decide what moves forward.</p>
-				</div>
-				<button type="button" onClick={create}>
-					<Icon name="plus" />
-					Create namespace
-				</button>
-			</div>
-			<div className="home-toolbar">
-				<p>
-					{count(me.namespaces.length, "namespace")} <span className="toolbar-dot">/</span>{" "}
-					{loading
-						? "Loading repositories…"
-						: count(
-								Object.values(spaces).reduce((n, w) => n + w.repositories.length, 0),
-								"repository",
-								"repositories",
-							)}
-					{Object.keys(failures).length > 0 && <small>Counts include available namespaces.</small>}
-				</p>
+			<div className="page-head">
+				<h1>Your repositories</h1>
 				<label className="namespace-search">
 					<Icon name="search" />
 					<input
 						aria-label="Filter namespaces"
-						placeholder="Filter namespaces or repositories…"
+						placeholder="Filter repositories or namespaces…"
 						value={filter}
 						onChange={(e) => setFilter(e.target.value)}
 					/>
 				</label>
 			</div>
-			{!filter && motion.length > 0 && (
-				<section className="motion-panel">
-					<div className="section-heading">
-						<h2>Work in motion</h2>
-						<span className="observed-label">Reported activity</span>
-					</div>
-					{motion.map((row) => (
+			{rows.length ? (
+				<div className="rows">
+					{rows.map(({ namespace, repository, summary }) => (
 						<button
 							type="button"
-							className="motion-row"
-							key={`${row.namespace.id}/${row.id}`}
-							onClick={() => open(row.namespace.id, row.id)}
+							className="repo-row"
+							key={`${namespace.id}/${repository.id}`}
+							onClick={() => open(namespace.id, repository.id)}
 						>
-							<MiniTopology topology={row.topology} />
-							<span className="motion-identity">
-								<strong>{row.repository!.name}</strong>
-								<small>{row.namespace.name}</small>
+							<span className="row-main">
+								<strong>{repository.name}</strong>
+								<small>
+									{namespace.name} · <code>{repository.defaultBranch}</code>
+								</small>
 							</span>
-							<span className="motion-count">{count(row.active, "active workspace")}</span>
-							<span className="surface-count">{count(row.overlaps, "shared surface")}</span>
+							<AttentionPills summary={summary} />
 							<Icon name="arrow" />
 						</button>
 					))}
-				</section>
+				</div>
+			) : loading ? (
+				<p className="muted">Loading repositories…</p>
+			) : (
+				<Empty>{needle ? "No repositories match that filter." : "No repositories yet. Open a namespace to create one."}</Empty>
 			)}
-			<div className="namespace-groups">
-				{matches.map((w) => {
+			<div className="section-heading">
+				<h2>Namespaces</h2>
+				<button type="button" onClick={create}>
+					<Icon name="plus" />
+					Create namespace
+				</button>
+			</div>
+			<div className="rows">
+				{namespaces.map((w) => {
 					const data = spaces[w.id];
 					return (
-						<section className={`namespace-card ${w.kind}`} key={w.id}>
-							<div className="namespace-group-heading">
-								<button className="namespace-card-title" aria-label={w.name} type="button" onClick={() => open(w.id)}>
-									<span className="namespace-avatar">{w.name.slice(0, 1)}</span>
-									<span>
-										<h2>{w.name}</h2>
-										<code>/{w.handle}</code>
-									</span>
-								</button>
-								<span className="space-kind">
-									{w.kind === "personal" ? "Personal" : "Shared"} {data && `· ${data.role}`}
+						<div className="namespace-row" key={w.id}>
+							<button className="namespace-card-title" aria-label={w.name} type="button" onClick={() => open(w.id)}>
+								<span className="namespace-avatar">{w.name.slice(0, 1)}</span>
+								<span className="row-main">
+									<strong>{w.name}</strong>
+									<small>
+										{w.kind === "personal" ? "Personal" : "Shared"}
+										{data && ` · ${data.role}`}
+										{data && ` · ${plural(data.repositories.length, "repository", "repositories")}`}
+										{data && !data.account && " · Cloudflare account not connected"}
+									</small>
 								</span>
-							</div>
-							{failures[w.id] ? (
-								<div role="alert">
+								<Icon name="arrow" />
+							</button>
+							{failures[w.id] && (
+								<div role="alert" className="row-alert">
 									<p>{failures[w.id]}</p>
 									<button type="button" onClick={() => setRetry((n) => n + 1)}>
 										Retry
 									</button>
 								</div>
-							) : data ? (
-								<div className="namespace-repositories">
-									{data.repositories.length ? (
-										data.repositories.map((r) => {
-											const summary = data.repositorySummaries?.find((s) => s.id === r.id);
-											return (
-												<button type="button" className="home-repo" key={r.id} onClick={() => open(w.id, r.id)}>
-													<Icon name="branch" />
-													<strong>{r.name}</strong>
-													<code>{r.defaultBranch}</code>
-													<span className="muted">{summary ? count(summary.active, "active workspace") : "Activity unavailable"}</span>
-													<Icon name="arrow" />
-												</button>
-											);
-										})
-									) : (
-										<div className="namespace-card-empty">
-											<p>No repositories yet. A place for your next independent effort.</p>
-											<button type="button" className="text-button" onClick={() => open(w.id)}>
-												Open namespace <Icon name="arrow" />
-											</button>
-										</div>
-									)}
-								</div>
-							) : (
-								<p className="muted">Loading repositories…</p>
 							)}
-						</section>
+						</div>
 					);
 				})}
-			</div>
-			{!matches.length && <Empty>No matching namespaces. Try a namespace name, handle, or repository.</Empty>}
-			<div className="home-footer">
-				<Icon name="branch" />
-				<p>Isolated workspaces. Exact revisions. Human decisions.</p>
+				{!namespaces.length && <Empty>No matching namespaces.</Empty>}
 			</div>
 		</>
 	);

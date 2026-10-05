@@ -1,5 +1,4 @@
-import { z } from "zod";
-import { DomainError, domainStatus } from "../core/errors.ts";
+import { DomainError, publicError } from "../core/errors.ts";
 import { type AuthProps, authRoute, oauthProvider } from "./auth.ts";
 import { bridgeRoute } from "./bridge-auth.ts";
 import { json, type PlatformEnv, platformRoute } from "./platform-router.ts";
@@ -9,11 +8,9 @@ export { Directory } from "./directory.ts";
 export { NamespaceRuntime } from "./namespace-runtime.ts";
 
 function failure(error: unknown) {
-	const status = domainStatus(error) ?? (error instanceof z.ZodError ? 400 : 500);
-	return json(
-		{ error: status === 500 ? "Operation unavailable; retry with the same operation identity" : (error as Error).message },
-		status,
-	);
+	const { status, message } = publicError(error);
+	if (status === 500) console.error(JSON.stringify({ event: "unexpected_error", name: (error as Error)?.name }));
+	return json({ error: message }, status);
 }
 const consoleHandler = {
 	async fetch(request, env, ctx) {
