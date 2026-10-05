@@ -1,6 +1,6 @@
 import { type OAuthHelpers, OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { DEFAULT_AGENT_SCOPES, SCOPE_LABELS, SCOPES, type Scope } from "../core/capabilities.ts";
-import { DomainError as CoordinationError } from "../core/errors.ts";
+import { DomainError as CoordinationError, domainStatus } from "../core/errors.ts";
 import type { Directory } from "./directory.ts";
 import type { NamespaceRuntime } from "./namespace-runtime.ts";
 import { decode, seal, unseal } from "./sealing.ts";
@@ -67,9 +67,15 @@ export async function accessIdentity(env: AuthEnv, jwt: string, send: typeof fet
 			throw new Error();
 		let cached = keys.get(issuer);
 		if (!cached || now - cached.at > 300000 || !cached.keys.some((k) => k.kid === header.kid)) {
-			const response = await send(`${issuer}/cdn-cgi/access/certs`, { signal: AbortSignal.timeout(10000) });
-			if (!response.ok) throw new Error();
-			cached = { at: now, keys: ((await response.json()) as { keys: (JsonWebKey & { kid?: string })[] }).keys };
+			try {
+				const response = await send(`${issuer}/cdn-cgi/access/certs`, { signal: AbortSignal.timeout(10000) });
+				if (!response.ok) throw new Error();
+				const document = (await response.json()) as { keys: (JsonWebKey & { kid?: string })[] };
+				if (!Array.isArray(document.keys)) throw new Error();
+				cached = { at: now, keys: document.keys };
+			} catch {
+				throw new CoordinationError(503, "Access identity verification unavailable; retry");
+			}
 			keys.set(issuer, cached);
 		}
 		const jwk = cached.keys.find((k) => k.kid === header.kid);
@@ -78,7 +84,8 @@ export async function accessIdentity(env: AuthEnv, jwt: string, send: typeof fet
 		if (!(await crypto.subtle.verify("RSASSA-PKCS1-v1_5", publicKey, decode(signature), new TextEncoder().encode(`${h}.${b}`))))
 			throw new Error();
 		return { developerId: claims.sub, tenantId: issuer, email: claims.email, accessJwt: jwt };
-	} catch {
+	} catch (error) {
+		if (domainStatus(error) === 503) throw error;
 		throw new CoordinationError(401, "Access identity invalid or expired");
 	}
 }
@@ -102,13 +109,39 @@ export async function consoleIdentity(request: Request, env: AuthEnv) {
 const escapeHtml = (s: string) => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
 export async function authRoute(request: Request, env: AuthEnv): Promise<Response | undefined> {
 	const url = new URL(request.url);
-	if (!["/authorize", "/auth/login", "/auth/logout"].includes(url.pathname)) return;
+	if (!["/authorize", "/auth/login", "/auth/logout", "/auth/session"].includes(url.pathname)) return;
 	if (env.CRUCE_PUBLIC_ORIGIN && url.origin !== new URL(env.CRUCE_PUBLIC_ORIGIN).origin)
 		throw new CoordinationError(403, "Identity origin mismatch");
+	if (url.pathname === "/auth/session") {
+		const headers = { "cache-control": "no-store" };
+		if (request.method !== "GET") return Response.json({ error: "GET required" }, { status: 405, headers: { ...headers, allow: "GET" } });
+		const raw = cookie(request, "__Host-cruce");
+		if (!raw) return Response.json({ authenticated: false }, { headers });
+		if (!env.CRUCE_SECRET) throw new CoordinationError(503, "Identity encryption not configured");
+		try {
+			const identity = await unseal<AuthProps>(env, raw);
+			if (
+				!identity ||
+				typeof identity.accessJwt !== "string" ||
+				typeof identity.developerId !== "string" ||
+				typeof identity.tenantId !== "string"
+			)
+				throw new CoordinationError(401, "Session invalid");
+			await validateIdentity(identity, env);
+			return Response.json({ authenticated: true }, { headers });
+		} catch (error) {
+			if (![401, 403].includes(domainStatus(error) ?? 500)) throw error;
+			return Response.json({ authenticated: false }, { headers });
+		}
+	}
 	if (url.pathname === "/auth/logout")
 		return new Response(null, {
 			status: 302,
-			headers: { location: "/", "set-cookie": "__Host-cruce=; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=0" },
+			headers: {
+				location: "/",
+				"set-cookie": "__Host-cruce=; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=0",
+				"cache-control": "no-store",
+			},
 		});
 	const identity = await requestIdentity(request, env);
 	if (url.pathname === "/auth/login")

@@ -6,13 +6,21 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Added
 
+- Public early-development homepage with an illustrative hero showing independent workspace paths, advisory crossings, exact revisions and deliberate canonical convergence, with mobile recomposition and reduced-motion support.
+- Cookie-verified public session detection, a lazy-loaded authenticated console, Cruce-only sign-out and a reviewable Cloudflare Access configuration for the public front door.
+
 - Illustrated local console walkthrough covering namespaces, concurrent work, exact-revision review, source artifacts and account access.
 - Local bridge worktrees, advisory overlap, upstream reconciliation and exact-revision source provenance.
 - Architectural principles and guardrails, Mermaid diagrams, contributor/MCP guidance and a roadmap of future candidates.
 
 ### Changed
 
+- Show each illustration note subtly beneath its active progress dot, replacing that step’s label and keeping the diagram clear. Narrow layouts show only the note title.
+
 - Align product documentation and diagrams around proactive coordination across independent coding agents, with a two-vendor validation pilot and explicit limits. Put intent/dependency tracking, decision acknowledgements and opt-in supported controls in the roadmap; no runtime capabilities or promotion authority change.
+
+- Keep the homepage to its hero illustration, remove the How it works link and detailed product walkthrough, use one subdued Sign in text link, and mark early development with a quiet Coming soon note.
+- Reframe the hero as the coordination vision: agents share advisories, align routine work and carry accepted changes forward, with unresolved decisions branching to the developer. Replace procedural review stages and dense captions with a compact progress strip, smoother independent-work and context-exchange animation. Keep the vision label without an additional explanation panel. Carry all three illustrative contributions back to separate canonical dots in the order Claude Code, Codex, then Cursor. Replace detached captions with anchored, fading SVG notes; guide attention with subtle path dimming, show only the latest accepted hash, keep moving dots within their own paths, and use one quiet playback text control.
 
 - Give the avatar menu a compact Cruce profile card with the junction motif, an initial tile and a distinct sign-out row.
 

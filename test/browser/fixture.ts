@@ -107,18 +107,41 @@ export async function fixture() {
 	});
 	const runtimes = new Map([[repository.id, c]]),
 		calls: unknown[] = [];
+	let authenticated = true,
+		sessionFailure = false,
+		sessionDelay = 0;
 	const json = (res: ServerResponse, data: unknown, status = 200) => {
 		res.writeHead(status, { "content-type": "application/json" });
 		res.end(JSON.stringify(data));
 	};
 	const handle = async (req: IncomingMessage, res: ServerResponse, nextHandler: () => void) => {
 		const url = new URL(req.url ?? "/", "http://localhost");
-		if (!url.pathname.startsWith("/api/") && !url.pathname.startsWith("/__fixture/")) return nextHandler();
+		if (!url.pathname.startsWith("/api/") && !url.pathname.startsWith("/__fixture/") && !url.pathname.startsWith("/auth/"))
+			return nextHandler();
 		try {
 			const buffers: Buffer[] = [];
 			for await (const b of req) buffers.push(Buffer.from(b));
 			const body = buffers.length ? JSON.parse(Buffer.concat(buffers).toString()) : {};
 			const parts = url.pathname.split("/").filter(Boolean);
+			if (url.pathname === "/__fixture/session" && req.method === "POST") {
+				if (typeof body.authenticated === "boolean") authenticated = body.authenticated;
+				sessionFailure = body.failure ?? false;
+				sessionDelay = body.delay ?? 0;
+				return json(res, { configured: true });
+			}
+			if (url.pathname === "/auth/session") {
+				const state = { authenticated },
+					failure = sessionFailure;
+				if (sessionDelay) await new Promise((resolve) => setTimeout(resolve, sessionDelay));
+				res.setHeader("cache-control", "no-store");
+				return failure ? json(res, { error: "Session verification unavailable; retry" }, 503) : json(res, state);
+			}
+			if (["/auth/login", "/auth/logout"].includes(url.pathname)) {
+				authenticated = url.pathname === "/auth/login";
+				res.writeHead(302, { location: "/", "cache-control": "no-store" });
+				return res.end();
+			}
+			if (url.pathname.startsWith("/api/") && !authenticated) return json(res, { error: "Session expired" }, 401);
 			if (url.pathname === "/__fixture/calls") return json(res, calls);
 			if (url.pathname === "/__fixture/upstream" && req.method === "POST") {
 				c.state.sourceHead = head;

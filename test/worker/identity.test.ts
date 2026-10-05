@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { type AuthEnv, accessIdentity, oauthProvider, seal, unseal } from "../../src/worker/auth.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { type AuthEnv, accessIdentity, authRoute, oauthProvider, seal, unseal } from "../../src/worker/auth.ts";
 
 vi.mock("cloudflare:workers", () => ({
 	WorkerEntrypoint: class {},
@@ -89,5 +89,69 @@ describe("native identity", () => {
 		expect(encrypted).not.toContain("person");
 		expect(await unseal(f.env, encrypted)).toEqual({ developerId: "person" });
 		await expect(unseal(f.env, `${encrypted.slice(0, -4)}aaaa`)).rejects.toThrow("Sign in again");
+	});
+});
+
+describe("public Cruce session boundary", () => {
+	afterEach(() => vi.unstubAllGlobals());
+	const request = (value?: string, method = "GET") =>
+		new Request("https://cruce.example.test/auth/session", { method, headers: value ? { cookie: `__Host-cruce=${value}` } : {} });
+	it("returns only a no-store boolean without provisioning or trusting Access identity alone", async () => {
+		const env = { DIRECTORY: { getByName: vi.fn() }, NAMESPACE: { getByName: vi.fn() } } as unknown as AuthEnv;
+		const response = (await authRoute(
+			new Request("https://cruce.example.test/auth/session", {
+				headers: { cookie: "CF_Authorization=access-token", "cf-access-jwt-assertion": "access-token" },
+			}),
+			env,
+		))!;
+		expect(await response.json()).toEqual({ authenticated: false });
+		expect(response.headers.get("cache-control")).toBe("no-store");
+		expect(env.DIRECTORY.getByName).not.toHaveBeenCalled();
+		expect(env.NAMESPACE.getByName).not.toHaveBeenCalled();
+		const post = (await authRoute(request(undefined, "POST"), env))!;
+		expect(post.status).toBe(405);
+		expect(post.headers.get("allow")).toBe("GET");
+	});
+	it("checks a sealed session against the real signature, expiry and bound subject", async () => {
+		const f = await identityFixture();
+		vi.stubGlobal("fetch", f.send);
+		const jwt = await f.token({ exp: Math.floor(Date.now() / 1000) + 600 });
+		const identity = { developerId: "person", tenantId: f.env.CRUCE_ACCESS_ISSUER, email: "person@example.test", accessJwt: jwt };
+		const valid = await seal(f.env, identity);
+		expect(await (await authRoute(request(valid), f.env))!.json()).toEqual({ authenticated: true });
+		for (const raw of [
+			"tampered",
+			await seal(f.env, null),
+			await seal(f.env, { ...identity, developerId: "different" }),
+			await seal(f.env, { ...identity, accessJwt: await f.token({ exp: 1 }) }),
+		]) {
+			expect(await (await authRoute(request(raw), f.env))!.json()).toEqual({ authenticated: false });
+		}
+		const logout = (await authRoute(new Request("https://cruce.example.test/auth/logout"), f.env))!;
+		expect(logout.headers.get("location")).toBe("/");
+		expect(logout.headers.get("set-cookie")).toContain("__Host-cruce=;");
+		expect(logout.headers.get("set-cookie")).not.toContain("CF_Authorization");
+	});
+	it("keeps certificate outages and configuration errors distinct from signed-out visitors", async () => {
+		const f = await identityFixture();
+		const identity = {
+			developerId: "person",
+			tenantId: f.env.CRUCE_ACCESS_ISSUER,
+			email: "person@example.test",
+			accessJwt: await f.token({ exp: Math.floor(Date.now() / 1000) + 600 }),
+		};
+		const valid = await seal(f.env, identity);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				throw new Error("offline");
+			}),
+		);
+		await expect(authRoute(request(valid), f.env)).rejects.toMatchObject({ status: 503 });
+		await expect(authRoute(request(valid), { ...f.env, CRUCE_SECRET: undefined })).rejects.toMatchObject({ status: 503 });
+		await expect(authRoute(request(valid), { ...f.env, CRUCE_ACCESS_AUD: undefined })).rejects.toMatchObject({ status: 503 });
+		await expect(authRoute(request(valid), { ...f.env, CRUCE_PUBLIC_ORIGIN: "https://another.example.test" })).rejects.toMatchObject({
+			status: 403,
+		});
 	});
 });

@@ -25,6 +25,432 @@ async function openRepo() {
 	await page.goto(`${server.origin}/?namespace=fernloop&repository=payments`);
 	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
 }
+async function openHomepage() {
+	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false } });
+	await page.emulateMedia({ reducedMotion: "reduce" });
+	await page.goto(server.origin);
+	await page.getByRole("heading", { name: "Many agents. One repository. Common ground." }).waitFor();
+}
+test("public homepage explains independent work without requesting private repository data", async () => {
+	const privateRequests = [];
+	page.on("request", (request) => {
+		if (new URL(request.url()).pathname.startsWith("/api/")) privateRequests.push(request.url());
+	});
+	await openHomepage();
+	assert.equal(await page.getByRole("navigation", { name: "Repository navigation" }).count(), 0);
+	assert.equal(await page.getByRole("link", { name: /GitHub|Docs/ }).count(), 0);
+	const signIn = page.getByRole("link", { name: "Sign in", exact: true });
+	assert.equal(await signIn.count(), 1);
+	assert.equal(await signIn.getAttribute("href"), "/auth/login");
+	assert.equal(await page.getByRole("button", { name: /Sign up/ }).count(), 0);
+	assert.equal(await page.getByRole("link", { name: /Sign up|Get started/ }).count(), 0);
+	await page.getByText("Coming soon · in early development.", { exact: true }).waitFor();
+	assert.equal(await page.getByRole("link", { name: "How it works" }).count(), 0);
+	assert.equal(await page.locator("main section").count(), 1);
+	assert.equal(await page.locator(".product-preview, .revision-preview, .reality-tools").count(), 0);
+	assert.deepEqual(privateRequests, []);
+});
+test("coordination vision aligns routine work and accepts three distinct revisions in a clean sequence", async () => {
+	await page.clock.install();
+	await openHomepage();
+	const story = page.getByRole("group", { name: "Development story stages" });
+	const canonical = page.locator(".graph-canonical-head");
+	await page.getByText("Coordination vision · illustrative", { exact: true }).waitFor();
+	for (const stage of ["Independent work", "Shared awareness", "Align together"]) {
+		await story.getByRole("button", { name: stage, exact: true }).click();
+		assert.equal(await canonical.textContent(), "");
+		assert.equal((await page.locator(".crossing-graph").getAttribute("data-canonical")).slice(0, 8), "71d94e2a");
+		assert.equal(await page.locator(".graph-convergence.is-visible").count(), 0);
+	}
+	assert.equal(await page.locator(".graph-alignment.is-visible").count(), 1);
+	assert.equal(await page.locator(".graph-decision.is-visible").count(), 1);
+	assert.equal(await page.locator(".lane-2.graph-lane path").evaluate((el) => getComputedStyle(el).strokeOpacity), "0.3");
+	assert.match(await page.locator(".sequence-description").textContent(), /unresolved disagreement branch to the developer/);
+	assert.equal(await page.locator(".sequence-explanation, .sequence-footer, .hero-sequence details").count(), 0);
+	await page.screenshot({ path: "dist/ui-checks/homepage-alignment.png", fullPage: true });
+	await story.getByRole("button", { name: "Sequential convergence", exact: true }).click();
+	assert.equal(await canonical.textContent(), "bc811af0");
+	assert.equal(await page.locator(".graph-convergence.is-visible").count(), 1);
+	assert.equal(await page.locator(".graph-convergence.is-visible").getAttribute("data-workspace"), "claude");
+	await page.emulateMedia({ reducedMotion: "no-preference" });
+	await page.getByRole("button", { name: "Play", exact: true }).click();
+	await page.clock.runFor(3700);
+	assert.equal(await canonical.textContent(), "bc811af0");
+	assert.equal((await page.locator(".graph-lane").nth(1).getAttribute("data-head")).slice(0, 8), "b2c4e718");
+	assert.equal(await page.locator(".graph-upstream.is-visible").count(), 1);
+	await page.screenshot({ path: "dist/ui-checks/homepage-reconciliation.png", fullPage: true });
+	await page.clock.runFor(4700);
+	assert.equal(await canonical.textContent(), "b2c4e718");
+	assert.equal(await page.locator(".graph-convergence.is-visible").count(), 2);
+	await page.clock.runFor(3700);
+	assert.equal(await canonical.textContent(), "b2c4e718");
+	assert.equal((await page.locator(".graph-lane").last().getAttribute("data-head")).slice(0, 8), "c3d8a902");
+	assert.match(await page.locator(".sequence-description").textContent(), /starting revision remains 71d94e2a/);
+	await page.clock.runFor(4700);
+	assert.equal(await canonical.textContent(), "c3d8a902");
+	assert.equal(await page.locator(".graph-convergence.is-visible").count(), 3);
+	await story.getByRole("button", { name: "Common ground", exact: true }).click();
+	assert.equal(await page.locator(".graph-lane.is-focused").count(), 3);
+	assert.deepEqual(
+		await page
+			.locator(".graph-convergence.is-visible")
+			.evaluateAll((groups) => groups.map((g) => [g.dataset.workspace, g.dataset.revision.slice(0, 8)])),
+		[
+			["claude", "bc811af0"],
+			["codex", "b2c4e718"],
+			["cursor", "c3d8a902"],
+		],
+	);
+	// Test the actual geometry: no pair of return curves intersects, and their main dots advance left to right.
+	assert.equal(
+		await page.locator(".graph-convergence .graph-trace").evaluateAll((paths) => {
+			const samples = paths.map((path) => Array.from({ length: 81 }, (_, i) => path.getPointAtLength((path.getTotalLength() * i) / 80)));
+			const cross = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+			for (let i = 0; i < samples.length; i++)
+				for (let j = i + 1; j < samples.length; j++)
+					for (let a = 1; a < 81; a++)
+						for (let b = 1; b < 81; b++) {
+							const p = samples[i][a - 1],
+								q = samples[i][a],
+								r = samples[j][b - 1],
+								s = samples[j][b];
+							if (cross(p, q, r) * cross(p, q, s) < 0 && cross(r, s, p) * cross(r, s, q) < 0) return false;
+						}
+			return true;
+		}),
+		true,
+	);
+	const dots = await page.locator(".graph-accepted-dot").evaluateAll((nodes) => nodes.map((n) => Number(n.getAttribute("cx"))));
+	assert.equal(dots[0] < dots[1] && dots[1] < dots[2], true);
+	await page.screenshot({ path: "dist/ui-checks/homepage-convergence.png", fullPage: true });
+	await page.setViewportSize({ width: 390, height: 1000 });
+	assert.equal(await page.locator(".mobile-main-dot.is-accepted").count(), 3);
+	await page.screenshot({ path: "dist/ui-checks/homepage-cycle-mobile.png", fullPage: true });
+	await story.getByRole("button", { name: "Shared awareness", exact: true }).click();
+	assert.equal(await canonical.textContent(), "");
+	assert.equal((await page.locator(".crossing-graph").getAttribute("data-canonical")).slice(0, 8), "71d94e2a");
+	assert.equal(await page.locator(".graph-convergence.is-visible").count(), 0);
+	assert.equal(await page.locator(".graph-overlap.is-visible").count(), 1);
+	await page.emulateMedia({ reducedMotion: "reduce" });
+	assert.equal(await page.getByRole("button", { name: "Pause", exact: true }).count(), 0);
+});
+test("public sign-in enters the console and Cruce sign-out returns to the homepage", async () => {
+	await openHomepage();
+	await page.getByRole("link", { name: "Sign in", exact: true }).first().click();
+	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
+	await page.getByRole("button", { name: "Your account", exact: true }).click();
+	await page.getByRole("link", { name: "Sign out", exact: true }).click();
+	await page.getByRole("heading", { name: "Many agents. One repository. Common ground." }).waitFor();
+	assert.equal(new URL(page.url()).pathname, "/");
+	await page.reload();
+	await page.getByRole("heading", { name: "Many agents. One repository. Common ground." }).waitFor();
+});
+test("sign-in preserves a saved repository revision and invitation fragment without changing the login URL", async () => {
+	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false } });
+	await page.goto(`${server.origin}/?namespace=fernloop&repository=payments#/code/source`);
+	await page.getByRole("heading", { name: "Many agents. One repository. Common ground." }).waitFor();
+	await page.getByRole("link", { name: "Sign in", exact: true }).first().click();
+	await page.getByRole("heading", { name: "Bounded retry policy", exact: true }).waitFor();
+	assert.equal(new URL(page.url()).hash, "#/code/source");
+	assert.equal(new URL(page.url()).search, "?namespace=fernloop&repository=payments");
+	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false } });
+	await page.goto(`${server.origin}/invite/fernloop#fixture-invitation`);
+	await page.getByRole("heading", { name: "Many agents. One repository. Common ground." }).waitFor();
+	await page.getByRole("link", { name: "Sign in", exact: true }).first().click();
+	await page.getByRole("heading", { name: "Join namespace", exact: true }).waitFor();
+	assert.equal(new URL(page.url()).pathname, "/invite/fernloop");
+	assert.equal(new URL(page.url()).hash, "#fixture-invitation");
+});
+test("session failures retain a retry state and stale confirmation cannot remount an expired console", async () => {
+	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: true, failure: true } });
+	await page.goto(server.origin);
+	await page.getByRole("heading", { name: "Connection unavailable." }).waitFor();
+	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false } });
+	await page.getByRole("button", { name: "Try again", exact: true }).click();
+	await page.getByRole("heading", { name: "Many agents. One repository. Common ground." }).waitFor();
+	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: true, delay: 500 } });
+	await page.goto(server.origin);
+	await page.getByRole("status").waitFor();
+	await page.evaluate(() => window.dispatchEvent(new Event("cruce:session-expired")));
+	await page.getByRole("heading", { name: "Many agents. One repository. Common ground." }).waitFor();
+	await page.waitForTimeout(650);
+	assert.equal(await page.getByRole("heading", { name: "Agent work. Shared direction." }).count(), 0);
+});
+test("expired console requests clear private views and public anchors do not rewrite console deep links", async () => {
+	await openRepo();
+	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false } });
+	await page.getByRole("button", { name: "Your account", exact: true }).click();
+	await page.getByRole("button", { name: "Switch namespace", exact: true }).click();
+	// Trigger a normal console read after revocation without waiting for the polling interval.
+	await page.evaluate(async () => {
+		const { request } = await import("/src/ui/request.ts");
+		try {
+			await request("/api/me");
+		} catch {}
+	});
+	await page.getByRole("heading", { name: "Many agents. One repository. Common ground." }).waitFor();
+	assert.equal(await page.locator(".shell").count(), 0);
+	assert.equal(new URL(page.url()).search, "?namespace=fernloop&repository=payments");
+	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: true } });
+	await page.reload();
+	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
+});
+test("homepage reflows, keyboard controls work, and reduced motion leaves a readable static story", async () => {
+	await openHomepage();
+	await page.keyboard.press("Tab");
+	assert.equal(await page.getByRole("link", { name: "Skip to content" }).evaluate((element) => element === document.activeElement), true);
+	await page.keyboard.press("Enter");
+	assert.equal(await page.locator("#landing-content").evaluate((element) => element === document.activeElement), true);
+	const crossing = page.getByRole("group", { name: "Development story stages" }).getByRole("button", { name: /Shared awareness/ });
+	await crossing.focus();
+	await page.keyboard.press("Enter");
+	assert.equal(await crossing.getAttribute("aria-pressed"), "true");
+	await page.evaluate(() => document.activeElement?.blur());
+	for (const width of [1440, 1024, 390, 320]) {
+		await page.setViewportSize({ width, height: 1000 });
+		assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+		await page.screenshot({ path: `dist/ui-checks/homepage-${width}.png`, fullPage: true });
+	}
+	assert.equal(await page.locator(".crossing-mobile").isVisible(), true);
+	assert.equal(await page.locator(".crossing-desktop").isVisible(), false);
+	assert.equal(await page.locator(".graph-convergence.is-visible").count(), 0);
+	await page.setViewportSize({ width: 1440, height: 1000 });
+	await page.evaluate(() => {
+		document.documentElement.style.zoom = "2";
+	});
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+	assert.equal(
+		await page.locator(".landing-hero").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length),
+		1,
+	);
+	await page.screenshot({ path: "dist/ui-checks/homepage-zoom.png", fullPage: true });
+});
+test("homepage motion runs once and pauses when controlled, hidden, or outside the viewport", async () => {
+	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false } });
+	await page.clock.install();
+	await page.goto(server.origin);
+	await page.getByRole("button", { name: "Pause", exact: true }).waitFor();
+	const story = page.getByRole("group", { name: "Development story stages" });
+	await page.clock.runFor(4300);
+	assert.equal(await story.getByRole("button", { name: /Shared awareness/ }).getAttribute("aria-pressed"), "true");
+	await page.getByRole("button", { name: "Pause", exact: true }).click();
+	assert.equal(await page.locator(".hero-sequence").getAttribute("data-motion"), "paused");
+	assert.equal(
+		await page
+			.locator('.sequence-controls button[aria-pressed="true"] .sequence-step-copy')
+			.evaluate((element) => getComputedStyle(element).opacity),
+		"1",
+	);
+	await page.clock.runFor(5000);
+	assert.equal(await story.getByRole("button", { name: /Shared awareness/ }).getAttribute("aria-pressed"), "true");
+	await story.getByRole("button", { name: "Independent work", exact: true }).click();
+	await page.getByRole("button", { name: "Play", exact: true }).click();
+	await page.evaluate(() => {
+		Object.defineProperty(document, "hidden", { configurable: true, value: true });
+		document.dispatchEvent(new Event("visibilitychange"));
+	});
+	await page.clock.runFor(5000);
+	assert.equal(await story.getByRole("button", { name: /Independent work/ }).getAttribute("aria-pressed"), "true");
+	await page.evaluate(() => {
+		Object.defineProperty(document, "hidden", { configurable: true, value: false });
+		document.dispatchEvent(new Event("visibilitychange"));
+	});
+	await page.setViewportSize({ width: 1440, height: 100 });
+	await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
+	await page.waitForTimeout(80); // Allow the browser's native IntersectionObserver to observe the scroll.
+	await page.clock.runFor(5000);
+	assert.equal(await story.getByRole("button", { name: /Independent work/ }).getAttribute("aria-pressed"), "true");
+	await page.setViewportSize({ width: 1440, height: 1000 });
+	await page.locator(".hero-sequence").scrollIntoViewIfNeeded();
+	await page.waitForTimeout(80);
+	for (const duration of [4300, 4900, 5700, 3700, 4700, 3700, 4700, 3700, 3300]) await page.clock.runFor(duration);
+	assert.equal(await story.getByRole("button", { name: /Common ground/ }).getAttribute("aria-pressed"), "true");
+	await page.getByRole("button", { name: "Replay", exact: true }).waitFor();
+	await page.clock.runFor(10000);
+	assert.equal(await story.getByRole("button", { name: /Common ground/ }).getAttribute("aria-pressed"), "true");
+});
+test("hero draws native SVG paths smoothly and Pause holds a partially drawn promotion", async () => {
+	await openHomepage();
+	await page.emulateMedia({ reducedMotion: "no-preference" });
+	await page.getByRole("button", { name: "Play", exact: true }).waitFor();
+	await page.getByRole("button", { name: "Align together", exact: true }).click();
+	await page.getByRole("button", { name: "Play", exact: true }).click();
+	await page.waitForTimeout(300);
+	const independentWorker = page.locator(".lane-2 .graph-worker");
+	const message = page.locator(".message-down");
+	assert.equal(await independentWorker.evaluate((element) => element.getAnimations()[0].playState), "running");
+	assert.equal(await message.evaluate((element) => element.getAnimations()[0].playState), "running");
+	assert.equal(await page.locator(".graph-canonical-head").textContent(), "");
+	await page.getByRole("button", { name: "Pause", exact: true }).click();
+	await page.waitForFunction(() => document.querySelector(".graph-message").getAnimations()[0].playState === "paused");
+	await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+	const messagePausedAt = await message.evaluate((element) => element.getAnimations()[0].currentTime);
+	assert.equal(messagePausedAt > 100, true);
+	assert.equal(await page.locator(".graph-alignment").evaluate((element) => getComputedStyle(element).opacity), "1");
+	await page.waitForTimeout(100);
+	assert.equal(await message.evaluate((element) => element.getAnimations()[0].currentTime), messagePausedAt);
+	await page.screenshot({ path: "dist/ui-checks/homepage-coordination-paused.png", fullPage: true });
+	await page
+		.getByRole("group", { name: "Development story stages" })
+		.getByRole("button", { name: /Sequential convergence/ })
+		.click();
+	await page.getByRole("button", { name: "Play", exact: true }).click();
+	const curve = page.locator('.graph-convergence[data-workspace="claude"] .graph-trace');
+	assert.equal(await page.locator(".graph-worker").count(), 2);
+	await page.waitForTimeout(500);
+	const offset = await curve.evaluate((element) => Number.parseFloat(getComputedStyle(element).strokeDashoffset));
+	const length = await curve.evaluate((element) => element.getTotalLength());
+	assert.equal(offset > 0 && offset < length, true);
+	assert.equal(
+		Math.abs((await curve.evaluate((element) => Number.parseFloat(getComputedStyle(element).strokeDasharray))) - length) < 0.01,
+		true,
+	);
+	await page.getByRole("button", { name: "Pause", exact: true }).click();
+	await page.waitForFunction(
+		() => document.querySelector('.graph-convergence[data-workspace="claude"] .graph-trace').getAnimations()[0].playState === "paused",
+	);
+	await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+	const pausedAt = await curve.evaluate((element) => element.getAnimations()[0].currentTime);
+	await page.waitForTimeout(100);
+	assert.equal(await curve.evaluate((element) => element.getAnimations()[0].currentTime), pausedAt);
+	assert.equal(await curve.evaluate((element) => element.getAnimations()[0].playState), "paused");
+	assert.equal(await curve.evaluate((element) => getComputedStyle(element.parentElement).opacity), "1");
+	assert.equal(
+		await page
+			.locator('.sequence-controls button[aria-pressed="true"] .sequence-step-copy')
+			.evaluate((element) => Number(getComputedStyle(element).opacity) > 0),
+		true,
+	);
+	const paintedFrame = await page.screenshot({ path: "dist/ui-checks/homepage-motion-paused.png", fullPage: true });
+	const samples = await curve.evaluate((path) =>
+		[20, 35, 50].map((distance) => {
+			const point = path.getPointAtLength(distance).matrixTransform(path.getScreenCTM());
+			return { x: Math.round(point.x + scrollX), y: Math.round(point.y + scrollY) };
+		}),
+	);
+	const copperPixels = await page.evaluate(
+		async ({ png, samples }) => {
+			const image = new Image();
+			image.src = `data:image/png;base64,${png}`;
+			await image.decode();
+			const canvas = document.createElement("canvas");
+			canvas.width = image.width;
+			canvas.height = image.height;
+			const context = canvas.getContext("2d");
+			context.drawImage(image, 0, 0);
+			let count = 0;
+			for (const { x, y } of samples) {
+				const pixels = context.getImageData(x - 2, y - 2, 5, 5).data;
+				for (let i = 0; i < pixels.length; i += 4) {
+					if (pixels[i] < 210 && pixels[i] > pixels[i + 1] + 25 && pixels[i + 1] > pixels[i + 2] + 20) count++;
+				}
+			}
+			return count;
+		},
+		{ png: paintedFrame.toString("base64"), samples },
+	);
+	assert.equal(copperPixels > 3, true, "the paused return curve must actually paint, not merely have a computed offset");
+	assert.equal(await curve.evaluate((element) => element.getAnimations()[0].currentTime), pausedAt);
+	await page.getByRole("button", { name: "Play", exact: true }).click();
+	try {
+		await page.waitForFunction(
+			(frozenTime) => {
+				const animation = document.querySelector('.graph-convergence[data-workspace="claude"] .graph-trace').getAnimations()[0];
+				return animation.playState !== "paused" && animation.currentTime > frozenTime;
+			},
+			pausedAt,
+			{ timeout: 2500 },
+		);
+	} catch (error) {
+		throw new Error(
+			JSON.stringify(
+				await page.evaluate(() => {
+					const animation = document.querySelector('.graph-convergence[data-workspace="claude"] .graph-trace').getAnimations()[0];
+					return {
+						motion: document.querySelector(".hero-sequence").dataset.motion,
+						hidden: document.hidden,
+						time: animation.currentTime,
+						state: animation.playState,
+						stage: document.querySelector(".crossing-graph").className,
+						playback: document.querySelector(".sequence-playback").textContent,
+						scroll: scrollY,
+					};
+				}),
+			),
+			{ cause: error },
+		);
+	}
+
+	assert.equal(await curve.evaluate((element) => element.getAnimations()[0].currentTime > 0), true);
+});
+test("moving dots stay on their own paths and advisory exchange uses one distinct signal", async () => {
+	await openHomepage();
+	await page.emulateMedia({ reducedMotion: "no-preference" });
+	await page.getByRole("button", { name: "Align together", exact: true }).click();
+	await page.getByRole("button", { name: "Play", exact: true }).click();
+	await page.waitForTimeout(150);
+	await page.getByRole("button", { name: "Pause", exact: true }).click();
+	assert.equal(await page.locator(".graph-message").count(), 1);
+	const failures = await page.evaluate(async () => {
+		const failures = [];
+		for (const fraction of [0, 0.125, 0.5, 0.9, 1]) {
+			for (const worker of document.querySelectorAll(".graph-worker")) {
+				const animation = worker.getAnimations()[0];
+				animation.pause();
+				animation.currentTime = 3200 * fraction;
+			}
+			await new Promise(requestAnimationFrame);
+			for (const worker of document.querySelectorAll(".graph-worker")) {
+				const dot = worker.getBoundingClientRect(),
+					tip = worker.parentElement.querySelector(".graph-tip").getBoundingClientRect();
+				const center = dot.left + dot.width / 2,
+					end = tip.left + tip.width / 2;
+				if (center > end - 2 || Math.abs(dot.top + dot.height / 2 - (tip.top + tip.height / 2)) > 1)
+					failures.push({ fraction, center, end });
+			}
+		}
+		return failures;
+	});
+	assert.deepEqual(failures, []);
+	await page.screenshot({ path: "dist/ui-checks/homepage-dot-endpoints.png", fullPage: true });
+});
+test("active progress caption fits its step without covering the diagram through every moment", async () => {
+	await page.clock.install();
+	await openHomepage();
+	await page.emulateMedia({ reducedMotion: "no-preference" });
+	const durations = [4200, 4800, 5600, 3600, 4600, 3600, 4600, 3600, 3200];
+	for (const width of [1440, 1024, 390, 320]) {
+		await page.setViewportSize({ width, height: 1000 });
+		await page.getByRole("button", { name: "Independent work", exact: true }).click();
+		await page.getByRole("button", { name: "Play", exact: true }).click();
+		await page.locator(".hero-sequence").scrollIntoViewIfNeeded();
+		let initialHeight;
+		for (let stage = 0; stage < durations.length; stage++) {
+			await page.locator(`.crossing-graph.graph-stage-${stage}`).waitFor();
+			await page.clock.runFor(250);
+			const layout = await page.locator(".hero-sequence").evaluate((root) => {
+				const note = root.querySelector('.sequence-controls button[aria-pressed="true"]');
+				const box = note.getBoundingClientRect();
+				const graph = root.querySelector(".crossing-graph").getBoundingClientRect();
+				const controls = root.querySelector(".sequence-controls").getBoundingClientRect();
+				const copy = note.querySelector(".sequence-step-copy").getBoundingClientRect();
+				return {
+					clear: box.top >= graph.bottom && box.bottom <= controls.bottom,
+					fits: copy.left >= box.left && copy.right <= box.right && copy.bottom <= box.bottom,
+					height: controls.height,
+				};
+			});
+			assert.equal(layout.clear, true, `${width}px moment ${stage}: caption must remain below diagram within controls`);
+			assert.equal(layout.fits, true, `${width}px moment ${stage}: caption text must fit`);
+			initialHeight ??= layout.height;
+			assert.equal(layout.height, initialHeight, `${width}px moment ${stage}: caption must not shift controls`);
+			assert.equal(await page.locator(".sequence-step-detail").count(), 1);
+			assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+			await page.screenshot({ path: `dist/ui-checks/homepage-note-${width}-${stage}.png`, fullPage: true });
+			if (stage < durations.length - 1) await page.clock.runFor(durations[stage] - 250 + 80);
+		}
+	}
+});
 test("home lets the user choose a namespace before honest repository creation", async () => {
 	await page.goto(server.origin);
 	await page.getByRole("button", { name: "Alex Morgan", exact: true }).click();
