@@ -16,7 +16,7 @@ The bridge supplies namespace/repository/workspace IDs and mutation identities f
 
 `connect --client codex|claude|cursor` currently writes client configuration and a bounded participation-instruction block through [runner/client-config.ts](../runner/client-config.ts). The corresponding files are `.codex/config.toml` and `AGENTS.md`, `.mcp.json` and `CLAUDE.md`, or `.cursor/mcp.json` and `.cursor/rules/cruce.mdc`. Existing surrounding content is preserved. Review these explicit local setup changes before committing them.
 
-Gemini CLI, future tools and internal agents are within the product model, but no dedicated configuration writer or end-to-end compatibility claim exists for them here. A compatible adapter must obey the same authority and isolation rules. A tool name is only a label; independent authorization comes from OAuth connections. Reusing a cached connection is not evidence of distinct participant identity.
+Gemini CLI, future tools and internal agents are within the product model, but no dedicated configuration writer or end-to-end compatibility claim exists for them here. A compatible adapter must obey the same authority and isolation rules. A tool name is only a label; independent authorization comes from OAuth connections. One authorized agent may participate in many workspaces; each writer workspace owns and reuses its own fork. Reusing a cached connection is not evidence of distinct participant identity.
 
 ## Current command families
 
@@ -31,7 +31,7 @@ Gemini CLI, future tools and internal agents are within the product model, but n
 | Propose, review and report checks | `create_proposal`, `review_proposal`, `record_verification` | `change:write`; agent evidence stays reported |
 | Request source acceptance | `request_promotion` | `promotion:request`; requests a human decision |
 
-Hosted discovery filters tools by granted scope. Scope does not replace current membership, approved-repository checks, writer ownership or namespace resource policy. Human concern resolution and source promotion are absent from the agent catalog. Deployment and environment orchestration are outside Cruce entirely. A promotion request is not an approval.
+Hosted discovery filters tools by granted scope. Scope does not replace current membership, approved-repository checks, writer ownership or namespace resource policy. Human concern resolution and source promotion are absent from the agent catalog. Deployment and environment orchestration are outside Cruce entirely. A promotion request is not an approval, and an agent review with outcome `approve` cannot satisfy human approval. Publication, the product term change (`Proposal` in contracts), evidence and promotion are distinguished in the [architecture vocabulary](architecture.md#domain-vocabulary-and-ownership).
 
 ## Participation protocol
 

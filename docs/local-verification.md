@@ -2,7 +2,7 @@
 
 [Documentation map](../README.md#documentation-map) · [Contributor checks](../CONTRIBUTING.md#verify) · [Test environment](test-environment.md)
 
-Use separate evidence for pure decisions, local integration, real provider behavior and real participant behavior. Passing one layer does not establish another.
+Use separate evidence for pure decisions, local integration, real provider behavior and real participant behavior. Passing one layer does not establish another. **Proposed** means a candidate design; **implemented** means code exists; **locally verified** means named local checks passed; **live verified** requires recorded checks against the real configured environment and revision. Generated client configuration does not prove heterogeneous-agent interoperability. These capability claims are separate from artifact/evidence [trust labels](architecture.md#publication-review-and-retention).
 
 ## Local checks
 

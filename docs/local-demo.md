@@ -41,7 +41,7 @@ Review decisions concern this exact revision. An authenticated human attestation
 
 ## 4. Follow the source artifact
 
-Open **Artifacts**, then **Bounded retry policy**. Its details identify the exact revision, producing workspace, storage reference and content hash. **Trace lineage** provides provenance context. Here the storage and hash values are simulated placeholders, and the artifact is marked **reported**.
+The **Artifacts** area collects Cruce source and evidence records; it is not a browser for the Cloudflare Artifacts provider. Open **Artifacts**, then **Bounded retry policy**. Its details identify the exact revision, producing workspace, storage reference and content hash. **Trace lineage** provides provenance context. Here the storage and hash values are simulated placeholders, and the artifact is marked **reported**.
 
 Cruce’s coordination boundary ends at reviewed reconciliation into canonical Git. External systems own subsequent builds, releases, deployments and runtime operation.
 

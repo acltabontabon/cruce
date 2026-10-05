@@ -8,9 +8,9 @@ Cruce coordinates independent, heterogeneous coding agents working concurrently 
 
 An individual agent can use worktrees to separate its own tasks. That protects working files, but it does not establish a common record across independently authorized tools, machines and successive participants. A developer still has to discover what is happening, relay upstream changes, reconstruct what was tested and decide what can converge safely.
 
-Cruce starts where individual-agent isolation ends. Its useful unit is concurrent repository work, independent of which agent vendor performs it. A tool can own several workspaces; each workspace belongs to an actor connection and has its own fork. There is no permanent fork per vendor and no privileged coordinating agent.
+Cruce starts where individual-agent isolation ends. Its useful unit is concurrent repository work, independent of which agent vendor performs it. An authorized agent can participate in several workspaces; each workspace belongs to one actor, and each writer workspace owns one reusable direct fork of canonical. Local execution contexts materialize that durable work in worktrees or clones. There is no permanent fork per vendor and no privileged coordinating agent.
 
-For example, a Codex participant might change an authentication contract while a Claude Code participant updates a caller against the previous contract. Both can finish in isolated worktrees. Their patches may merge cleanly while the resulting behavior is wrong. Cruce can expose reported path overlap, accepted-source updates and the exact source/evidence under review. It cannot infer every dependency, force an agent to read context or prove behavioral compatibility.
+For example, a Codex participant might change an authentication contract while a Claude Code participant updates a caller against the previous contract. Both can finish in isolated worktrees. Their changes may share no paths and merge cleanly while the resulting behavior is wrong. Cruce can expose reported path overlap, accepted-source updates and the exact source/evidence under review. It cannot infer every dependency, force an agent to read context or prove behavioral compatibility.
 
 | Need | Current mechanism | Limit |
 | --- | --- | --- |
@@ -36,7 +36,7 @@ Cruce’s responsibility ends when isolated concurrent work is safely reviewed a
 | Another command language over Git | Use Git for source transport and manipulation; Cruce operations add coordination meaning |
 | A requirement to abandon normal Git workflows | Preserve existing remotes and require explicit publication; ordinary local editing needs no Cruce clearance |
 
-Normal Git does not mean unrestricted writes to every remote. The current architecture requires canonical Artifacts storage and protects its accepted branch through human-reviewed promotion. Writers push normally into their own forks. GitHub/GitLab integrations and local-only canonical hosting are outside the current foundation. An arbitrary existing checkout is not automatically imported or identified by its remote URL.
+Normal Git does not mean unrestricted writes to every remote. The current architecture requires authoritative canonical Git storage backed by Cloudflare Artifacts and protects its accepted branch through human-reviewed promotion. Writers push normally into their own forks. GitHub/GitLab integrations and local-only canonical hosting are outside the current foundation. An arbitrary existing checkout is not automatically imported or identified by its remote URL.
 
 ## The coordination loop
 
@@ -51,6 +51,6 @@ The console supports understanding work and making decisions: Overview, Code, Wo
 
 ## What must be proven
 
-The hypothesis is less human coordination time, less duplicated or stale work and less effort accepting verified results. More agents, more status panels or more hosted forks are not evidence of value. A developer already coordinating one tool's independent tasks may gain little.
+The mechanisms above describe the current design, not proven product value or live interoperability; [verification](local-verification.md) owns those claims. The hypothesis is less human coordination time, less duplicated or stale work and less effort accepting verified results. More agents, more status panels or more hosted forks are not evidence of value. A developer already coordinating one tool's independent tasks may gain little.
 
 Compare matched tasks using ordinary worktrees and Git review with the same tasks using Cruce. Count setup, reporting, cloud resources and interruptions as costs. The [roadmap](../ROADMAP.md) collects candidate improvements and explains the pilot and decision criteria used to prioritize them. Cross-tool interoperability and useful context consumption must be demonstrated with real participants; generated client configuration alone proves neither.

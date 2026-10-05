@@ -8,12 +8,12 @@ Codex, Claude Code, Cursor, Gemini CLI and internal or future agents belong in t
 
 ```mermaid
 flowchart TB
-    A[Agent in tool A] --> WA[Isolated workspace A]
-    B[Agent in tool B] --> WB[Isolated workspace B]
-    WA <-->|Context, reports, exact artifacts| C[Cruce coordination]
-    WB <-->|Context, reports, exact artifacts| C
+    A[Agent in tool A] --> WA[Local checkout for workspace A]
+    B[Agent in tool B] --> WB[Local checkout for workspace B]
+    WA <-->|Git + MCP: context, reports, exact source| C[Cruce coordination]
+    WB <-->|Git + MCP: context, reports, exact source| C
     C --> R[Human review of exact revisions]
-    R -->|Non-forced Git promotion| G[Canonical repository]
+    R -->|Human approval, readiness, non-forced promotion| G[Canonical Git: Cloudflare Artifacts]
     G --> X[CRUCE BOUNDARY]
     X --> CI[External CI / Build / Release]
     CI --> D[Deployment]
@@ -28,9 +28,9 @@ Worktrees isolate work. Cruce coordinates workers. Cruce does not launch agents,
 
 Keep using `git clone`, `git fetch`, `git pull`, `git push`, `git commit`, `git branch`, `git diff` and `git log`. Cruce adds participation, authorization, shared observations and revision-bound decisions. It does not add a replacement Git command language.
 
-The ownership model is **Namespace → Repository → Workspace**. A namespace owns access and budgets. Every repository has canonical Cloudflare Artifacts storage. Each writer workspace owns one reusable fork and records an actor, task and immutable starting commit; a worktree or clone holds its local files. Existing checkout attachment preserves remotes and never silently uploads history.
+The ownership model is **Namespace → Repository → Workspace**. A namespace owns access and budgets. Every repository has an authoritative canonical Git repository backed by Cloudflare Artifacts. Each writer workspace owns one reusable direct fork of canonical and records an actor, task and immutable starting commit. An agent may participate in many workspaces; the workspace owns its fork, not the vendor. A worktree or clone is its local execution context, not its durable identity. Existing checkout attachment preserves remotes and never silently uploads history.
 
-Normal pushes go to the writer's fork. Publication retains an exact pushed revision as a source artifact; human-reviewed promotion advances canonical source. Cruce’s responsibility ends when isolated concurrent work is safely reviewed and reconciled into the canonical Git repository. CI, build/release orchestration, deployment, environment management, rollback and runtime operation belong to external systems. See the [architecture](docs/architecture.md) for the complete flow and its trust boundaries.
+Normal pushes go to the writer's fork. Publication retains an exact pushed revision as a Cruce source artifact, distinct from the Cloudflare Artifacts provider. Evidence records revision-linked claims/results separately. Publication proves which source was retained, not that it is correct; human-approved, controller-gated promotion advances canonical source. Cruce’s responsibility ends when isolated concurrent work is safely reviewed and reconciled into the canonical Git repository. CI, build/release orchestration, deployment, environment management, rollback and runtime operation belong to external systems. See the [architecture](docs/architecture.md) for the complete flow and its trust boundaries.
 
 ## Try the local console
 

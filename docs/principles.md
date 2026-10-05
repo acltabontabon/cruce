@@ -18,7 +18,7 @@ Worktrees isolate work. Cruce coordinates workers. Any adapter must use the same
 
 Namespace → Repository → Workspace is the domain hierarchy. Stable IDs determine ownership and storage; handles, names, paths and remote URLs are addresses. A workspace owns the actor/task association, immutable starting revision and fork. An execution context records local materialization only. Disconnecting a process must not erase durable work or provenance.
 
-Every repository has canonical Artifacts storage. Each writer workspace gets one direct canonical fork, reused across publications. Local worktrees and hosted forks solve different isolation problems; neither substitutes for the other.
+Every repository has authoritative canonical Git storage backed by Cloudflare Artifacts. Each writer workspace owns one direct fork of canonical, reused across publications. An authorized agent may participate in many workspaces; the vendor never owns their forks. Local worktrees and hosted forks solve different isolation problems; neither substitutes for the other.
 
 ## 4. Derive authority on every request
 
@@ -30,7 +30,7 @@ Human decisions require authenticated human authority. An agent may review, disa
 
 Enforce persistent local writer locks and server checkout reservations. Agent writers use dedicated worktrees or isolated clones; humans may attach existing checkouts. A stale heartbeat changes presence, never ownership of a locked checkout. Local edits need no plan, overlap clearance or scheduling approval.
 
-Overlap is an advisory observation based initially on paths, including rename endpoints and binary files. Absence of overlap proves neither absence of concurrent work nor semantic compatibility. Structural analysis enriches context and cannot authorize a write or acceptance.
+Overlap is awareness, not a Git conflict. It is an advisory observation based initially on paths, including rename endpoints and binary files; it does not require participants to stop or block a merge. Absence of overlap proves neither absence of concurrent work nor semantic compatibility. Structural analysis enriches context and cannot authorize a write or acceptance.
 
 ## 6. Bind decisions to exact source and honest evidence
 
@@ -40,7 +40,7 @@ Keep reported evidence, authenticated human attestation and independent verifica
 
 ## 7. End coordination at canonical Git
 
-Hosted source promotion requires human approval, controller readiness and a non-forced Git update. Fetching updates does not integrate them; ending a workspace does not accept it. Participants use Git to reconcile before proposing a new exact artifact.
+Hosted source promotion currently requires authenticated human approval, controller readiness and an explicit non-forced Git update. Approval alone does not integrate source. Any future automated promotion would be an authority-policy change requiring an explicit architectural decision. Fetching updates does not integrate them; ending a workspace does not accept it. Participants use Git to reconcile before proposing a new exact artifact.
 
 Cruce’s responsibility ends when isolated concurrent work is safely reviewed and reconciled into the canonical Git repository. CI, build/release orchestration, deployment, environment management, rollback and runtime operation belong to external systems. Cruce records revision-linked evidence supplied by participants; it does not execute their builds or operate their applications. Cruce’s own hosting and release tooling remains necessary infrastructure.
 
@@ -58,9 +58,11 @@ Workspace completion preserves commits, artifacts and provenance. Local cleanup 
 
 Keep core controllers pure and deterministic with injected time and IDs. Put I/O in adapters. The console renders controller-derived permissions and readiness instead of independently deciding authority. Use one MCP catalog, [src/shared/tools.ts](../src/shared/tools.ts), for bridge and hosted tools.
 
-Architecture-changing work updates the relevant invariant, design explanation and behavioral checks together. Label proposed, locally verified and live-verified behavior separately. Preserve dated evidence without treating retired designs as current instructions. The working name Cruce should remain easy to change.
+Architecture-changing work updates the relevant invariant, design explanation and behavioral checks together. Distinguish proposed, implemented, locally verified and live-verified behavior; implementation alone is not verification. Preserve dated evidence without treating retired designs as current instructions. The working name Cruce should remain easy to change.
 
 ## Review prompts
+
+> Does this capability help independent participants coordinate and safely converge work around canonical Git, or make Cruce own another layer of software delivery? The latter needs an explicit architectural decision before entering the core.
 
 Before accepting a design, ask:
 
@@ -70,4 +72,4 @@ Before accepting a design, ask:
 - What is reported, retained, attested or independently observed? Can a moving ref change the meaning of a prior decision?
 - What survives disconnect, completion and cleanup? Which tests demonstrate those boundaries?
 
-Do not reintroduce project/mission aliases, Flight/radar routes, migration adapters, shared-branch execution workspaces, mandatory scheduling, external provider integrations or a general workflow engine through incremental features. Proposals to change these boundaries need an explicit architectural decision, not terminology drift.
+Do not reintroduce project/mission aliases, Flight/radar routes, migration adapters, shared-branch execution workspaces, mandatory scheduling or a general workflow engine through incremental features. Cloudflare Artifacts is the intentional canonical-storage foundation. Other source-hosting/forge, CI/CD, deployment, runtime, infrastructure-orchestration or workflow integrations must not become core dependencies without an explicit architectural decision. Proposals to change these boundaries require that decision, not terminology drift.

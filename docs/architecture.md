@@ -10,31 +10,45 @@ This describes the current Namespace → Repository → Workspace design. It doe
 flowchart TD
     N[Namespace: access, resources, budgets] --> R[Repository: canonical Git and policy]
     R --> W[Workspace: actor, task, immutable base]
-    W --> F[One reusable hosted writer fork]
+    W -->|Writer only| F[One reusable hosted fork of canonical]
     W --> E[Execution context: local worktree or clone]
-    W --> A[Retained source and evidence artifacts]
-    A --> C[Change: exact revision and review base]
-    C --> V[Reviews and verification]
-    V --> P[Human-approved reconciliation]
-    P --> G[Canonical Git]
-    G --> X[CRUCE BOUNDARY]
-    X --> CI[External CI / Build / Release]
-    CI --> D[Deployment]
-    D --> RT[Runtime]
+    W --> A[Publications and provenance]
 ```
 
 | Term | Meaning and boundary |
 | --- | --- |
 | Namespace | Owns repositories, membership, teams, connected Cloudflare credentials, resource policy and atomic shared budgets; personal or shared |
-| Repository | Stable code identity, configured default branch and mandatory canonical Artifacts storage; names and URLs are mutable addresses |
+| Repository | Stable code identity and configured default branch; names and URLs are mutable addresses |
+| Canonical repository | The authoritative Git repository for a Cruce repository, backed by Cloudflare Artifacts; its accepted source history advances through controlled promotion |
+| Cloudflare Artifacts | Provider infrastructure for canonical Git storage, workspace forks, retained source/evidence storage and Git/provider operations; not a Cruce source artifact |
 | Actor | Human or agent identity derived from authentication; an agent belongs to an authorized user and connection |
-| Workspace | One actor's bounded repository work: title/context, immutable starting revision, presence, reported changes and writer fork |
+| Workspace | Durable coordination identity for one actor's repository work: task, immutable starting revision, writer fork, publications, provenance and lifecycle state |
 | Execution context | Local materialization with checkout/machine identity, ownership and branch; not the durable task or hosted storage owner |
-| Fork | Mutable Artifacts Git repository isolated for one writer workspace; read-only observers need no fork |
-| Source artifact | Retained exact source revision plus its pinned review base, provenance, content hash and storage reference |
-| Change | Proposal of a source artifact for exact-revision review; the code type and MCP names use `Proposal`/`*_proposal` |
+| Writer fork | One mutable Cloudflare Artifacts Git repository forked directly from canonical, owned by one writer workspace and reused across its publications; read-only observers need no fork |
+| Source artifact | Cruce domain record of an exact retained source revision, pinned review base, provenance, content hash and storage identity (`Artifact` with `kind: "source"`) |
+| Evidence | Revision-linked claims/results, such as reported tests or human attestation; stored evidence content (`Artifact` with `kind: "evidence"`) is separate from source. A `Verification` records an outcome for a proposal and may link an evidence artifact |
+| Publication | Retention of an exact pushed workspace revision for review through `publish_revision`, producing a source artifact; `publish_artifact` stores evidence. There is no separate `Publication` contract |
+| Change / Proposal | The same exact-revision review unit: a source artifact, base, head and reviews. Product language uses change; the contract and MCP use `Proposal`/`*_proposal`. `WorkspaceChange` is only a reported path change |
+| Review | A permitted participant evaluates an exact revision and its evidence; only authenticated human approval satisfies the current approval requirement |
+| Promotion | Human-authorized, controller-gated, non-forced canonical Git update; a `Promotion` records the transition. Local integration means reconciling with Git before publication and is not canonical acceptance |
 
-A workspace is neither a namespace nor a temporary process session. Multiple workspaces from one tool remain independent. Directory identities and provider repository IDs prevent mutable addresses from becoming proof of ownership. Full contracts are in [src/shared/platform.ts](../src/shared/platform.ts).
+An authorized agent may participate in many workspaces; each workspace belongs to one actor, and each attached writer workspace owns one reusable hosted fork. The vendor/tool does not own the fork. Preparing writers may not yet have a fork; explicit cleanup can later delete it without deleting the workspace. Directory identities and provider repository IDs prevent mutable addresses from becoming proof of ownership. Full contracts are in [src/shared/platform.ts](../src/shared/platform.ts).
+
+Canonical does not mean a local clone, cached Git objects, a workspace fork, retained source storage or an arbitrary external remote. Publication retains source separately without advancing accepted history; promotion advances canonical history.
+
+The console **Artifacts** area lists both source and evidence artifacts, with revision, producer/trust, storage/hash, content and lineage inspection. Reviews and verification decisions live in **Work**. Keep Artifacts as the mixed collection label: Sources or Evidence would exclude part of it, while Publications would blur the source-publication operation with stored evidence. This area is not the Cloudflare Artifacts service or a provider resource browser.
+
+### Workspace durability
+
+A workspace is durable coordination identity. Its execution context records machine, checkout/worktree/clone, branch and local ownership; the bridge holds the persistent writer lock for that local materialization.
+
+```text
+Process exit or agent disconnect  ≠ workspace deletion or loss of ownership
+Worktree removal                 ≠ erasure of published work
+Heartbeat expiry                 ≠ loss of checkout ownership or cleanup
+Execution context disappearance  ≠ loss of durable provenance
+Workspace completion             ≠ source acceptance or cleanup
+```
 
 ## Components and trust boundaries
 
@@ -118,7 +132,8 @@ sequenceDiagram
     A->>A: Commit and push revision A1 to own fork
     A->>C: Publish A1, propose artifact, record evidence
     H->>C: Review A1 and approve promotion
-    C->>G: Check current base S0, non-forced push A1
+    C->>C: Require readiness for exact A1
+    C->>G: Recheck current base S0, non-forced push A1
     B->>C: Inspect workspace updates
     C-->>B: Accepted source A1 and available comparison
     B->>G: Normal Git fetch
@@ -126,7 +141,8 @@ sequenceDiagram
     B->>B: Push B2 to own fork
     B->>C: Publish B2 with review base A1
     H->>C: Fresh review and promotion decision for B2
-    C->>G: Check current base A1, non-forced push B2
+    C->>C: Require readiness for exact B2
+    C->>G: Recheck current base A1, non-forced push B2
 ```
 
 These are three different revision references:
@@ -137,15 +153,29 @@ These are three different revision references:
 
 A new source publication must descend from the workspace base and its previous publication. Merge upstream explicitly when needed; rewriting already published history by rebase can make later publication fail ancestry checks. Local Git can manipulate unpublished work, but publication must preserve retained ancestry.
 
-`inspect_overlap` compares paths reported by currently present writers, including both sides of reported renames, deleted paths and binary files. `get_workspace_updates` compares accepted source against the workspace's publication baseline using available cached Git objects. A reported local ref never advances accepted source. Missing objects produce unavailable comparison, not a provider fetch during a coordination read.
+`inspect_overlap` compares paths reported by currently present writers, including both sides of reported renames, deleted paths and binary files. Overlap is awareness, not a Git conflict or a reason to block local work. Absence of overlap proves neither absence of concurrent work nor semantic compatibility: edits to `auth-contract.ts` and `auth-client.ts` can be behaviorally dependent without sharing a path. Observation is not a decision; analysis is not authorization.
+
+`get_workspace_updates` compares accepted source against the workspace's publication baseline using available cached Git objects. A reported local ref never advances accepted source. Missing objects produce unavailable comparison, not a provider fetch during a coordination read.
 
 ## Publication, review and retention
 
 Publication fetches the named pushed fork ref and verifies it equals the requested commit. It checks ancestry and protected-path policy, pins the review base, then retains the exact source under a unique artifact ref in a separate per-repository Artifacts repository. Workspace forks remain mutable; retained artifact refs and Cruce records are not exposed as agent-writable remotes. Immutability is an application/storage-access invariant, not a claim that ordinary Git refs are intrinsically immutable.
 
-Every artifact identifies namespace, repository, workspace, actor, source revision, SHA-256 content hash, storage and trust. Evidence content lives separately from source. Reported test results remain `reported`; authenticated human attestation is `human_attested`. Retaining source does not upgrade its correctness claims.
+Every artifact identifies namespace, repository, workspace, actor, source revision, SHA-256 content hash, storage and trust. Evidence content lives separately from source. **Publication proves which source was retained, not that it is correct.**
 
-Changes bind an artifact, base and head. Controller readiness requires current base, human approval for the exact revision, reasoned resolution of concerns and policy-required trusted passing evidence without unresolved failures. Promotion rechecks canonical source and makes a non-forced Git push. A moved base requires reconciliation and a new proposal, not rewriting the existing review.
+| Knowledge or state | What it establishes |
+| --- | --- |
+| Reported (`reported`) | A participant supplied a claim; a reported test pass or local ref is not an independently verified test or remote push |
+| Human-attested (`human_attested`) | An authenticated authorized human attests an outcome; Cruce has not thereby run the check |
+| Independently verified | A named check was independently exercised for a specific revision/environment; current `Verification` trust values are only `reported` and `human_attested`. Cruce does not execute tests |
+| Retained | Exact source remains stored and reachable; retention does not imply approval or correctness |
+| Published | A publication record identifies retained source for review; it does not imply approval or canonical acceptance |
+| Approved | An authenticated human approved the exact revision; readiness and an explicit promotion are still required |
+| Accepted / canonical | Source in authoritative canonical history, initially provisioned or advanced by completed promotion; existence of a publication is insufficient |
+
+Publication records currently carry `reported` trust even when source retention succeeds. Source identity/retention checks and correctness claims are different facts. Missing source/provider observations remain unknown or unavailable, never inferred success.
+
+Changes bind an artifact, base and head. Controller readiness requires current base, human approval for the exact revision, reasoned resolution of concerns and policy-required trusted passing evidence without unresolved failures. Promotion rechecks canonical source and makes a non-forced Git push. A moved base requires reconciliation and a new proposal, not rewriting the existing review. Agents can publish, inspect, review, disagree, supply evidence and request promotion, but cannot supply human authority. Automatic promotion would change the authority policy, not merely add an auto-merge convenience; it is outside the current model.
 
 Hosted cleanup requires an ended workspace. The runtime checks every fork ref against retained canonical/artifact history; unretained commits, annotated tags and non-commit refs conservatively block deletion. Deletion intent is persisted and asynchronous provider absence is reconciled on retry. Workspace records, source artifacts and lineage survive. Local cleanup separately requires Cruce ownership, clean files and a published or retained-base head.
 

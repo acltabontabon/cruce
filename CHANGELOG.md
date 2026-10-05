@@ -12,6 +12,8 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Changed
 
+- Clarify provider versus source/evidence terminology, durable workspace/fork ownership, advisory overlap and exact-revision human promotion without changing domain behavior.
+
 - End Cruce coordination at human-reviewed reconciliation into canonical Git; CI, releases, deployments and runtimes remain external.
 
 - Adopt Namespace → Repository → Workspace ownership with namespace access/budgets and durable human/agent workspaces.

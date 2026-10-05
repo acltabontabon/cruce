@@ -68,7 +68,7 @@ export const CRUCE_TOOLS: Tool[] = [
 	]),
 	write(
 		"attach_workspace",
-		"Attach an exclusive local execution context and provision its canonical Artifacts fork once.",
+		"Attach an exclusive local execution context and provision the workspace-owned Cloudflare Artifacts fork of canonical once.",
 		["workspaceId", "execution"],
 		"workspace:write",
 		"workspace.fork",

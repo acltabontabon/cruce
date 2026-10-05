@@ -99,6 +99,7 @@ export interface NamespaceState {
 	reservations: ResourceReservation[];
 	version: number;
 }
+/** Local materialization and ownership metadata; the Workspace remains the durable work identity. */
 export interface ExecutionContext {
 	id: string;
 	checkoutId: string;
@@ -164,6 +165,7 @@ export interface RefObservation {
 	at: number;
 	trust: "reported" | "verified";
 }
+/** Cruce retained source/evidence record, not the Cloudflare Artifacts provider; retention does not imply correctness. */
 export interface Artifact {
 	id: string;
 	namespaceId: string;
@@ -200,6 +202,7 @@ export interface Verification {
 	artifactId?: string;
 	at: number;
 }
+/** Product-facing change: an exact source artifact proposed for review, not acceptance into canonical Git. */
 export interface Proposal {
 	id: string;
 	number: number;

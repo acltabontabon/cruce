@@ -75,7 +75,7 @@ Hosted fork cleanup is a separate `cleanup_workspace` operation or console actio
 
 ## Human terminals
 
-`cruce.mjs human --server URL --namespace ID --repository ID` requests browser-approved terminal participation. Then use `start` from the existing checkout. Human terminals can attach that checkout but cannot approve source promotion or production.
+`cruce.mjs human --server URL --namespace ID --repository ID` requests browser-approved terminal participation. Then use `start` from the existing checkout. Human terminals can attach that checkout but cannot approve canonical source promotion.
 
 The credential helper can use `--human-file /absolute/path/to/git-metadata/cruce/connection.json` with `credential.useHttpPath=true`, scoped to that repository. Use the fork URL from `get_git_access` for explicit `git push FORK_URL HEAD:BRANCH`; existing remotes remain unchanged. Renew terminal authorization from its checkout when it expires. Agent MCP must use its own OAuth connection, never human terminal credentials.
 
