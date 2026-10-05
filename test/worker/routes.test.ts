@@ -43,15 +43,19 @@ function fixture() {
 	const command = vi.fn(async (_r: Repository, c: Command, g: ConnectionGrant) =>
 		controller.command(c, namespace.authority(g.actor, repo.id, g.scopes, g.repositories)),
 	);
+	const retired = { users: [{ personalWorkspaceId: "retired" }], workspaces: [{ id: "retired" }] };
+	const getDirectory = vi.fn((name: string) => {
+		if (name === "directory") throw new Error(`Retired directory: ${JSON.stringify(retired)}`);
+		if (name !== "namespace-directory") throw new Error("Unknown directory");
+		return {
+			login: (v: { tenantId: string; developerId: string; email: string }) => directory.login(v.tenantId, v.developerId, v.email),
+			namespace: (id: string) => directory.state.namespaces.find((w) => w.id === id)!,
+			namespaces: () => directory.state.namespaces,
+			users: () => [user],
+		};
+	});
 	const env = {
-		DIRECTORY: {
-			getByName: () => ({
-				login: (v: { tenantId: string; developerId: string; email: string }) => directory.login(v.tenantId, v.developerId, v.email),
-				namespace: (id: string) => directory.state.namespaces.find((w) => w.id === id)!,
-				namespaces: () => directory.state.namespaces,
-				users: () => [user],
-			}),
-		},
+		DIRECTORY: { getByName: getDirectory },
 		NAMESPACE: {
 			getByName: (id: string) => {
 				if (id !== namespace.state.namespace.id) throw new Error("Namespace access denied");
@@ -70,7 +74,7 @@ function fixture() {
 			["cruce:read", "workspace:write"],
 			bridge,
 		);
-	return { call, path, repo, directory, controller, command, user, namespace };
+	return { call, path, repo, directory, controller, command, user, namespace, getDirectory, retired };
 }
 describe("namespace repository contracts", () => {
 	it("namespace topology is an authorized coordination read and rechecks revoked membership", async () => {
@@ -107,6 +111,15 @@ describe("namespace repository contracts", () => {
 		const ids = await Promise.all(responses.map(async (r) => ((await r!.json()) as { user: { id: string } }).user.id));
 		expect(new Set(ids).size).toBe(1);
 		expect(f.directory.state.namespaces).toHaveLength(1);
+	});
+	it("loads the current personal namespace without reading or rewriting retired development identities", async () => {
+		const f = fixture();
+		const before = structuredClone(f.retired);
+		const result = (await (await f.call("/api/me"))!.json()) as { user: { personalNamespaceId: string } };
+		expect(result.user.personalNamespaceId).toBe(f.namespace.state.namespace.id);
+		expect(f.getDirectory).toHaveBeenCalledWith("namespace-directory");
+		expect(f.getDirectory).not.toHaveBeenCalledWith("directory");
+		expect(f.retired).toEqual(before);
 	});
 	it("returns repository collections and record details; rejects obsolete routes and unknown records", async () => {
 		const f = fixture();

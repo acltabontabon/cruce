@@ -2,6 +2,7 @@ import { type OAuthHelpers, OAuthProvider } from "@cloudflare/workers-oauth-prov
 import { DEFAULT_AGENT_SCOPES, SCOPE_LABELS, SCOPES, type Scope } from "../core/capabilities.ts";
 import { DomainError as CoordinationError, domainStatus } from "../core/errors.ts";
 import type { Directory } from "./directory.ts";
+import { namespaceDirectory } from "./directory-access.ts";
 import type { NamespaceRuntime } from "./namespace-runtime.ts";
 import { decode, seal, unseal } from "./sealing.ts";
 
@@ -138,7 +139,7 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 		return new Response(null, {
 			status: 302,
 			headers: {
-				location: "/",
+				location: "/cdn-cgi/access/logout",
 				"set-cookie": "__Host-cruce=; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=0",
 				"cache-control": "no-store",
 			},
@@ -153,7 +154,7 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 				"cache-control": "no-store",
 			},
 		});
-	const directory = env.DIRECTORY.getByName("directory");
+	const directory = namespaceDirectory(env);
 	const user = await directory.login(identity);
 	const personal = await directory.namespace(user.personalNamespaceId);
 	await env.NAMESPACE.getByName(personal.id).initialize(personal);

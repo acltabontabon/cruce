@@ -116,13 +116,23 @@ export async function fixture() {
 	};
 	const handle = async (req: IncomingMessage, res: ServerResponse, nextHandler: () => void) => {
 		const url = new URL(req.url ?? "/", "http://localhost");
-		if (!url.pathname.startsWith("/api/") && !url.pathname.startsWith("/__fixture/") && !url.pathname.startsWith("/auth/"))
+		if (
+			!url.pathname.startsWith("/api/") &&
+			!url.pathname.startsWith("/__fixture/") &&
+			!url.pathname.startsWith("/auth/") &&
+			url.pathname !== "/cdn-cgi/access/logout"
+		)
 			return nextHandler();
 		try {
 			const buffers: Buffer[] = [];
 			for await (const b of req) buffers.push(Buffer.from(b));
 			const body = buffers.length ? JSON.parse(Buffer.concat(buffers).toString()) : {};
 			const parts = url.pathname.split("/").filter(Boolean);
+			if (url.pathname === "/cdn-cgi/access/logout") {
+				// A boundary marker, not a simulation of provider session revocation.
+				res.writeHead(200, { "content-type": "text/html", "cache-control": "no-store" });
+				return res.end("<h1>Fixture Access logout boundary</h1>");
+			}
 			if (url.pathname === "/__fixture/session" && req.method === "POST") {
 				if (typeof body.authenticated === "boolean") authenticated = body.authenticated;
 				sessionFailure = body.failure ?? false;
@@ -138,7 +148,7 @@ export async function fixture() {
 			}
 			if (["/auth/login", "/auth/logout"].includes(url.pathname)) {
 				authenticated = url.pathname === "/auth/login";
-				res.writeHead(302, { location: "/", "cache-control": "no-store" });
+				res.writeHead(302, { location: authenticated ? "/" : "/cdn-cgi/access/logout", "cache-control": "no-store" });
 				return res.end();
 			}
 			if (url.pathname.startsWith("/api/") && !authenticated) return json(res, { error: "Session expired" }, 401);

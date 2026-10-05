@@ -134,12 +134,17 @@ test("coordination vision aligns routine work and accepts three distinct revisio
 	await page.emulateMedia({ reducedMotion: "reduce" });
 	assert.equal(await page.getByRole("button", { name: "Pause", exact: true }).count(), 0);
 });
-test("public sign-in enters the console and Cruce sign-out returns to the homepage", async () => {
+test("sign-out hands off to Access, and returning home keeps the Cruce console signed out", async () => {
+	// Only the real provider can revoke Access sessions. Hold its boundary here
+	// to verify the console navigation without simulating revocation as evidence.
 	await openHomepage();
 	await page.getByRole("link", { name: "Sign in", exact: true }).first().click();
 	await page.getByRole("heading", { name: "Agent work. Shared direction." }).waitFor();
 	await page.getByRole("button", { name: "Your account", exact: true }).click();
 	await page.getByRole("link", { name: "Sign out", exact: true }).click();
+	await page.getByRole("heading", { name: "Fixture Access logout boundary" }).waitFor();
+	assert.equal(new URL(page.url()).pathname, "/cdn-cgi/access/logout");
+	await page.goto(server.origin);
 	await page.getByRole("heading", { name: "Many agents. One repository. Common ground." }).waitFor();
 	assert.equal(new URL(page.url()).pathname, "/");
 	await page.reload();

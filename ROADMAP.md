@@ -56,7 +56,7 @@ Git-note summaries are a later option if portable provenance becomes useful; mut
 
 These are verification gaps in the existing foundation, not new feature promises:
 
-- Exercise two writers starting from one revision, accept one result, then fetch, merge, verify and freshly review the other. Include a behavioral incompatibility whose patches merge cleanly; passing a merge is not proof of correctness.
+- Run the two-writer convergence scenario against real Artifacts and record hosted evidence: accept one result, fetch and merge the other, detect the clean-merge behavioral failure, repair, verify and freshly review before promotion. Local deterministic coverage is recorded in the [verification guide](docs/local-verification.md); deployed authentication and actual client participation remain separate gaps.
 - Verify the current hosted Git/publication path and reconciliation flow against the explicit test account, including distinct forks, fork reuse, retention, lost-response recovery and revocation. Declare the resource budget before running it.
 - Exercise actual browser consent and independent bridge processes with different tools. Adapter tests with in-memory grants do not establish client interoperability or that an agent consumes updates.
 

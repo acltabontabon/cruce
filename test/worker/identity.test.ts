@@ -127,10 +127,25 @@ describe("public Cruce session boundary", () => {
 		]) {
 			expect(await (await authRoute(request(raw), f.env))!.json()).toEqual({ authenticated: false });
 		}
-		const logout = (await authRoute(new Request("https://cruce.example.test/auth/logout"), f.env))!;
-		expect(logout.headers.get("location")).toBe("/");
-		expect(logout.headers.get("set-cookie")).toContain("__Host-cruce=;");
-		expect(logout.headers.get("set-cookie")).not.toContain("CF_Authorization");
+	});
+	it("clears the Cruce session before handing logout to Access, without accepting a supplied redirect", async () => {
+		const env = { DIRECTORY: { getByName: vi.fn() }, NAMESPACE: { getByName: vi.fn() } } as unknown as AuthEnv;
+		const send = vi.fn();
+		vi.stubGlobal("fetch", send);
+		const logout = (await authRoute(
+			new Request("https://cruce.example.test/auth/logout?returnTo=https://untrusted.example", {
+				headers: { cookie: "__Host-cruce=expired-session; CF_Authorization=access-session" },
+			}),
+			env,
+		))!;
+		expect(logout.status).toBe(302);
+		expect(logout.headers.get("location")).toBe("/cdn-cgi/access/logout");
+		expect(logout.headers.get("set-cookie")).toBe("__Host-cruce=; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
+		expect(logout.headers.get("cache-control")).toBe("no-store");
+		expect(send).not.toHaveBeenCalled();
+		expect(env.DIRECTORY.getByName).not.toHaveBeenCalled();
+		expect(env.NAMESPACE.getByName).not.toHaveBeenCalled();
+		expect(await (await authRoute(request(), env))!.json()).toEqual({ authenticated: false });
 	});
 	it("keeps certificate outages and configuration errors distinct from signed-out visitors", async () => {
 		const f = await identityFixture();

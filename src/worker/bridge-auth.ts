@@ -1,5 +1,6 @@
 import { DomainError } from "../core/errors.ts";
 import { type AuthProps, consoleIdentity } from "./auth.ts";
+import { namespaceDirectory } from "./directory-access.ts";
 import { input, json, type PlatformEnv, platformRoute } from "./platform-router.ts";
 import { hash } from "./store.ts";
 
@@ -40,7 +41,7 @@ export async function bridgeRoute(request: Request, env: PlatformEnv, ctx: Execu
 			code = url.searchParams.get("code") ?? "";
 		const pair = await env.OAUTH_KV.get<Pair>(`pair:${code}`, "json");
 		if (!pair || pair.expiresAt < Date.now()) throw new DomainError(403, "Pairing request expired");
-		const directory = env.DIRECTORY.getByName("directory"),
+		const directory = namespaceDirectory(env),
 			user = await directory.login(identity);
 		const repo = await env.NAMESPACE.getByName(pair.namespaceId).repository(
 			{ actor: { id: user.id, userId: user.id, name: user.name, kind: "human" } },

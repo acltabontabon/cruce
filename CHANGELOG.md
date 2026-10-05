@@ -4,7 +4,14 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Fixed
+
+- Sign out clears the Cruce cookie and hands off to Cloudflare Access logout, ending the Access session across the team's applications instead of allowing automatic re-entry.
+- Load current personal namespaces from their dedicated identity directory after sign-in, keeping incompatible retired development records untouched.
+
 ### Added
+
+- Reproducible two-writer convergence verification using real local Git: independently passing branches merge cleanly but fail a behavioral assertion, then require repair, exact-revision evidence and fresh human review. The opt-in Artifacts verifier runs the same scenario with an explicit 20-operation resource budget; hosted execution remains pending.
 
 - Public early-development homepage with an illustrative hero showing independent workspace paths, advisory crossings, exact revisions and deliberate canonical convergence, with mobile recomposition and reduced-motion support.
 - Cookie-verified public session detection, a lazy-loaded authenticated console, Cruce-only sign-out and a reviewable Cloudflare Access configuration for the public front door.

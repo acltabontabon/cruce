@@ -6,6 +6,7 @@ import { parseGitRoute } from "../shared/git-access.ts";
 import { type Actor, branch, CommandInput, id, name, path, RESOURCE_ACTIONS, type Repository } from "../shared/platform.ts";
 import { type AuthEnv, type AuthProps, consoleIdentity, validateIdentity } from "./auth.ts";
 import type { ControlTower } from "./control-tower.ts";
+import { namespaceDirectory } from "./directory-access.ts";
 import { remoteMcp } from "./mcp.ts";
 import type { ConnectionGrant } from "./namespace-runtime.ts";
 import { hash } from "./store.ts";
@@ -74,7 +75,7 @@ export async function platformRoute(
 		: bridge
 			? validateIdentity(bridge.identity, env)
 			: consoleIdentity(request, env));
-	const directory = env.DIRECTORY.getByName("directory"),
+	const directory = namespaceDirectory(env),
 		user = await directory.login(identity);
 	const personal = await directory.namespace(user.personalNamespaceId);
 	await env.NAMESPACE.getByName(personal.id).initialize(personal);
