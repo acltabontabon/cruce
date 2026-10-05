@@ -34,6 +34,14 @@ Access protects browser sign-in, consent, pairing approval, invitations and name
 
 Sign out expires the Cruce cookie and redirects to `/cdn-cgi/access/logout`, ending Access sessions across applications in the same team. It does not revoke Cruce OAuth connections or alter namespace membership.
 
+### Access login branding
+
+The existing Access email-and-one-time-code screen can use Cruce's identity without changing authentication. In **Zero Trust → Reusable components → Custom pages → Access login page → Manage**, set the organization name to **Cruce**, use the publicly accessible `/brand/symbol-ink.svg` at your installation's HTTPS origin as the logo, and use the paper background (`#F5F5EF`) and forest text (`#17251F`). Set the header to **Sign in to Cruce** and the footer to **Use your email to receive a one-time sign-in code.** The [reviewable payload](../tools/access-login-branding.json) contains the hosted installation's values; replace its logo origin for your own installation.
+
+These settings apply to every Access application in the same team. Cloudflare retains its own login layout and provider branding. See [Access login customization](https://developers.cloudflare.com/cloudflare-one/reusable-components/custom-pages/access-login-page/) and the [organization update API](https://developers.cloudflare.com/api/resources/zero_trust/subresources/organizations/methods/update/).
+
+For CLI administration, read and back up the organization with `cf zero-trust organization get` first. Apply the payload with `cf zero-trust organization update --body`, including the **existing** `auth_domain` in the JSON body; the API requires it even for this appearance change. Keep issuer, audience, admission policies, identity providers and session settings unchanged, then independently read back the organization. Set the existing browser application's display name to **Cruce** if desired, preserving its ID and all authentication configuration. Verify the logo loads anonymously and the hosted sign-in still presents its email form. Branding is separate from Worker deployment and does not provision Access policies.
+
 For local UI/controller checks use `pnpm dev:fixture`; for an offline Worker build use `pnpm exec cf build --mode offline`. Offline mode omits the Artifacts binding and permits no cloud storage provisioning. [.dev.vars.example](../.dev.vars.example) describes local identity settings.
 
 ## Limits and costs

@@ -1,0 +1,10 @@
+{
+	"name": "Cruce",
+	"login_design": {
+		"background_color": "#F5F5EF",
+		"text_color": "#17251F",
+		"header_text": "Sign in to Cruce",
+		"footer_text": "Use your email to receive a one-time sign-in code.",
+		"logo_path": "https://cruce.acltabontabon.com/brand/symbol-ink.svg"
+	}
+}

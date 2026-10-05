@@ -46,6 +46,12 @@ The checked-in [transport configuration](../tools/access-agent-transport.json) d
 
 These bypass Access's browser challenge, not Cruce authentication. Discovery/registration are protocol endpoints; MCP requires OAuth and current grants. `/authorize`, `/bridge/approve` and `/api/namespaces` stay behind Access. Human pairing uses `/mcp?terminal=start|poll|command`, browser approval and a proof-bound token. Machine exceptions must not bypass browser sign-in, private APIs or consent pages. The public console document is separately addressed below; its data remains authenticated.
 
+## Access sign-in branding
+
+On **2026-10-06**, the existing Access team and browser application's display names were set to **Cruce**, and the [branding payload](../tools/access-login-branding.json) applied the public ink symbol, paper background, forest text, sign-in header and email-code guidance. Organization readback preserved all non-appearance settings. Application readback preserved its ID, audience, routes, session settings, identity providers and admission rules; Cloudflare refreshed the policy update timestamps when saving. Public logo HTTPS and the anonymous branded email form returned 200. A local rendering of that hosted HTML was visually inspected. OTP delivery/submission was not repeated. Backups/readbacks and the non-secret verification receipt are in ignored `dist/access-branding/`.
+
+Branding affects all applications in this Access team and is independent of Worker releases. The GitHub release environment was corrected to the existing custom domain and supplied the installation account, Worker name and stable Artifacts namespace required by alpha.2. No source transition, rebinding or cleanup was performed. See [setup](cloudflare-setup.md#access-login-branding) and [release verification](local-verification.md#alpha2-release-and-access-branding-verification).
+
 ## Public homepage Access configuration
 
 The [reviewable configuration](../tools/access-public-homepage.json) is a handoff containing one new application payload and one partial update to the **existing** browser Access application. It is not an executable deployment script. Its protected destinations and public Bypass policy were applied to the hosted custom domain on 2026-10-05 after explicit approval. The `type: "public"` destinations describe Internet-facing hostnames, not a Bypass policy for protected data.

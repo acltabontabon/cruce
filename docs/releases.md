@@ -2,7 +2,7 @@
 
 [Documentation map](../README.md#documentation-map) · [Changelog](../CHANGELOG.md) · [Verification](local-verification.md)
 
-Cruce's first alpha, **0.1.0-alpha.1**, was released on 2026-10-05. Future releases are deployed by pushing a checked release tag. This is experimental software; alpha interfaces may change.
+Cruce's second alpha, **0.1.0-alpha.2**, is dated 2026-10-06. Releases are deployed by pushing a checked release tag. This is experimental software; alpha interfaces may change.
 
 ## Versioning and changelog
 
@@ -12,7 +12,7 @@ Cruce's first alpha, **0.1.0-alpha.1**, was released on 2026-10-05. Future relea
 - Follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): group brief user-facing changes under `[Unreleased]` using applicable `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed` or `Security` headings; omit empty categories and maintain release/comparison links. Before release, move them into a heading matching the package version. Summarize user-facing changes; Git history and review descriptions retain implementation details. Keep current local/live verification evidence in [verification](local-verification.md).
 - Release tags are `v` plus the exact package version. Never move or reuse a published tag; fix a release with a new version.
 
-`pnpm release:check` checks the version and changelog. `pnpm release:check v0.1.0-alpha.1` also checks the tag. A matching entry with release notes is required.
+`pnpm release:check` checks the version and changelog. `pnpm release:check v0.1.0-alpha.2` also checks the tag. A matching entry with release notes is required.
 
 ## One-time GitHub setup
 
@@ -48,11 +48,17 @@ git tag -a "$release_tag" -m "Cruce $release_tag"
 git push origin "$release_tag"
 ```
 
-First set a new, unreleased package version and matching changelog entry. The commands derive that version; do not rerun them against the already released `0.1.0-alpha.1`.
+First set a new, unreleased package version and matching changelog entry. The commands derive that version; do not rerun them against the already released version.
 
 Pull requests and pushes to `main` run checks and an offline build. Only pushed `v*` tags can deploy. A release must match the package version and changelog, be contained in `main`, and pass typecheck, lint, tests, demo verification and builds. Deployments are serialized and record the release tag and commit in the Cloudflare Worker version. Ordinary commits and GitHub draft releases do not deploy; pushing a tag does, even if a GitHub release remains a draft.
 
 To restore older code, prepare a new version on `main` with a concise rollback changelog entry and push its new tag. Existing Cloudflare Worker version rollback is also available as an explicit human operation.
+
+## Access branding
+
+Access branding is account-level configuration, applied separately from Worker deployment. The [branding payload](../tools/access-login-branding.json) and [setup instructions](cloudflare-setup.md#access-login-branding) keep it reviewable. A release tag does not apply or reset Access branding or policies.
+
+Alpha.2 includes the deployment-managed storage change: existing connected-account namespaces fail closed for resource operations. A release does not migrate retained source or authorize deleting or rebinding it. Plan that transition explicitly before using those namespaces with the new storage model.
 
 ## Direct test deployment without a release
 
