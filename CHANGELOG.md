@@ -12,6 +12,8 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Changed
 
+- Align product documentation and diagrams around proactive coordination across independent coding agents, with a two-vendor validation pilot and explicit limits. Put intent/dependency tracking, decision acknowledgements and opt-in supported controls in the roadmap; no runtime capabilities or promotion authority change.
+
 - Give the avatar menu a compact Cruce profile card with the junction motif, an initial tile and a distinct sign-out row.
 
 - Make repository search a real header input with compact anchored results instead of a modal, and use an unboxed mobile search icon beside the avatar. Cmd/Ctrl K focuses the same field; preserve page context, keyboard selection, partial results, retries and a compact mobile search panel.

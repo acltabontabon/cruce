@@ -16,6 +16,8 @@ The bridge supplies namespace/repository/workspace IDs and mutation identities f
 
 `connect --client codex|claude|cursor` currently writes client configuration and a bounded participation-instruction block through [runner/client-config.ts](../runner/client-config.ts). The corresponding files are `.codex/config.toml` and `AGENTS.md`, `.mcp.json` and `CLAUDE.md`, or `.cursor/mcp.json` and `.cursor/rules/cruce.mdc`. Existing surrounding content is preserved. Review these explicit local setup changes before committing them.
 
+The configuration writer reports Git observation and coordination MCP capabilities, with `hooksInstalled: false` and `adaptiveVerified: false`. It does not install decision-delivery or pause/resume hooks. Generated instructions do not prove an agent consumes updates or follows recommendations; the proposed Codex/Claude Code pilot must establish that with actual independent connections.
+
 Gemini CLI, future tools and internal agents are within the product model, but no dedicated configuration writer or end-to-end compatibility claim exists for them here. A compatible adapter must obey the same authority and isolation rules. A tool name is only a label; independent authorization comes from OAuth connections. One authorized agent may participate in many workspaces; each writer workspace owns and reuses its own fork. Reusing a cached connection is not evidence of distinct participant identity.
 
 ## Current command families
@@ -43,6 +45,16 @@ Hosted discovery filters tools by granted scope. Scope does not replace current 
 6. End participation when finished. Choose local or hosted cleanup explicitly after retention checks; end does not promote source.
 
 These checkpoints are cooperative guidance, not scheduling gates. Cruce cannot guarantee an agent reads updates, monitor unconnected participants or recreate an agent conversation. Compact `get_coordination_context` and bridge `status` commands are proposed in the [roadmap](../ROADMAP.md), not available commands.
+
+`start_workspace` accepts a title and optional context, not structured intent/dependency reports. `report_change` reports observed changes, not a planned scope or decision response. Heartbeat activity does not prove these reports remain accurate. The current catalog has no coordination decision, acknowledgement or agent pause/resume commands; source review outcomes and promotion requests are separate concepts.
+
+## Proposed coordination integrations
+
+The [roadmap interaction contract](../ROADMAP.md#proposed-interaction-contract) describes the future protocol. A supported adapter must deliver applicable decisions at demonstrated checkpoints and let agents acknowledge, decline with reasons or report inability to comply. Reads remain read-only; recording a response requires an explicit authorized mutation. Delivery, acknowledgement, reported action and observed enforcement must remain distinct.
+
+Begin with automatic recommendations and cooperative checkpoint reads. Targeted pause/resume is a later opt-in capability requiring demonstrated client support, a precise constrained action, safe pause/release behavior and a human override. Unsupported clients remain advisory. A client label or MCP connection cannot establish that Cruce can interrupt an agent. Scope changes and stale reports require reassessment; reconnecting participants need refreshed context rather than replaying obsolete advice. Missing acknowledgement is unknown compliance, not success.
+
+The current command table remains the available interface. New schemas, tool names, scopes and client hook choices require implementation design and evidence. The roadmap's [open integration questions](../ROADMAP.md#open-questions-and-integration-requirements) track those gaps; do not instruct participants to call proposed tools.
 
 ## Failures and retries
 

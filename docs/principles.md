@@ -12,7 +12,9 @@ Use commits, refs, worktrees, clone, fetch, merge and push directly. Publication
 
 ## 2. Coordinate across tools; leave execution with participants
 
-Worktrees isolate work. Cruce coordinates workers. Any adapter must use the same repository, workspace and authority model regardless of client brand. No client label confers identity or a special role. Cruce never launches agents, edits on their behalf through a hosted IDE, owns their conversation or schedules their local work.
+Worktrees isolate work. Cruce coordinates workers. The product goal is to surface meaningful interference early and reduce routine human coordination while useful independent work continues. Any adapter must use the same repository, workspace and authority model regardless of client brand. No client label confers identity or a special role. Cruce never launches agents, edits on their behalf through a hosted IDE, owns their conversation or acts as a general task scheduler.
+
+Repository-specific sequencing recommendations and future opt-in scoped controls through supported client integrations fit this boundary. They are proposed capabilities in the [roadmap](../ROADMAP.md), not current execution control. Their scope is coordinating interacting work, not choosing models, assigning arbitrary tasks or owning runtimes. Escalate ambiguous requirements, competing designs and unresolved disagreement to the developer; routine coordination automation cannot supply human approval.
 
 ## 3. Make ownership durable and addresses mutable
 
@@ -26,11 +28,13 @@ Verify authentication before resolving current membership, repository grants, ap
 
 Human decisions require authenticated human authority. An agent may review, disagree or request promotion; it cannot impersonate a human approval. Human terminal pairing is restricted participation, not console authority. Namespace admission and repository grants remain separate from Access sign-in. Credentials stay sealed server-side; Git uses short-lived server-side provider tokens, never credentials embedded in source, URLs, logs or frontend responses.
 
-## 5. Protect writers without scheduling their work
+## 5. Protect writers without mandatory scheduling
 
 Enforce persistent local writer locks and server checkout reservations. Agent writers use dedicated worktrees or isolated clones; humans may attach existing checkouts. A stale heartbeat changes presence, never ownership of a locked checkout. Local edits need no plan, overlap clearance or scheduling approval.
 
-Overlap is awareness, not a Git conflict. It is an advisory observation based initially on paths, including rename endpoints and binary files; it does not require participants to stop or block a merge. Absence of overlap proves neither absence of concurrent work nor semantic compatibility. Structural analysis enriches context and cannot authorize a write or acceptance.
+Overlap is awareness, not a Git conflict. The current implementation is an advisory observation based on paths, including rename endpoints and binary files; it does not require participants to stop or block a merge. Shared files can contain independent edits; different files can encode incompatible assumptions or duplicate outcomes. Absence of overlap proves neither absence of concurrent work nor semantic compatibility. Structural analysis enriches context and cannot authorize a write or acceptance.
+
+Future coordination decisions must distinguish notice, recommendation and enforced control. A targeted pause requires meaningful interference or a dependency, an explicit scope and a release condition; a shared path alone is insufficient. Enforce only through an opted-in integration with demonstrated support, leaving unsupported clients advisory. Delivery and acknowledgement are not proof of compliance. Scope changes require reassessment, stale reports reduce confidence, and heartbeat presence cannot prove intent freshness. Disconnects preserve ownership; reconnecting participants must refresh context before relying on old decisions. These are constraints on roadmap work, not claims that the protocol exists today.
 
 ## 6. Bind decisions to exact source and honest evidence
 
@@ -40,7 +44,7 @@ Keep reported evidence, authenticated human attestation and independent verifica
 
 ## 7. End coordination at canonical Git
 
-Hosted source promotion currently requires authenticated human approval, controller readiness and an explicit non-forced Git update. Approval alone does not integrate source. Any future automated promotion would be an authority-policy change requiring an explicit architectural decision. Fetching updates does not integrate them; ending a workspace does not accept it. Participants use Git to reconcile before proposing a new exact artifact.
+Hosted source promotion currently requires authenticated human approval, controller readiness and an explicit non-forced Git update checked against current canonical source. Approval alone does not integrate source. Any future automated promotion would be an authority-policy change requiring an explicit architectural decision. Receiving, acknowledging or fetching updates does not integrate or verify them; ending a workspace does not accept it. Continuing writers explicitly incorporate accepted source with Git, verify the resulting revision and obtain fresh review before promoting their next result. Proposed follow-through tracking cannot substitute for that evidence.
 
 Cruce’s responsibility ends when isolated concurrent work is safely reviewed and reconciled into the canonical Git repository. CI, build/release orchestration, deployment, environment management, rollback and runtime operation belong to external systems. Cruce records revision-linked evidence supplied by participants; it does not execute their builds or operate their applications. Cruce’s own hosting and release tooling remains necessary infrastructure.
 
@@ -67,6 +71,8 @@ Architecture-changing work updates the relevant invariant, design explanation an
 Before accepting a design, ask:
 
 - Does it coordinate independent workers, or take ownership of an agent's execution?
+- Does it reduce measured routine intervention or rework enough to justify reporting, false alarms, waiting and setup costs? Can independent work continue?
+- Is a claimed control advisory, acknowledged, reported as acted on or observed as enforced? Which client integration demonstrates the claim?
 - Is there an existing Git primitive, and are exact source and existing remotes preserved?
 - Which stable identity owns the state, authority and cost? What happens after revocation or a lost response?
 - What is reported, retained, attested or independently observed? Can a moving ref change the meaning of a prior decision?

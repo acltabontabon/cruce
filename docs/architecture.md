@@ -4,6 +4,8 @@
 
 This describes the current Namespace → Repository → Workspace design. It does not establish live verification. Cruce maintains shared repository state and exact-revision decisions across independently running agents; their execution remains outside the control plane.
 
+The [product goal](product-thesis.md) is proactive coordination that reduces avoidable interference, duplicated effort and routine human intervention. The current architecture supplies isolation, cooperative observations and controlled convergence. Structured intent/dependencies, coordination decisions and acknowledgements, opt-in supported controls and incorporation follow-through are [roadmap proposals](../ROADMAP.md#proposed-coordination-milestones), not current services or contracts.
+
 ## Domain vocabulary and ownership
 
 ```mermaid
@@ -122,6 +124,8 @@ Cloudflare credentials stay server-side: creation/fork tokens are revoked, and G
 
 ## Concurrent work and convergence
 
+This sequence shows the implemented protocol and participant responsibilities. It does not imply automatic notification delivery, pause/resume or verified agent compliance.
+
 ```mermaid
 sequenceDiagram
     participant A as Agent A / workspace A
@@ -129,10 +133,13 @@ sequenceDiagram
     participant C as Cruce
     participant H as Human reviewer
     participant G as Canonical Git
+    Note over A,C: Current cooperative protocol, no decision acknowledgements or pause controls
     A->>C: Register at S0 and report paths
     B->>C: Register at S0 and report paths
-    C-->>A: Shared work and advisory overlap
-    C-->>B: Shared work and advisory overlap
+    A->>C: Inspect recorded work and overlap
+    C-->>A: Reported paths and advisory overlap, not a stop decision
+    B->>C: Inspect recorded work and overlap
+    C-->>B: Reported paths and advisory overlap, not a stop decision
     A->>A: Commit and push revision A1 to own fork
     A->>C: Publish A1, propose artifact, record evidence
     H->>C: Review A1 and approve promotion
@@ -140,6 +147,7 @@ sequenceDiagram
     C->>G: Recheck current base S0, non-forced push A1
     B->>C: Inspect workspace updates
     C-->>B: Accepted source A1 and available comparison
+    Note over B,C: Receiving or fetching A1<br/>does not prove incorporation or verification
     B->>G: Normal Git fetch
     B->>B: Explicit merge, resolve, verify, commit B2
     B->>B: Push B2 to own fork
@@ -159,7 +167,19 @@ A new source publication must descend from the workspace base and its previous p
 
 `inspect_overlap` compares paths reported by currently present writers, including both sides of reported renames, deleted paths and binary files. Overlap is awareness, not a Git conflict or a reason to block local work. Absence of overlap proves neither absence of concurrent work nor semantic compatibility: edits to `auth-contract.ts` and `auth-client.ts` can be behaviorally dependent without sharing a path. Observation is not a decision; analysis is not authorization.
 
+Workspace `title` and optional `context` describe reported work, but do not implement structured intent, dependency, progress or scope-version tracking. `report_change` records changed paths/commits, not planned edits or incompatible assumptions. The controller derives presence and overlap freshness from workspace activity; a heartbeat can refresh that activity without refreshing the content of a work report. Disconnected writers are excluded from active overlap even though their durable workspaces and checkout reservations remain. Neither a live heartbeat nor an empty overlap result establishes complete, current knowledge of concurrent work.
+
 `get_workspace_updates` compares accepted source against the workspace's publication baseline using available cached Git objects. A reported local ref never advances accepted source. Missing objects produce unavailable comparison, not a provider fetch during a coordination read.
+
+Continuing writers are responsible for explicitly incorporating accepted source with Git and verifying the resulting revision before fresh publication/review. `integratedRevision` records a publication's review base; it is not a receipt proving that an agent read an update or ran tests. There is no separate decision acknowledgement or incorporation-follow-through protocol today.
+
+| Boundary | Current behavior | Proposed extension |
+| --- | --- | --- |
+| Advisory awareness | Participants read recorded work, reported path overlap and canonical updates | Assess meaningful interference from fresh intent and available source context; no compatibility guarantee |
+| Agent response | Cooperative participation instructions; no decision delivery/acknowledgement or pause/resume protocol | Versioned, scoped decisions and explicit responses; opt-in controls only through demonstrated integrations |
+| Enforced safeguards | Authorization, writer isolation/reservations, resource gates, publication and promotion checks | Coordination controls must preserve these safeguards and human authority; they cannot claim control over arbitrary local execution |
+
+The [roadmap interaction contract](../ROADMAP.md#proposed-interaction-contract) owns the future delivery, acknowledgement, scope-change, stale-report and disconnect requirements. Ordinary coordination reads remain free of acknowledgement mutations and provider fetches. No new public API, persistence schema or client control is introduced by that proposal.
 
 ## Publication, review and retention
 

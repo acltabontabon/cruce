@@ -25,6 +25,8 @@ Offline mode avoids configured cloud provisioning; it does not bypass Access. Us
 
 ## Locate a change
 
+Use the product thesis for the proactive coordination goal and the roadmap for missing capabilities. Current behavior remains cooperative observation and controlled convergence. Repository-specific recommendations and future opt-in controls are within direction, but require demonstrated integration support; do not turn advisory path overlap into mandatory scheduling or claim acknowledgement proves enforcement. Keep human review and promotion authority separate from routine coordination automation. Evaluate proposed features against the two-vendor pilot's intervention, rework and overhead criteria.
+
 | Concern | Start here |
 | --- | --- |
 | Ownership, permissions, readiness, resource policy | `src/core` and `test/core` |

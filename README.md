@@ -1,26 +1,34 @@
 # Cruce
 
-Cruce is a Git-native platform for coordinating multiple heterogeneous AI coding agents working concurrently on the same repository. Agents work in their own tools and isolated checkouts; Cruce gives connected participants shared context about work in progress, exact revisions, review and human-controlled convergence into canonical source.
+Cruce aims to be air traffic control for multiple coding agents from different vendors working on one repository: proactively coordinate work to reduce avoidable conflicts, duplicated effort and routine human intervention. Agents keep their own tools and isolated checkouts. The current Git-native foundation provides shared observations, exact revisions, review and human-controlled convergence into canonical source.
 
-**Cruce starts where individual-agent isolation ends.** An agent can already manage several of its own tasks with Git worktrees. Cruce addresses the next problem: independent agents and tools working on the same codebase need to remain isolated, learn about one another's work and reconcile their results.
+Proactive intent/dependency tracking, coordination decisions, acknowledgements and opt-in controls through supported integrations are proposed in the [roadmap](ROADMAP.md), not implemented capabilities. The [product thesis](docs/product-thesis.md) explains the intended workflow, limits and hypothesis to validate.
+
+**Cruce starts where individual-agent isolation ends.** An agent can already manage several of its own tasks with Git worktrees. Independent tools can still duplicate an outcome, change incompatible assumptions or miss a dependency. The goal is to surface these interactions while work is underway and keep independent work moving, then reconcile results under review. Two edits to the same file need not interfere; edits to different files can.
 
 Codex, Claude Code, Cursor, Gemini CLI and internal or future agents belong in this model. That is a product boundary, not a claim of tested interoperability with every client. The current bridge writes configuration for Codex, Claude Code and Cursor; other clients need a compatible adapter. See [MCP and agent participation](docs/mcp.md).
+
+The implemented foundation and proposed coordination layer are separate below. Dashed links describe proposed interactions, not available controls.
 
 ```mermaid
 flowchart TB
     A[Agent in tool A] --> WA[Local checkout for workspace A]
     B[Agent in tool B] --> WB[Local checkout for workspace B]
-    WA <-->|Git + MCP: context, reports, exact source| C[Cruce coordination]
+    WA <-->|Git + MCP: context, reports, exact source| C[Current Cruce foundation]
     WB <-->|Git + MCP: context, reports, exact source| C
+    subgraph Proposed[Proposed proactive coordination]
+        I[Fresh intent, assumptions and dependencies] --> M[Assess meaningful interference]
+        M --> Q[Scoped recommendations and explicit responses]
+    end
+    C -.->|Intent and current observations| I
+    Q -.->|Deliver through supported integrations| C
+    Q -.->|Ambiguity or unresolved disagreement| H[Developer decision]
     C --> R[Human review of exact revisions]
     R -->|Human approval, readiness, non-forced promotion| G[Canonical Git: Cloudflare Artifacts]
-    G --> X[CRUCE BOUNDARY]
-    X --> CI[External CI / Build / Release]
-    CI --> D[Deployment]
-    D --> RT[Runtime]
+    G --> X[Outside Cruce: CI, releases, deployment and runtime]
 ```
 
-Worktrees isolate work. Cruce coordinates workers. Cruce does not launch agents, host an editor or require scheduling clearance before local edits. Overlap is advisory; it does not prove a semantic conflict or guarantee compatibility.
+Worktrees isolate work. Cruce coordinates workers. Cruce does not launch agents, host an editor or require scheduling clearance before local edits. Current overlap is advisory; it does not prove a semantic conflict or guarantee compatibility. Future targeted pause/resume controls require opt-in and demonstrated integration support; Cruce cannot reliably stop arbitrary agents.
 
 ## Git stays Git
 
@@ -49,7 +57,9 @@ To use Cruce with real repositories, follow [Git and bridge setup](docs/native-s
 
 ## Status
 
-Cruce is early, experimental software, and its name remains provisional. The current foundation has local controller, Git, bridge and browser coverage. The native Git gateway and current namespace model have **not been verified in the configured live Worker**; earlier provider checks covered an older implementation. A heterogeneous-agent workflow pilot remains open. [Verification](docs/local-verification.md) records the evidence and limits.
+Cruce is early, experimental software, and its name remains provisional. The current foundation has local controller, Git, bridge and browser coverage. The native Git gateway and current namespace model have **not been verified in the configured live Worker**; earlier provider checks covered an older implementation. [Verification](docs/local-verification.md) records the evidence and limits.
+
+The proposed first pilot uses one developer, one repository, Codex and Claude Code, subject to demonstrated integration support. It must show reduced routine intervention, duplicated effort and integration rework against ordinary worktrees and Git review, within predeclared limits on delay, reporting effort, cost and quality. The [roadmap](ROADMAP.md#how-we-choose-what-to-build) includes failure and simplification criteria; product value and cross-tool context consumption remain unproven.
 
 Cruce is not a Git/Git-worktree replacement, a Claude Code worktree manager, a GitHub/GitLab clone, a remote IDE, a cloud coding environment, an agent runtime, a general agent orchestrator or a CI/CD replacement. Its scope is coordination of concurrent repository work. See [product boundaries](docs/product-thesis.md).
 
