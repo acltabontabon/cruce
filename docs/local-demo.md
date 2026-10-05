@@ -19,7 +19,7 @@ Open the loopback URL printed by the server. The port changes between runs. Keep
 
 ## 1. Find your namespace and repository
 
-The opening view shows the personal **Alex Morgan** namespace and shared **Fernloop** namespace. **Work in motion** provides a route into the active sample repository. Click **payment-service** to inspect it.
+The opening view shows the personal **Alex Morgan** namespace and shared **Fernloop** namespace. Namespaces group compact repository rows. **Work in motion** shows miniature workspace paths and their reported shared surface, and provides a route into the active sample repository. Click **payment-service** to inspect it.
 
 ![Namespace home with personal and shared namespaces and the sample repository](images/local-demo/namespaces.jpg)
 
@@ -27,17 +27,19 @@ The opening view shows the personal **Alex Morgan** namespace and shared **Fernl
 
 The repository **Overview** shows two active workspaces: Codex is implementing a retry policy, and Alex Morgan is inspecting a payment timeout. Both report changes to `src/retry.ts`. **Shared surfaces** makes that overlap visible; it does not establish a Git conflict or semantic incompatibility.
 
+Canonical source has its own line; writer lanes show immutable starting revisions and reported heads. A copper bracket identifies the shared surface without joining Git histories. Select the surface to see its participating workspaces.
+
 The review queue names an exact revision, `9461bc8e`, rather than only a branch. Click **Bounded retry policy** to open its review. Click a workspace row to explore its actor, starting revision and execution details.
 
 ![Repository overview with two active workspaces, advisory overlap and a review queue](images/local-demo/overview.jpg)
 
 ## 3. Read the review requirements
 
-The expanded change in **Work** pins base `4906343f` and head `9461bc8e`. It offers a reasoned review and verification attestation. **Promote source** is disabled in this sample state because human approval and trusted passing test evidence are still required.
+The focused change detail in **Work** pins base `4906343f` and head `9461bc8e`. It offers a reasoned review and verification attestation. **Promote source** is disabled in this sample state because human approval and trusted passing test evidence are still required.
 
 Review decisions concern this exact revision. An authenticated human attestation and an agent's reported evidence have different trust. The fixture lets you explore the controls, but it does not prove hosted Git promotion works. **Inspect diff** leads to the Code view; **Code** also provides source and history controls.
 
-![Expanded change with pinned revisions, review controls, verification and disabled promotion](images/local-demo/review.jpg)
+![Focused change with pinned revisions, readiness reasons, evidence and separate human decisions](images/local-demo/review.jpg)
 
 ## 4. Follow the source artifact
 
@@ -49,7 +51,7 @@ Cruce’s coordination boundary ends at reviewed reconciliation into canonical G
 
 ## 5. Keep account and namespace access distinct
 
-Open **Your account** at the bottom of the sidebar. This view shows the sample identity and namespace membership links. In the real system, sign-in identity and namespace/repository permissions are separate. **Members** and **Teams** live under the shared namespace, while repository settings live in repository navigation.
+Open **Your account** at the bottom of the sidebar (inside Navigation on mobile). This view shows the sample identity and namespace membership links. In the real system, sign-in identity and namespace/repository permissions are separate. **Members** and **Teams** live under the shared namespace, while repository settings live in repository navigation.
 
 ![Sample account identity with personal and shared namespace links](images/local-demo/account.jpg)
 

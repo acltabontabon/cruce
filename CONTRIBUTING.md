@@ -31,7 +31,7 @@ Offline mode avoids configured cloud provisioning; it does not bypass Access. Us
 | Authentication, persistence, Git transport, provider adapters | `src/worker`, `test/worker`, `test/git` |
 | Shared contracts and MCP catalog | `src/shared/platform.ts`, `src/shared/tools.ts` |
 | Local isolation, bridge and credentials | `runner`, `test/runner` |
-| Console and navigation | `src/ui`, `test/browser` |
+| Console and navigation | `src/ui`, `test/browser`, [visual identity and interaction](docs/design.md) |
 | Pinned source context | `src/intelligence`, `test/intelligence` |
 | Reproducible examples and verification | `src/demo`, `demo`, `tools/verify-scenario.ts` |
 

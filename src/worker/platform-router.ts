@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { namespaceMaintain, SCOPES, type Scope } from "../core/capabilities.ts";
 import { DomainError, requireValue } from "../core/errors.ts";
+import { repositorySummary } from "../shared/coordination.ts";
 import { parseGitRoute } from "../shared/git-access.ts";
 import { type Actor, branch, CommandInput, id, name, path, RESOURCE_ACTIONS, type Repository } from "../shared/platform.ts";
 import { type AuthEnv, type AuthProps, consoleIdentity, validateIdentity } from "./auth.ts";
@@ -170,12 +171,7 @@ export async function platformRoute(
 						) as Promise<import("../shared/platform.ts").RepositorySnapshot>,
 				),
 			);
-			const repositorySummaries = snapshots.map((s) => ({
-				id: s.repository.id,
-				active: s.workspaces.filter((x) => x.state === "active").length,
-				overlaps: s.overlaps.length,
-				latestArtifact: s.artifacts.at(-1),
-			}));
+			const repositorySummaries = snapshots.map(repositorySummary);
 			const activity = snapshots
 				.flatMap((s) => s.activity.map((event) => ({ ...event, repositoryId: s.repository.id, repositoryName: s.repository.name })))
 				.sort((a, b) => b.at - a.at)

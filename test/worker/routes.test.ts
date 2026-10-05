@@ -70,9 +70,21 @@ function fixture() {
 			["cruce:read", "workspace:write"],
 			bridge,
 		);
-	return { call, path, repo, directory, controller, command, user };
+	return { call, path, repo, directory, controller, command, user, namespace };
 }
 describe("namespace repository contracts", () => {
+	it("namespace topology is an authorized coordination read and rechecks revoked membership", async () => {
+		const f = fixture();
+		const url = `/api/namespaces/${f.repo.namespaceId}`;
+		const result = (await (await f.call(url))!.json()) as { repositorySummaries: { topology: unknown }[] };
+		expect(result.repositorySummaries[0].topology).toEqual({ workspaces: [], intersections: [] });
+		expect(f.command).toHaveBeenCalledTimes(1);
+		expect(f.command.mock.calls[0][1].tool).toBe("get_repository");
+		delete f.namespace.state.members[f.user.id];
+		await expect(f.call(url)).rejects.toThrow();
+		expect(f.command).toHaveBeenCalledTimes(1);
+	});
+
 	it.each(["environments", "environments/old", "deployments", "deployments/old"])(
 		"returns 404 for removed collection %s",
 		async (section) => {

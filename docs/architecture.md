@@ -36,6 +36,8 @@ An authorized agent may participate in many workspaces; each workspace belongs t
 
 Canonical does not mean a local clone, cached Git objects, a workspace fork, retained source storage or an arbitrary external remote. Publication retains source separately without advancing accepted history; promotion advances canonical history.
 
+The [console design guide](design.md) owns visual identity and topology semantics. Console topology is a presentation of authorized snapshots, never an inferred Git DAG or an independent readiness/authority decision. Namespace summaries expose minimal workspace and overlap membership for miniature views without provider reads.
+
 The console **Artifacts** area lists both source and evidence artifacts, with revision, producer/trust, storage/hash, content and lineage inspection. Reviews and verification decisions live in **Work**. Keep Artifacts as the mixed collection label: Sources or Evidence would exclude part of it, while Publications would blur the source-publication operation with stored evidence. This area is not the Cloudflare Artifacts service or a provider resource browser.
 
 ### Workspace durability

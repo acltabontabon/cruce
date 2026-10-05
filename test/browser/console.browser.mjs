@@ -148,7 +148,7 @@ test("workspaces disclose upstream updates and inspect advisory overlap without 
 test("exact revision review and attestation update readiness", async () => {
 	await openRepo();
 	await page.getByRole("navigation", { name: "Repository navigation" }).getByRole("button", { name: "work", exact: true }).click();
-	await page.getByText(/#1 Bounded retry policy/).click();
+	await page.getByRole("button", { name: /#1.*Bounded retry policy/ }).click();
 	await page.getByLabel("Reason", { exact: true }).fill("Inspected exact commit");
 	await page.getByRole("button", { name: "Submit review" }).click();
 	await page.getByLabel("What you inspected").fill("Verified local test run against this commit");
@@ -188,9 +188,11 @@ test("namespace home, account and creation remain usable on mobile", async () =>
 	await page.getByRole("button", { name: "Fernloop", exact: true }).waitFor();
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
 	await page.screenshot({ path: "dist/ui-checks/namespaces-mobile.png", fullPage: true });
+	await page.getByRole("button", { name: "Open navigation" }).click();
 	await page.getByRole("button", { name: "Your account", exact: true }).click();
 	await page.getByRole("heading", { name: "Your account", exact: true }).waitFor();
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+	await page.getByRole("button", { name: "Open navigation" }).click();
 	await page.getByRole("button", { name: "Switch namespace" }).click();
 	await page.getByRole("dialog").getByRole("button", { name: "Alex Morgan", exact: false }).click();
 	await page.getByRole("button", { name: "New repository", exact: true }).click();
@@ -205,7 +207,249 @@ test("repository clone uses normal Git and workspace fork cleanup is unavailable
 	await openRepo();
 	await page.getByText("Clone", { exact: true }).click();
 	await page.getByText(`git clone ${server.origin}/mcp/git/fernloop/payments/canonical.git`, { exact: true }).waitFor();
+	await page.keyboard.press("Escape");
 	await page.getByRole("button", { name: /Codex.*Implement retry policy/ }).click();
+	await page.getByText("Execution details", { exact: true }).click();
 	await page.getByText("Artifacts fork · ready", { exact: true }).waitFor();
 	assert.equal(await page.getByRole("button", { name: "Clean up retained fork" }).isDisabled(), true);
+});
+
+test("surface selection and keyboard focus preserve independent workspace identities", async () => {
+	await openRepo();
+	const surface = page.getByRole("button", { name: "src/retry.ts 2 workspaces" });
+	await surface.focus();
+	await page.keyboard.press("Enter");
+	assert.equal(await surface.getAttribute("aria-expanded"), "true");
+	assert.equal(await page.locator(".topology-lane.highlighted").count(), 2);
+	await page.locator(".surface-detail").getByRole("button", { name: "Implement retry policy" }).click();
+	await page.getByRole("heading", { name: "Implement retry policy", exact: true }).waitFor();
+	assert.equal(await page.locator(".workspace-list").count(), 0);
+	await page.reload();
+	await page.getByText("Started from", { exact: false }).waitFor();
+	await page.goBack();
+	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
+	const lane = page.getByRole("button", { name: /Codex.*Implement retry policy/ });
+	await lane.focus();
+	assert.equal(await page.locator(".surface-button.highlighted").count(), 1);
+});
+
+test("failed promotion preserves canonical source and reuses retry identity", async () => {
+	await openRepo();
+	const before = await page.locator(".canonical-track").innerText();
+	await page.getByRole("button", { name: /#1.*Bounded retry policy/ }).click();
+	await page.getByLabel("Reason", { exact: true }).fill("Exact revision inspected");
+	await page.getByRole("button", { name: "Submit review" }).click();
+	await page.getByText("Trusted passing tests evidence required", { exact: false }).waitFor();
+	assert.equal(await page.getByRole("button", { name: "Promote source", exact: true }).isDisabled(), true);
+	await page.getByLabel("What you inspected").fill("Checked the exact source");
+	await page.getByRole("button", { name: "Attest verification" }).click();
+	await page.getByText("Ready for human promotion").waitFor();
+	const keys = [];
+	await page.route("**/command", async (route) => {
+		const body = route.request().postDataJSON();
+		if (body.tool !== "promote_proposal") return route.continue();
+		keys.push(body.idempotencyKey);
+		await route.fulfill({ status: 503, json: { error: "Canonical update unavailable" } });
+	});
+	await page.getByRole("button", { name: "Promote source", exact: true }).click();
+	await page.getByRole("alert").filter({ hasText: "Canonical update unavailable" }).waitFor();
+	await page.getByRole("button", { name: "Promote source", exact: true }).click();
+	await page.getByRole("alert").filter({ hasText: "Canonical update unavailable" }).waitFor();
+	assert.equal(keys.length, 2);
+	assert.equal(keys[0], keys[1]);
+	await page.getByRole("navigation", { name: "Repository navigation" }).getByRole("button", { name: "overview", exact: true }).click();
+	assert.equal(await page.locator(".canonical-track").innerText(), before);
+	assert.equal(await page.locator(".promotion-link").count(), 0);
+});
+
+test("unknown canonical and disconnected writers stay distinct from accepted source", async () => {
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		const response = await route.fetch(),
+			data = await response.json();
+		delete data.sourceHead;
+		data.refs = [{ ref: "main", revision: "d".repeat(40), trust: "reported" }];
+		data.workspaces[0].state = "disconnected";
+		data.workspaces.push({
+			...data.workspaces[0],
+			id: "observer",
+			mode: "read",
+			state: "active",
+			actor: { ...data.workspaces[0].actor, name: "Read-only participant" },
+		});
+		await route.fulfill({ json: data });
+	});
+	await openRepo();
+	await page.locator(".canonical-track").getByText("Unavailable", { exact: true }).waitFor();
+	assert.equal(await page.locator(".topology-lane.disconnected").count(), 1);
+	assert.equal(await page.locator(".topology-lane").count(), 2);
+	await page.locator(".observers").getByText("Observers · Read-only participant").waitFor();
+	assert.equal(await page.getByRole("button", { name: "Clone", exact: true }).isDisabled(), true);
+});
+
+test("namespace failures remain unavailable and retry restores actual topology", async () => {
+	let fail = true;
+	await page.route("**/api/namespaces/fernloop", async (route) =>
+		fail ? route.fulfill({ status: 503, json: { error: "Namespace temporarily unavailable" } }) : route.continue(),
+	);
+	await page.goto(server.origin);
+	await page.getByRole("alert").filter({ hasText: "Namespace temporarily unavailable" }).waitFor();
+	assert.equal(await page.locator(".motion-row").count(), 0);
+	fail = false;
+	await page.getByRole("button", { name: "Retry", exact: true }).click();
+	await page.locator(".motion-row").getByText("2 active workspaces", { exact: true }).waitFor();
+	assert.equal(await page.locator(".mini-topology .crossing").count(), 1);
+});
+
+test("late source responses cannot overwrite a newer history inspection", async () => {
+	await openRepo();
+	await page.getByRole("navigation", { name: "Repository navigation" }).getByRole("button", { name: "code", exact: true }).click();
+	let release;
+	const gate = new Promise((resolve) => {
+		release = resolve;
+	});
+	let received;
+	const ready = new Promise((resolve) => {
+		received = resolve;
+	});
+	await page.route("**/command", async (route) => {
+		if (route.request().postDataJSON().tool !== "get_source") return route.continue();
+		received();
+		await gate;
+		await route.fulfill({ json: { files: { "late.ts": "SHOULD NOT REPLACE HISTORY" } } });
+	});
+	await page.getByRole("button", { name: "Browse source", exact: true }).click();
+	await ready;
+	await page.getByRole("button", { name: "Commit history", exact: true }).click();
+	await page.locator(".commit-history").waitFor();
+	const response = page.waitForResponse((r) => r.request().postData()?.includes("get_source"));
+	release();
+	await response;
+	await page.getByRole("heading", { name: "Code", exact: true }).waitFor();
+	assert.equal(await page.locator(".source-browser").count(), 0);
+	assert.equal(await page.locator(".commit-history").count(), 1);
+});
+
+test("mobile drawer traps focus, restores trigger and honors reduced motion", async () => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.emulateMedia({ reducedMotion: "reduce" });
+	await openRepo();
+	const trigger = page.getByRole("button", { name: "Open navigation" });
+	await trigger.click();
+	for (let i = 0; i < 18; i++) {
+		await page.keyboard.press("Tab");
+		assert.equal(await page.evaluate(() => !!document.activeElement?.closest("dialog")), true);
+	}
+	await page.keyboard.press("Escape");
+	assert.equal(await trigger.evaluate((e) => e === document.activeElement), true);
+	assert.equal(
+		await page
+			.locator(".topology-lane")
+			.first()
+			.evaluate((e) => getComputedStyle(e).transitionDuration),
+		"0s",
+	);
+});
+
+test("screen families remain readable across desktop, tablet, mobile and 200 percent zoom", async () => {
+	const data = await (await page.request.get(`${server.origin}/api/namespaces/fernloop/repositories/payments`)).json();
+	const root = `${server.origin}/?namespace=fernloop&repository=payments`;
+	const routes = [
+		["home", server.origin, "Agent work. Shared direction."],
+		["overview", root, "payment-service"],
+		["work", `${root}#/work`, "Work"],
+		["review", `${root}#/work/${data.proposals[0].id}`, "Bounded retry policy"],
+		["workspace", `${root}#/work/${data.workspaces[0].id}`, data.workspaces[0].title],
+		["artifact", `${root}#/artifacts/${data.artifacts[0].id}`, "Bounded retry policy"],
+		["code", `${root}#/code`, "Code"],
+		["repository-settings", `${root}#/settings`, "Repository settings"],
+		["members", `${server.origin}/?namespace=fernloop#/members`, "Members"],
+		["teams", `${server.origin}/?namespace=fernloop#/teams`, "Teams"],
+		["namespace-settings", `${server.origin}/?namespace=fernloop#/settings`, "Settings"],
+		["account", `${server.origin}/?page=account`, "Your account"],
+	];
+	for (const width of [1440, 1024, 390]) {
+		await page.setViewportSize({ width, height: 1000 });
+		for (const [name, url, title] of routes) {
+			await page.goto(url);
+			await page.getByRole("heading", { name: title, exact: true }).waitFor();
+			if (name === "code") {
+				await page.getByRole("button", { name: "Browse source", exact: true }).click();
+				await page.locator(".source-browser").waitFor();
+			}
+			if (name === "artifact") {
+				await page.getByRole("button", { name: "Trace lineage", exact: true }).click();
+				await page.locator(".lineage").waitFor();
+			}
+			await page.evaluate(() => document.fonts.ready);
+			assert.equal(
+				await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+				false,
+				`${name} overflow at ${width}`,
+			);
+			await page.screenshot({ path: `dist/ui-checks/${name}-${width}.png`, fullPage: true });
+		}
+	}
+	await page.setViewportSize({ width: 1440, height: 1000 });
+	await page.goto(root);
+	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
+	await page.evaluate(() => {
+		document.documentElement.style.zoom = "2";
+	});
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+	assert.equal(await page.getByRole("button", { name: "Open navigation" }).isVisible(), true);
+	assert.ok((await page.locator(".topology-panel").boundingBox()).width >= 500);
+	await page.screenshot({ path: "dist/ui-checks/overview-zoom.png", fullPage: true });
+	await page.evaluate(() => {
+		document.documentElement.style.zoom = "";
+	});
+	await page.goto(server.origin);
+	await page.setContent(
+		`<html><body style="margin:0;background:#f5f5ef"><img alt="Identity exploration" src="${server.origin}/brand/study.svg" width="900" height="790"></body></html>`,
+	);
+	await page.locator("img").evaluate((img) => img.decode());
+	await page.screenshot({ path: "dist/ui-checks/brand-study.png", fullPage: true });
+	await page.setContent(
+		`<html><body style="margin:32px;background:#f5f5ef;font-family:Arial"><h1>Cruce / optical sizes</h1>${["symbol-ink", "symbol-white", "symbol"].map((name) => `<div style="display:flex;align-items:center;gap:48px;padding:32px;background:${name === "symbol-ink" ? "#f5f5ef" : "#17251f"}">${[16, 24, 32].map((size) => `<img alt="${name} ${size}px" src="${server.origin}/brand/${name}.svg" width="${size}" height="${size}">`).join("")}</div>`).join("")}</body></html>`,
+	);
+	await page.locator("img").evaluateAll((imgs) => Promise.all(imgs.map((img) => img.decode())));
+	await page.screenshot({ path: "dist/ui-checks/brand-sizes.png", fullPage: true });
+});
+
+test("many writers, long paths and read-only authority keep a usable bounded overview", async () => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		const data = await (await route.fetch()).json();
+		const original = data.workspaces[0];
+		data.workspaces = Array.from({ length: 8 }, (_, i) => ({
+			...original,
+			id: `writer-${i}`,
+			startedAt: i,
+			title: `Independent change ${i} ${"extended-description-".repeat(5)}`,
+			branch: `cruce/${"long-branch-".repeat(10)}`,
+		}));
+		data.workspaces.push({ ...original, id: "ended", state: "completed" });
+		data.overlaps = [
+			{
+				id: "one",
+				kind: "file",
+				surface: `src/${"nested/".repeat(15)}renamed-file.ts`,
+				workspaces: ["writer-0", "writer-2"],
+				evidence: "reported",
+				observedAt: 1,
+			},
+			{ id: "two", kind: "file", surface: "assets/binary.dat", workspaces: ["writer-3", "writer-7"], evidence: "reported", observedAt: 1 },
+		];
+		data.permissions = { write: false, maintain: false, human: true };
+		await route.fulfill({ json: data });
+	});
+	await openRepo();
+	assert.equal(await page.locator(".topology-lane").count(), 6);
+	await page.getByRole("button", { name: "View all work · 2 more writers" }).waitFor();
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+	await page.screenshot({ path: "dist/ui-checks/many-writers-mobile.png", fullPage: true });
+	await page.getByRole("button", { name: /#1.*Bounded retry policy/ }).click();
+	assert.equal(await page.getByRole("button", { name: "Submit review" }).count(), 0);
+	assert.equal(await page.getByRole("button", { name: "Promote source" }).count(), 0);
+	await page.getByRole("button", { name: "← All work" }).click();
+	assert.equal(await page.locator(".workspace-list > button").count(), 9);
 });

@@ -1,12 +1,12 @@
 import { type ReactNode, useEffect, useId, useRef } from "react";
 
 const paths: Record<string, ReactNode> = {
+	menu: <path d="M4 7h16M4 12h16M4 17h16" />,
+
 	repositories: (
 		<>
-			<rect x="3" y="4" width="7" height="7" rx="1.5" />
-			<rect x="14" y="4" width="7" height="7" rx="1.5" />
-			<rect x="3" y="15" width="7" height="7" rx="1.5" />
-			<rect x="14" y="15" width="7" height="7" rx="1.5" />
+			<path d="M8 5h12v16H8M8 5H4v16h4M8 5v16M12 9h5M12 13h5" />
+			<circle cx="14" cy="17" r="1" />
 		</>
 	),
 	settings: (
@@ -139,16 +139,17 @@ export function Dialog({
 export function BranchArt() {
 	return (
 		<div className="branch-art" aria-hidden="true">
-			<svg viewBox="0 0 440 190" fill="none" aria-hidden="true">
-				<path d="M-20 122h180c50 0 55-64 110-64h200M160 122h90c55 0 55 44 110 44h110" stroke="currentColor" strokeWidth="2" />
-				<path d="M-20 122h490" stroke="currentColor" strokeWidth="2" />
-				<circle cx="100" cy="122" r="9" fill="currentColor" />
-				<circle cx="270" cy="58" r="9" fill="currentColor" />
-				<circle cx="360" cy="166" r="9" fill="currentColor" />
-				<circle cx="204" cy="122" r="21" fill="var(--accent)" stroke="var(--ink)" strokeWidth="2" />
-				<path d="m196 122 6 6 10-12" stroke="var(--ink)" strokeWidth="2" />
+			<svg viewBox="0 0 320 180" fill="none" aria-hidden="true">
+				<path d="M24 54h272M24 126h272" stroke="currentColor" strokeWidth="2" />
+				{[54, 126].map((y) => (
+					<g key={y}>
+						<circle cx="24" cy={y} r="5" fill="var(--paper)" stroke="currentColor" strokeWidth="2" />
+						<circle cx="296" cy={y} r="5" fill="var(--paper)" stroke="currentColor" strokeWidth="2" />
+					</g>
+				))}
+				<path d="M170 40h-12v100h12" stroke="var(--attention)" strokeWidth="2" />
 			</svg>
-			<span className="art-label label-code">your code</span>
+			<span className="art-label label-code">independent work</span>
 			<span className="art-label label-work">shared context</span>
 		</div>
 	);

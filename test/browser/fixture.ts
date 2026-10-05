@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { DirectoryController, initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
 import { initialRepository, RepositoryController } from "../../src/core/platform.ts";
+import { repositorySummary } from "../../src/shared/coordination.ts";
 import { type Actor, type Command, CommandInput, type Repository } from "../../src/shared/platform.ts";
 import { MemoryFs } from "../../src/worker/git/memory-fs.ts";
 import { GitWorkspace } from "../../src/worker/git/workspace.ts";
@@ -124,12 +125,7 @@ export async function fixture() {
 				}
 				const repositorySummaries = w.state.repositories.map((r) => {
 					const snapshot = runtimes.get(r.id)!.snapshot({ ...a, repositoryId: r.id, repositoryRole: "maintain" });
-					return {
-						id: r.id,
-						active: snapshot.workspaces.filter((workspace) => workspace.state === "active").length,
-						overlaps: snapshot.overlaps.length,
-						latestArtifact: snapshot.artifacts.at(-1),
-					};
+					return repositorySummary(snapshot);
 				});
 				return json(res, { ...w.state, repositorySummaries, role: a.role, people: [user], permissions: { maintain: true, owner: true } });
 			}
