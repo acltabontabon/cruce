@@ -20,6 +20,7 @@ export function ChangeDetail({
 	const p = view.proposals.find((p) => p.id === id);
 	const [error, setError] = useState("");
 	if (!p) return <p className="empty">Change unavailable.</p>;
+	const recovery = view.promotionRecovery[p.id];
 	const evidence = view.verifications.filter((v) => v.proposalId === p.id && v.revision === p.revision);
 	const reports = view.artifacts.filter(
 		(a) =>
@@ -188,6 +189,26 @@ export function ChangeDetail({
 						)}
 					</div>
 				</>
+			)}
+			{["promoting", "promoted"].includes(p.state) && recovery && (
+				<div className="promotion-action">
+					<p>
+						{p.state === "promoted"
+							? "Source was promoted. Finish recording completion for the interrupted operation."
+							: "The promotion was interrupted. Reconcile its exact remote outcome before continuing."}
+					</p>
+					<button
+						type="button"
+						className="primary"
+						disabled={busy || !recovery.ready}
+						onClick={() => {
+							setError("");
+							void execute(recovery.command).catch((e) => setError((e as Error).message));
+						}}
+					>
+						{p.state === "promoted" ? "Finish promotion" : "Reconcile promotion"}
+					</button>
+				</div>
 			)}
 			{error && <p role="alert">{error}</p>}
 		</section>

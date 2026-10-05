@@ -1091,6 +1091,39 @@ test("failed promotion preserves canonical source and reuses retry identity", as
 	assert.equal(await page.locator(".promotion-link").count(), 0);
 });
 
+test("interrupted promotion can reconcile after reload with its persisted operation identity", async () => {
+	let command;
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		const response = await route.fetch(),
+			data = await response.json();
+		const proposal = data.proposals[0];
+		proposal.state = "promoting";
+		command = {
+			tool: "promote_proposal",
+			namespaceId: "fernloop",
+			repositoryId: "payments",
+			proposalId: proposal.id,
+			idempotencyKey: "durable-promotion-key",
+		};
+		data.readiness[proposal.id] = { ready: false, reasons: ["Promotion in progress"] };
+		data.promotionRecovery = { [proposal.id]: { ready: true, reasons: [], command } };
+		await route.fulfill({ response, json: data });
+	});
+	await openRepo();
+	await page.getByRole("navigation", { name: "Repository navigation" }).getByRole("button", { name: "work", exact: true }).click();
+	await page.getByRole("button", { name: /#1.*Bounded retry policy/ }).click();
+	await page.reload();
+	await page.getByRole("button", { name: "Reconcile promotion", exact: true }).waitFor();
+	let sent;
+	await page.route("**/command", async (route) => {
+		sent = route.request().postDataJSON();
+		await route.fulfill({ status: 200, json: { state: "complete" } });
+	});
+	await page.getByRole("button", { name: "Reconcile promotion", exact: true }).click();
+	await page.getByRole("status").filter({ hasText: "Saved." }).waitFor();
+	assert.deepEqual(sent, command);
+});
+
 test("unknown canonical and disconnected writers stay distinct from accepted source", async () => {
 	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
 		const response = await route.fetch(),

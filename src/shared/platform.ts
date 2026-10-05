@@ -222,7 +222,15 @@ export interface Promotion {
 	to: string;
 	actor: Actor;
 	at: number;
-	state: "prepared" | "complete";
+	state: "prepared" | "uncertain" | "failed" | "complete";
+	operation?: {
+		id: string;
+		fingerprint: string;
+		reservationId: string;
+		phase: "prepared" | "attempted" | "confirmed";
+		command: Command;
+		settled?: boolean;
+	};
 }
 export interface ActivityEvent {
 	id: string;
@@ -252,6 +260,7 @@ export interface RepositorySnapshot extends Omit<RepositoryState, "receipts"> {
 	permissions: { write: boolean; maintain: boolean; human: boolean };
 	sourceAvailable: boolean;
 	readiness: Record<string, { ready: boolean; reasons: string[] }>;
+	promotionRecovery: Record<string, { command: Command; ready: boolean; reasons: string[] }>;
 	forkCleanup: Record<string, { ready: boolean; reasons: string[] }>;
 	context?: { available: boolean; files: Record<string, string> };
 }

@@ -345,6 +345,35 @@ describe("revision-bound review", () => {
 		c.state.sourceHead = "c".repeat(40);
 		expect(c.readiness(p).ready).toBe(false);
 	});
+
+	it("derives recovery only for the authorized operation owner and preserves review readiness", () => {
+		const { c, p } = proposed();
+		c.command(cmd("review_proposal", { proposalId: p.id, revision: head, outcome: "approve", reason: "Inspected" }), authority());
+		const command = cmd("promote_proposal", { proposalId: p.id, idempotencyKey: "persisted-key" });
+		const promotion: import("../../src/shared/platform.ts").Promotion = {
+			id: "pending",
+			proposalId: p.id,
+			from: base,
+			to: head,
+			actor: human,
+			at: 100,
+			state: "uncertain",
+			operation: { id: "operation", fingerprint: "input", reservationId: "reservation", phase: "attempted", command },
+		};
+		c.state.promotions.push(promotion);
+		p.state = "promoting";
+		expect(c.readiness(p).ready).toBe(false);
+		expect(c.snapshot(authority()).promotionRecovery[p.id]).toEqual({ command, ready: true, reasons: [] });
+		expect(c.snapshot(authority(agent)).promotionRecovery).toEqual({});
+		expect(c.snapshot({ ...authority(), repositoryRole: "read" }).promotionRecovery).toEqual({});
+		expect(c.snapshot(authority({ ...human, id: "other-human" })).promotionRecovery).toEqual({});
+		p.state = "open";
+		c.command(cmd("review_proposal", { proposalId: p.id, revision: head, outcome: "concern", reason: "Recheck" }), authority(agent));
+		p.state = "promoting";
+		expect(c.snapshot(authority()).promotionRecovery[p.id].ready).toBe(false);
+		promotion.state = "failed";
+		expect(c.snapshot(authority()).promotionRecovery).toEqual({});
+	});
 	it("traces source, workspace, review evidence and canonical promotion in both directions", () => {
 		const { c, s, p } = proposed();
 		const verification = c.command(

@@ -6,7 +6,7 @@ import { gitRemotePath, parseGitRoute } from "../shared/git-access.ts";
 import type { Artifact, Command, Repository, RepositoryState, ResourceAction, WorkspaceUpdateDetails } from "../shared/platform.ts";
 import { authorizeMachine, HUMAN_TOOLS, toolByName } from "../shared/tools.ts";
 import { boundedBody, type RepositoryHost, ResourceBoundary } from "./artifacts.ts";
-import type { GitWorkspace } from "./git/workspace.ts";
+import { GitUpdateRejected, type GitWorkspace } from "./git/workspace.ts";
 import type { ConnectionGrant, NamespaceRuntime } from "./namespace-runtime.ts";
 import { hash, Serial, type Store } from "./store.ts";
 
@@ -159,6 +159,11 @@ export class RepositoryRuntime {
 			}
 			const fingerprint = stable(cmd),
 				receipt = state.receipts[op];
+			if (cmd.tool === "promote_proposal") {
+				humanMaintain(a);
+				if (receipt && receipt.fingerprint !== fingerprint) throw new DomainError(409, "Operation identity reused");
+				return this.promote(c, cmd, grant, op, fingerprint);
+			}
 			if (mutation && receipt) {
 				if (receipt.fingerprint !== fingerprint) throw new DomainError(409, "Operation identity reused");
 				return receipt.result;
@@ -457,44 +462,6 @@ export class RepositoryRuntime {
 						at: this.now(),
 					});
 				});
-			} else if (cmd.tool === "promote_proposal") {
-				humanMaintain(a);
-				const p = c.proposal(cmd.proposalId),
-					ready = c.readiness(p);
-				if (!ready.ready) throw new DomainError(409, ready.reasons.join("; "));
-				result = await this.gate(grant, cmd, "revision.publish", async (host) => {
-					const name = requireValue(repo.storageName, "Source repository unavailable"),
-						info = await host.info(name);
-					const { result: head } = await host.withToken(name, "read", (token) =>
-						this.git.fetch({ url: info.remote, token, remoteBranch: repo.defaultBranch, localRef: "refs/cruce/promotion-current" }),
-					);
-					if (head !== p.base && head !== p.revision) throw new DomainError(409, "Source advanced; refresh and propose a new revision");
-					if (head !== p.revision) {
-						await this.git.setRef("refs/cruce/promotion-next", p.revision);
-						await host.withToken(name, "write", (token) =>
-							this.git.push({
-								url: info.remote,
-								token,
-								localRef: "refs/cruce/promotion-next",
-								remoteRef: `refs/heads/${repo.defaultBranch}`,
-							}),
-						);
-					}
-					state.sourceHead = p.revision;
-					p.state = "promoted";
-					const promotion = {
-						id: `${op.slice(0, 24)}-promotion`,
-						proposalId: p.id,
-						from: p.base,
-						to: p.revision,
-						actor: a.actor,
-						at: this.now(),
-						state: "complete" as const,
-					};
-					state.promotions.push(promotion);
-					c.event(a.actor, "source_promoted", p.title, [p.id, p.revision]);
-					return promotion;
-				});
 			} else result = c.command(cmd, a);
 			if (mutation) {
 				if (cmd.tool === "start_workspace" && a.actor.kind === "human" && a.actor.connectionId)
@@ -506,6 +473,132 @@ export class RepositoryRuntime {
 			return result;
 		});
 	}
+	/** Journal before I/O; a retry reconciles an attempted update and never sends it twice. */
+	private async promote(c: RepositoryController, cmd: Command, grant: ConnectionGrant, op: string, fingerprint: string) {
+		const state = c.state,
+			repo = state.repository;
+		let promotion = state.promotions.find((p) => p.operation?.id === op);
+		if (promotion && (promotion.operation!.fingerprint !== fingerprint || promotion.proposalId !== cmd.proposalId))
+			throw new DomainError(409, "Operation identity reused");
+		const p = c.proposal(cmd.proposalId);
+		if (promotion?.state === "failed") throw new DomainError(409, "Promotion failed; reconcile source and obtain fresh review");
+		if (promotion?.state !== "complete") {
+			if (state.promotions.some((other) => other !== promotion && ["prepared", "uncertain"].includes(other.state)))
+				throw new DomainError(409, "Reconcile the pending promotion before another canonical update");
+			const ready = c.readiness(p, promotion);
+			if (!ready.ready) throw new DomainError(409, ready.reasons.join("; "));
+		}
+		const reservation = await this.namespace.reserve(grant, repo.id, cmd.idempotencyKey!, fingerprint, "revision.publish", cmd.workspaceId);
+		// Completion and the receipt are durable before settlement. Lost settlement is retried
+		// under current authority without fetching or pushing canonical again.
+		if (promotion?.state === "complete") {
+			await this.namespace.settle(reservation.id, "complete");
+			promotion.operation!.settled = true;
+			this.save(c);
+			return promotion;
+		}
+		if (!promotion) {
+			promotion = {
+				id: `${op.slice(0, 24)}-promotion`,
+				proposalId: p.id,
+				from: p.base,
+				to: p.revision,
+				actor: grant.actor,
+				at: this.now(),
+				state: "prepared",
+				operation: { id: op, fingerprint, reservationId: reservation.id, phase: "prepared", command: cmd },
+			};
+			state.promotions.push(promotion);
+			p.state = "promoting";
+		}
+		const operation = promotion.operation!;
+		let unexpectedMovement = false;
+		try {
+			this.save(c);
+			await this.git.ensureInit();
+			const artifact = c.artifact(p.artifactId);
+			if (artifact.kind !== "source" || artifact.revision !== p.revision || artifact.baseRevision !== p.base)
+				throw new DomainError(409, "Exact reviewed source unavailable");
+			// Validate full retained source, even on retries; local refs cannot prove success.
+			await this.git.exportPack(p.revision);
+			if ((await this.git.mergeBase(p.base, p.revision)) !== p.base || p.base === p.revision)
+				throw new DomainError(409, "Promotion requires a non-forced forward update");
+			const host = await (await this.resources()).host();
+			const name = requireValue(repo.storageName, "Source repository unavailable"),
+				info = await host.info(name);
+			if (!state.canonical || info.id !== state.canonical.id)
+				throw new DomainError(409, "Canonical provider identity changed; promotion refused");
+			const remoteRef = `refs/heads/${repo.defaultBranch}`;
+			const remoteHead = async () =>
+				(
+					await host.withToken(
+						name,
+						"read",
+						async (token) => (await this.git.remoteRefs({ url: info.remote, token })).find((ref) => ref.ref === remoteRef)?.oid,
+					)
+				).result;
+			if (operation.phase === "prepared") {
+				if ((await remoteHead()) !== promotion.from)
+					throw new DomainError(409, "Canonical moved; reconcile source and obtain fresh review");
+				const localRef = `refs/cruce/promotion/${op}`;
+				await this.git.setRef(localRef, promotion.to);
+				await host.withToken(name, "write", async (token) => {
+					await this.git.push({
+						url: info.remote,
+						token,
+						localRef,
+						remoteRef,
+						expected: {
+							old: promotion!.from,
+							next: promotion!.to,
+							beforeUpdate: async () => {
+								humanMaintain(await this.namespace.authority(grant, repo.id));
+								operation.phase = "attempted";
+								this.save(c);
+							},
+						},
+					});
+					// Record the acknowledged update before token cleanup can fail.
+					operation.phase = "confirmed";
+					this.save(c);
+				});
+			}
+			// Independent provider observation, including interrupted-response reconciliation.
+			// Only the exact candidate can satisfy this attempted operation, never descendants.
+			if ((await remoteHead()) !== promotion.to) {
+				unexpectedMovement = true;
+				throw new DomainError(409, "Promotion outcome differs from the exact candidate; reconcile source and obtain fresh review");
+			}
+			humanMaintain(await this.namespace.authority(grant, repo.id));
+			operation.phase = "confirmed";
+			promotion.state = "complete";
+			state.sourceHead = promotion.to;
+			p.state = "promoted";
+			c.event(promotion.actor, "source_promoted", p.title, [p.id, p.revision, promotion.id]);
+			state.receipts[op] = { fingerprint, result: promotion };
+			this.save(c);
+		} catch (error) {
+			// Reload: a failed persistence call must not leave an in-memory completion
+			// capable of overwriting the durable journal on error handling.
+			const durable = this.state();
+			const pending = durable.promotions.find((item) => item.id === promotion!.id);
+			if (pending && pending.state !== "complete") {
+				pending.state =
+					unexpectedMovement || error instanceof GitUpdateRejected || (error instanceof DomainError && error.status === 409)
+						? "failed"
+						: "uncertain";
+				if (pending.state === "failed") durable.proposals.find((item) => item.id === p.id)!.state = "rejected";
+				this.store.put("repository", durable);
+			}
+			await this.namespace.settle(reservation.id, "uncertain");
+			throw error;
+		}
+		await this.namespace.settle(reservation.id, "complete");
+		operation.settled = true;
+		this.save(c);
+		return promotion;
+	}
+
 	exportSource(revision: string, grant: ConnectionGrant) {
 		return this.serial.run(async () => {
 			const state = this.state();

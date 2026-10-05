@@ -28,6 +28,8 @@ export interface MergeOutcome {
 	alreadyMerged: boolean;
 }
 
+export class GitUpdateRejected extends Error {}
+
 export const NOTES_REF = "refs/notes/cruce";
 
 type Fs = PromiseFsClient;
@@ -427,16 +429,38 @@ export class GitWorkspace {
 		await git.setConfig({ ...this.base, path: "remote.artifacts.fetch", value: "+refs/*:refs/remotes/artifacts/*" });
 	}
 
-	async push(input: { url: string; token: string; localRef: string; remoteRef: string; force?: boolean }) {
-		const result = await git.push({
-			...this.base,
-			http,
-			url: input.url,
-			ref: input.localRef,
-			remoteRef: input.remoteRef,
-			force: input.force,
-			headers: { Authorization: `Bearer ${input.token}` },
-		});
+	async push(input: {
+		url: string;
+		token: string;
+		localRef: string;
+		remoteRef: string;
+		force?: boolean;
+		expected?: { old: string; next: string; beforeUpdate: () => Promise<void> };
+	}) {
+		if (input.expected && input.force) throw new Error("Expected-base pushes cannot force an update");
+		const result = await git
+			.push({
+				...this.base,
+				http,
+				url: input.url,
+				ref: input.localRef,
+				remoteRef: input.remoteRef,
+				force: input.force,
+				onPrePush: input.expected
+					? async ({ localRef, remoteRef }) => {
+							if (remoteRef.ref !== input.remoteRef || remoteRef.oid !== input.expected!.old || localRef.oid !== input.expected!.next)
+								throw new GitUpdateRejected("Approved Git revisions changed; reconcile and obtain fresh review");
+							await input.expected!.beforeUpdate();
+							return true;
+						}
+					: undefined,
+				headers: { Authorization: `Bearer ${input.token}` },
+			})
+			.catch((error: unknown) => {
+				if (input.expected && (error instanceof Errors.GitPushError || error instanceof Errors.PushRejectedError))
+					throw new GitUpdateRejected("Canonical Git update rejected; reconcile source and obtain fresh review");
+				throw error;
+			});
 		if (!result.ok) throw new Error(`push rejected: ${JSON.stringify(result.refs)}`);
 		return result;
 	}

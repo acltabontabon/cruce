@@ -6,12 +6,13 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
-import type { Actor, Command, Repository, Workspace } from "../../src/shared/platform.ts";
+import type { Actor, Command, Proposal, Repository, Workspace } from "../../src/shared/platform.ts";
 import { type RepositoryHost, ResourceBoundary } from "../../src/worker/artifacts.ts";
 import { MemoryFs } from "../../src/worker/git/memory-fs.ts";
 import { GitWorkspace } from "../../src/worker/git/workspace.ts";
 import { RepositoryRuntime } from "../../src/worker/repository-runtime.ts";
 import type { Store } from "../../src/worker/store.ts";
+import { gitServer } from "../git/http-fixture.ts";
 
 const owner: Actor = { id: "human", userId: "owner", name: "Cris", kind: "human" };
 const agent: Actor = { id: "agent", userId: "owner", name: "Codex", kind: "agent", connectionId: "oauth" };
@@ -102,6 +103,11 @@ async function fixture(_hosted = true) {
 	{
 		const state = runtime.state();
 		state.sourceHead = base;
+		state.canonical = {
+			id: repository.storageName!,
+			name: repository.storageName!,
+			remote: `https://example.invalid/${repository.storageName}`,
+		};
 		store.put("repository", state);
 	}
 	let n = 0;
@@ -120,7 +126,7 @@ async function fixture(_hosted = true) {
 		execution: { id: s.id, checkoutId: "checkout", machineId: "machine", kind: "worktree", owned: true },
 	});
 	const pack = Buffer.from(await git.exportPack(head)).toString("base64");
-	return { w, git, host, push, store, runtime, call, workspace: s, base, head, pack };
+	return { w, git, host, push, store, port, runtime, call, workspace: s, base, head, pack };
 }
 describe("repository runtime", () => {
 	it("forks canonical directly and keeps hosted identity out of local execution metadata", async () => {
@@ -288,6 +294,9 @@ describe("repository runtime", () => {
 			human,
 		);
 		const fetch = vi.spyOn(f.git, "fetch").mockResolvedValue(f.base);
+		vi.spyOn(f.git, "remoteRefs")
+			.mockResolvedValueOnce([{ ref: "refs/heads/trunk", oid: f.base }])
+			.mockResolvedValueOnce([{ ref: "refs/heads/trunk", oid: upstream }]);
 		await f.call("promote_proposal", { proposalId: proposal.id }, human);
 		await f.call("report_change", {
 			workspaceId: f.workspace.id,
@@ -330,6 +339,9 @@ describe("repository runtime", () => {
 			human,
 		);
 		fetch.mockResolvedValue(upstream);
+		vi.mocked(f.git.remoteRefs)
+			.mockResolvedValueOnce([{ ref: "refs/heads/trunk", oid: upstream }])
+			.mockResolvedValueOnce([{ ref: "refs/heads/trunk", oid: merged.oid }]);
 		await f.call("promote_proposal", { proposalId: next.id }, human);
 		expect(f.runtime.state().sourceHead).toBe(merged.oid);
 		expect(await f.call("get_workspace_updates", { workspaceId: f.workspace.id })).toMatchObject({
@@ -539,4 +551,273 @@ it("clones, pushes and fetches with native Git through the workspace gateway whi
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 		await rm(root, { recursive: true, force: true });
 	}
+});
+
+describe("exact approved-base promotion", () => {
+	async function prepared() {
+		const f = await fixture();
+		const middle = await f.git.commit({
+			ref: "refs/heads/middle",
+			parent: f.base,
+			files: { intermediate: "ancestor" },
+			message: "Intermediate",
+			author: { name: "Fixture", email: "fixture@local", timestamp: 12346 },
+		});
+		const candidate = await f.git.commit({
+			ref: "refs/heads/candidate",
+			parent: middle,
+			files: { "src/pay.ts": "approved" },
+			message: "Approved",
+			author: { name: "Fixture", email: "fixture@local", timestamp: 12347 },
+		});
+		const artifact = (await f.call("publish_revision", {
+			workspaceId: f.workspace.id,
+			revision: candidate,
+			pack: Buffer.from(await f.git.exportPack(candidate)).toString("base64"),
+		})) as { id: string };
+		const proposal = (await f.call("create_proposal", { artifactId: artifact.id, title: "Reviewed candidate" })) as Proposal;
+		await f.call(
+			"review_proposal",
+			{ proposalId: proposal.id, revision: candidate, outcome: "approve", reason: "Exact source reviewed" },
+			{ actor: owner },
+		);
+		f.push.mockRestore();
+		const remote = await gitServer(f.git, f.base, [middle, candidate]);
+		vi.mocked(f.host.info).mockResolvedValue({ name: repo.storageName!, id: repo.storageName!, remote: remote.url });
+		const cmd: Command = {
+			tool: "promote_proposal",
+			namespaceId: repo.namespaceId,
+			repositoryId: repo.id,
+			proposalId: proposal.id,
+			idempotencyKey: "exact-promotion",
+		};
+		const run = (runtime = f.runtime) => runtime.command(cmd, { actor: owner });
+		const restart = () => new RepositoryRuntime(f.store, f.git, f.port, {}, () => 1001);
+		return { ...f, proposal, middle, candidate, remote, cmd, run, restart };
+	}
+	it.each([
+		["beforeAdvertisement", "middle"],
+		["beforeUpdate", "middle"],
+		["beforeAdvertisement", "candidate"],
+		["beforeUpdate", "candidate"],
+	] as const)("rejects movement at %s to %s", async (window, revision) => {
+		const f = await prepared();
+		try {
+			f.remote[window] = () => f.remote.setHead(f[revision]);
+			await expect(f.run()).rejects.toThrow();
+			expect(f.remote.head()).toBe(f[revision]);
+			expect(f.runtime.state().sourceHead).toBe(f.base);
+			expect(f.runtime.state().promotions[0].state).not.toBe("complete");
+			await expect(f.run(f.restart())).rejects.toThrow();
+			expect(f.remote.updates).toBe(window === "beforeAdvertisement" ? 0 : 1);
+			expect(f.w.state.reservations.at(-1)?.state).toBe("uncertain");
+		} finally {
+			await f.remote.close();
+		}
+	});
+
+	it("retries unavailable pre-push observations under the same prepared operation", async () => {
+		const f = await prepared();
+		try {
+			vi.spyOn(f.git, "remoteRefs").mockRejectedValueOnce(new Error("observation unavailable"));
+			await expect(f.run()).rejects.toThrow("observation unavailable");
+			expect(f.remote.updates).toBe(0);
+			expect(f.runtime.state().promotions[0]).toMatchObject({ state: "uncertain", operation: { phase: "prepared" } });
+			await f.run(f.restart());
+			expect(f.remote.updates).toBe(1);
+			expect(f.remote.head()).toBe(f.candidate);
+			expect(f.w.state.reservations.filter((r) => r.id === "human:exact-promotion")).toHaveLength(1);
+		} finally {
+			await f.remote.close();
+		}
+	});
+	it("refuses a pre-existing candidate instead of inferring acceptance", async () => {
+		const f = await prepared();
+		try {
+			f.remote.setHead(f.candidate);
+			await expect(f.run()).rejects.toThrow("Canonical moved");
+			expect(f.remote.updates).toBe(0);
+			expect(f.runtime.state().sourceHead).toBe(f.base);
+			expect(f.runtime.state().proposals[0].state).toBe("rejected");
+		} finally {
+			await f.remote.close();
+		}
+	});
+	it("reconciles a lost successful push response after restart without re-pushing", async () => {
+		const f = await prepared();
+		try {
+			f.remote.afterUpdate = () => {
+				throw new Error("response lost after ref update");
+			};
+			await expect(f.run()).rejects.toThrow();
+			expect(f.remote.head()).toBe(f.candidate);
+			expect(f.runtime.state().sourceHead).toBe(f.base);
+			expect(f.runtime.state().promotions[0]).toMatchObject({ state: "uncertain", operation: { phase: "attempted" } });
+			expect(await f.run(f.restart())).toMatchObject({ state: "complete", from: f.base, to: f.candidate });
+			await f.run(f.restart());
+			expect(f.remote.updates).toBe(1);
+			expect(f.runtime.state().promotions).toHaveLength(1);
+			expect(f.runtime.state().activity.filter((e) => e.kind === "source_promoted")).toHaveLength(1);
+			expect(f.w.state.reservations.filter((r) => r.id === "human:exact-promotion")).toHaveLength(1);
+			expect(f.w.state.reservations.at(-1)?.state).toBe("complete");
+		} finally {
+			await f.remote.close();
+		}
+	});
+	it.each(["confirmed", "complete"])("recovers a persistence failure at %s", async (phase) => {
+		const f = await prepared();
+		try {
+			const put = f.store.put.bind(f.store);
+			let interrupted = false;
+			vi.spyOn(f.store, "put").mockImplementation((key, value) => {
+				const promotion = (value as import("../../src/shared/platform.ts").RepositoryState).promotions?.[0];
+				if (
+					!interrupted &&
+					key === "repository" &&
+					(phase === "complete" ? promotion?.state === "complete" : promotion?.operation?.phase === "confirmed")
+				) {
+					interrupted = true;
+					throw new Error("interrupted persistence");
+				}
+				put(key, value);
+			});
+			await expect(f.run()).rejects.toThrow("interrupted persistence");
+			expect(f.remote.head()).toBe(f.candidate);
+			expect(f.runtime.state().sourceHead).toBe(f.base);
+			await f.run(f.restart());
+			expect(f.remote.updates).toBe(1);
+			expect(f.runtime.state().promotions[0].state).toBe("complete");
+		} finally {
+			await f.remote.close();
+		}
+	});
+	it("persists provenance before settlement and repairs only settlement on retry", async () => {
+		const f = await prepared();
+		try {
+			vi.spyOn(f.port, "settle").mockImplementationOnce(() => {
+				throw new Error("settlement interrupted");
+			});
+			await expect(f.run()).rejects.toThrow("settlement interrupted");
+			expect(f.runtime.state().promotions[0].state).toBe("complete");
+			expect(f.runtime.state().sourceHead).toBe(f.candidate);
+			await f.run(f.restart());
+			expect(f.remote.updates).toBe(1);
+			expect(f.w.state.reservations.at(-1)?.state).toBe("complete");
+		} finally {
+			await f.remote.close();
+		}
+	});
+	it("serializes concurrent promotions and rejects reused operation inputs", async () => {
+		const f = await prepared();
+		try {
+			const competing = (await f.call("create_proposal", { artifactId: f.proposal.artifactId, title: "Competing promotion" })) as Proposal;
+			await f.call(
+				"review_proposal",
+				{ proposalId: competing.id, revision: f.candidate, outcome: "approve", reason: "Exact source inspected" },
+				{ actor: owner },
+			);
+			const results = await Promise.allSettled([
+				f.run(),
+				f.runtime.command({ ...f.cmd, proposalId: competing.id, idempotencyKey: "competing" }, { actor: owner }),
+			]);
+			expect(results.map((r) => r.status)).toEqual(["fulfilled", "rejected"]);
+			await expect(f.runtime.command({ ...f.cmd, proposalId: "changed" }, { actor: owner })).rejects.toThrow("identity reused");
+			expect(f.remote.updates).toBe(1);
+		} finally {
+			await f.remote.close();
+		}
+	});
+	it("rechecks revoked authority on uncertain and completed retries", async () => {
+		const f = await prepared();
+		try {
+			f.remote.afterUpdate = () => {
+				throw new Error("lost response");
+			};
+			await expect(f.run()).rejects.toThrow();
+			const authority = vi.spyOn(f.port, "authority").mockImplementation(() => {
+				throw new Error("revoked");
+			});
+			await expect(f.run(f.restart())).rejects.toThrow("revoked");
+			expect(f.runtime.state().sourceHead).toBe(f.base);
+			authority.mockRestore();
+			await f.run(f.restart());
+			vi.spyOn(f.port, "authority").mockImplementation(() => {
+				throw new Error("revoked");
+			});
+			await expect(f.run(f.restart())).rejects.toThrow("revoked");
+			expect(f.remote.updates).toBe(1);
+		} finally {
+			await f.remote.close();
+		}
+	});
+	it("does not adopt unrelated remote history while reconciling an interrupted update", async () => {
+		const f = await prepared();
+		try {
+			f.remote.afterUpdate = () => {
+				throw new Error("lost response");
+			};
+			await expect(f.run()).rejects.toThrow();
+			f.remote.setHead(f.middle);
+			await expect(f.run(f.restart())).rejects.toThrow("outcome differs");
+			expect(f.remote.updates).toBe(1);
+			expect(f.runtime.state().sourceHead).toBe(f.base);
+			expect(f.runtime.state().proposals[0].state).toBe("rejected");
+			expect(f.w.state.reservations.at(-1)?.state).toBe("uncertain");
+		} finally {
+			await f.remote.close();
+		}
+	});
+	it("fails closed on missing source", async () => {
+		const f = await prepared();
+		try {
+			vi.spyOn(f.git, "exportPack").mockRejectedValueOnce(new Error("Missing source"));
+			await expect(f.run()).rejects.toThrow("Missing source");
+			expect(f.remote.updates).toBe(0);
+			expect(f.runtime.state().sourceHead).toBe(f.base);
+		} finally {
+			await f.remote.close();
+		}
+	});
+	it("rechecks source and authority while resuming an uncertain operation", async () => {
+		const f = await prepared();
+		try {
+			f.remote.afterUpdate = () => {
+				throw new Error("lost response");
+			};
+			await expect(f.run()).rejects.toThrow();
+			vi.spyOn(f.git, "exportPack").mockRejectedValueOnce(new Error("Missing retained source"));
+			await expect(f.run(f.restart())).rejects.toThrow("Missing retained source");
+			expect(f.runtime.state().sourceHead).toBe(f.base);
+			expect(f.remote.updates).toBe(1);
+			expect(f.w.state.reservations.at(-1)?.state).toBe("uncertain");
+		} finally {
+			await f.remote.close();
+		}
+	});
+	it("refuses canonical provider identity replacement", async () => {
+		const f = await prepared();
+		try {
+			vi.mocked(f.host.info).mockResolvedValue({ name: repo.storageName!, id: "replacement", remote: f.remote.url });
+			await expect(f.run()).rejects.toThrow("identity changed");
+			expect(f.remote.updates).toBe(0);
+			expect(f.runtime.state().sourceHead).toBe(f.base);
+		} finally {
+			await f.remote.close();
+		}
+	});
+	it("rechecks authority immediately before sending the approved update", async () => {
+		const f = await prepared();
+		try {
+			f.remote.beforeAdvertisement = () => {
+				vi.spyOn(f.port, "authority").mockImplementation(() => {
+					throw new Error("revoked before update");
+				});
+			};
+			await expect(f.run()).rejects.toThrow("revoked before update");
+			expect(f.remote.updates).toBe(0);
+			expect(f.runtime.state().sourceHead).toBe(f.base);
+		} finally {
+			await f.remote.close();
+		}
+	});
 });

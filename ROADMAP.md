@@ -8,15 +8,13 @@ Cruce's direction is Git-native coordination and convergence across independentl
 
 ## P0 — prove the complete loop
 
-### P0.1 Promotion against the exact approved base
+### P0.1 Promotion against the exact approved base — done
 
-**Problem:** Promotion fetches canonical, then performs a separate non-forced push whose advertisement can observe a different base. Repository serialization does not cover external provider writers. A successful remote push can also precede failure to persist its provenance.
+**Status:** Implemented and locally verified on 2026-10-06. The installed Git library's pre-push hook binds the advertised old revision and exact candidate; non-forced receive-pack checks the same old/new pair at ref update. A durable promotion journal records operation identity, exact inputs, reservation and prepared/attempted/confirmed phases. Same-identity retries reconcile the exact independently observed remote candidate without another push. Provenance and the receipt persist before namespace settlement; interrupted settlement retries separately under current human authority.
 
-**Target:** Bind the remote update to the approved expected old revision and exact candidate, with durable operation identity and explicit interrupted-outcome reconciliation. **Invariants:** No forced update, silent approval reinterpretation, inferred acceptance from local refs or duplicate promotion. Recheck authority on retries; an unexpected remote movement requires reconciliation and fresh review.
+**Acceptance evidence:** Native Git tests inject ancestor/candidate movement before advertisement and before ref update; every raced update fails closed. Lost successful responses and persistence/settlement interruptions recover after runtime restart with one operation, event and reservation. Tests also cover concurrent promotions, revoked retries and pre-update authority, missing source, provider identity replacement, changed inputs and unrelated remote history. Console recovery preserves the original operation across reloads. See [verification and limitations](docs/local-verification.md#exact-base-promotion-verification) and [current architecture](docs/architecture.md#publication-review-and-retention).
 
-**Cloudflare/Git:** Existing Repository DO, Namespace reservations and Git receive-pack old/new revision semantics. Consider the installed Git library's pre-push hook before custom transport; Workflows alone cannot make Git and metadata atomic.
-
-**Acceptance:** Inject canonical movement before advertisement and before ref update, including an ancestor of the candidate; every unexpected movement fails closed. Interrupt after remote success and before metadata/settlement, restart, then reconcile one operation without re-pushing or relabeling unrelated history. Exercise concurrent promotions, revoked retries and missing source. Verify the resulting remote revision independently.
+**Verification boundary:** Local native Git and in-process authority, not a new hosted Artifacts or deployed Worker result. P0.3 retains deployed/provider validation. Unobserved or changed remote outcomes stay charged; they cannot be relabeled as accepted source. No custom transport, forced update, Workflows or new infrastructure was added.
 
 ### P0.2 Durable provider ownership and identity
 
@@ -113,7 +111,7 @@ Future reports and responses identify the affected workspace, scope/version, exa
 
 ## Foundation validation still needed
 
-P0.3 owns the remaining deployed/client verification. Existing [real-provider two-writer convergence](docs/local-verification.md#hosted-two-writer-convergence) proves a narrower foundation and must not be erased or described as entirely untested. Existing local tests do not cover all P0.1/P0.2 failure windows; targeted new tests belong with those future corrections.
+P0.3 owns the remaining deployed/client verification. Existing [real-provider two-writer convergence](docs/local-verification.md#hosted-two-writer-convergence) proves a narrower foundation and must not be erased or described as entirely untested. P0.1 now has targeted local race/restart evidence; its new implementation still needs hosted validation. P0.2 failure windows remain future corrections.
 
 ## How we choose what to build
 

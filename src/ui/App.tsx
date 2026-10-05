@@ -203,7 +203,7 @@ export function App() {
 
 	const mutate = async <T,>(url: string, body: Record<string, unknown>, method = "POST") => {
 		const fingerprint = JSON.stringify({ url, body, method }),
-			key = retries.current.get(fingerprint) ?? crypto.randomUUID();
+			key = (body.idempotencyKey as string | undefined) ?? retries.current.get(fingerprint) ?? crypto.randomUUID();
 		retries.current.set(fingerprint, key);
 		const result = await request<T>(
 			url,

@@ -4,6 +4,7 @@ import type {
 	Authority,
 	Command,
 	Overlap,
+	Promotion,
 	Proposal,
 	Repository,
 	RepositorySnapshot,
@@ -99,9 +100,19 @@ export class RepositoryController {
 		if (!["completed", "cancelled"].includes(s.state)) reasons.push("End the workspace before cleaning up its fork");
 		return { ready: reasons.length === 0, reasons };
 	}
-	readiness(p: Proposal) {
+	readiness(p: Proposal, promotion?: Promotion) {
 		const reasons: string[] = [];
-		if (p.state !== "open") reasons.push("Change is closed or promotion is in progress");
+		const resuming =
+			p.state === "promoting" &&
+			promotion &&
+			this.state.promotions.includes(promotion) &&
+			promotion.proposalId === p.id &&
+			promotion.from === p.base &&
+			promotion.to === p.revision &&
+			["prepared", "uncertain"].includes(promotion.state);
+		if (p.state !== "open" && !resuming) reasons.push("Change is closed or promotion is in progress");
+		if (this.state.promotions.some((other) => other !== promotion && ["prepared", "uncertain"].includes(other.state)))
+			reasons.push("Reconcile the pending promotion before another canonical update");
 		const head = this.upstream();
 		if (head && p.base !== head) reasons.push("Base revision changed; refresh and propose the reconciled revision");
 		const latest = new Map<string, (typeof p.reviews)[number]>();
@@ -133,6 +144,26 @@ export class RepositoryController {
 			sourceAvailable: !!this.state.sourceHead || !!this.state.artifacts.find((a) => a.kind === "source"),
 			forkCleanup: Object.fromEntries(this.state.workspaces.map((s) => [s.id, this.forkCleanup(s)])),
 			readiness: Object.fromEntries(this.state.proposals.map((p) => [p.id, this.readiness(p)])),
+			promotionRecovery: Object.fromEntries(
+				this.state.promotions
+					.filter(
+						(p) =>
+							p.operation &&
+							p.actor.id === a.actor.id &&
+							a.actor.kind === "human" &&
+							!a.actor.connectionId &&
+							a.repositoryRole === "maintain" &&
+							p.state !== "failed" &&
+							!p.operation.settled,
+					)
+					.map((p) => [
+						p.proposalId,
+						{
+							command: p.operation!.command,
+							...(p.state === "complete" ? { ready: true, reasons: [] } : this.readiness(this.proposal(p.proposalId), p)),
+						},
+					]),
+			),
 		};
 	}
 	trace(subject: string) {

@@ -6,6 +6,7 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Fixed
 
+- Bind canonical promotion to the exact approved old revision and candidate through the Git update. Persist promotion intent and reconcile interrupted outcomes without another push, recheck human authority on retries, preserve uncertain reservations, and allow console recovery after reload. Promotion provenance now saves before reservation settlement.
 - Call the Git gateway’s provider fetch without binding it to the adapter, fixing deployed clone/fetch failures that Node adapter tests did not expose.
 - Show rejected or expired OAuth consent as a no-store HTML retry page without issuing a grant.
 - Render authenticated OAuth consent as an HTML form instead of displaying its source text, while preserving the provider's consent cookies.

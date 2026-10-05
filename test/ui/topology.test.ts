@@ -43,6 +43,7 @@ function snapshot(workspaces: Workspace[] = []): RepositorySnapshot {
 		sourceAvailable: false,
 		readiness: {},
 		forkCleanup: {},
+		promotionRecovery: {},
 	};
 }
 describe("coordination presentation", () => {

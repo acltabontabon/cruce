@@ -22,6 +22,22 @@ The scenario scripts fix commit timestamps and isolate signing/hooks for their d
 
 The [timeout fixture](../demo/convergence/README.md) uses injected delay capture without timers or network calls. A shared driver exercises ordinary Git against disposable bare repositories served over loopback HTTP and the real in-process Cruce runtime. Only the provider adapter is substituted; Git fetch/push, publication, retained source/evidence, readiness and non-forced promotion run normally. Fixture grants and human attestations do not establish actual authenticated participation. `pnpm verify:scenario` replays the driver twice and checks identical revisions and behavioral outcomes, then writes non-secret results to ignored `dist/scenario-verification/result.json`, including the tested Cruce commit and working-tree-dirty flag.
 
+## Exact-base promotion verification
+
+On **2026-10-06**, P0.1 was implemented and locally verified against the working tree based on `59434eeb3fc89e37cade1893620da2d93d579464`. The [native Git fixture](../test/git/http-fixture.ts) serves real smart HTTP receive-pack and independently reads the bare remote with native `git rev-parse`; its refs are separate from the runtime cache. The [runtime tests](../test/worker/repository-runtime.test.ts) exercise the installed `isomorphic-git@1.42.6` pre-push hook, non-forced old/new ref comparison, durable repository journal and namespace reservations.
+
+Acceptance coverage includes:
+
+- Canonical movement to an intermediate ancestor or the candidate immediately before push advertisement and immediately before ref update. Every raced update fails closed; a definite rejection cannot later be revived by remote candidate equality.
+- Unavailable pre-push observations retry the same prepared operation before any update is sent. A lost response after native receive-pack succeeds, then a new runtime over the saved store. Only the independently observed exact candidate reconciles the original operation; there is one push, promotion, activity event and reservation.
+- Interrupted confirmed-phase/provenance persistence and interrupted namespace settlement. Repository completion saves before settlement; retries repair the outstanding phase without a second Git update.
+- Concurrent promotion requests, changed idempotent inputs, revoked retries and revocation immediately before the push, missing source initially and during recovery, canonical provider identity replacement, pre-existing candidates and changed remote history during recovery. Failed or unavailable outcomes never advance recorded accepted source.
+- Pure controller recovery permissions/readiness and a browser reload that preserves the original promotion command/identity for explicit reconciliation.
+
+Typecheck, lint, **127 unit/integration tests**, **49 browser journeys**, deterministic scenario replay and the offline Worker build passed. The scenario's exact source revisions remained unchanged. Loopback Git/browser fixtures required local socket access. Lint retained the existing Biome deprecation notice; the offline build completed with the existing unavailable-Docker notice.
+
+This is **local native Git / in-process authority evidence**, not a new hosted Artifacts or deployed Worker verification. Explicit source-account credentials were not present in the invoking environment or `.env.test`, so no provider resources were provisioned and no deployment was performed. Earlier hosted receipts retain their original implementation scope. P0.3 owns new hosted/deployed validation; P0.2 still owns remaining provider/account binding gaps. Reconciliation proves the intended exact remote source effect, not exclusive authorship of an indistinguishable external write or recovery of transient remote ref history. Changed/unobservable outcomes preserve charged uncertainty rather than inventing promotion provenance.
+
 ## Architecture audit validation
 
 The documentation audit on **2026-10-06** inspected commit `e57ee33498f06c29937522214d18f449bb7bde24` plus a dirty working tree. At audit start, existing changes were present in `CHANGELOG.md`, `ROADMAP.md`, this guide, `docs/test-environment.md`, `src/worker/auth.ts`, `test/worker/identity.test.ts`, `tsconfig.test.json`, and untracked `tools/verify-deployed.ts`. The audit preserved those changes and separately added documentation; it did not author the consent repair or deployed verifier.
