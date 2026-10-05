@@ -102,7 +102,8 @@ describe("provider reconciliation", () => {
 describe("Artifacts Git boundary", () => {
 	it("forwards Git bytes with a scoped token, strips user headers and revokes after consumption", async () => {
 		const calls: string[] = [];
-		const send = (async (url: string | URL | Request, init?: RequestInit) => {
+		const send = async function (this: unknown, url: string | URL | Request, init?: RequestInit) {
+			expect(this).toBeUndefined();
 			const address = String(url);
 			calls.push(address);
 			if (address.endsWith("/repos/repo"))
@@ -119,7 +120,7 @@ describe("Artifacts Git boundary", () => {
 			expect(headers.get("git-protocol")).toBe("version=1");
 			expect(init?.redirect).toBe("manual");
 			return new Response("0000", { headers: { "content-type": "application/x-git-receive-pack-result", "set-cookie": "secret" } });
-		}) as typeof fetch;
+		} as typeof fetch;
 		const host = new ArtifactsRestHost(ACCOUNT, "team", "account-secret", send);
 		const response = await host.gitRequest(
 			"repo",

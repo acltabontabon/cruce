@@ -1,3 +1,4 @@
+import { AuthorizationError } from "@cloudflare/workers-oauth-provider";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type AuthEnv, accessIdentity, authRoute, oauthProvider, seal, unseal } from "../../src/worker/auth.ts";
 
@@ -67,6 +68,59 @@ async function identityFixture() {
 	return { env, send, token };
 }
 describe("native identity", () => {
+	afterEach(() => vi.unstubAllGlobals());
+	it.each([false, true])("renders consent and rejected-consent retry pages as HTML (rejected: %s)", async (rejected) => {
+		const f = await identityFixture();
+		vi.stubGlobal("fetch", f.send);
+		const consentHeaders = new Headers({ "set-cookie": "consent=fixture; Secure; HttpOnly", "cache-control": "no-store" });
+		const namespace = { id: "namespace", handle: "test", ownerId: "owner" };
+		const repo = { id: "repo", name: "gateway-check" };
+		const env = {
+			...f.env,
+			DIRECTORY: {
+				getByName: () => ({
+					login: async () => ({ id: "owner", name: "Owner", personalNamespaceId: namespace.id }),
+					namespace: async () => namespace,
+					namespaces: async () => [namespace],
+				}),
+			},
+			NAMESPACE: { getByName: () => ({ initialize: async () => {}, snapshot: async () => ({ repositories: [repo] }) }) },
+			OAUTH_PROVIDER: {
+				approveConsent: vi.fn(async () => {
+					throw new AuthorizationError("invalid_request", { description: "This authorization expired <fixture>; start again" });
+				}),
+				completeAuthorization: vi.fn(),
+				parseAuthRequest: async () => ({ clientId: "client", scope: ["cruce:read"], redirectUri: "http://127.0.0.1:12345/callback" }),
+				beginConsent: async () => ({ handle: "consent-handle", headers: consentHeaders }),
+				describeConsent: async () => ({ clientName: "Gateway <client>" }),
+			},
+		} as unknown as AuthEnv;
+		const response = (await authRoute(
+			new Request("https://cruce.example.test/authorize", {
+				method: rejected ? "POST" : "GET",
+				...(rejected ? { body: new URLSearchParams({ handle: "expired" }) } : {}),
+				headers: { "cf-access-jwt-assertion": await f.token({ exp: Math.floor(Date.now() / 1000) + 600 }) },
+			}),
+			env,
+		))!;
+		expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+		if (rejected) {
+			expect(response.status).toBe(400);
+			expect(response.headers.get("cache-control")).toBe("no-store");
+			const html = await response.text();
+			expect(html).toContain("This authorization expired &lt;fixture>; start again");
+			expect(html).toContain('href="https://cruce.example.test/authorize"');
+			expect(env.OAUTH_PROVIDER!.completeAuthorization).not.toHaveBeenCalled();
+			return;
+		}
+		expect(response.headers.get("set-cookie")).toBe(consentHeaders.get("set-cookie"));
+		expect(response.headers.get("cache-control")).toBe("no-store");
+		const html = await response.text();
+		expect(html).toContain('<form method="post">');
+		expect(html).toContain('name="repository" value="repo"');
+		expect(html).toContain('name="handle" value="consent-handle"');
+		expect(html).toContain("Gateway &lt;client>");
+	});
 	it("verifies real signatures, issuer, application audience and expiry", async () => {
 		const f = await identityFixture(),
 			jwt = await f.token();

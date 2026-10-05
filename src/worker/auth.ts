@@ -1,4 +1,4 @@
-import { type OAuthHelpers, OAuthProvider } from "@cloudflare/workers-oauth-provider";
+import { type ApprovedConsent, AuthorizationError, type OAuthHelpers, OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { DEFAULT_AGENT_SCOPES, SCOPE_LABELS, SCOPES, type Scope } from "../core/capabilities.ts";
 import { DomainError as CoordinationError, domainStatus } from "../core/errors.ts";
 import type { Directory } from "./directory.ts";
@@ -179,14 +179,24 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 			(scope) =>
 				`<label><input type="checkbox" name="scope" value="${scope}"${preset.includes(scope) ? " checked" : ""}${scope === "cruce:read" ? " disabled checked" : ""}> <code>${scope}</code> — ${escapeHtml(SCOPE_LABELS[scope])}</label><br>`,
 		).join("");
+		consent.headers.set("content-type", "text/html; charset=utf-8");
 		return new Response(
 			`<html lang="en"><meta charset="utf-8"><title>Connect to Cruce</title><h1>Connect to Cruce</h1><p>${escapeHtml(description.clientName ?? original.clientId)} requests access to the repositories you select.</p><p>Signed in as ${escapeHtml(identity.email)}.</p><form method="post"><input type="hidden" name="handle" value="${escapeHtml(consent.handle)}"><fieldset><legend>Allow this agent to</legend>${options}</fieldset><fieldset><legend>Repositories</legend>${choices.map((r) => `<label><input type="checkbox" name="repository" value="${escapeHtml(r.id)}"> ${escapeHtml(r.label)}</label><br>`).join("")}</fieldset><p>Source promotion remains a human decision. CI, release and deployment remain outside Cruce. Metered Cloudflare operations stay subject to namespace policy and budgets.</p><p>Redirect: ${escapeHtml(original.redirectUri)}</p><button>Allow</button></form><a href="/">Cancel</a></html>`,
 			{ headers: consent.headers },
 		);
 	}
-	const form = await request.formData(),
-		approved = await oauth.approveConsent(request, String(form.get("handle"))),
-		chosen = form.getAll("scope").map(String),
+	const form = await request.formData();
+	let approved: ApprovedConsent;
+	try {
+		approved = await oauth.approveConsent(request, String(form.get("handle")));
+	} catch (error) {
+		if (!(error instanceof AuthorizationError)) throw error;
+		return new Response(
+			`<html lang="en"><meta charset="utf-8"><title>Connection not authorized</title><h1>Connection not authorized</h1><p>${escapeHtml(error.description)}</p><a href="${escapeHtml(request.url)}">Start again</a></html>`,
+			{ status: 400, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
+		);
+	}
+	const chosen = form.getAll("scope").map(String),
 		scope = SCOPES.filter((s) => s === "cruce:read" || chosen.includes(s)),
 		result = await oauth.completeAuthorization({
 			request: approved.request,

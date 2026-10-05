@@ -6,6 +6,9 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Fixed
 
+- Call the Git gateway’s provider fetch without binding it to the adapter, fixing deployed clone/fetch failures that Node adapter tests did not expose.
+- Show rejected or expired OAuth consent as a no-store HTML retry page without issuing a grant.
+- Render authenticated OAuth consent as an HTML form instead of displaying its source text, while preserving the provider's consent cookies.
 - Sign out clears the Cruce cookie and hands off to Cloudflare Access logout, ending the Access session across the team's applications instead of allowing automatic re-entry.
 - Load current personal namespaces from their dedicated identity directory after sign-in, keeping incompatible retired development records untouched.
 

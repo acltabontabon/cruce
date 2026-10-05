@@ -167,7 +167,9 @@ export class ArtifactsRestHost implements RepositoryHost {
 					const value = request.headers.get(key);
 					if (value) headers.set(key, value);
 				}
-				const response = await this.send(target, {
+				// Native Worker fetch requires its global receiver, not the host instance.
+				const send = this.send;
+				const response = await send(target, {
 					method: request.method,
 					headers,
 					body: request.method === "POST" ? await boundedBody(request) : undefined,

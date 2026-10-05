@@ -16,6 +16,7 @@
 		"cloudflare.config.ts",
 		"runner",
 		"tools/verify-cloud.ts",
+		"tools/verify-deployed.ts",
 		"tools/verify-scenario.ts"
 	]
 }

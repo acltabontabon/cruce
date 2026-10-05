@@ -31,7 +31,7 @@ export async function nativeGit(args: string[], token?: string) {
 				GIT_TERMINAL_PROMPT: "0",
 				GIT_TRACE: "0",
 				GIT_TRACE_CURL: "0",
-				GIT_CURL_VERBOSE: "0",
+				GIT_CURL_VERBOSE: undefined,
 				GIT_AUTHOR_NAME: "Convergence fixture",
 				GIT_AUTHOR_EMAIL: "verify@cruce.invalid",
 				GIT_COMMITTER_NAME: "Convergence fixture",
