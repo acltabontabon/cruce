@@ -1,111 +1,21 @@
-For native projects (Access identity, scopes, Cruce MCP, Artifacts source, connected accounts and environments) follow [native setup](native-setup.md). This page covers the Cloudflare resources and the deterministic demo.
-
 # Cloudflare setup
 
-Everything here was set up with the `cf` CLI (1.0.0-beta.12) and `cloudflare.config.ts`. Wrangler is not
-used for the project (only its docs were consulted for event-subscription body shapes).
+Cruce uses `cf` with `cloudflare.config.ts`. The control plane requires a Worker, Directory/WorkspaceRuntime/ControlTower SQLite Durable Objects, OAuth KV, DeploymentWorkflow and the `CRUCE_SECRET` server secret. Access issuer, audience and public origin are ordinary configuration. Use the configured single test environment in [test-environment.md](test-environment.md).
 
-## Requirements
+Local repository registration and session coordination require no Artifacts resources and no connected workspace Cloudflare account. Cloud setup begins when the owner chooses hosted repositories, publication or deployment.
 
-- A Cloudflare account on **Workers Paid** (Artifacts requires it; Durable Objects, Workflows and Queues are
-  included).
-- Node 22.18+ (the local bridge and demo-repo tests need Node 23.6+ for TypeScript type stripping), pnpm, git.
+## Workspace resource account
 
-```sh
-npm install --global cf@latest
-cf auth login            # browser approval
-cf auth whoami
-```
+In Workspace Settings, an Owner connects an account ID and an account-scoped API token. The token must allow Artifacts reads/edits and the Workers Builds and Workers Scripts reads required to observe builds and runtime versions. Workers Builds deployments also require a separately configured build token in Cloudflare. Cruce verifies Builds access, seals the credential with `CRUCE_SECRET`, and returns only account metadata. It does not borrow the account running the control plane.
 
-## Resources
+Stable workspace IDs provide Artifacts namespaces. Repository IDs, immutable revisions and session IDs determine storage names, so renames cannot move ownership. Resource policy and operation budgets belong to the workspace and apply across repositories. Limits count resource operations, not an estimated dollar bill. Uncertain operations keep reservations; retry the same operation identity to reconcile rather than spending again.
 
-| Resource | Name / id | Created by | Purpose |
-|---|---|---|---|
-| Worker | `cruce` → https://cruce.acltabontabon.workers.dev | `cf deploy` | console, Cruce MCP, API, queue consumer |
-| Durable Object | `ControlTower` (SQLite) | `cf deploy` | one Control Tower per project (and the demo) |
-| Durable Object | `ProjectDirectory` (SQLite) | `cf deploy` | project membership and identity |
-| Workflow | `cruce-deployment` (`DeploymentWorkflow`) | `cf deploy` | await Workers Builds, run smoke checks, record evidence |
-| KV | `OAUTH_KV` | `cf deploy` | MCP OAuth grants |
-| Artifacts namespaces | `cruce` (prod), `cruce-dev` (dev) | implicitly on first repo | project, workspace, evidence and deploy repositories; demo repos |
-| Artifacts repos | `project-<id>`, `project-<id>--w-<n>`, `project-<id>--evidence`, `project-<id>--deploy`; demo `auth-service`, `auth-service--fNNN` | Cruce | |
-| Queue | `cruce-artifact-events` (`f86ac1b9…`) | `cf queues create` | Artifacts event delivery; consumer = Worker |
-| Event subscription | `cruce artifacts account` (source `artifacts`) | `cf queues subscriptions create` | repo.created / forked / deleted / imported |
-| Event subscriptions | `cruce repo <ns>/<repo>` (source `artifacts.repo`) | Cruce at runtime | pushed / token.created / token.revoked per repo |
-| API token | `cruce-event-subscriptions` (account-owned, Queues Write, expires 2026-12-31) | `cf accounts tokens create` | lets Cruce manage per-repo subscriptions |
+Artifacts REST creates source, baseline, session, evidence and deploy repositories as needed. Cruce immediately revokes creation/fork tokens and mints 60-second tokens for server-side Git operations, revoking them afterwards. The bridge receives Git packs, never a repository write credential.
 
-## Secrets
+## Workers Builds integration
 
-| Secret | Used for | Where |
-|---|---|---|
-| `CRUCE_SECRET` | sealing identity cookies and connected-account credentials | `.dev.vars`, `.secrets.prod.json` |
-| `CF_EVENTS_API_TOKEN` | event-subscription management | same |
+Configure the target Worker and connect its Cruce deployment repository using Cloudflare's [Artifacts–Workers Builds integration](https://developers.cloudflare.com/artifacts/guides/build-and-deploy-on-push/). The deploy repository name is recorded on the Cruce environment. Its production ref is `main`; preview refs are `cruce/<environment-id>`. This is independent of the source repository's configured default branch.
 
-Connected-account API tokens are entered by project maintainers in the console and stored sealed per project; they are not deployment secrets.
+Set the build/deploy commands and build token in Cloudflare. Cruce does not invent a build configuration or administer unrelated Cloudflare products. Choose an immutable source artifact in Deployments. Cruce pushes that exact revision to the deployment ref, then observes the matching build by commit and branch. Production requires a human console decision and exact-revision review/verification. Failure, timeout, supersession, smoke results and rollback remain visible. A source artifact is a retained source snapshot, not a compiled downloadable output.
 
-`.dev.vars` and `.secrets*` are gitignored. Never commit them; never put tokens in Git remotes.
-
-## Local development
-
-```sh
-pnpm install
-cp .dev.vars.example .dev.vars          # fill CRUCE_SECRET and Access settings
-pnpm exec cf dev                        # Artifacts (remote binding, namespace cruce-dev)
-pnpm exec cf dev --mode offline         # no account needed: local Git backend
-```
-
-The Artifacts binding has no local simulator; `bindings.artifacts({ dev: { remote: true } })` makes local
-dev use the real service in the `cruce-dev` namespace. The queue consumer only receives real events in
-production; locally Cruce records its own gated pushes.
-
-## Deploy
-
-Automated deployments of Cruce's own Worker use checked release tags (`v0.1.0-alpha.1` initially), not branch pushes. See [release setup](releases.md) for GitHub secrets, Access variables and versioning. The commands below are manual deployment commands.
-
-```sh
-pnpm exec cf deploy --dry-run
-pnpm exec cf deploy --secrets-file .secrets.prod.json
-```
-
-## Workers Builds / previews (Cruce's own source)
-
-Cruce's source is mirrored into Artifacts with `tools/mirror-to-artifacts.sh` (→ `cruce/cruce-platform`;
-2-minute write token per push, every token revoked afterwards). To build and deploy Cruce from it:
-
-1. Dashboard → **Workers & Pages** → `cruce` → **Settings → Builds → Connect** → namespace `cruce`,
-   repository `cruce-platform`.
-2. Build command: `pnpm install`. Deploy command: `npx cf deploy`. Preview command: `npx cf previews deploy`
-   (the project uses `cf` + `cloudflare.config.ts`, not Wrangler's default commands).
-3. Non-`main` branches can produce Worker Previews. Keep automatic production deployment disabled when using the GitHub release-tag workflow; a push to `main` must not deploy Cruce's live Worker. Secrets stay configured on the Worker.
-
-This is optional and separate from the product's own Worker Preview path for projects (see
-[native setup](native-setup.md#cloudflare-account-and-environments)), which uses a per-project deploy repository.
-
-## Verifying Artifacts from scratch
-
-`tools/artifacts-smoke` is a minimal Worker with only the Artifacts binding:
-
-```sh
-cd tools/artifacts-smoke && pnpm install && pnpm exec cf dev &      # http://localhost:8790
-bash scripts/verify.sh cruce-bootstrap
-```
-
-It creates a repo through the binding, pushes a commit with a standard git client (token in a transient
-`http.extraHeader`), clones it into a separate directory with a READ token, checks the SHA, fetches,
-round-trips Git notes, proves a read token cannot push, reads the repo through the binding, and revokes
-both tokens. `scripts/probe-push-event.sh` pushes once so a `pushed` event can be observed on the queue.
-
-`tools/verify-repo.sh <repo> <namespace>` independently checks what Cruce produced (plain git + `cf`).
-
-## Notes and gotchas (as of Oct 2026)
-
-- `create()` returns a token valid for about a year and `fork()` a 24-hour write token; Cruce revokes both.
-- `repo.info().lastPushAt` may stay `null` after pushes; Cruce does not rely on it.
-- Per-repo events need a subscription per repository (`source.namespace` + `source.repo_name` required).
-- Account-level event names are `repo.created` etc. (without the `cf.artifacts.` prefix used in payloads).
-- A queue can have one consumer: remove any `http_pull` consumer before attaching the Worker.
-- `cf queues consumers delete`, `subscriptions delete`, and `artifacts namespaces tokens revoke` need `--force`
-  in non-interactive shells — and exit 0 when they abort without it, so always pass it in scripts.
-- pnpm 12 enforces a minimum release age; `isomorphic-git` is pinned to 1.42.6 for that reason.
-- Workers Builds builds Artifacts repositories directly (production branch must be `main`; other branches
-  produce Worker Previews). The Builds API lists builds with commit hash, branch, outcome and `preview_url`;
-  connecting a repository to a Worker is a dashboard step for Artifacts today.
+Consult current [Artifacts REST](https://developers.cloudflare.com/artifacts/api/rest-api/), [Workers Builds API](https://developers.cloudflare.com/workers/ci-cd/builds/api-reference/) and [cf](https://developers.cloudflare.com/cf/llms.txt) documentation before changing these adapters. Mocked provider tests and an offline build are not live publication/deployment verification.

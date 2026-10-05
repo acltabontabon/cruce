@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Replays the demo scenario with plain git and Node's test runner, outside Cruce.
-# Proves the scripted Flight work is real: every step commits, merges cleanly, and passes tests,
-# and that F-021's final step depends on F-022's contract change (it fails on the old baseline).
+# Independently checks reusable source overlays with ordinary Git.
+# Historical fixture directory names are preserved; they are not Cruce domain records.
 set -euo pipefail
 DEMO="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 export GIT_AUTHOR_NAME="Cruce Demo" GIT_AUTHOR_EMAIL="demo@cruce.acltabontabon.com"
+export GIT_AUTHOR_DATE="2026-10-05T00:00:00Z" GIT_COMMITTER_DATE="2026-10-05T00:00:00Z"
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false GIT_CONFIG_KEY_1=core.hooksPath GIT_CONFIG_VALUE_1=/dev/null
 export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME" GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
 
 run_tests() { (cd "$1" && node --test "test/**/*.test.ts" >"$WORK/test.log" 2>&1) && echo "  tests: $(grep -E '^ℹ pass' "$WORK/test.log")" || { echo "  TESTS FAILED in $1"; tail -30 "$WORK/test.log"; return 1; }; }
@@ -17,24 +18,24 @@ git init -q -b main "$WORK/canonical"
 cp -R "$DEMO/auth-service/." "$WORK/canonical/"
 (cd "$WORK/canonical" && git add -A && git commit -qm "Baseline")
 run_tests "$WORK/canonical"
-for f in F-021 F-022 F-023; do git clone -q "$WORK/canonical" "$WORK/$f"; done
+for f in rotation jwt cleanup; do git clone -q "$WORK/canonical" "$WORK/$f"; done
 
-echo "F-023 session cleanup"; apply "$WORK/F-023" f023-session-cleanup "Add idle session cleanup"; run_tests "$WORK/F-023"
-echo "F-022 JWT migration";  apply "$WORK/F-022" f022-jwt-migration "Migrate to typed JWT verification"; run_tests "$WORK/F-022"
-echo "F-021 step 1 (partial clearance)"; apply "$WORK/F-021" f021-rotation-1 "Add refresh token families and rotation storage"; run_tests "$WORK/F-021"
+echo "cleanup session cleanup"; apply "$WORK/cleanup" f023-session-cleanup "Add idle session cleanup"; run_tests "$WORK/cleanup"
+echo "jwt JWT migration";  apply "$WORK/jwt" f022-jwt-migration "Migrate to typed JWT verification"; run_tests "$WORK/jwt"
+echo "rotation step 1 (independent work)"; apply "$WORK/rotation" f021-rotation-1 "Add refresh token families and rotation storage"; run_tests "$WORK/rotation"
 
-echo "F-021 step 2 on the OLD baseline must fail (it depends on F-022's contract)"
-cp -R "$WORK/F-021" "$WORK/F-021-unsequenced"
-cp -R "$DEMO/scenario/f021-rotation-2/." "$WORK/F-021-unsequenced/"
-if (cd "$WORK/F-021-unsequenced" && node --test "test/**/*.test.ts" >/dev/null 2>&1); then echo "  UNEXPECTED: passed without F-022"; exit 1; else echo "  failed as expected"; fi
+echo "rotation step 2 on the OLD baseline must fail (it depends on jwt's contract)"
+cp -R "$WORK/rotation" "$WORK/rotation-unsequenced"
+cp -R "$DEMO/scenario/f021-rotation-2/." "$WORK/rotation-unsequenced/"
+if (cd "$WORK/rotation-unsequenced" && node --test "test/**/*.test.ts" >/dev/null 2>&1); then echo "  UNEXPECTED: passed without jwt"; exit 1; else echo "  failed as expected"; fi
 
-echo "land F-022"; land F-022; run_tests "$WORK/canonical"
-echo "land F-023"; land F-023; run_tests "$WORK/canonical"
-echo "refresh F-021 onto canonical"
-(cd "$WORK/F-021" && git pull -q --no-rebase --no-edit "$WORK/canonical" main) && echo "  $(cd "$WORK/F-021" && git log --oneline -1)"
-run_tests "$WORK/F-021"
-echo "F-021 step 2 (re-planned)"; apply "$WORK/F-021" f021-rotation-2 "Rotate refresh tokens on use"; run_tests "$WORK/F-021"
-echo "land F-021"; land F-021; run_tests "$WORK/canonical"
+echo "land jwt"; land jwt; run_tests "$WORK/canonical"
+echo "land cleanup"; land cleanup; run_tests "$WORK/canonical"
+echo "refresh rotation onto canonical"
+(cd "$WORK/rotation" && git fetch -q "$WORK/canonical" main && git merge -q --no-edit -m "Integrate accepted source" FETCH_HEAD) && echo "  $(cd "$WORK/rotation" && git log --oneline -1)"
+run_tests "$WORK/rotation"
+echo "rotation step 2 (after integration)"; apply "$WORK/rotation" f021-rotation-2 "Rotate refresh tokens on use"; run_tests "$WORK/rotation"
+echo "land rotation"; land rotation; run_tests "$WORK/canonical"
 echo
 (cd "$WORK/canonical" && git log --graph --oneline --all | head -20)
 echo "SCENARIO VERIFIED"

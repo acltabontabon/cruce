@@ -1,374 +1,385 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
-import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-	auth,
-	Client,
-	type OAuthClientProvider,
-	type StoredOAuthClientInformation,
-	type StoredOAuthTokens,
-	StreamableHTTPClientTransport,
-} from "@modelcontextprotocol/client";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
-import type { Decision } from "../src/shared/coordination.ts";
+import { DEFAULT_AGENT_SCOPES } from "../src/core/capabilities.ts";
+import type { Command, RepositorySnapshot, Session } from "../src/shared/platform.ts";
 import { CRUCE_INSTRUCTIONS, CRUCE_TOOLS, toolByName, toolInputShape } from "../src/shared/tools.ts";
 import { CRUCE_VERSION } from "../src/shared/version.ts";
 import { configureClient } from "./client-config.ts";
-import { git, observe, packRevision, pipeGit, workspace } from "./local-git.ts";
+import {
+	cleanupExecution,
+	context,
+	createExecution,
+	observeChanges,
+	releaseCheckout,
+	reserveCheckout,
+	stateDirectory,
+} from "./execution.ts";
+import { git, packRevision, pipeGit } from "./local-git.ts";
+import { Credentials, login } from "./oauth.ts";
 
 interface Connection {
-	missionId?: string;
-	missionVersion?: number;
-	/** Head of the mission's isolated workspace in Artifacts; the base for the next publish_revision. */
-	workspaceHead?: string;
+	mode?: "read" | "write";
+	client?: string;
 	server: string;
-	projectId: string;
-	workstreamId?: string;
+	workspaceId: string;
+	repositoryId: string;
+	humanToken?: string;
 	sessionId?: string;
-	workstreamVersion?: number;
-	planVersion?: number;
+	baseRevision?: string;
+	publishedRevision?: string;
+	directory?: string;
+	owned?: boolean;
+	pending?: { fingerprint: string; command: Command };
 }
 const args = process.argv.slice(2),
 	option = (key: string) => {
-		const index = args.indexOf(`--${key}`);
-		return index < 0 ? undefined : args[index + 1];
-	},
-	cwd = resolve(option("cwd") ?? process.cwd()),
-	connectionFile = join(cwd, ".cruce/connection.json");
-async function read<T>(path: string, fallback: T) {
-	try {
-		return JSON.parse(await readFile(path, "utf8")) as T;
-	} catch (e) {
-		if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
-		return fallback;
-	}
-}
-async function save(path: string, value: unknown) {
-	await mkdir(dirname(path), { recursive: true });
-	await writeFile(path, JSON.stringify(value, null, 2), { mode: 0o600 });
-}
-class Credentials implements OAuthClientProvider {
-	redirectUrl: string | undefined;
-	clientMetadata = {
-		client_name: "Cruce local coordination bridge",
-		redirect_uris: [] as string[],
-		grant_types: ["authorization_code", "refresh_token"],
-		response_types: ["code"],
-		token_endpoint_auth_method: "none" as const,
+		const i = args.indexOf(`--${key}`);
+		return i < 0 ? undefined : args[i + 1];
 	};
-	data: { client?: StoredOAuthClientInformation; tokens?: StoredOAuthTokens; verifier?: string; state?: string } = {};
-	path: string;
-	constructor(server: string) {
-		this.path = join(homedir(), ".config/cruce", `${Buffer.from(new URL(server).origin).toString("base64url")}.json`);
-	}
-	async load() {
-		this.data = await read(this.path, {});
-	}
-	clientInformation() {
-		return this.data.client;
-	}
-	async saveClientInformation(client: StoredOAuthClientInformation) {
-		this.data.client = client;
-		await save(this.path, this.data);
-	}
-	tokens() {
-		return this.data.tokens;
-	}
-	async saveTokens(tokens: StoredOAuthTokens) {
-		this.data.tokens = tokens;
-		await save(this.path, this.data);
-	}
-	async saveCodeVerifier(verifier: string) {
-		this.data.verifier = verifier;
-		await save(this.path, this.data);
-	}
-	codeVerifier() {
-		if (!this.data.verifier) throw new Error("No pending authorization");
-		return this.data.verifier;
-	}
-	async state() {
-		this.data.state = randomUUID();
-		await save(this.path, this.data);
-		return this.data.state;
-	}
-	redirectToAuthorization(url: URL) {
-		process.stderr.write(`Open this sign-in link in your browser:\n${url.href}\n`);
-	}
-}
-async function login(server: string, credentials: Credentials) {
-	let timeout: ReturnType<typeof setTimeout> | undefined;
-	let complete!: (code: string, iss?: string) => void;
-	const callback = new Promise<{ code: string; iss?: string }>((resolve) => {
-		complete = (code, iss) => resolve({ code, iss });
-	});
-	const listener = createServer((request, response) => {
-		const url = new URL(request.url ?? "/", "http://127.0.0.1");
-		if (url.pathname !== "/callback" || url.searchParams.get("state") !== credentials.data.state || !url.searchParams.get("code")) {
-			response.writeHead(400);
-			response.end("Sign-in state mismatch");
-			return;
-		}
-		complete(url.searchParams.get("code") as string, url.searchParams.get("iss") ?? undefined);
-		response.end("Connected to Cruce. You can close this tab.");
-	});
-	await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
-	const address = listener.address();
-	if (!address || typeof address === "string") throw new Error("Cannot open OAuth callback");
-	credentials.redirectUrl = `http://127.0.0.1:${address.port}/callback`;
-	credentials.clientMetadata.redirect_uris = [credentials.redirectUrl];
-	// Registration binds the exact callback. Re-register when an ephemeral callback changes.
-	credentials.data.client = undefined;
-	try {
-		const result = await auth(credentials, {
-			serverUrl: `${server}/mcp`,
-			scope: "coordination offline_access",
-			forceReauthorization: true,
-		});
-		if (result !== "AUTHORIZED") {
-			const { code, iss } = await Promise.race([
-				callback,
-				new Promise<never>((_, reject) => {
-					timeout = setTimeout(() => reject(new Error("Sign-in timed out")), 300000);
-				}),
-			]);
-			await auth(credentials, { serverUrl: `${server}/mcp`, authorizationCode: code, iss });
-		}
-	} finally {
-		clearTimeout(timeout);
-		listener.close();
-	}
-}
+const cwd = resolve(option("cwd") ?? process.cwd());
 async function main() {
 	const operation = args[0] ?? "help";
 	if (operation === "help" || args.includes("--help")) {
 		process.stdout.write(
-			"cruce connect --project ID --client codex|claude|cursor [--server URL]\ncruce checkout --project ID --directory NEW_DIRECTORY\ncruce mcp --client TOOL\ncruce refresh\ncruce publish [--title TEXT]   publish committed work (base..HEAD) to the mission workspace\ncruce check\ncruce release\n",
+			"Cruce — Workspace → Repository → Session\n\ncruce connect --workspace ID --repository ID --server URL [--client codex|claude|cursor]\ncruce human --workspace ID --repository ID --server URL\ncruce start --title TEXT [--read]\ncruce mcp [--client TOOL]\ncruce watch\ncruce publish [--title TEXT]\ncruce refresh\ncruce resume   reattach a prepared session\ncruce report-ref --ref BRANCH\ncruce end [--cleanup]\ncruce checkout --workspace ID --repository ID --server URL --directory EMPTY_DIRECTORY\n",
 		);
 		return;
 	}
-	const connection = await read<Connection>(connectionFile, {
-		server: option("server") ?? option("url") ?? "https://cruce.acltabontabon.workers.dev",
-		projectId: option("project") ?? "",
-	});
-	connection.server = (option("server") ?? option("url") ?? connection.server).replace(/\/$/, "");
-	connection.projectId = option("project") ?? connection.projectId;
-	const origin = new URL(connection.server);
-	if (origin.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(origin.hostname)) throw new Error("Use HTTPS for Cruce");
-	const credentials = new Credentials(connection.server);
+	const checkout = operation === "checkout";
+	if (checkout) {
+		const target = resolve(option("directory") ?? "");
+		if (!option("directory")) throw new Error("Choose an empty directory");
+		await mkdir(target, { recursive: true });
+		if ((await readdir(target)).length) throw new Error("Checkout requires an empty directory");
+		await git(target, ["init"]);
+	}
+	const root = checkout ? resolve(option("directory")!) : cwd;
+	let configFile = join(await stateDirectory(root), "connection.json");
+	const connection: Connection = await readFile(configFile, "utf8")
+		.then(JSON.parse)
+		.catch((e: NodeJS.ErrnoException) => {
+			if (e.code !== "ENOENT") throw e;
+			return {
+				server: option("server") ?? "https://cruce.acltabontabon.workers.dev",
+				workspaceId: option("workspace") ?? "",
+				repositoryId: option("repository") ?? "",
+			};
+		});
+	if (operation === "mcp" && !connection.owned) {
+		// Every bridge process owns its session state. The repository connection remains shareable.
+		configFile = join(await stateDirectory(root), `agent-${randomUUID()}.json`);
+		delete connection.sessionId;
+		delete connection.directory;
+		delete connection.baseRevision;
+		delete connection.publishedRevision;
+		delete connection.pending;
+	}
+	connection.client = option("client") ?? connection.client ?? "agent";
+	connection.server = (option("server") ?? connection.server).replace(/\/$/, "");
+	connection.workspaceId = option("workspace") ?? connection.workspaceId;
+	connection.repositoryId = option("repository") ?? connection.repositoryId;
+	const url = new URL(connection.server);
+	if (url.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(url.hostname)) throw new Error("Use HTTPS");
+	if (!connection.workspaceId || !connection.repositoryId) throw new Error("Choose a workspace and repository ID from Cruce");
+	const save = async () => {
+		await writeFile(configFile, JSON.stringify(connection, null, 2), { mode: 0o600 });
+		if (connection.directory && connection.directory !== root)
+			await writeFile(join(await stateDirectory(connection.directory), "connection.json"), JSON.stringify(connection, null, 2), {
+				mode: 0o600,
+			});
+	};
+	const send = async (path: string, body: unknown, token?: string) => {
+		const response = await fetch(`${connection.server}${path}`, {
+			method: "POST",
+			headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+			body: JSON.stringify(body),
+		});
+		const data = (await response.json()) as Record<string, unknown>;
+		if (!response.ok) throw Object.assign(new Error(String(data.error ?? "Cruce request failed")), { status: response.status });
+		return data;
+	};
+	if (operation === "human") {
+		const pair = await send("/mcp?terminal=start", {
+			workspaceId: connection.workspaceId,
+			repositoryId: connection.repositoryId,
+			sessionId: connection.sessionId,
+		});
+		process.stderr.write(`Authorize this terminal session in your browser:\n${pair.url}\n`);
+		for (let i = 0; i < 150; i++) {
+			const result = await send("/mcp?terminal=poll", { code: pair.code, proof: pair.proof });
+			if (result.token) {
+				connection.humanToken = String(result.token);
+				connection.directory = root;
+				await save();
+				process.stdout.write("Terminal authorized. Run cruce start --title TEXT.\n");
+				return;
+			}
+			await new Promise((r) => setTimeout(r, 2000));
+		}
+		throw new Error("Terminal authorization timed out");
+	}
+	const clientName = connection.client,
+		credentials = new Credentials(connection.server, clientName);
 	await credentials.load();
-	if (operation === "connect" || operation === "checkout") await login(connection.server, credentials);
-	if (!connection.projectId) throw new Error("Choose the native project ID; no external Git provider is required");
-	if (operation === "checkout") {
-		const target = option("directory");
-		if (!target) throw new Error("Choose a new directory for source checkout");
-		const directory = resolve(target);
-		await mkdir(directory, { recursive: true });
-		if ((await readdir(directory)).length) throw new Error("Checkout requires an empty directory; existing work is preserved");
-		const response = await fetch(`${connection.server}/mcp/export?projectId=${encodeURIComponent(connection.projectId)}`, {
-			headers: { authorization: `Bearer ${credentials.tokens()?.access_token}` },
-		});
-		if (!response.ok) throw new Error("Source export denied or unavailable");
-		const head = response.headers.get("x-cruce-revision");
-		if (!head || !/^[a-f0-9]{40}$/.test(head)) throw new Error("Invalid immutable source revision");
-		await git(directory, ["init"]);
-		await pipeGit(directory, ["index-pack", "--stdin"], Buffer.from(await response.arrayBuffer()));
-		await git(directory, ["update-ref", "refs/heads/main", head]);
-		await git(directory, ["update-ref", "refs/cruce/accepted", head]);
-		await git(directory, ["symbolic-ref", "HEAD", "refs/heads/main"]);
-		await git(directory, ["checkout", "main"]);
-		await save(join(directory, ".cruce/connection.json"), connection);
-		process.stdout.write(`Source checked out at ${head}. Run cruce connect --cwd ${directory} --client TOOL to configure participation.\n`);
-		return;
+	if (operation === "connect" || checkout) {
+		delete connection.humanToken;
+		await login(connection.server, credentials, DEFAULT_AGENT_SCOPES);
 	}
-	const transport = new StreamableHTTPClientTransport(new URL(`${connection.server}/mcp`), { authProvider: credentials }),
-		remote = new Client({ name: "cruce-local-bridge", version: CRUCE_VERSION });
-	await remote.connect(transport);
-	const refreshSource = async () => {
-		await remote.callTool({ name: "get_canonical_revision", arguments: { projectId: connection.projectId } });
-		const response = await fetch(`${connection.server}/mcp/export?projectId=${encodeURIComponent(connection.projectId)}`, {
-			headers: { authorization: `Bearer ${credentials.tokens()?.access_token}` },
-		});
-		const head = response.headers.get("x-cruce-revision");
-		if (!response.ok || !head || !/^[a-f0-9]{40}$/.test(head)) throw new Error("Accepted source unavailable");
-		await pipeGit(cwd, ["index-pack", "--stdin"], Buffer.from(await response.arrayBuffer()));
-		await git(cwd, ["update-ref", "refs/cruce/accepted", head]);
-		return {
-			revision: head,
-			gitRef: "refs/cruce/accepted",
-			nextAction:
-				"Inspect accepted source. Reconcile with your draft using normal Git tools, preserve existing changes, then amend the mission plan. Fetching does not change the working tree.",
-		};
+	let remote: Client | undefined;
+	if (!connection.humanToken) {
+		remote = new Client({ name: `cruce-${clientName}-bridge`, version: CRUCE_VERSION });
+		await remote.connect(new StreamableHTTPClientTransport(new URL(`${connection.server}/mcp`), { authProvider: credentials }));
+	}
+	const call = async (command: Command): Promise<unknown> => {
+		if (connection.humanToken) return send("/mcp?terminal=command", command, connection.humanToken);
+		const { tool, ...parameters } = command;
+		const response = await remote!.callTool({ name: tool, arguments: parameters });
+		if (response.isError)
+			throw Object.assign(new Error(response.content.map((c) => (c.type === "text" ? c.text : "")).join("\n")), {
+				status: (response.structuredContent as { status?: number } | undefined)?.status,
+			});
+		return response.structuredContent ?? JSON.parse(response.content.find((c) => c.type === "text")?.text ?? "{}");
 	};
-	if (operation === "connect") {
-		await refreshSource();
-		await workspace(cwd);
-		await save(connectionFile, connection);
-		const client = option("client") ?? "codex";
-		if (!["codex", "claude", "cursor"].includes(client)) throw new Error("Select codex, claude or cursor");
-		const configured = await configureClient(cwd, client as "codex" | "claude" | "cursor", fileURLToPath(import.meta.url));
-		process.stdout.write(`${JSON.stringify(configured, null, 2)}\nConnected to native Cruce. Continue using your coding tool normally.\n`);
-		await remote.close();
-		return;
-	}
-	if (operation === "refresh") {
-		process.stdout.write(`${JSON.stringify(await refreshSource(), null, 2)}\n`);
-		await remote.close();
-		return;
-	}
 	let queue: Promise<unknown> = Promise.resolve();
-	/** Calls a public Cruce MCP tool, filling identity, session, versions and local Git context. */
-	const execute = async (input: Record<string, unknown> & { tool: string }) => {
-		const tool = toolByName(input.tool);
-		if (!tool) throw new Error(`Unknown Cruce tool ${input.tool}`);
-		const native = tool.via.kind === "platform";
-		const common = { projectId: connection.projectId, ...(tool.mutation ? { idempotencyKey: randomUUID() } : {}), ...input };
-		delete (common as { tool?: string }).tool;
-		const data: Record<string, unknown> = native
-			? {
-					missionId: connection.missionId,
-					sessionId: connection.sessionId,
-					expectedVersion: connection.missionVersion,
-					expectedPlanVersion: connection.planVersion,
-					...common,
+	const execute = (raw: Partial<Command> & { tool: string }) => {
+		const next = queue.then(async () => {
+			const tool = toolByName(raw.tool);
+			if (!tool) throw new Error("Unknown Cruce tool");
+			const command: Command = {
+				workspaceId: connection.workspaceId,
+				repositoryId: connection.repositoryId,
+				sessionId: connection.sessionId,
+				...raw,
+			};
+			if (raw.tool === "start_session") {
+				if (connection.sessionId) throw new Error("End the current session before starting another");
+				command.baseRevision ??= await git(root, ["rev-parse", "HEAD"]);
+				command.title ??= option("title") ?? "Local work";
+				command.mode ??= args.includes("--read") ? "read" : "write";
+				delete command.sessionId;
+			}
+			const directory = connection.directory ?? root;
+			if (raw.tool === "report_change") {
+				if (!connection.baseRevision) throw new Error("Start a session first");
+				Object.assign(command, await observeChanges(directory, connection.baseRevision));
+			}
+			if (raw.tool === "publish_revision") {
+				if (!connection.baseRevision) throw new Error("Start a session first");
+				const packed = await packRevision(directory, connection.publishedRevision ?? connection.baseRevision);
+				command.revision = packed.revision;
+				command.pack = packed.pack;
+			}
+			const fingerprint = JSON.stringify(command);
+			if (tool.mutation) {
+				if (connection.pending && connection.pending.command.tool !== command.tool)
+					throw new Error("A previous mutation has an uncertain outcome. Retry that operation before starting another.");
+				if (connection.pending) Object.assign(command, connection.pending.command);
+				command.idempotencyKey = connection.pending?.command.idempotencyKey ?? randomUUID();
+				connection.pending = { fingerprint, command };
+				await save();
+			}
+			let result: Record<string, unknown>;
+			try {
+				result = (await call(command)) as Record<string, unknown>;
+			} catch (error) {
+				// Explicit authorization/validation rejection is a known outcome. Network/provider
+				// failures keep the operation identity until the caller reconciles the attempt.
+				if ([400, 401, 403, 404, 405, 409, 413].includes((error as { status: number }).status)) {
+					delete connection.pending;
+					await save();
 				}
-			: {
-					workstreamId: connection.workstreamId,
-					sessionId: connection.sessionId,
-					expectedVersion: connection.workstreamVersion,
-					expectedPlanVersion: connection.planVersion,
-					...common,
-				};
-		if (["start_mission", "update_plan", "report_scope"].includes(tool.name))
-			Object.assign(data, {
-				workspace: await workspace(cwd),
-				agent: {
-					tool: option("client") ?? "terminal",
-					instance: process.env.CRUCE_AGENT_INSTANCE ?? `${process.pid}:${cwd}`,
-					role: "writer",
-				},
-			});
-		if (tool.name === "report_change") Object.assign(data, { observation: await observe(cwd, (await workspace(cwd)).base) });
-		if (tool.name === "publish_revision" && !data.pack && !data.files) {
-			if (!connection.workspaceHead) throw new Error("Start a mission first; its workspace head is the publication base");
-			const packed = await packRevision(cwd, connection.workspaceHead);
-			Object.assign(data, {
-				base: packed.base,
-				revision: packed.revision,
-				pack: packed.pack,
-				execution: data.execution ?? "local",
-				executionDetail: data.executionDetail ?? option("client") ?? "local",
-			});
-		}
-		const response = await remote.callTool({ name: tool.name, arguments: data });
-		if (response.isError) throw new Error(response.content.map((c) => (c.type === "text" ? c.text : "")).join("\n"));
-		const result = (response.structuredContent ?? JSON.parse(response.content.find((c) => c.type === "text")?.text ?? "{}")) as Record<
-			string,
-			unknown
-		>;
-		const decision = (result.coordination ?? result) as Partial<Decision> & { sessionId?: string };
-		if (decision.workstreamId) {
-			connection.workstreamId = decision.workstreamId;
-			connection.sessionId = decision.sessionId ?? connection.sessionId;
-			if (decision.workstreamVersion !== undefined) connection.workstreamVersion = decision.workstreamVersion;
-			if (decision.planVersion !== undefined) connection.planVersion = decision.planVersion;
-		}
-		const mission = result.mission as { id?: string; version?: number } | undefined;
-		if (mission?.id) {
-			connection.missionId = mission.id;
-			connection.missionVersion = mission.version;
-		}
-		const ws = result.workspace as { headRevision?: string } | undefined;
-		if (ws?.headRevision) connection.workspaceHead = ws.headRevision;
-		await save(connectionFile, connection);
-		return result;
-	};
-	const serialized = (input: Record<string, unknown> & { tool: string }) => {
-		const next = queue.then(() => execute(input));
+				throw error;
+			}
+			if (tool.mutation) {
+				delete connection.pending;
+				await save();
+			}
+			if (raw.tool === "start_session") {
+				const session = result as unknown as Session;
+				connection.sessionId = session.id;
+				connection.baseRevision = session.baseRevision;
+				connection.mode = session.mode;
+				await save();
+				if (session.mode === "write") {
+					const made = connection.humanToken
+						? { directory: root, execution: await context(root, session.id, false) }
+						: await createExecution(root, session.id, session.baseRevision);
+					await reserveCheckout(made.directory, session.id);
+					connection.directory = made.directory;
+					connection.owned = made.execution.owned;
+					await save();
+					const attach: Command = {
+						tool: "attach_session",
+						workspaceId: connection.workspaceId,
+						repositoryId: connection.repositoryId,
+						sessionId: session.id,
+						execution: made.execution,
+						idempotencyKey: `attach-${session.id}`,
+					};
+					await call(attach);
+					return { ...result, directory: made.directory, instruction: "Use this isolated directory for all session work." };
+				}
+			}
+			if (raw.tool === "publish_revision") {
+				connection.publishedRevision = String(result.revision);
+				await save();
+			}
+			if (raw.tool === "end_session") {
+				const sessionId = connection.sessionId!;
+				await releaseCheckout(directory, sessionId);
+				const cleanup = args.includes("--cleanup") && connection.owned;
+				const retained = connection.publishedRevision ?? connection.baseRevision!;
+				delete connection.sessionId;
+				delete connection.baseRevision;
+				delete connection.directory;
+				delete connection.owned;
+				await save();
+				if (cleanup) await cleanupExecution(directory, sessionId, retained);
+			}
+			return result;
+		});
 		queue = next.catch(() => {});
 		return next;
 	};
-	if (operation === "mcp") {
-		const server = new McpServer({ name: "Cruce local bridge", version: CRUCE_VERSION }, { instructions: CRUCE_INSTRUCTIONS });
-		server.registerTool(
-			"refresh_source",
-			{
-				description: "Fetch accepted source objects into refs/cruce/accepted. Does not change or discard working-tree code.",
-				inputSchema: {},
-			},
-			async () => {
-				try {
-					const result = await refreshSource();
-					return { content: [{ type: "text" as const, text: JSON.stringify(result) }], structuredContent: result };
-				} catch (error) {
-					return { isError: true, content: [{ type: "text" as const, text: (error as Error).message }] };
-				}
-			},
-		);
-		for (const tool of CRUCE_TOOLS) {
-			// The bridge supplies identity, session, versions and local Git content.
-			const {
-				projectId: _p,
-				sessionId: _s,
-				workstreamId: _w,
-				idempotencyKey: _i,
-				expectedVersion: _v,
-				expectedPlanVersion: _pv,
-				...inputSchema
-			} = toolInputShape(tool);
-			const description =
-				tool.name === "publish_revision"
-					? "Publish your committed local work (workspace head..HEAD) to the mission workspace as a Git pack. Commit first; the recorded revision is your exact commit."
-					: tool.description;
-			server.registerTool(tool.name, { description, inputSchema }, async (input: Record<string, unknown>) => {
-				try {
-					const result = await serialized({ ...input, tool: tool.name });
-					return { content: [{ type: "text" as const, text: JSON.stringify(result) }], structuredContent: result };
-				} catch (e) {
-					return { isError: true, content: [{ type: "text" as const, text: (e as Error).message }] };
-				}
+	try {
+		if (operation === "connect") {
+			await call({ tool: "get_repository", workspaceId: connection.workspaceId, repositoryId: connection.repositoryId });
+			await save();
+			const client = option("client");
+			if (client && ["codex", "claude", "cursor"].includes(client))
+				await configureClient(root, client as "codex" | "claude" | "cursor", fileURLToPath(new URL("./cruce.mjs", import.meta.url)));
+			process.stdout.write("Connected. Start work through Cruce MCP or cruce start.\n");
+			return;
+		}
+		if (operation === "resume") {
+			if (!connection.sessionId) throw new Error("No prepared session to resume");
+			let directory = connection.directory;
+			if (!directory) {
+				const made = connection.humanToken
+					? { directory: root, execution: await context(root, connection.sessionId, false) }
+					: await createExecution(root, connection.sessionId, connection.baseRevision!);
+				directory = made.directory;
+				connection.directory = directory;
+				connection.owned = made.execution.owned;
+				await save();
+			}
+			await reserveCheckout(directory, connection.sessionId);
+			const execution = await context(directory, connection.sessionId, connection.owned ?? false);
+			await call({
+				tool: "attach_session",
+				workspaceId: connection.workspaceId,
+				repositoryId: connection.repositoryId,
+				sessionId: connection.sessionId,
+				execution,
+				idempotencyKey: `attach-${connection.sessionId}`,
 			});
+			process.stdout.write(`Session attached at ${directory}\n`);
+			return;
 		}
-		const timer = setInterval(() => {
-			if (connection.workstreamId)
-				void serialized({ tool: "report_change" })
-					.then(() => serialized({ tool: "check_coordination" }))
+		if (operation === "report-ref") {
+			const ref = option("ref");
+			if (!ref) throw new Error("Choose --ref BRANCH");
+			const revision = await git(connection.directory ?? root, ["rev-parse", `refs/heads/${ref}`]);
+			process.stdout.write(`${JSON.stringify(await execute({ tool: "report_ref", ref, revision }))}\n`);
+			return;
+		}
+		if (operation === "refresh" || checkout) {
+			const snapshot = (await call({
+				tool: "get_repository",
+				workspaceId: connection.workspaceId,
+				repositoryId: connection.repositoryId,
+			})) as RepositorySnapshot;
+			if (snapshot.repository.source.kind === "local")
+				throw new Error("Fetch your existing remote with normal Git. Cruce does not manage that remote.");
+			const head = snapshot.sourceHead;
+			if (!head) throw new Error("Hosted source not provisioned");
+			const exported = (await call({
+				tool: "export_revision",
+				workspaceId: connection.workspaceId,
+				repositoryId: connection.repositoryId,
+				revision: head,
+			})) as { pack: string };
+			await pipeGit(root, ["index-pack", "--stdin"], Buffer.from(exported.pack, "base64"));
+			await git(root, ["update-ref", "refs/cruce/source", head]);
+			if (checkout) {
+				await git(root, ["update-ref", `refs/heads/${snapshot.repository.defaultBranch}`, head]);
+				await git(root, ["symbolic-ref", "HEAD", `refs/heads/${snapshot.repository.defaultBranch}`]);
+				await git(root, ["checkout", snapshot.repository.defaultBranch]);
+				await save();
+			}
+			process.stdout.write(`Source ${head} available at refs/cruce/source. Working changes preserved.\n`);
+			return;
+		}
+		const heartbeat = () => {
+			if (connection.sessionId)
+				void execute({ tool: "heartbeat" })
+					.then(() => (connection.mode === "read" ? undefined : execute({ tool: "report_change" })))
 					.catch((e) => process.stderr.write(`${(e as Error).message}\n`));
-		}, 30000);
-		timer.unref();
-		const release = () => {
-			clearInterval(timer);
-			void serialized({ tool: "release_scope" }).finally(() => process.exit());
 		};
-		process.on("SIGTERM", release);
-		process.on("SIGINT", release);
-		await server.connect(new StdioServerTransport());
-		return;
-	}
-	if (operation === "publish") {
-		const result = await serialized({ tool: "publish_revision", ...(option("title") ? { title: option("title") } : {}) });
-		process.stdout.write(
-			`${JSON.stringify({ revision: result.revision, artifact: (result.artifact as { id?: string })?.id, resourceRequest: result.resourceRequest }, null, 2)}\n`,
-		);
-	} else if (operation === "check") {
-		if (!connection.workstreamId) {
-			process.stdout.write("No started mission is attached; source coordination has limited visibility.\n");
-			process.exitCode = 2;
-		} else {
-			await serialized({ tool: "report_change" });
-			const d = await serialized({ tool: "check_coordination" });
-			process.stdout.write(`${JSON.stringify(d, null, 2)}\n`);
-			process.exitCode = d.publication === "PROCEED" ? 0 : 1;
+		if (operation === "mcp") {
+			if (connection.humanToken) throw new Error("Agent MCP cannot use human terminal credentials; connect the agent separately");
+			const server = new McpServer({ name: "Cruce local bridge", version: CRUCE_VERSION }, { instructions: CRUCE_INSTRUCTIONS });
+			for (const tool of CRUCE_TOOLS) {
+				const { workspaceId: _, repositoryId: __, sessionId: ___, idempotencyKey: ____, ...shape } = toolInputShape(tool);
+				server.registerTool(tool.name, { description: tool.description, inputSchema: shape }, async (values) => {
+					try {
+						const result = await execute({ ...values, tool: tool.name });
+						return { content: [{ type: "text" as const, text: JSON.stringify(result) }], structuredContent: result };
+					} catch (e) {
+						return { isError: true, content: [{ type: "text" as const, text: (e as Error).message }] };
+					}
+				});
+			}
+			const timer = setInterval(heartbeat, 30000);
+			timer.unref();
+			await server.connect(new StdioServerTransport());
+			await new Promise<void>((done) => {
+				process.once("SIGTERM", () => {
+					clearInterval(timer);
+					done();
+				});
+				process.once("SIGINT", () => {
+					clearInterval(timer);
+					done();
+				});
+			});
+			await server.close();
+			return;
 		}
-	} else if (operation === "release") await serialized({ tool: "release_scope" });
-	else throw new Error(`Unknown command ${operation}`);
-	await remote.close();
+		if (operation === "watch") {
+			heartbeat();
+			const timer = setInterval(heartbeat, 30000);
+			await new Promise<void>((done) => {
+				process.once("SIGINT", () => {
+					clearInterval(timer);
+					done();
+				});
+			});
+			return;
+		}
+		const tool =
+			operation === "start"
+				? "start_session"
+				: operation === "publish"
+					? "publish_revision"
+					: operation === "end"
+						? "end_session"
+						: operation === "check"
+							? "get_repository"
+							: undefined;
+		if (!tool) throw new Error("Unknown command; run cruce help");
+		process.stdout.write(`${JSON.stringify(await execute({ tool, ...(option("title") ? { title: option("title") } : {}) }), null, 2)}\n`);
+	} finally {
+		await remote?.close();
+	}
 }
-void main().catch((error) => {
+main().catch((error) => {
 	process.stderr.write(`${(error as Error).message}\n`);
 	process.exitCode = 1;
 });

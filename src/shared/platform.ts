@@ -1,240 +1,202 @@
 import { z } from "zod";
-import { type CostClass, RESOURCE_ACTIONS, type ResourceAction, type ResourcePolicy, type Scope } from "../core/capabilities.ts";
-import { FlightPlanInput } from "../core/domain.ts";
-import { CommandInput, type Principal, WorkspaceInput } from "./coordination.ts";
 
-export const ArtifactKinds = [
-	"source",
-	"plan",
-	"tests",
-	"test_report",
-	"build",
-	"dependency_analysis",
-	"migration_plan",
-	"architecture",
-	"api_specification",
-	"logs",
-	"benchmark",
-	"screenshot",
-	"deployment_plan",
-	"deployment_manifest",
-	"security_scan",
-	"sbom",
-	"summary",
-	"documentation",
-	"rollout_evidence",
-	"validation",
-	"preview_report",
-] as const;
-export const Specializations = [
-	"implementation",
-	"architecture",
-	"security",
-	"test",
-	"migration",
-	"review",
-	"performance",
-	"incident",
-	"investigation",
-] as const;
-export const VerificationKinds = ["tests", "static_analysis", "security", "architecture", "benchmark", "preview", "human_review"] as const;
-export type VerificationKind = (typeof VerificationKinds)[number];
-/** Where work executed. Source, execution and deployment are separate concepts. */
-export const ExecutionLocations = ["local", "cloudflare", "external"] as const;
-
-/** Internal command names. Agents reach a subset through Cruce MCP (see shared/tools.ts). */
-export const PLATFORM_TOOLS = [
-	// control: read Cruce domain state
-	"get_project",
-	"get_context",
-	"get_mission",
-	"get_canonical_revision",
-	"get_source",
-	"get_diff",
-	"get_history",
-	"get_proposal",
-	"get_lineage",
-	"get_policy",
-	"read_artifact",
-	// lifecycle
-	"create_mission",
-	"start_mission",
-	"publish_revision",
-	"publish_artifact",
-	"create_proposal",
-	"attach_evidence",
-	"request_verification",
-	"review_proposal",
-	"request_preview",
-	"request_promotion",
-	"complete_mission",
-	// human decisions (console only)
-	"set_policy",
-	"resolve_review",
-	"decide_proposal",
-	"promote_proposal",
-	"decide_resource_request",
-	"configure_environment",
-	"deploy_revision",
-	"plan_rollback",
-] as const;
-export type PlatformTool = (typeof PLATFORM_TOOLS)[number];
-export const PLATFORM_READ_TOOLS = new Set<string>([
-	"get_project",
-	"get_context",
-	"get_mission",
-	"get_canonical_revision",
-	"get_source",
-	"get_diff",
-	"get_history",
-	"get_proposal",
-	"get_lineage",
-	"get_policy",
-	"read_artifact",
-	"plan_rollback",
-]);
-/** Decisions reserved for humans. Agent connections never reach these, whatever their scopes. */
-export const HUMAN_TOOLS = new Set<string>([
-	"set_policy",
-	"resolve_review",
-	"decide_proposal",
-	"promote_proposal",
-	"decide_resource_request",
-	"configure_environment",
-	"deploy_revision",
-	"plan_rollback",
-]);
-
-export type Actor = Principal & { kind: "human" | "agent" | "runtime"; scopes?: Scope[] };
-
-/** The project's canonical Git repository in Cloudflare Artifacts. Remote URLs never carry credentials. */
-export interface SourceRepository {
-	backend: "cloudflare_artifacts" | "offline_fixture";
-	namespace: string;
-	name: string;
-	remote?: string;
-	defaultBranch: "main";
-	acceptedRef: "refs/heads/main";
-	canonicalRevision: string;
-}
-export interface MissionAgent {
-	developerId: string;
-	tool: string;
-	instance: string;
-	sessionId: string;
-}
-export interface Mission {
-	/** Background supplied by the local agent, without a separate parent record. */
-	context?: string;
+export type WorkspaceRole = "owner" | "maintainer" | "developer" | "viewer";
+export type RepositoryRole = "read" | "write" | "maintain";
+export type ActorKind = "human" | "agent" | "system";
+export interface User {
 	id: string;
-	version: number;
-	title: string;
-	specialization: (typeof Specializations)[number];
-	plan: z.output<typeof FlightPlanInput>;
-	/** Coordination workstream; also the workspace identity. */
-	workstreamId?: string;
-	/** Accepted revision the mission's workspace started from. */
-	baseRevision?: string;
-	/** Latest revision published from the mission's workspace. */
-	headRevision?: string;
-	agent?: MissionAgent;
-	/** Isolated experiments of the same mission share a group so approaches can be compared. */
-	experimentOf?: string;
-	state: "ready" | "active" | "completed";
-	at: number;
-	completedAt?: number;
+	issuer: string;
+	subject: string;
+	email: string;
+	name: string;
+	personalWorkspaceId: string;
 }
-/** Product view of a mission's isolated Git workspace (one Artifacts fork per workspace). */
+export interface Actor {
+	id: string;
+	kind: ActorKind;
+	userId: string;
+	name: string;
+	connectionId?: string;
+}
+export interface Authority {
+	actor: Actor;
+	workspaceId: string;
+	repositoryId?: string;
+	role: WorkspaceRole;
+	repositoryRole?: RepositoryRole;
+	scopes?: string[];
+}
 export interface Workspace {
 	id: string;
-	missionId?: string;
-	repository: string;
-	remote: string;
+	handle: string;
+	name: string;
+	kind: "personal" | "shared";
+	ownerId: string;
+	createdAt: number;
+}
+export interface Team {
+	id: string;
+	name: string;
+	members: string[];
+}
+export interface Invitation {
+	id: string;
+	email: string;
+	role: Exclude<WorkspaceRole, "owner">;
+	tokenHash: string;
+	expiresAt: number;
+	acceptedBy?: string;
+}
+export interface Repository {
+	id: string;
+	workspaceId: string;
+	name: string;
+	defaultBranch: string;
+	createdAt: number;
+	source: { kind: "local" | "artifacts"; remote?: string; storageName?: string };
+	grants: { subject: "user" | "team"; id: string; role: RepositoryRole }[];
+	policy: { protectedPaths: string[]; requiredEvidence: string[]; resourceRules: Partial<Record<ResourceAction, ResourceRule>> };
+}
+export const RESOURCE_ACTIONS = [
+	"repository.create",
+	"session.fork",
+	"revision.publish",
+	"artifact.publish",
+	"preview.deploy",
+	"production.deploy",
+] as const;
+export type ResourceAction = (typeof RESOURCE_ACTIONS)[number];
+export type ResourceRule = "allow" | "approval" | "deny";
+export type CostClass = "none" | "local" | "artifacts" | "metered" | "metered_production";
+export interface ResourcePolicy {
+	rules: Record<ResourceAction, ResourceRule>;
+	dailyLimit: number;
+	previewsPerSession: number;
+}
+export interface ResourceReservation {
+	id: string;
+	fingerprint: string;
+	repositoryId: string;
+	sessionId?: string;
+	action: ResourceAction;
+	actorId: string;
+	at: number;
+	state: "reserved" | "complete" | "uncertain" | "released";
+}
+export interface ResourceAccount {
+	mode: "connected";
+	accountId: string;
+	label: string;
+	credential: "stored" | "none";
+	capabilities: ("artifacts" | "builds")[];
+	connectedBy?: string;
+	at?: number;
+}
+export interface WorkspaceState {
+	workspace: Workspace;
+	members: Record<string, WorkspaceRole>;
+	teams: Team[];
+	invitations: Invitation[];
+	repositories: Repository[];
+	policy: ResourcePolicy;
+	reservations: ResourceReservation[];
+	version: number;
+}
+export interface ExecutionContext {
+	id: string;
+	checkoutId: string;
+	machineId: string;
+	kind: "worktree" | "checkout";
+	owned: boolean;
+	branch?: string;
+	storageName?: string;
+}
+export interface SessionChange {
+	path: string;
+	previousPath?: string;
+	status: "added" | "modified" | "deleted" | "renamed";
+	binary?: boolean;
+}
+export interface Session {
+	id: string;
+	repositoryId: string;
+	actor: Actor;
+	title: string;
 	baseRevision: string;
 	headRevision: string;
-	state: string;
+	branch?: string;
+	mode: "read" | "write";
+	context?: string;
+	execution?: ExecutionContext;
+	state: "preparing" | "active" | "disconnected" | "completed" | "cancelled";
+	startedAt: number;
+	lastActivity: number;
+	endedAt?: number;
+	changes: SessionChange[];
+	commits: string[];
+	publishedRevision?: string;
+}
+export interface Overlap {
+	id: string;
+	kind: "file" | "symbol";
+	sessions: string[];
+	surface: string;
+	evidence: "reported";
+	observedAt: number;
+}
+export interface RefObservation {
+	ref: string;
+	revision: string;
+	sessionId: string;
+	actorId: string;
+	at: number;
+	trust: "reported" | "verified";
 }
 export interface Artifact {
 	id: string;
-	kind: (typeof ArtifactKinds)[number];
-	missionId: string;
-	title: string;
-	summary: string;
-	/** The Git revision this artifact describes (its anchor). */
+	workspaceId: string;
+	repositoryId: string;
+	sessionId: string;
+	actor: Actor;
 	revision: string;
-	/** First parent of `revision` for source; equal to `revision` for typed evidence. */
-	parentRevision: string;
+	kind: "source" | "evidence" | "build";
+	title: string;
 	contentHash: string;
-	storage: { repository: string; path?: string; revision: string };
-	producer: { actor: string; kind: Actor["kind"]; sessionId?: string; tool?: string; model?: string };
-	execution: { location: (typeof ExecutionLocations)[number]; detail: string };
-	related: string[];
-	trust: "reported" | "verified";
-	/** Source artifacts: commits in base..revision and the number of changed paths. */
-	source?: { base: string; commits: { oid: string; message: string }[]; files: number };
+	trust: "reported" | "human_attested" | "runtime_verified";
+	storage: { repository: string; revision: string; ref?: string; path?: string };
 	at: number;
 }
-export interface ProposalDecision {
-	outcome: "reject" | "request_changes";
-	actor: string;
+export interface Review {
+	id: string;
+	actor: Actor;
+	revision: string;
+	outcome: "approve" | "concern" | "disagree";
 	reason: string;
 	at: number;
-}
-export interface Proposal {
-	id: string;
-	number: number;
-	version: number;
-	missionId: string;
-	artifactId: string;
-	summary: string;
-	impact: string;
-	risks: string[];
-	questions: string[];
-	risk: "low" | "medium" | "high";
-	/** Exact Git state: the accepted revision it builds on and the proposed revision. */
-	base: string;
-	revision: string;
-	repository: string;
-	commits: number;
-	files: number;
-	policyVersion: number;
-	state: "proposed" | "promoting" | "promoted" | "rejected" | "changes_requested" | "superseded";
-	decision?: ProposalDecision;
-	supersededBy?: string;
-	promotionRequestedAt?: number;
-	at: number;
-}
-export interface VerificationRequest {
-	id: string;
-	proposalId: string;
-	revision: string;
-	kinds: VerificationKind[];
-	requestedBy: string;
-	at: number;
+	resolution?: { actor: Actor; reason: string; at: number };
 }
 export interface Verification {
 	id: string;
 	proposalId: string;
 	revision: string;
-	kind: VerificationKind;
-	outcome: "pass" | "fail" | "inconclusive";
-	artifactIds: string[];
-	summary: string;
-	actor: string;
+	kind: string;
+	outcome: "pass" | "fail";
 	trust: "reported" | "human_attested" | "runtime_verified";
-	deploymentId?: string;
+	actor: Actor;
+	summary: string;
+	artifactId?: string;
 	at: number;
 }
-export interface Review {
+export interface Proposal {
 	id: string;
-	proposalId: string;
+	number: number;
+	sessionId: string;
+	artifactId: string;
+	base: string;
 	revision: string;
-	policyVersion: number;
-	actor: string;
-	actorKind: Actor["kind"];
-	outcome: "approve" | "concern" | "disagree";
-	summary: string;
-	resolved?: { actor: string; reason: string; at: number };
+	title: string;
+	state: "open" | "rejected" | "promoting" | "promoted";
+	reviews: Review[];
 	at: number;
 }
 export interface Promotion {
@@ -242,230 +204,158 @@ export interface Promotion {
 	proposalId: string;
 	from: string;
 	to: string;
-	repository: string;
-	actor: string;
-	proposalVersion: number;
-	policyVersion: number;
-	evidenceIds: string[];
-	reviewIds: string[];
-	coordinationFingerprint?: string;
-	/** Set when the same human decision also deploys the promoted revision to production. */
-	deploy?: boolean;
+	actor: Actor;
+	at: number;
 	state: "prepared" | "complete";
-	at: number;
-	completedAt?: number;
-}
-export interface PromotionPolicy {
-	version: number;
-	humanApproval: boolean;
-	approvals: number;
-	requiredEvidence: VerificationKind[];
-	agentPromotion: false;
-	resources: ResourcePolicy;
-}
-/** A resource action awaiting a human, or the record of one that was decided. */
-export interface ResourceRequest {
-	id: string;
-	action: ResourceAction;
-	cost: CostClass;
-	missionId?: string;
-	proposalId?: string;
-	environmentId?: string;
-	revision?: string;
-	requestedBy: string;
-	actorKind: Actor["kind"];
-	reason: string;
-	state: "pending" | "approved" | "denied" | "executed" | "failed";
-	decidedBy?: string;
-	decision?: string;
-	deploymentId?: string;
-	at: number;
-	decidedAt?: number;
 }
 export interface SmokeCheck {
 	path: string;
 	expectStatus: number;
 }
-export type EnvironmentTarget =
-	| {
-			type: "cloudflare_worker";
-			workerName: string;
-			accountId: string;
-			/** Artifacts repository Workers Builds is connected to: `main` deploys production, other branches build previews. */
-			deployRepository: string;
-			deployRemote?: string;
-			scriptTag?: string;
-	  }
-	| { type: "external"; description: string };
 export interface Environment {
 	id: string;
 	name: string;
 	kind: "preview" | "production";
-	target: EnvironmentTarget;
+	workerName: string;
+	deployRepository: string;
+	scriptTag?: string;
 	smokeChecks: SmokeCheck[];
-	createdBy: string;
-	at: number;
 }
 export interface Deployment {
 	id: string;
 	environmentId: string;
+	artifactId: string;
 	revision: string;
-	proposalId?: string;
-	promotionId?: string;
-	requestId?: string;
-	branch?: string;
+	sessionId: string;
+	actor: Actor;
 	state: "queued" | "building" | "deployed" | "failed" | "superseded";
+	branch: string;
 	buildId?: string;
+	runtimeVersion?: string;
 	url?: string;
-	/** Revision that was running in this environment before this deployment. */
 	previous?: string;
 	rollbackOf?: string;
-	evidenceIds: string[];
-	actor: string;
 	error?: string;
+	smoke?: { ok: boolean; at: number };
 	at: number;
 	updatedAt: number;
 }
-/** Where Cruce consumes infrastructure. Credentials are stored sealed and never returned. */
-export interface ResourceAccount {
-	mode: "operator" | "connected";
-	accountId: string;
-	label: string;
-	credential: "none" | "stored";
-	capabilities: ("artifacts" | "builds")[];
-	connectedBy?: string;
-	at?: number;
-}
 export type DeploymentProfile =
-	| { kind: "cloudflare_worker"; configPath: string; workerName?: string; revision: string }
-	| { kind: "unknown"; revision: string };
-export interface PlatformState {
-	counter: number;
+	| { kind: "unknown"; revision: string }
+	| { kind: "cloudflare_worker"; revision: string; configPath: string; workerName?: string };
+export interface ActivityEvent {
+	id: string;
+	actor: Actor;
+	kind: string;
+	summary: string;
+	ids: string[];
+	at: number;
+}
+export interface RepositoryState {
+	repository: Repository;
 	version: number;
-	missions: Mission[];
+	sessions: Session[];
 	artifacts: Artifact[];
 	proposals: Proposal[];
-	verificationRequests: VerificationRequest[];
 	verifications: Verification[];
-	reviews: Review[];
 	promotions: Promotion[];
-	resourceRequests: ResourceRequest[];
 	environments: Environment[];
 	deployments: Deployment[];
-	usage: Record<string, number>;
-	policy: PromotionPolicy;
-	replays: Record<string, { request: string; result: unknown }>;
-	timeline: { id: string; at: number; actor: string; kind: string; ids: string[]; summary: string }[];
+	refs: RefObservation[];
+	activity: ActivityEvent[];
+	receipts: Record<string, { fingerprint: string; result: unknown }>;
+	sourceHead?: string;
 }
-export interface PromotionReadiness {
-	outcome: "READY" | "NEEDS_ATTENTION" | "VERIFY" | "REFRESH" | "CLOSED";
-	reasons: string[];
-	evidence: { kind: Verification["kind"]; trust: Verification["trust"]; outcome: Verification["outcome"] }[];
-	/** Required kinds still lacking trusted, passing evidence on this exact revision. */
-	missing: VerificationKind[];
+export interface RepositorySnapshot extends Omit<RepositoryState, "receipts"> {
+	overlaps: Overlap[];
+	permissions: { write: boolean; maintain: boolean; human: boolean };
+	sourceAvailable: boolean;
+	readiness: Record<string, { ready: boolean; reasons: string[] }>;
+	context?: { available: boolean; files: Record<string, string> };
 }
-const path = z
+
+export const id = z.string().min(1).max(160);
+export const revision = z.string().regex(/^[0-9a-f]{40}$/);
+export const name = z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/);
+export const path = z
 	.string()
 	.min(1)
 	.max(400)
 	.refine(
-		(p) => !p.startsWith("/") && !p.includes("\\") && !p.includes("\0") && p.split("/").every((s) => s && s !== "." && s !== ".."),
-		"Relative source path required",
+		(p) => !p.startsWith("/") && !/[\\\0]/.test(p) && p.split("/").every((s) => s && s !== "." && s !== ".."),
+		"Relative repository path required",
 	);
-const revision = z.string().regex(/^[0-9a-f]{40}$/, "Full 40-character Git revision required");
-export const ResourcePolicyInput = z
-	.object({
-		rules: z.partialRecord(z.enum(RESOURCE_ACTIONS), z.enum(["allow", "approval", "deny"])),
-		budgets: z
-			.object({
-				previewsPerMission: z.number().int().min(0).max(1000),
-				previewsPerDay: z.number().int().min(0).max(1000),
-				workspacesPerDay: z.number().int().min(0).max(1000),
-			})
-			.partial(),
-	})
-	.partial()
+export const branch = z
+	.string()
+	.min(1)
+	.max(200)
+	.refine(
+		(s) =>
+			!/[\s~^:?*[\\]/.test(s) &&
+			!s.includes("..") &&
+			!s.includes("@{") &&
+			!s.startsWith("-") &&
+			!s.startsWith("/") &&
+			!s.endsWith("/") &&
+			!s.endsWith(".") &&
+			s.split("/").every((p) => p && !p.startsWith(".") && !p.endsWith(".lock")),
+		"Valid Git branch required",
+	);
+export const ExecutionInput = z
+	.object({ id, checkoutId: id, machineId: id, kind: z.enum(["worktree", "checkout"]), owned: z.boolean(), branch: branch.optional() })
 	.strict();
-export const PlatformCommandInput = z
+export const ChangeInput = z
 	.object({
-		tool: z.enum(PLATFORM_TOOLS),
-		projectId: z.string().min(1).max(300),
-		idempotencyKey: z.string().min(1).max(200).optional(),
-		expectedVersion: z.number().int().nonnegative().optional(),
-		workspace: WorkspaceInput.optional(),
-		agent: CommandInput.shape.agent,
-		expectedPlanVersion: z.number().int().nonnegative().optional(),
-		missionId: z.string().max(100).optional(),
-		proposalId: z.string().max(100).optional(),
-		artifactId: z.string().max(100).optional(),
-		reviewId: z.string().max(100).optional(),
-		requestId: z.string().max(100).optional(),
-		environmentId: z.string().max(100).optional(),
-		deploymentId: z.string().max(100).optional(),
-		subjectId: z.string().max(100).optional(),
-		sessionId: z.string().max(100).optional(),
-		experimentOf: z.string().max(100).optional(),
-		title: z.string().max(200).optional(),
-		context: z.string().max(4000).optional(),
-		summary: z.string().max(2000).optional(),
-		impact: z.string().max(2000).optional(),
-		risks: z.array(z.string().max(400)).max(20).optional(),
-		questions: z.array(z.string().max(400)).max(20).optional(),
-		risk: z.enum(["low", "medium", "high"]).default("medium"),
-		specialization: z.enum(Specializations).default("implementation"),
-		plan: FlightPlanInput.optional(),
-		kind: z.enum(ArtifactKinds).optional(),
-		content: z.string().max(100000).optional(),
-		related: z.array(z.string().max(100)).max(50).default([]),
-		model: z.string().max(100).optional(),
-		execution: z.enum(ExecutionLocations).default("local"),
-		executionDetail: z.string().max(200).optional(),
+		path,
+		previousPath: path.optional(),
+		status: z.enum(["added", "modified", "deleted", "renamed"]),
+		binary: z.boolean().optional(),
+	})
+	.strict();
+export const CommandInput = z
+	.object({
+		tool: z.string(),
+		workspaceId: id.optional(),
+		repositoryId: id.optional(),
+		sessionId: id.optional(),
+		idempotencyKey: id.optional(),
+		title: z.string().min(1).max(200).optional(),
+		context: z.string().max(10000).optional(),
+		baseRevision: revision.optional(),
 		revision: revision.optional(),
-		base: revision.optional(),
-		path: path.optional(),
-		files: z
-			.record(path, z.string().max(100000).nullable())
-			.refine(
-				(files) => Object.keys(files).length <= 250 && new TextEncoder().encode(JSON.stringify(files)).length <= 4 * 1024 * 1024,
-				"Bounded source publication exceeded",
-			)
-			.optional(),
-		/** Base64 Git pack (non-thin) containing base..revision, produced by `git pack-objects` locally. */
+		branch: branch.optional(),
+		mode: z.enum(["read", "write"]).optional(),
+		execution: ExecutionInput.optional(),
+		changes: z.array(ChangeInput).max(5000).optional(),
+		commits: z.array(revision).max(1000).optional(),
+		cancelled: z.boolean().optional(),
 		pack: z
 			.string()
-			.max(6 * 1024 * 1024)
-			.regex(/^[A-Za-z0-9+/=]+$/, "Base64 Git pack required")
+			.max(44 * 1024 * 1024)
 			.optional(),
-		message: z.string().max(2000).optional(),
-		verificationKind: z.enum(VerificationKinds).optional(),
-		verificationKinds: z.array(z.enum(VerificationKinds)).min(1).max(VerificationKinds.length).optional(),
-		outcome: z.enum(["pass", "fail", "inconclusive", "approve", "concern", "disagree"]).optional(),
-		decision: z.enum(["reject", "request_changes", "approve", "deny"]).optional(),
-		deploy: z.boolean().optional(),
-		reason: z.string().max(1000).optional(),
-		policy: z
-			.object({
-				approvals: z.number().int().min(1).max(10),
-				requiredEvidence: z.array(z.enum(VerificationKinds)).min(1).max(VerificationKinds.length),
-				resources: ResourcePolicyInput.optional(),
-			})
-			.strict()
-			.optional(),
+		artifactId: id.optional(),
+		proposalId: id.optional(),
+		subjectId: id.optional(),
+		content: z.string().max(1000000).optional(),
+		kind: z.string().max(100).optional(),
+		outcome: z.enum(["approve", "concern", "disagree", "pass", "fail", "reject"]).optional(),
+		reason: z.string().min(1).max(2000).optional(),
+		reviewIndex: z.number().int().nonnegative().optional(),
+		humanAttested: z.boolean().optional(),
+		environmentId: id.optional(),
 		environment: z
 			.object({
-				kind: z.enum(["cloudflare_worker", "external"]),
-				workerName: z
-					.string()
-					.regex(/^[a-z0-9][a-z0-9-]{0,62}$/, "Worker names use lowercase letters, digits and dashes")
-					.optional(),
-				description: z.string().max(400).optional(),
-				smokePaths: z
-					.array(z.string().regex(/^\/[^\s]{0,200}$/))
-					.max(10)
-					.optional(),
+				name: z.string().min(1).max(80),
+				kind: z.enum(["preview", "production"]),
+				workerName: name,
+				smokeChecks: z
+					.array(z.object({ path: z.string().regex(/^\/(?!\/)[^\r\n]*$/), expectStatus: z.number().int().min(100).max(599) }))
+					.max(10),
 			})
-			.strict()
 			.optional(),
+		deploymentId: id.optional(),
+		ref: branch.optional(),
+		path: path.optional(),
 	})
 	.strict();
-export type PlatformCommand = z.infer<typeof PlatformCommandInput>;
+export type Command = z.infer<typeof CommandInput>;

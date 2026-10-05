@@ -1,23 +1,21 @@
-import { CoordinationError } from "../core/workstreams.ts";
+import { DomainError } from "../core/errors.ts";
 import type { ResourceAccount, SmokeCheck } from "../shared/platform.ts";
-import type { ArtifactsHost, RepoRef } from "./artifacts-host.ts";
 import type { GitWorkspace } from "./git/workspace.ts";
 import { type SealingEnv, seal, unseal } from "./sealing.ts";
-import type { TowerStore } from "./tower.ts";
+import type { Store } from "./store.ts";
 
-/**
- * The resource boundary. Cruce's control plane keeps missions, proposals, policy and lineage;
- * the project's Cloudflare account owns (and pays for) the Artifacts deploy repository, Workers Builds
- * and the deployed Worker. Cruce orchestrates across that boundary only through policy-checked actions.
- *
- * Operator mode: Cruce is deployed in the same account (self-hosted); Artifacts is reached through the
- * Worker binding. Connected mode: another account; Artifacts is reached through its REST API with the
- * connected account's API token. Workers Builds always uses the API token, sealed at rest and never returned.
- */
+/** Resource calls use only the workspace's explicitly connected, sealed credential. */
+export interface RepoRef {
+	name: string;
+	id: string;
+	remote: string;
+	created: boolean;
+}
 
 export interface RepositoryHost {
-	ensure(name: string, description: string): Promise<RepoRef>;
-	info(name: string): Promise<{ name: string; description?: string | null; remote: string }>;
+	ensure(name: string, description: string, defaultBranch?: string): Promise<RepoRef>;
+	fork?(source: string, target: string, description: string): Promise<RepoRef>;
+	info(name: string): Promise<{ name: string; description?: string | null; remote: string; id?: string }>;
 	withToken<T>(name: string, scope: "read" | "write", fn: (token: string) => Promise<T>): Promise<{ result: T; tokenId: string }>;
 }
 
@@ -31,8 +29,8 @@ async function cloudflare<T>(send: Send, token: string, path: string, init: Requ
 	});
 	const body = (await response.json().catch(() => ({}))) as { success?: boolean; result?: T; errors?: { message: string }[] };
 	if (!response.ok || body.success === false)
-		throw new CoordinationError(
-			response.status === 404 ? 404 : 502,
+		throw new DomainError(
+			[404, 409, 429].includes(response.status) ? response.status : 502,
 			`Cloudflare API ${path.split("?")[0]}: ${body.errors?.map((e) => e.message).join("; ") || response.status}`,
 		);
 	return body.result as T;
@@ -56,12 +54,44 @@ export class ArtifactsRestHost implements RepositoryHost {
 			this.path(`/repos/${name}`),
 		);
 	}
-	async ensure(name: string, description: string): Promise<RepoRef> {
+	private async namespaceReady() {
+		try {
+			await cloudflare(this.send, this.token, this.path());
+		} catch (error) {
+			if (!(error instanceof DomainError) || error.status !== 404) throw error;
+			try {
+				await cloudflare(this.send, this.token, `/accounts/${this.accountId}/artifacts/namespaces`, {
+					method: "POST",
+					body: JSON.stringify({ namespace: this.namespace }),
+				});
+			} catch (createError) {
+				// Another repository in this workspace may have created the same namespace.
+				if (!(createError instanceof DomainError) || createError.status !== 409) throw createError;
+				await cloudflare(this.send, this.token, this.path());
+			}
+		}
+	}
+	private async revokeOutstanding(name: string) {
+		for (let page = 0; page < 20; page++) {
+			const tokens = await cloudflare<{ id: string }[]>(
+				this.send,
+				this.token,
+				this.path(`/repos/${name}/tokens?state=active&per_page=100`),
+			);
+			for (const token of tokens) await this.revoke(token.id);
+			if (tokens.length < 100) return;
+		}
+		throw new DomainError(503, "Repository token reconciliation needs another retry");
+	}
+	async ensure(name: string, description: string, defaultBranch = "main"): Promise<RepoRef> {
+		await this.namespaceReady();
 		try {
 			const info = await this.info(name);
+			if (info.description !== description) throw new DomainError(409, "Artifacts repository ownership mismatch");
+			await this.revokeOutstanding(name);
 			return { name: info.name, id: info.id, remote: info.remote, created: false };
 		} catch (error) {
-			if ((error as CoordinationError).status !== 404) throw error;
+			if ((error as DomainError).status !== 404) throw error;
 		}
 		const created = await cloudflare<{ id: string; name: string; remote: string; token: string }>(
 			this.send,
@@ -69,16 +99,32 @@ export class ArtifactsRestHost implements RepositoryHost {
 			this.path("/repos"),
 			{
 				method: "POST",
-				body: JSON.stringify({ name, description, default_branch: "main" }),
+				body: JSON.stringify({ name, description, default_branch: defaultBranch }),
 			},
 		);
 		// The creation token is long-lived; Cruce never keeps it.
-		const tokens = await cloudflare<{ id: string; plaintext?: string }[]>(this.send, this.token, this.path(`/repos/${name}/tokens`)).catch(
-			() => [],
-		);
-		for (const t of tokens) await this.revoke(t.id);
+		await this.revokeOutstanding(name);
 		return { name: created.name, id: created.id, remote: created.remote, created: true };
 	}
+	async fork(source: string, target: string, description: string): Promise<RepoRef> {
+		try {
+			const old = await this.info(target);
+			if (old.description !== description) throw new DomainError(409, "Fork ownership mismatch");
+			await this.revokeOutstanding(target);
+			return { ...old, created: false };
+		} catch (error) {
+			if ((error as DomainError).status !== 404) throw error;
+		}
+		const created = await cloudflare<{ id: string; name: string; remote: string }>(
+			this.send,
+			this.token,
+			this.path(`/repos/${source}/fork`),
+			{ method: "POST", body: JSON.stringify({ name: target, description, default_branch_only: true, read_only: false }) },
+		);
+		await this.revokeOutstanding(target);
+		return { ...created, created: true };
+	}
+
 	async withToken<T>(name: string, scope: "read" | "write", fn: (token: string) => Promise<T>) {
 		const t = await cloudflare<{ id: string; plaintext: string }>(this.send, this.token, this.path("/tokens"), {
 			method: "POST",
@@ -91,7 +137,11 @@ export class ArtifactsRestHost implements RepositoryHost {
 		}
 	}
 	private async revoke(id: string) {
-		await cloudflare(this.send, this.token, this.path(`/tokens/${id}`), { method: "DELETE" }).catch(() => undefined);
+		try {
+			await cloudflare(this.send, this.token, this.path(`/tokens/${id}`), { method: "DELETE" });
+		} catch (e) {
+			if (!(e instanceof DomainError) || e.status !== 404) throw e;
+		}
 	}
 }
 
@@ -119,7 +169,25 @@ export class WorkersBuildsClient {
 			this.token,
 			`/accounts/${this.accountId}/builds/workers/${scriptTag}/builds?per_page=50`,
 		);
-		return builds.find((b) => b.build_trigger_metadata?.commit_hash === revision && b.build_trigger_metadata?.branch === branch);
+		const match = builds.find((b) => b.build_trigger_metadata?.commit_hash === revision && b.build_trigger_metadata?.branch === branch);
+		if (match?.status !== "stopped") return match;
+		// preview_url is only supplied by the single-build endpoint.
+		return cloudflare<BuildRecord>(this.send, this.token, `/accounts/${this.accountId}/builds/builds/${match.build_uuid}`);
+	}
+	async runtimeVersion(worker: string, buildId: string): Promise<string | undefined> {
+		const versions = await cloudflare<{ items: { id: string }[] }>(
+			this.send,
+			this.token,
+			`/accounts/${this.accountId}/workers/scripts/${encodeURIComponent(worker)}/versions`,
+		);
+		const ids = versions.items.slice(0, 20).map((v) => v.id);
+		if (!ids.length) return undefined;
+		const result = await cloudflare<{ builds?: Record<string, BuildRecord> }>(
+			this.send,
+			this.token,
+			`/accounts/${this.accountId}/builds/builds?version_ids=${ids.join(",")}`,
+		);
+		return Object.entries(result.builds ?? {}).find(([, build]) => build.build_uuid === buildId)?.[0];
 	}
 	async verify(): Promise<void> {
 		await cloudflare(this.send, this.token, `/accounts/${this.accountId}/builds/account/limits`);
@@ -129,17 +197,15 @@ export class WorkersBuildsClient {
 interface StoredAccount extends ResourceAccount {
 	sealed?: string;
 }
-export interface OperatorResources {
-	accountId?: string;
+export interface WorkspaceResources {
 	namespace: string;
-	host?: ArtifactsHost;
 }
 
 export class ResourceBoundary {
 	constructor(
-		readonly store: TowerStore,
+		readonly store: Store,
 		readonly env: SealingEnv,
-		readonly operator: OperatorResources,
+		readonly resources: WorkspaceResources,
 		readonly send: Send = fetch,
 	) {}
 	/** Public view: never includes the credential. */
@@ -149,26 +215,18 @@ export class ResourceBoundary {
 			const { sealed: _secret, ...view } = stored;
 			return view;
 		}
-		if (!this.operator.host || !this.operator.accountId) return undefined;
-		return {
-			mode: "operator",
-			accountId: this.operator.accountId,
-			label: "Cruce deployment account",
-			credential: "none",
-			capabilities: ["artifacts"],
-		};
+		return undefined;
 	}
 	async connect(input: { accountId: string; token: string; label?: string }, actor: string): Promise<ResourceAccount> {
-		if (!/^[0-9a-f]{32}$/.test(input.accountId)) throw new CoordinationError(400, "Cloudflare account ID required");
-		if (input.token.length < 20 || input.token.length > 400) throw new CoordinationError(400, "Cloudflare API token required");
+		if (!/^[0-9a-f]{32}$/.test(input.accountId)) throw new DomainError(400, "Cloudflare account ID required");
+		if (input.token.length < 20 || input.token.length > 400) throw new DomainError(400, "Cloudflare API token required");
 		await new WorkersBuildsClient(input.accountId, input.token, this.send).verify().catch((error) => {
-			throw new CoordinationError(400, `Token cannot read Workers Builds for this account: ${(error as Error).message}`);
+			throw new DomainError(400, `Token cannot read Workers Builds for this account: ${(error as Error).message}`);
 		});
-		const mode = input.accountId === this.operator.accountId && this.operator.host ? "operator" : "connected";
 		const account: StoredAccount = {
-			mode,
+			mode: "connected",
 			accountId: input.accountId,
-			label: input.label?.slice(0, 80) || (mode === "operator" ? "Cruce deployment account" : "Connected Cloudflare account"),
+			label: input.label?.slice(0, 80) || "Connected Cloudflare account",
 			credential: "stored",
 			capabilities: ["artifacts", "builds"],
 			connectedBy: actor,
@@ -183,23 +241,19 @@ export class ResourceBoundary {
 	}
 	private async token(): Promise<string> {
 		const stored = this.store.get<StoredAccount>("resource-account");
-		if (!stored?.sealed) throw new CoordinationError(409, "Connect a Cloudflare account with a Workers Builds token first");
+		if (!stored?.sealed) throw new DomainError(409, "Connect a Cloudflare account with a Workers Builds token first");
 		return (await unseal<{ token: string }>(this.env, stored.sealed)).token;
 	}
 	async builds(): Promise<WorkersBuildsClient> {
 		const account = this.account();
-		if (!account) throw new CoordinationError(409, "No Cloudflare account connected");
+		if (!account) throw new DomainError(409, "No Cloudflare account connected");
 		return new WorkersBuildsClient(account.accountId, await this.token(), this.send);
 	}
 	/** Where deploy repositories live: the account Workers Builds reads from. */
 	async host(): Promise<RepositoryHost> {
 		const account = this.account();
-		if (!account) throw new CoordinationError(409, "No Cloudflare account connected");
-		if (account.mode === "operator") {
-			if (!this.operator.host) throw new CoordinationError(503, "Artifacts binding unavailable");
-			return this.operator.host;
-		}
-		return new ArtifactsRestHost(account.accountId, this.operator.namespace, await this.token(), this.send);
+		if (!account) throw new DomainError(409, "No Cloudflare account connected");
+		return new ArtifactsRestHost(account.accountId, this.resources.namespace, await this.token(), this.send);
 	}
 }
 
@@ -230,7 +284,7 @@ export async function runSmokeChecks(
 	clock: () => number = Date.now,
 ): Promise<SmokeResult[]> {
 	const origin = new URL(url);
-	if (origin.protocol !== "https:") throw new CoordinationError(400, "Smoke checks require an HTTPS preview URL");
+	if (origin.protocol !== "https:") throw new DomainError(400, "Smoke checks require an HTTPS preview URL");
 	const results: SmokeResult[] = [];
 	for (const check of checks) {
 		const started = clock();

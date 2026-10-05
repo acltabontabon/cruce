@@ -1,652 +1,399 @@
 import type {
 	Actor,
 	Artifact,
+	Authority,
+	Command,
 	Deployment,
-	Environment,
-	PlatformCommand,
-	PlatformState,
-	Promotion,
-	PromotionReadiness,
+	Overlap,
 	Proposal,
-	ResourceRequest,
-	Verification,
-	VerificationKind,
+	Repository,
+	RepositorySnapshot,
+	RepositoryState,
+	Session,
 } from "../shared/platform.ts";
-import {
-	DEFAULT_RESOURCE_POLICY,
-	evaluateResource,
-	normalizeResourcePolicy,
-	RESOURCE_COST,
-	RESOURCE_LABELS,
-	type ResourceAction,
-	type ResourceEvaluation,
-	recordUsage,
-} from "./capabilities.ts";
-import { migratePlanRecords } from "./migrate-records.ts";
-import { CoordinationError, stable } from "./workstreams.ts";
-
-export const initialPlatform = (): PlatformState => ({
-	counter: 0,
+import { humanMaintain, writeAccess } from "./capabilities.ts";
+import { DomainError, requireValue, stable } from "./errors.ts";
+export const SESSION_TTL = 90_000;
+export const initialRepository = (repository: Repository): RepositoryState => ({
+	repository,
 	version: 0,
-	missions: [],
+	sessions: [],
 	artifacts: [],
 	proposals: [],
-	verificationRequests: [],
 	verifications: [],
-	reviews: [],
 	promotions: [],
-	resourceRequests: [],
 	environments: [],
 	deployments: [],
-	usage: {},
-	policy: {
-		version: 1,
-		humanApproval: true,
-		approvals: 1,
-		requiredEvidence: ["tests"],
-		agentPromotion: false,
-		resources: structuredClone(DEFAULT_RESOURCE_POLICY),
-	},
-	replays: {},
-	timeline: [],
+	refs: [],
+	activity: [],
+	receipts: {},
 });
-
-/** Upgrade state stored by earlier versions without reinterpreting its records. */
-export function migratePlatform(stored: PlatformState): PlatformState {
-	const legacy = structuredClone(stored) as PlatformState & {
-		intents?: { id: string; title: string; context: string; why: string }[];
-	};
-	const retired = new Set((legacy.intents ?? []).map((i) => i.id));
-	for (const m of legacy.missions as (PlatformState["missions"][number] & { intentId?: string })[]) {
-		const parent = legacy.intents?.find((i) => i.id === m.intentId);
-		if (parent) m.context ??= [parent.title, parent.context, parent.why].filter(Boolean).join("\n\n");
-	}
-	legacy.timeline = legacy.timeline.flatMap((e) => {
-		if (e.kind === "intent") {
-			const ids = legacy.missions.filter((m) => e.ids.includes((m as typeof m & { intentId?: string }).intentId ?? "")).map((m) => m.id);
-			return ids.length ? [{ ...e, kind: "mission_context", ids }] : [];
-		}
-		return [{ ...e, ids: e.ids.filter((id) => !retired.has(id)) }];
-	});
-	// Retired creation receipts must not reintroduce the removed product record.
-	for (const [key, receipt] of Object.entries(legacy.replays)) {
-		if (JSON.parse(receipt.request).tool === "create_intent") delete legacy.replays[key];
-	}
-	const s = migratePlanRecords(legacy) as PlatformState & Record<string, unknown>;
-	const base = initialPlatform();
-	for (const key of ["verificationRequests", "resourceRequests", "environments", "deployments"] as const) s[key] ??= [];
-	s.usage ??= {};
-	s.policy = { ...base.policy, ...s.policy, resources: s.policy?.resources ?? base.policy.resources };
-	s.proposals.forEach((p, i) => {
-		p.number ??= i + 1;
-		p.repository ??= "";
-		p.commits ??= 1;
-		p.files ??= 0;
-	});
-	for (const a of s.artifacts as (Artifact & { environment?: string })[]) {
-		a.execution ??= { location: "external", detail: a.environment ?? "unspecified" };
-		delete a.environment;
-	}
-	return s;
-}
-
-const CLOSED: Proposal["state"][] = ["promoted", "rejected", "changes_requested", "superseded"];
-
-export class PlatformController {
-	readonly state: PlatformState;
+export class RepositoryController {
 	constructor(
-		state: PlatformState,
+		readonly state: RepositoryState,
 		readonly now: number,
-	) {
-		this.state = migratePlatform(state);
-	}
-	next(prefix: string) {
-		return `${prefix}-${++this.state.counter}`;
-	}
-	event(actor: string, kind: string, ids: string[], summary: string) {
+		readonly nextId: () => string,
+	) {}
+	event(actor: Actor, kind: string, summary: string, ids: string[]) {
 		this.state.version++;
-		this.state.timeline.push({ id: this.next("E"), at: this.now, actor, kind, ids, summary });
+		this.state.activity.push({ id: `event-${this.state.version}`, actor, kind, summary, ids, at: this.now });
+	}
+	session(id?: string) {
+		const s = this.state.sessions.find((s) => s.id === id);
+		if (!s) throw new DomainError(404, "Session unavailable");
+		return s;
 	}
 	proposal(id?: string) {
 		const p = this.state.proposals.find((p) => p.id === id);
-		if (!p) throw new CoordinationError(404, "Proposal unavailable");
+		if (!p) throw new DomainError(404, "Change unavailable");
 		return p;
 	}
-	mission(id?: string) {
-		const m = this.state.missions.find((m) => m.id === id);
-		if (!m) throw new CoordinationError(404, "Mission unavailable");
-		return m;
-	}
-	environment(id?: string) {
-		const e = this.state.environments.find((e) => e.id === id);
-		if (!e) throw new CoordinationError(404, "Environment unavailable");
-		return e;
+	artifact(id?: string) {
+		const a = this.state.artifacts.find((a) => a.id === id);
+		if (!a) throw new DomainError(404, "Artifact unavailable");
+		return a;
 	}
 	deployment(id?: string) {
 		const d = this.state.deployments.find((d) => d.id === id);
-		if (!d) throw new CoordinationError(404, "Deployment unavailable");
+		if (!d) throw new DomainError(404, "Deployment unavailable");
 		return d;
 	}
-	replay(cmd: PlatformCommand, actor: Actor, run: () => unknown) {
-		if (!cmd.idempotencyKey) throw new CoordinationError(400, "Mutation requires an idempotency key");
-		const key = `${actor.developerId}:${actor.kind}:${cmd.idempotencyKey}`,
-			request = stable(cmd),
-			old = this.state.replays[key];
-		if (old) {
-			if (old.request !== request) throw new CoordinationError(409, "Idempotency key reused with different inputs");
-			return old.result;
+	owned(a: Authority, id?: string, write = true) {
+		if (write) writeAccess(a);
+		const s = this.session(id);
+		if (s.actor.id !== a.actor.id || s.actor.connectionId !== a.actor.connectionId)
+			throw new DomainError(403, "Session belongs to another actor connection");
+		if (["completed", "cancelled"].includes(s.state)) throw new DomainError(409, "Session has ended");
+		if (write && s.mode !== "write") throw new DomainError(403, "Read-only session");
+		return s;
+	}
+	live(s: Session) {
+		return s.state === "active" && s.lastActivity + SESSION_TTL > this.now;
+	}
+	overlaps(): Overlap[] {
+		const byPath = new Map<string, Session[]>();
+		for (const s of this.state.sessions.filter((s) => this.live(s) && s.mode === "write")) {
+			for (const p of new Set(s.changes.flatMap((c) => [c.path, ...(c.previousPath ? [c.previousPath] : [])])))
+				byPath.set(p, [...(byPath.get(p) ?? []), s]);
 		}
-		if (actor.canWrite === false) throw new CoordinationError(403, "Contribution permission required");
-		const result = run();
-		this.state.replays[key] = { request, result };
-		return result;
+		return [...byPath]
+			.filter(([, s]) => s.length > 1)
+			.map(([surface, s]) => ({
+				id: `file:${surface}`,
+				kind: "file",
+				sessions: s.map((s) => s.id).sort(),
+				surface,
+				evidence: "reported",
+				observedAt: Math.min(...s.map((s) => s.lastActivity)),
+			}));
 	}
-	private human(actor: Actor, reason: string) {
-		if (actor.kind !== "human" || !actor.maintainer) throw new CoordinationError(403, reason);
-	}
-	/** Latest result per verification kind and verifier, on the proposal's exact revision. */
-	private latestEvidence(p: Proposal) {
-		const evidence = this.state.verifications.filter((v) => v.proposalId === p.id && v.revision === p.revision);
-		return evidence.filter(
-			(v, position) => !evidence.slice(position + 1).some((other) => other.kind === v.kind && other.actor === v.actor),
-		);
-	}
-	readiness(id: string, canonical: string): PromotionReadiness {
-		const p = this.proposal(id),
-			latest = this.latestEvidence(p);
-		const summary = latest.map((v) => ({ kind: v.kind, trust: v.trust, outcome: v.outcome }));
-		const missing = this.state.policy.requiredEvidence.filter(
-			(kind) => !latest.some((v) => v.kind === kind && v.outcome === "pass" && v.trust !== "reported"),
-		);
-		if (CLOSED.includes(p.state))
-			return {
-				outcome: "CLOSED",
-				reasons: [
-					p.state === "promoted"
-						? "Promoted to accepted source"
-						: p.state === "superseded"
-							? `Superseded by ${p.supersededBy}`
-							: `${p.state === "rejected" ? "Rejected" : "Changes requested"}: ${p.decision?.reason ?? ""}`,
-				],
-				evidence: summary,
-				missing,
-			};
-		const reviews = this.state.reviews.filter(
-			(r) => r.proposalId === id && r.revision === p.revision && r.policyVersion === this.state.policy.version,
-		);
+	readiness(p: Proposal, accepted = false) {
 		const reasons: string[] = [];
-		if (p.base !== canonical) reasons.push("Source baseline changed; refresh and verify a new proposal");
-		if (p.policyVersion !== this.state.policy.version) reasons.push("Policy changed; re-evaluate this proposal");
-		if (latest.some((v) => v.outcome === "fail")) reasons.push("Applicable verification failed");
-		for (const kind of missing) reasons.push(`Trusted ${kind} evidence required; agent assertions remain reported evidence`);
-		if (reviews.some((r) => r.outcome !== "approve" && !r.resolved))
-			reasons.push("Review disagreement or concern requires an explicit decision");
-		const approvals = new Set(
-			reviews
-				.filter(
-					(r, position) =>
-						r.actorKind === "human" && r.outcome === "approve" && !reviews.slice(position + 1).some((other) => other.actor === r.actor),
-				)
-				.map((r) => r.actor),
-		);
-		if (this.state.policy.humanApproval && approvals.size < this.state.policy.approvals) reasons.push("Human approval required");
-		if (p.questions.length) reasons.push("Unresolved questions must be addressed in a new proposal");
+		if (p.state !== "open" && !(accepted && p.state === "promoted")) reasons.push("Change is closed or promotion is in progress");
+		const head = this.state.sourceHead ?? this.state.refs.filter((r) => r.ref === this.state.repository.defaultBranch).at(-1)?.revision;
+		if (head && p.base !== head && !(accepted && p.state === "promoted" && p.revision === head))
+			reasons.push("Base revision changed; refresh and propose the reconciled revision");
+		const latest = new Map<string, (typeof p.reviews)[number]>();
+		for (const r of p.reviews.filter((r) => r.revision === p.revision)) latest.set(r.actor.id, r);
+		if (![...latest.values()].some((r) => r.actor.kind === "human" && r.outcome === "approve"))
+			reasons.push("Human approval required for this revision");
+		if ([...latest.values()].some((r) => r.outcome !== "approve" && !r.resolution))
+			reasons.push("Review concern requires a reasoned human resolution");
+		for (const kind of this.state.repository.policy.requiredEvidence) {
+			const evidence = new Map<string, (typeof this.state.verifications)[number]>();
+			for (const v of this.state.verifications.filter((v) => v.proposalId === p.id && v.revision === p.revision && v.kind === kind))
+				evidence.set(v.actor.id, v);
+			if (
+				![...evidence.values()].some((v) => v.outcome === "pass" && v.trust !== "reported") ||
+				[...evidence.values()].some((v) => v.outcome === "fail")
+			)
+				reasons.push(`Trusted passing ${kind} evidence required`);
+		}
+		return { ready: !reasons.length, reasons };
+	}
+	snapshot(a: Authority): RepositorySnapshot {
+		const { receipts: _, ...state } = structuredClone(this.state);
+		state.sessions = state.sessions.map((s) => ({ ...s, state: s.state === "active" && !this.live(s) ? "disconnected" : s.state }));
 		return {
-			outcome:
-				p.base !== canonical
-					? "REFRESH"
-					: reasons.some((r) => r.includes("disagreement") || r.includes("failed"))
-						? "NEEDS_ATTENTION"
-						: reasons.length
-							? "VERIFY"
-							: "READY",
-			reasons,
-			evidence: summary,
-			missing,
+			...state,
+			overlaps: this.overlaps(),
+			permissions: { write: a.repositoryRole !== "read", maintain: a.repositoryRole === "maintain", human: a.actor.kind === "human" },
+			sourceAvailable: !!this.state.sourceHead || !!this.state.artifacts.find((a) => a.kind === "source"),
+			readiness: Object.fromEntries(this.state.proposals.map((p) => [p.id, this.readiness(p)])),
 		};
 	}
-	artifact(a: Omit<Artifact, "id" | "at">) {
-		const artifact = { ...a, id: this.next("A"), at: this.now };
-		this.state.artifacts.push(artifact);
-		this.event(a.producer.actor, "artifact", [a.missionId, artifact.id], a.title);
-		return artifact;
-	}
-
-	// ── resources ────────────────────────────────────────────────────────
-
-	evaluate(action: ResourceAction, actor: Actor, missionId?: string): ResourceEvaluation {
-		return evaluateResource(this.state.policy.resources, this.state.usage, { action, missionId, actorKind: actor.kind }, this.now);
-	}
-	/**
-	 * Gate a resource action. Returns undefined when it may run now (usage is charged), a pending
-	 * request when a human must approve, and throws when policy denies it.
-	 */
-	gate(
-		action: ResourceAction,
-		actor: Actor,
-		subject: { missionId?: string; proposalId?: string; environmentId?: string; revision?: string },
-	): ResourceRequest | undefined {
-		const evaluation = this.evaluate(action, actor, subject.missionId);
-		if (evaluation.outcome === "deny") throw new CoordinationError(403, evaluation.reason);
-		if (evaluation.outcome === "allow") {
-			this.charge(action, actor, subject.missionId);
-			return undefined;
+	trace(subject: string) {
+		const ids = new Set([subject]);
+		let changed = true;
+		const records = [
+			...this.state.sessions.map((s) => ({ type: "session", record: s, ids: [s.id, s.baseRevision, s.headRevision, s.actor.id] })),
+			...this.state.artifacts.map((a) => ({ type: "artifact", record: a, ids: [a.id, a.sessionId, a.revision, a.actor.id] })),
+			...this.state.proposals.map((p) => ({ type: "change", record: p, ids: [p.id, p.sessionId, p.artifactId, p.revision] })),
+			...this.state.deployments.map((d) => ({ type: "deployment", record: d, ids: [d.id, d.artifactId, d.sessionId, d.revision] })),
+			...this.state.verifications.map((v) => ({ type: "verification", record: v, ids: [v.id, v.proposalId, v.revision] })),
+			...this.state.promotions.map((p) => ({ type: "promotion", record: p, ids: [p.id, p.proposalId, p.to] })),
+		];
+		// Actor identities are leaves, never edges that join every unrelated action by the same person.
+		const actors = new Set(this.state.sessions.map((s) => s.actor.id));
+		while (changed) {
+			changed = false;
+			for (const r of records)
+				if (r.ids.some((id) => ids.has(id) && (!actors.has(id) || id === subject)))
+					for (const id of r.ids)
+						if (!ids.has(id)) {
+							ids.add(id);
+							changed = true;
+						}
 		}
-		const matching = this.state.resourceRequests.filter(
-			(r) =>
-				r.action === action && r.proposalId === subject.proposalId && r.missionId === subject.missionId && r.revision === subject.revision,
-		);
-		// A human already approved this exact action: run it once, then the approval is spent.
-		const approved = matching.find((r) => r.state === "approved");
-		if (approved) {
-			approved.state = "executed";
-			return undefined;
-		}
-		const existing = matching.find((r) => r.state === "pending");
-		if (existing) return existing;
-		const request: ResourceRequest = {
-			id: this.next("RR"),
-			action,
-			cost: RESOURCE_COST[action],
-			...subject,
-			requestedBy: actor.developerId,
-			actorKind: actor.kind,
-			reason: evaluation.reason,
-			state: "pending",
-			at: this.now,
-		};
-		this.state.resourceRequests.push(request);
-		this.event(
-			actor.developerId,
-			"resource_request",
-			[subject.proposalId ?? subject.missionId ?? "", request.id],
-			`${RESOURCE_LABELS[action]}: approval required`,
-		);
-		return request;
+		return records.filter((r) => ids.has(r.record.id)).map(({ type, record }) => ({ type, record }));
 	}
-	charge(action: ResourceAction, actor: Actor, missionId?: string) {
-		this.state.usage = recordUsage(this.state.usage, { action, missionId, actorKind: actor.kind }, this.now);
-	}
-	decideResourceRequest(cmd: PlatformCommand, actor: Actor) {
-		this.human(actor, "Human maintainer decision required for resource consumption");
-		const r = this.state.resourceRequests.find((r) => r.id === cmd.requestId);
-		if (!r) throw new CoordinationError(404, "Resource request unavailable");
-		if (r.state !== "pending") throw new CoordinationError(409, "Resource request already decided");
-		if (cmd.decision !== "approve" && cmd.decision !== "deny") throw new CoordinationError(400, "Approve or deny required");
-		if (!cmd.reason?.trim()) throw new CoordinationError(400, "Decision reason required");
-		r.state = cmd.decision === "approve" ? "approved" : "denied";
-		r.decidedBy = actor.developerId;
-		r.decision = cmd.reason;
-		r.decidedAt = this.now;
-		if (r.state === "approved") this.charge(r.action, actor, r.missionId);
-		this.event(
-			actor.developerId,
-			"resource_decision",
-			[r.proposalId ?? r.missionId ?? "", r.id],
-			`${RESOURCE_LABELS[r.action]}: ${r.state}`,
-		);
-		return r;
-	}
-
-	// ── environments and deployments ─────────────────────────────────────
-
-	addEnvironment(e: Omit<Environment, "id" | "at">, actor: Actor) {
-		const existing = this.state.environments.find((x) => x.kind === e.kind);
-		if (existing) {
-			Object.assign(existing, e);
-			this.event(actor.developerId, "environment", [existing.id], `${existing.name} reconfigured`);
-			return existing;
-		}
-		const environment = { ...e, id: this.next("ENV"), at: this.now };
-		this.state.environments.push(environment);
-		this.event(actor.developerId, "environment", [environment.id], `${environment.name} configured`);
-		return environment;
-	}
-	recordDeployment(d: Omit<Deployment, "id" | "at" | "updatedAt" | "evidenceIds" | "state">, actor: Actor) {
-		const deployment: Deployment = { ...d, id: this.next("D"), state: "queued", evidenceIds: [], at: this.now, updatedAt: this.now };
-		this.state.deployments.push(deployment);
-		const env = this.environment(d.environmentId);
-		this.event(actor.developerId, "deployment", [d.proposalId ?? "", deployment.id], `${env.name}: ${d.revision.slice(0, 12)} requested`);
-		return deployment;
-	}
-	updateDeployment(id: string, fields: Partial<Pick<Deployment, "state" | "buildId" | "url" | "error" | "branch">>) {
-		const d = this.deployment(id);
-		const before = d.state;
-		Object.assign(d, fields, { updatedAt: this.now });
-		if (fields.state === "deployed")
-			for (const other of this.state.deployments)
-				if (other.id !== d.id && other.environmentId === d.environmentId && other.state === "deployed") other.state = "superseded";
-		if (fields.state && fields.state !== before) {
-			const env = this.environment(d.environmentId);
-			this.event("cruce", "deployment", [d.proposalId ?? "", d.id], `${env.name}: ${d.revision.slice(0, 12)} ${fields.state}`);
-		}
-		return d;
-	}
-	/** Evidence observed by Cruce itself (deployment checks) is runtime verified, unlike agent reports. */
-	runtimeVerification(d: Deployment, kind: VerificationKind, outcome: Verification["outcome"], summary: string, artifactIds: string[]) {
-		const p = d.proposalId ? this.proposal(d.proposalId) : undefined;
-		if (!p || p.revision !== d.revision) return undefined;
-		const v: Verification = {
-			id: this.next("V"),
-			proposalId: p.id,
-			revision: d.revision,
-			kind,
-			outcome,
-			artifactIds,
-			summary,
-			actor: "cruce-runtime",
-			trust: "runtime_verified",
-			deploymentId: d.id,
-			at: this.now,
-		};
-		this.state.verifications.push(v);
-		d.evidenceIds.push(v.id, ...artifactIds);
-		if (p.state === "proposed") p.version++;
-		this.event("cruce", "verification", [p.id, v.id, d.id], `${kind}: ${outcome} (runtime verified)`);
-		return v;
-	}
-
-	// ── lineage ──────────────────────────────────────────────────────────
-
-	/** Connected lineage around one subject: mission → revision → artifacts → proposal → verification → deployment, and back. */
-	trace(subjectId: string) {
-		const s = this.state,
-			edges: [string, string][] = [];
-		const rev = (r: string) => `rev:${r}`;
-		for (const m of s.missions) if (m.experimentOf) edges.push([m.experimentOf, m.id]);
-		for (const a of s.artifacts)
-			edges.push([a.missionId, a.id], [a.id, rev(a.revision)], ...a.related.map((r) => [a.id, r] as [string, string]));
-		for (const p of s.proposals) edges.push([p.missionId, p.id], [p.artifactId, p.id], [p.id, rev(p.revision)]);
-		for (const v of s.verifications) edges.push([v.proposalId, v.id], ...v.artifactIds.map((a) => [v.id, a] as [string, string]));
-		for (const r of s.reviews) edges.push([r.proposalId, r.id]);
-		for (const t of s.promotions) edges.push([t.proposalId, t.id], [t.id, rev(t.to)]);
-		for (const d of s.deployments) {
-			edges.push([d.id, rev(d.revision)], [d.environmentId, d.id]);
-			if (d.proposalId) edges.push([d.proposalId, d.id]);
-			if (d.promotionId) edges.push([d.promotionId, d.id]);
-		}
-		const start = /^[0-9a-f]{40}$/.test(subjectId) ? rev(subjectId) : subjectId;
-		const seen = new Set([start]),
-			queue = [start];
-		while (queue.length) {
-			const id = queue.shift()!;
-			// Environments connect every deployment; only traverse into them, never through them.
-			if (id.startsWith("ENV-") && id !== start) continue;
-			for (const [a, b] of edges) {
-				const other = a === id ? b : b === id ? a : undefined;
-				if (other && !seen.has(other)) {
-					seen.add(other);
-					queue.push(other);
-				}
-			}
-		}
-		const has = (id: string) => seen.has(id);
-		return {
-			subjectId,
-			missions: s.missions.filter((m) => has(m.id)),
-			revisions: [...seen].filter((id) => id.startsWith("rev:")).map((id) => id.slice(4)),
-			artifacts: s.artifacts.filter((a) => has(a.id)),
-			proposals: s.proposals.filter((p) => has(p.id)),
-			verifications: s.verifications.filter((v) => has(v.id)),
-			reviews: s.reviews.filter((r) => has(r.id)),
-			promotions: s.promotions.filter((t) => has(t.id)),
-			deployments: s.deployments.filter((d) => has(d.id)),
-			environments: s.environments.filter((e) => has(e.id)),
-		};
-	}
-	/** Which mission and proposal produced an accepted revision. */
-	explainRevision(revision: string) {
-		const t = this.state.promotions.find((t) => t.to === revision && t.state === "complete"),
-			p = t ? this.state.proposals.find((p) => p.id === t.proposalId) : this.state.proposals.find((p) => p.revision === revision),
-			m = p ? this.state.missions.find((m) => m.id === p.missionId) : undefined;
-		return {
-			proposal: p ? { id: p.id, number: p.number, summary: p.summary } : undefined,
-			mission: m?.title,
-			agent: m?.agent?.tool,
-		};
-	}
-
-	// ── commands ─────────────────────────────────────────────────────────
-
-	execute(cmd: PlatformCommand, actor: Actor, canonical: string): unknown {
-		if (cmd.tool === "get_policy") return this.state.policy;
-		if (cmd.tool === "get_lineage") return cmd.subjectId ? this.trace(cmd.subjectId) : this.everything();
-		return this.replay(cmd, actor, () => {
-			if (cmd.tool === "set_policy") {
-				this.human(actor, "Human maintainer policy decision and reason required");
-				if (!cmd.policy || !cmd.reason?.trim()) throw new CoordinationError(403, "Human maintainer policy decision and reason required");
-				if (cmd.expectedVersion !== this.state.policy.version) throw new CoordinationError(409, "Policy changed");
-				if (this.state.promotions.some((p) => p.state === "prepared"))
-					throw new CoordinationError(409, "Resolve prepared promotion before changing policy");
-				let resources = this.state.policy.resources;
-				try {
-					if (cmd.policy.resources)
-						resources = normalizeResourcePolicy({
-							rules: { ...resources.rules, ...cmd.policy.resources.rules },
-							budgets: { ...resources.budgets, ...cmd.policy.resources.budgets },
-						});
-				} catch (error) {
-					throw new CoordinationError(400, (error as Error).message);
-				}
-				this.state.policy = {
-					approvals: cmd.policy.approvals,
-					requiredEvidence: cmd.policy.requiredEvidence,
-					resources,
-					version: this.state.policy.version + 1,
-					humanApproval: true,
-					agentPromotion: false,
-				};
-				this.event(actor.developerId, "policy", [], cmd.reason);
-				return this.state.policy;
-			}
-			if (cmd.tool === "create_mission") {
-				if (!cmd.plan) throw new CoordinationError(400, "Bounded mission plan required");
-				const original = cmd.experimentOf ? this.mission(cmd.experimentOf) : undefined;
-				const m = {
-					id: this.next("M"),
-					version: 1,
+	command(cmd: Command, a: Authority): unknown {
+		if (a.repositoryId !== this.state.repository.id || a.workspaceId !== this.state.repository.workspaceId)
+			throw new DomainError(403, "Repository identity mismatch");
+		switch (cmd.tool) {
+			case "get_repository":
+				return this.snapshot(a);
+			case "get_session":
+				return this.snapshot(a).sessions.find((s) => s.id === cmd.sessionId) ?? this.session(cmd.sessionId);
+			case "list_active_sessions":
+				return this.snapshot(a).sessions.filter((s) => !["completed", "cancelled"].includes(s.state));
+			case "inspect_overlap":
+				return this.overlaps();
+			case "get_lineage":
+				return this.trace(requireValue(cmd.subjectId, "Subject required"));
+			case "start_session": {
+				if (cmd.mode !== "read") writeAccess(a);
+				const base = requireValue(cmd.baseRevision, "Exact base revision required");
+				const s: Session = {
+					id: this.nextId(),
+					repositoryId: this.state.repository.id,
+					actor: a.actor,
+					title: requireValue(cmd.title, "Session title required"),
+					baseRevision: base,
+					headRevision: base,
+					branch: cmd.branch,
+					mode: cmd.mode ?? "write",
 					context: cmd.context,
-					title: cmd.title ?? cmd.plan.summary,
-					specialization: cmd.specialization,
-					plan: cmd.plan,
-					experimentOf: original ? (original.experimentOf ?? original.id) : undefined,
-					state: "ready" as const,
-					at: this.now,
+					state: cmd.mode === "read" ? "active" : "preparing",
+					startedAt: this.now,
+					lastActivity: this.now,
+					changes: [],
+					commits: [],
 				};
-				this.state.missions.push(m);
-				this.event(actor.developerId, "mission", [m.id], m.title);
-				return m;
+				this.state.sessions.push(s);
+				this.event(a.actor, "session_started", `${a.actor.name} started ${s.title}`, [s.id, base]);
+				return s;
 			}
-			if (cmd.tool === "complete_mission") {
-				const m = this.mission(cmd.missionId);
-				if (cmd.expectedVersion !== m.version) throw new CoordinationError(409, "Mission changed; refresh context");
-				if (m.state === "completed") return m;
-				m.state = "completed";
-				m.completedAt = this.now;
-				m.version++;
-				this.event(
-					actor.developerId,
-					"mission_completed",
-					[m.id],
-					cmd.summary ?? `${m.title} completed; promotion remains separately governed`,
-				);
-				return m;
-			}
-			if (cmd.tool === "create_proposal") {
-				const m = this.mission(cmd.missionId),
-					a = this.state.artifacts.find(
-						(a) => a.id === cmd.artifactId && a.missionId === m.id && a.kind === "source" && a.trust === "verified",
-					);
-				if (!a) throw new CoordinationError(409, "Verified source artifact required");
-				const p: Proposal = {
-					id: this.next("P"),
-					number: this.state.proposals.length + 1,
-					version: 1,
-					missionId: m.id,
-					artifactId: a.id,
-					summary: cmd.summary ?? a.summary,
-					impact: cmd.impact ?? "",
-					risks: cmd.risks ?? [],
-					questions: cmd.questions ?? [],
-					risk: cmd.risk,
-					base: a.source?.base ?? a.parentRevision,
-					revision: a.revision,
-					repository: a.storage.repository,
-					commits: a.source?.commits.length ?? 1,
-					files: a.source?.files ?? 0,
-					policyVersion: this.state.policy.version,
-					state: "proposed",
-					at: this.now,
-				};
-				for (const old of this.state.proposals.filter(
-					(o) => o.missionId === m.id && (o.state === "proposed" || o.state === "changes_requested"),
-				)) {
-					old.state = "superseded";
-					old.supersededBy = p.id;
-					old.version++;
+			case "attach_session": {
+				const s = this.owned(a, cmd.sessionId, false),
+					execution = requireValue(cmd.execution, "Execution context required");
+				if (s.mode === "write") {
+					writeAccess(a);
+					if (a.actor.kind === "agent" && (execution.kind !== "worktree" || !execution.owned))
+						throw new DomainError(403, "Agent writers require a dedicated Cruce worktree");
+					if (
+						this.state.sessions.some(
+							(other) =>
+								other.id !== s.id &&
+								other.mode === "write" &&
+								!["completed", "cancelled"].includes(other.state) &&
+								other.execution?.checkoutId === execution.checkoutId &&
+								other.execution.machineId === execution.machineId,
+						)
+					)
+						throw new DomainError(409, "Checkout already reserved by another writer; end that session first");
 				}
+				if (s.execution && stable({ ...s.execution, storageName: undefined }) !== stable(execution))
+					throw new DomainError(409, "Session execution context is immutable");
+				s.execution = { ...execution, storageName: s.execution?.storageName };
+				s.branch = execution.branch ?? s.branch;
+				s.state = "active";
+				s.lastActivity = this.now;
+				return s;
+			}
+			case "heartbeat": {
+				const s = this.owned(a, cmd.sessionId, false);
+				if (s.mode === "write" && !s.execution) throw new DomainError(409, "Attach an isolated execution context first");
+				s.state = "active";
+				s.lastActivity = this.now;
+				return s;
+			}
+			case "report_change": {
+				const s = this.owned(a, cmd.sessionId);
+				if (!s.execution) throw new DomainError(409, "Attach an execution context first");
+				const changes = requireValue(cmd.changes, "Changes required");
+				const before = stable(s.changes);
+				s.changes = changes;
+				s.headRevision = requireValue(cmd.revision, "Head revision required");
+				s.commits = cmd.commits ?? [];
+				s.branch = cmd.branch ?? s.branch;
+				s.lastActivity = this.now;
+				s.state = "active";
+				if (before !== stable(changes))
+					this.event(a.actor, "changes_reported", `${a.actor.name} changed ${changes.length} files`, [s.id, s.headRevision]);
+				return s;
+			}
+			case "end_session": {
+				const s = this.owned(a, cmd.sessionId, false);
+				s.state = cmd.cancelled ? "cancelled" : "completed";
+				s.endedAt = this.now;
+				this.event(a.actor, "session_ended", `${a.actor.name} ${s.state} ${s.title}`, [s.id]);
+				return s;
+			}
+			case "report_ref": {
+				const s = this.owned(a, cmd.sessionId);
+				const ref = requireValue(cmd.ref, "Ref required"),
+					revision = requireValue(cmd.revision, "Revision required");
+				const observation = { ref, revision, sessionId: s.id, actorId: a.actor.id, at: this.now, trust: "reported" as const };
+				this.state.refs.push(observation);
+				this.event(a.actor, "ref_observed", `${a.actor.name} reported ${ref} at ${revision.slice(0, 7)}`, [s.id, revision]);
+				return observation;
+			}
+			case "create_proposal": {
+				writeAccess(a);
+				const artifact = this.artifact(cmd.artifactId),
+					s = this.session(artifact.sessionId);
+				if (artifact.kind !== "source" || s.actor.id !== a.actor.id)
+					throw new DomainError(403, "Propose a source artifact produced by your session");
+				const p: Proposal = {
+					id: this.nextId(),
+					number: this.state.proposals.length + 1,
+					sessionId: s.id,
+					artifactId: artifact.id,
+					base: s.baseRevision,
+					revision: artifact.revision,
+					title: cmd.title ?? artifact.title,
+					state: "open",
+					reviews: [],
+					at: this.now,
+				};
 				this.state.proposals.push(p);
-				this.event(actor.developerId, "proposal", [m.id, a.id, p.id], `#${p.number} ${p.summary}`);
+				this.event(a.actor, "change_proposed", p.title, [p.id, s.id, artifact.id, p.revision]);
 				return p;
 			}
-			if (cmd.tool === "decide_resource_request") return this.decideResourceRequest(cmd, actor);
-			const p = this.proposal(cmd.proposalId);
-			if (cmd.expectedVersion !== p.version) throw new CoordinationError(409, "Proposal changed; inspect its current evidence");
-			if (p.state !== "proposed") throw new CoordinationError(409, `Proposal is ${p.state.replace("_", " ")}; it can no longer change`);
-			if (cmd.tool === "attach_evidence") {
-				if (!cmd.verificationKind || !["pass", "fail", "inconclusive"].includes(cmd.outcome ?? ""))
-					throw new CoordinationError(400, "Verification kind and result required");
-				if (cmd.verificationKind !== "human_review" && !cmd.related.length)
-					throw new CoordinationError(400, "Verification requires exact-revision evidence artifacts");
-				if (cmd.related.some((id) => !this.state.artifacts.some((a) => a.id === id && a.revision === p.revision)))
-					throw new CoordinationError(400, "Evidence must reference artifacts from this exact source revision");
-				const v: Verification = {
-					id: this.next("V"),
+			case "review_proposal": {
+				writeAccess(a);
+				const p = this.proposal(cmd.proposalId);
+				if (p.state !== "open" || cmd.revision !== p.revision || !["approve", "concern", "disagree"].includes(cmd.outcome ?? ""))
+					throw new DomainError(409, "Review must name the open change's exact revision");
+				p.reviews.push({
+					id: this.nextId(),
+					actor: a.actor,
+					revision: p.revision,
+					outcome: cmd.outcome as "approve" | "concern" | "disagree",
+					reason: requireValue(cmd.reason, "Review reason required"),
+					at: this.now,
+				});
+				this.event(a.actor, "change_reviewed", `${a.actor.name} reviewed ${p.title}`, [p.id, p.revision]);
+				return p;
+			}
+			case "resolve_review": {
+				humanMaintain(a);
+				const p = this.proposal(cmd.proposalId),
+					r = p.reviews[requireValue(cmd.reviewIndex, "Review index required")];
+				if (!r || r.outcome === "approve") throw new DomainError(400, "Concern unavailable");
+				r.resolution = { actor: a.actor, reason: requireValue(cmd.reason, "Resolution reason required"), at: this.now };
+				this.event(a.actor, "review_resolved", r.resolution.reason, [p.id]);
+				return p;
+			}
+			case "record_verification": {
+				writeAccess(a);
+				const p = this.proposal(cmd.proposalId);
+				if (cmd.revision !== p.revision || !["pass", "fail"].includes(cmd.outcome ?? ""))
+					throw new DomainError(409, "Verification must name the exact revision");
+				if (cmd.humanAttested) humanMaintain(a);
+				if (cmd.artifactId && this.artifact(cmd.artifactId).revision !== p.revision)
+					throw new DomainError(409, "Evidence revision mismatch");
+				const v = {
+					id: this.nextId(),
 					proposalId: p.id,
 					revision: p.revision,
-					kind: cmd.verificationKind,
-					outcome: cmd.outcome as Verification["outcome"],
-					artifactIds: cmd.related,
-					summary: cmd.summary ?? "",
-					actor: actor.developerId,
-					trust: actor.kind === "runtime" ? "runtime_verified" : actor.kind === "human" ? "human_attested" : "reported",
+					kind: requireValue(cmd.kind, "Verification kind required"),
+					outcome: cmd.outcome as "pass" | "fail",
+					trust: cmd.humanAttested ? ("human_attested" as const) : ("reported" as const),
+					actor: a.actor,
+					summary: requireValue(cmd.reason, "Verification summary required"),
+					artifactId: cmd.artifactId,
 					at: this.now,
 				};
 				this.state.verifications.push(v);
-				p.version++;
-				this.event(actor.developerId, "verification", [p.id, v.id], `${v.kind}: ${v.outcome} (${v.trust})`);
+				this.event(a.actor, "verification_recorded", v.summary, [p.id, v.id]);
 				return v;
 			}
-			if (cmd.tool === "request_verification") {
-				const kinds = cmd.verificationKinds ?? this.state.policy.requiredEvidence;
-				const r = { id: this.next("VR"), proposalId: p.id, revision: p.revision, kinds, requestedBy: actor.developerId, at: this.now };
-				this.state.verificationRequests.push(r);
-				p.version++;
-				this.event(actor.developerId, "verification_request", [p.id, r.id], `Verify ${p.revision.slice(0, 12)}: ${kinds.join(", ")}`);
-				return { request: r, readiness: this.readiness(p.id, canonical) };
+			case "request_promotion": {
+				writeAccess(a);
+				const p = this.proposal(cmd.proposalId);
+				this.event(a.actor, "promotion_requested", `Human promotion requested for ${p.title}`, [p.id]);
+				return this.readiness(p);
 			}
-			if (cmd.tool === "request_promotion") {
-				p.promotionRequestedAt = this.now;
-				p.version++;
-				const readiness = this.readiness(p.id, canonical);
-				this.event(actor.developerId, "promotion_request", [p.id], `Promotion of #${p.number} requested`);
-				return { proposalId: p.id, readiness, decision: "Human approval required; agents cannot promote accepted source" };
-			}
-			if (cmd.tool === "review_proposal") {
-				if (!["approve", "concern", "disagree"].includes(cmd.outcome ?? "") || !cmd.summary?.trim())
-					throw new CoordinationError(400, "Structured review and reason required");
-				const r = {
-					id: this.next("R"),
-					proposalId: p.id,
-					revision: p.revision,
-					policyVersion: this.state.policy.version,
-					actor: actor.developerId,
-					actorKind: actor.kind,
-					outcome: cmd.outcome as "approve" | "concern" | "disagree",
-					summary: cmd.summary,
-					at: this.now,
-				};
-				this.state.reviews.push(r);
-				p.version++;
-				this.event(actor.developerId, "review", [p.id, r.id], r.summary);
-				return r;
-			}
-			if (cmd.tool === "resolve_review") {
-				this.human(actor, "Human maintainer decision and reason required");
-				if (!cmd.reason?.trim()) throw new CoordinationError(403, "Human maintainer decision and reason required");
-				const r = this.state.reviews.find((r) => r.id === cmd.reviewId && r.proposalId === p.id && !r.resolved);
-				if (!r) throw new CoordinationError(409, "Review changed");
-				r.resolved = { actor: actor.developerId, reason: cmd.reason, at: this.now };
-				p.version++;
-				this.event(actor.developerId, "decision", [p.id, r.id], cmd.reason);
-				return r;
-			}
-			if (cmd.tool === "decide_proposal") {
-				this.human(actor, "Human maintainer decision required");
-				if ((cmd.decision !== "reject" && cmd.decision !== "request_changes") || !cmd.reason?.trim())
-					throw new CoordinationError(400, "Reject or request changes, with a reason");
-				p.state = cmd.decision === "reject" ? "rejected" : "changes_requested";
-				p.decision = { outcome: cmd.decision, actor: actor.developerId, reason: cmd.reason, at: this.now };
-				p.version++;
-				this.event(
-					actor.developerId,
-					"decision",
-					[p.id],
-					`#${p.number} ${cmd.decision === "reject" ? "rejected" : "changes requested"}: ${cmd.reason}`,
-				);
+			case "reject_proposal": {
+				humanMaintain(a);
+				const p = this.proposal(cmd.proposalId);
+				if (p.state !== "open") throw new DomainError(409, "Change is not open");
+				p.state = "rejected";
+				this.event(a.actor, "change_rejected", requireValue(cmd.reason, "Reason required"), [p.id]);
 				return p;
 			}
-			throw new CoordinationError(400, "Command requires the native application adapter");
-		});
-	}
-	everything() {
-		const { replays: _r, usage: _u, ...rest } = this.state;
-		return rest;
-	}
-	preparePromotion(cmd: PlatformCommand, actor: Actor, canonical: string, repository: string): Promotion {
-		if (actor.kind !== "human" || !actor.maintainer)
-			throw new CoordinationError(403, "Human maintainer promotion required; agents cannot promote");
-		const p = this.proposal(cmd.proposalId);
-		if (cmd.expectedVersion !== p.version) throw new CoordinationError(409, "Proposal changed");
-		const existing = this.state.promotions.find((t) => t.proposalId === p.id);
-		if (existing) {
-			if (existing.actor !== actor.developerId || (canonical !== existing.from && canonical !== existing.to))
-				throw new CoordinationError(409, "Prepared promotion inputs changed");
-			return existing;
+			case "configure_environment": {
+				humanMaintain(a);
+				const input = requireValue(cmd.environment, "Environment required");
+				if (cmd.environmentId && !this.state.environments.some((e) => e.id === cmd.environmentId))
+					throw new DomainError(404, "Environment unavailable");
+				const env = { id: cmd.environmentId ?? this.nextId(), ...input, deployRepository: `repo-${this.state.repository.id}-deploy` };
+				this.state.environments = [...this.state.environments.filter((e) => e.id !== env.id), env];
+				this.event(a.actor, "environment_configured", `Configured ${env.name}`, [env.id]);
+				return env;
+			}
+			default:
+				throw new DomainError(400, "Unsupported repository command");
 		}
-		const readiness = this.readiness(p.id, canonical);
-		if (readiness.outcome !== "READY") throw new CoordinationError(409, readiness.reasons.join("; "));
-		const t: Promotion = {
-			id: this.next("PM"),
-			proposalId: p.id,
-			from: canonical,
-			to: p.revision,
-			repository,
-			actor: actor.developerId,
-			proposalVersion: p.version,
-			policyVersion: this.state.policy.version,
-			evidenceIds: this.latestEvidence(p).map((v) => v.id),
-			reviewIds: this.state.reviews
-				.filter((r) => r.proposalId === p.id && r.revision === p.revision && r.policyVersion === this.state.policy.version)
-				.map((r) => r.id),
-			deploy: cmd.deploy === true,
-			state: "prepared",
-			at: this.now,
-		};
-		this.state.promotions.push(t);
-		p.state = "promoting";
-		this.event(actor.developerId, "promotion_prepared", [p.id, t.id], p.summary);
-		return t;
 	}
-	completePromotion(id: string) {
-		const t = this.state.promotions.find((t) => t.id === id);
-		if (!t) throw new CoordinationError(404, "Promotion ticket missing");
-		if (t.state === "complete") return t;
-		t.state = "complete";
-		t.completedAt = this.now;
-		const p = this.proposal(t.proposalId);
-		p.state = "promoted";
-		this.event(t.actor, "promotion", [p.missionId, t.proposalId, t.id], `#${p.number} promoted to accepted source ${t.to.slice(0, 12)}`);
-		return t;
+	addArtifact(artifact: Artifact) {
+		this.state.artifacts.push(artifact);
+		this.event(artifact.actor, "artifact_published", artifact.title, [artifact.id, artifact.sessionId, artifact.revision]);
+		return artifact;
+	}
+	prepareDeployment(cmd: Command, a: Authority): Deployment {
+		const artifact = this.artifact(cmd.artifactId),
+			env = this.state.environments.find((e) => e.id === cmd.environmentId);
+		if (!env) throw new DomainError(404, "Environment unavailable");
+		if (artifact.kind !== "source") throw new DomainError(400, "Deployment requires an immutable source artifact");
+		if (env.kind === "production") {
+			humanMaintain(a);
+			if (!cmd.deploymentId) {
+				const proposal = this.state.proposals.find((p) => p.artifactId === artifact.id);
+				if (!proposal || !this.readiness(proposal, true).ready)
+					throw new DomainError(409, "Production requires exact-revision review and verification");
+			}
+		} else writeAccess(a);
+		const previous = this.state.deployments.filter((d) => d.environmentId === env.id && d.state === "deployed").at(-1);
+		if (
+			cmd.deploymentId &&
+			!this.state.deployments.some(
+				(d) => d.id === cmd.deploymentId && d.environmentId === env.id && d.artifactId === artifact.id && d.state === "deployed",
+			)
+		)
+			throw new DomainError(409, "Rollback must name a previously deployed artifact in this environment");
+		for (const pending of this.state.deployments.filter((d) => d.environmentId === env.id && ["queued", "building"].includes(d.state))) {
+			pending.state = "superseded";
+			pending.updatedAt = this.now;
+		}
+		const deployment: Deployment = {
+			id: this.nextId(),
+			environmentId: env.id,
+			artifactId: artifact.id,
+			revision: artifact.revision,
+			sessionId: artifact.sessionId,
+			actor: a.actor,
+			state: "queued",
+			branch: env.kind === "production" ? "main" : `cruce/${env.id}`,
+			previous: previous?.id,
+			rollbackOf: cmd.deploymentId,
+			at: this.now,
+			updatedAt: this.now,
+		};
+		this.state.deployments.push(deployment);
+		this.event(a.actor, "deployment_requested", `Requested ${env.name}`, [deployment.id, artifact.id]);
+		return deployment;
 	}
 }

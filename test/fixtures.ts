@@ -1,4 +1,3 @@
-import { type ControllerState, initialState } from "../src/core/controller.ts";
 import { overlayFiles, seedFiles } from "../src/demo/scenario.ts";
 import { buildIndex } from "../src/intelligence/structural-index.ts";
 
@@ -9,24 +8,6 @@ export function indexAfter(...overlays: string[]) {
 	const files = { ...seed };
 	for (const o of overlays) Object.assign(files, overlayFiles(o));
 	return { files, index: buildIndex(files, overlays.join("+") || "base") };
-}
-
-export function freshState(firstFlight = 21): ControllerState {
-	return initialState(
-		{
-			id: "auth-service",
-			name: "auth-service",
-			repo: "auth-service",
-			namespace: "cruce-dev",
-			defaultBranch: "main",
-			mode: "demo",
-			gitBackend: "local" as never,
-		},
-		baseIndex,
-		"base000",
-		0,
-		firstFlight,
-	);
 }
 
 import { execFileSync } from "node:child_process";

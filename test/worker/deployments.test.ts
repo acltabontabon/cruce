@@ -1,17 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { ArtifactsRestHost, ResourceBoundary, runSmokeChecks, WorkersBuildsClient } from "../../src/worker/deployments.ts";
-import type { TowerStore } from "../../src/worker/tower.ts";
+import type { Store } from "../../src/worker/store.ts";
 
 vi.mock("cloudflare:workers", () => ({ WorkflowEntrypoint: class {} }));
 
 const ok = (result: unknown) => new Response(JSON.stringify({ success: true, errors: [], messages: [], result }), { status: 200 });
-const memory = (): TowerStore => {
+const memory = (): Store => {
 	const data = new Map<string, unknown>();
 	return {
 		get: <T>(k: string) => structuredClone(data.get(k)) as T | undefined,
 		put: (k, v) => void data.set(k, structuredClone(v)),
 		delete: (k) => void data.delete(k),
-		appendEvents: () => {},
 	};
 };
 const ACCOUNT = "0123456789abcdef0123456789abcdef";
@@ -93,7 +92,7 @@ describe("smoke checks", () => {
 });
 
 describe("deployment workflow", () => {
-	it("polls the project's Durable Object with durable sleeps until the deployment settles", async () => {
+	it("polls the repository's Durable Object with durable sleeps until the deployment settles", async () => {
 		const { DeploymentWorkflow } = await import("../../src/worker/deployment-workflow.ts");
 		const states = ["building", "building", "deployed"];
 		const tick = vi.fn(async () => states.shift());
@@ -105,8 +104,65 @@ describe("deployment workflow", () => {
 			do: async (_name: string, a: unknown, b?: unknown) => ((typeof a === "function" ? a : b) as () => Promise<unknown>)(),
 			sleep: async (name: string) => void sleeps.push(name),
 		};
-		expect(await workflow.run({ payload: { projectId: "p", deploymentId: "D-1" } } as never, step as never)).toBe("deployed");
+		expect(await workflow.run({ payload: { repositoryId: "p", deploymentId: "D-1" } } as never, step as never)).toBe("deployed");
 		expect(tick).toHaveBeenCalledTimes(3);
 		expect(sleeps).toEqual(["wait 0", "wait 1"]);
+	});
+});
+
+describe("provider reconciliation", () => {
+	it("creates the workspace namespace and reconciles long-lived creation tokens on retry", async () => {
+		let namespace = false,
+			repository = false,
+			token = false,
+			failRevocation = true;
+		const send = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+			const path = new URL(String(url)).pathname;
+			const missing = () => new Response(JSON.stringify({ success: false }), { status: 404 });
+			if (path.endsWith("/namespaces") && init?.method === "POST") {
+				namespace = true;
+				return ok({});
+			}
+			if (path.endsWith("/namespaces/workspace")) return namespace ? ok({}) : missing();
+			if (path.endsWith("/repos") && init?.method === "POST") {
+				expect(JSON.parse(String(init.body)).default_branch).toBe("trunk");
+				repository = token = true;
+				return ok({ id: "r", name: "repo", remote: "https://example.invalid/repo.git" });
+			}
+			if (path.endsWith("/repos/repo"))
+				return repository ? ok({ id: "r", name: "repo", description: "owned", remote: "https://example.invalid/repo.git" }) : missing();
+			if (path.endsWith("/repos/repo/tokens")) return ok(token ? [{ id: "creation" }] : []);
+			if (path.endsWith("/tokens/creation")) {
+				if (failRevocation) {
+					failRevocation = false;
+					throw new Error("lost response");
+				}
+				token = false;
+				return ok({});
+			}
+			throw new Error(`Unexpected request ${path}`);
+		}) as unknown as typeof fetch;
+		const host = new ArtifactsRestHost(ACCOUNT, "workspace", "test", send);
+		await expect(host.ensure("repo", "owned", "trunk")).rejects.toThrow("lost response");
+		expect(await host.ensure("repo", "owned", "trunk")).toMatchObject({ created: false });
+		expect(token).toBe(false);
+	});
+	it("reads the build detail for preview URLs and correlates runtime versions by build ID", async () => {
+		const build = {
+			build_uuid: "build",
+			status: "stopped",
+			build_outcome: "success",
+			build_trigger_metadata: { commit_hash: "sha", branch: "trunk" },
+		};
+		const send = (async (url: string | URL | Request) => {
+			const u = new URL(String(url));
+			if (u.pathname.endsWith("/versions")) return ok({ items: [{ id: "unrelated" }, { id: "version" }] });
+			if (u.searchParams.has("version_ids")) return ok({ builds: { unrelated: { ...build, build_uuid: "else" }, version: build } });
+			if (u.pathname.endsWith("/builds/build")) return ok({ ...build, preview_url: "https://preview.example" });
+			return ok([build]);
+		}) as typeof fetch;
+		const client = new WorkersBuildsClient(ACCOUNT, "test", send);
+		expect((await client.buildFor("tag", "sha", "trunk"))?.preview_url).toBe("https://preview.example");
+		expect(await client.runtimeVersion("worker", "build")).toBe("version");
 	});
 });

@@ -4,6 +4,10 @@ User-facing changes are recorded here. Versions follow [Semantic Versioning 2.0.
 
 ## [Unreleased]
 
+- Replace projects/missions with workspace-owned repositories and human/agent sessions.
+- Add local Git registration, isolated bridge worktrees, advisory overlap, workspace access/budgets and artifact-bound deployment provenance.
+- Replace the console and demo; remove legacy radar routes and compatibility aliases.
+
 ## [0.1.0-alpha.1] - 2026-10-05
 
 First alpha release.

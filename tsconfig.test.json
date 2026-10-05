@@ -14,6 +14,8 @@
 		"vite.config.ts",
 		".cloudflare/types",
 		"cloudflare.config.ts",
-		"runner"
+		"runner",
+		"tools/verify-cloud.ts",
+		"tools/verify-scenario.ts"
 	]
 }

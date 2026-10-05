@@ -2,8 +2,8 @@ import { createTwoFilesPatch, diffLines } from "diff";
 import git, { Errors, type PromiseFsClient, type TreeEntry } from "isomorphic-git";
 import http from "isomorphic-git/http/web";
 import { changedRanges } from "../../core/line-diff.ts";
-import type { ChangedFile } from "../../core/publish-gate.ts";
 import type { ChangesResponse } from "../../shared/api.ts";
+import type { ChangedFile } from "../../shared/git.ts";
 
 /**
  * Real Git, inside the control plane. A bare workspace repository (no working tree) where Cruce
@@ -384,9 +384,11 @@ export class GitWorkspace {
 
 	/** Fetch a remote branch over smart HTTP into `localRef`. */
 	async fetch(input: { url: string; token: string; remoteBranch?: string; localRef: string; depth?: number }): Promise<string | null> {
+		await this.prepareFetch();
 		const result = await git.fetch({
 			...this.base,
 			http,
+			remote: "artifacts",
 			url: input.url,
 			ref: input.remoteBranch ?? "main",
 			singleBranch: true,
@@ -401,9 +403,11 @@ export class GitWorkspace {
 	/** Fetch the notes ref from a remote (best effort; absent notes are fine). */
 	async fetchNotes(input: { url: string; token: string }) {
 		try {
+			await this.prepareFetch();
 			const result = await git.fetch({
 				...this.base,
 				http,
+				remote: "artifacts",
 				url: input.url,
 				ref: NOTES_REF,
 				remoteRef: NOTES_REF,
@@ -415,6 +419,12 @@ export class GitWorkspace {
 		} catch {
 			// no notes on the remote yet
 		}
+	}
+
+	private async prepareFetch() {
+		// A bare init has no remote refspec. Fetch needs one even when its URL is explicit.
+		// Tracking refs stay separate from accepted source, workspace heads and local notes.
+		await git.setConfig({ ...this.base, path: "remote.artifacts.fetch", value: "+refs/*:refs/remotes/artifacts/*" });
 	}
 
 	async push(input: { url: string; token: string; localRef: string; remoteRef: string; force?: boolean }) {

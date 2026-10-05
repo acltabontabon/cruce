@@ -1,17 +1,11 @@
-# Product thesis
+# Product direction
 
-Cruce is the logical evolution of Git collaboration for an era where agents are first-class software engineers.
+Cruce is Git-native collaboration for developers and agents. Workspace → Repository → Session is the product model: ownership, code identity, then participation in bounded work.
 
-**Git stays.** Revisions, history, diffs, forks, merges, conflicts and rollback are exactly what agents need: start from a known revision, work in isolation, compare before and after, merge compatible work, abandon experiments, revert failures. Cruce relies on Git instead of inventing a weaker replacement.
+Developers and agents work locally with ordinary Git and their preferred tools. Shared presence and advisory overlap help them understand concurrent work. Exact-revision review, immutable artifacts and deployment provenance make decisions inspectable without turning Cruce into an editor, chat client or agent runtime.
 
-**The collaboration model above Git changes.** The unit of collaboration is a bounded mission registered by a locally running agent through MCP. The developer supplies the prompt to that agent; its objective and context belong to the mission. Each mission starts from a concrete accepted revision in an isolated workspace; agents produce real commits and immutable evidence; a proposal names exact base and proposed revisions; verification targets that exact revision; human policy governs promotion; deployment is traceable back to the mission.
+Workspaces may be personal or shared. Repositories may remain local/external or use Cloudflare Artifacts hosting. Cloud resources belong to a workspace's explicitly configured account and budget. Local coordination needs no provisioning. Human approval of accepted source and production deployment are separate decisions.
 
-**Cloudflare Artifacts is the canonical home.** Every project's repository, workspaces, evidence and deployment state live in Artifacts. Cruce understands refs, commits, ancestry, trees and diffs; it never treats the repository as an opaque URL, and it never needs GitHub or GitLab.
+The console emphasizes current sessions, actors, work, overlapping paths, artifacts and observed environment state. It makes stale observations and unavailable source explicit. Private access, stable IDs, sealed credentials and retained provenance are foundations.
 
-**Agents stay where they are.** Claude Code, Codex, Cursor and future agents run on the developer's machine with local caches, Docker and familiar tools. Cruce coordinates the agent; it does not execute it. Agent vendors remain interchangeable because the interface is Cruce MCP: intentional lifecycle operations, not cloud administration.
-
-**Autonomy is safe, not unlimited.** Agents get broad context and explicit, narrow authority. Actions that consume cloud resources carry a cost class and pass project policy and budgets; production is always a human decision. The project's Cloudflare account owns and pays for its infrastructure.
-
-**The connection is the product.** Git knows what changed; Artifacts knows which versions exist; the agent knows what it is implementing; Workers knows what is running. Cruce connects why and what work (mission objective, context and plan), who (agent), what changed (revision), what was produced (artifacts), why we trust it (verification), where it ran (environment) and what is live (deployment) — in both directions.
-
-The console answers: what changed, why, can I trust it, does it need me, where is it running? It stays calm and technical: no chat, no editor, no CI dashboard, no Git GUI, no vanity metrics. Technical detail is progressively disclosed.
+Public signup, GitHub/GitLab integrations, automated external merges/pushes and a general workflow engine are outside this foundation. Cruce is a working name.

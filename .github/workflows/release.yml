@@ -39,7 +39,7 @@ jobs:
           pnpm release:check "$RELEASE_TAG"
           git merge-base --is-ancestor HEAD origin/main
       - run: pnpm check
-      - run: bash demo/scripts/verify-scenario.sh
+      - run: pnpm verify:scenario
       - name: Build without cloud resources
         run: pnpm exec cf build --mode offline
 
@@ -56,7 +56,6 @@ jobs:
       CRUCE_PUBLIC_ORIGIN: ${{ vars.CRUCE_PUBLIC_ORIGIN }}
       CRUCE_ACCESS_ISSUER: ${{ vars.CRUCE_ACCESS_ISSUER }}
       CRUCE_ACCESS_AUD: ${{ vars.CRUCE_ACCESS_AUD }}
-      CRUCE_CLOUD_AI: 'off'
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v6

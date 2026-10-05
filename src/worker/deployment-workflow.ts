@@ -2,7 +2,7 @@ import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloud
 import type { ControlTower } from "./control-tower.ts";
 
 export interface DeploymentParams {
-	projectId: string;
+	repositoryId: string;
 	deploymentId: string;
 }
 export interface DeploymentWorkflowEnv {
@@ -16,12 +16,12 @@ export const DEPLOYMENT_POLL_INTERVAL = "20 seconds";
 /**
  * Durable orchestration for one deployment of an exact revision: wait for Workers Builds, then run
  * Cruce's own smoke checks against the result and record runtime-verified evidence. Decisions and
- * state stay in the project's Durable Object; the Workflow only provides retries and durable waiting.
+ * state stay in the repository's Durable Object; the Workflow only provides retries and durable waiting.
  */
 export class DeploymentWorkflow extends WorkflowEntrypoint<DeploymentWorkflowEnv, DeploymentParams> {
 	async run(event: WorkflowEvent<DeploymentParams>, step: WorkflowStep) {
-		const { projectId, deploymentId } = event.payload;
-		const tower = () => this.env.CONTROL_TOWER.getByName(projectId);
+		const { repositoryId, deploymentId } = event.payload;
+		const tower = () => this.env.CONTROL_TOWER.getByName(repositoryId);
 		for (let attempt = 0; attempt < DEPLOYMENT_POLLS; attempt++) {
 			const state = await step.do(`observe build ${attempt}`, { retries: { limit: 3, delay: "10 seconds", backoff: "exponential" } }, () =>
 				tower().deploymentTick(deploymentId),

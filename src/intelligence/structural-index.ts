@@ -1,5 +1,5 @@
 import { parse } from "@babel/parser";
-import type { AirspaceIndex, IndexedFile, IndexedModule, IndexedSymbol, SymbolKind } from "../core/airspace.ts";
+import type { IndexedFile, IndexedModule, IndexedSymbol, SourceIndex, SymbolKind } from "../shared/source-index.ts";
 
 /**
  * Structural code intelligence: file → types → members → imports.
@@ -167,7 +167,7 @@ export function buildIndex(
 	files: Record<string, string>,
 	revision: string,
 	indexer: StructuralIndexer = new BabelTypeScriptIndexer(),
-): AirspaceIndex {
+): SourceIndex {
 	let config: ModuleConfig | undefined;
 	try {
 		config = files["cruce.json"] ? (JSON.parse(files["cruce.json"]) as ModuleConfig) : undefined;

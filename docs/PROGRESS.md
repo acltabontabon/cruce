@@ -123,17 +123,49 @@ Short, dated entries so another agent can continue. Newest last.
 - Native console rebuilt into overview, proposal, mission, artifact, lineage and environments views with hash routes; no raw JSON by default.
 - Checks: typecheck, lint, 242 tests, offline `cf build`, independent scenario verifier. Live Access, Artifacts, Workers Builds and connected-account gates remain open (see PLAN).
 
+### 2026-10-05 — local native-console verification and usability
+
+- Added an isolated loopback native-console fixture with real controller decisions and deterministic local Git commits; identity, repository transport and deployment remain explicitly simulated. Added pinned Playwright and repeatable browser checks with screenshots at 1440/1024/768/390 widths.
+- Fixed creation errors hiding input, authentication/connection error confusion, project identity missing from deep links, stale snapshot/diff/source/lineage results, malformed route crashes, duplicate mutations and lost-response retries (including original expected versions).
+- Refined the native UI after visual feedback: aligned environment state cards and account metadata, progressively disclosed credential/deployment/policy settings, visible mission records and next steps, readable lineage before its optional graph, and consistent detail spacing.
+- Local checks passed: 248 tests plus 18 browser scenarios; full typecheck, lint, offline build and independent demo scenario. Real Git native lifecycle, two-mission adaptation and crash recovery are exercised by runtime tests. See local-verification.md for commands and boundaries. No cloud provisioning or production deployment.
+
+### 2026-10-05 — single live MVP environment setup
+
+- Confirmed the existing account has Workers Paid ($5/month) and Zero Trust Free; reused the `cruce` Worker URL, Artifacts namespace, queue, event subscription and sealing/event secrets. No second production environment was created.
+- Configured owner-only Access email-code login and deployed version `021cd3c4-b1dc-48c2-8b49-221166ec32cb`, adding native ProjectDirectory, OAuth KV and DeploymentWorkflow while retaining the original ControlTower storage. Added repeatable `deploy:test` configuration and disabled optional cloud AI by default.
+- Applied the exact six machine endpoint exceptions after explicit user approval. Live missing/forged MCP and export tokens return 401, fabricated exchanges return 401, malformed registration returns 400, and discovery returns correct metadata; console/API/consent remain behind email login. Added three OAuth boundary regressions.
+- Owner completed login; the live console created Cruce MVP test and Artifacts independently confirmed initial revision `ac941a64532c5c177c7e85ea42c9d7b697935d9c`. Found and fixed a missing bare-Git fetch refspec; direct live fetches and a real smart-HTTP regression verify repeated fetches, notes, credential-free config and unchanged accepted source. Added bounded retry of stale source checks for idle projects and accurate unavailable-source feedback, with sanitized error-type diagnostics.
+- Fixed local bridge startup on the installed Node with a pinned loader and `.mjs` entry point; replaced obsolete OAuth scopes and added optional narrower scopes. Verified startup from an unrelated checkout. Live client registration succeeded, but browser navigation to consent was blocked; no agent grant was issued, and the temporary callback listener was stopped.
+- The deployed build passed typecheck, lint and 254 tests across 32 files. Native agent publication/review/promotion, Workers Builds and connected-account gates remain pending; see test-environment.md. No successful live preview or runtime verification claimed.
+
+### 2026-10-05 — first-project welcome
+
+- Replaced the bare creation screen with a dark inline welcome: product purpose, three first steps, a demo link and a distinct project form with storage disclosure and the next action. Existing projects continue directly to their console.
+- Verified welcome layouts at 1440/768/390px without horizontal overflow and confirmed creation removes the welcome and opens the project. Typecheck, lint, 251 unit/runtime tests and 18 existing browser scenarios passed. Local fixture screenshots only; no deployment or cloud provisioning.
+
+### 2026-10-05 — live setup verification checkpoint
+
+- Deployed final setup version `dd9a36a3-aa85-4c59-9395-60ef1a35d38a`; the live console cleared the stale source warning, saved a historical intake record (the intake flow has since been removed), opened its record and returned to the overview. Screenshot: `dist/ui-checks/live-test-console.png`.
+- Concurrent edits arrived in the shared checkout during verification and were preserved. The current tree passes typecheck and 254 unit/runtime tests; its latest browser run passes 13/17 with four responsive checks timing out on proposal file controls, and lint reports formatting/import errors. No further deployment of those changing files was attempted.
+- The first concurrent browser run was also disrupted by development-server reloads. Agent consent remains blocked in the in-app browser; documented a reproducible read-only checkout command for the owner’s regular browser.
+
 ## 2026-10-05
 
 - Removed standalone intent records, creation tools, console intake, routes and lineage links. Local agents now register missions directly through MCP with a plan objective and optional context; human prompting stays local.
 - Updated coordination operation/capability names, evidence metadata, rollback explanations, onboarding and product documentation. Existing stored context moves onto missions; stored plans migrate without rewriting Git revisions or evidence contents.
 - Validation: typecheck and lint passed; all 260 unit tests, 17 browser checks (including responsive pages and agent-created mission navigation), and the demo scenario verifier passed.
+
+### 2026-10-05 — version control for agents positioning
+
+- Updated the README, product thesis, architecture, delivery plan and agent instructions to lead with version control built for agents, powered by Git and Cloudflare Artifacts. Removed the README's repository-host comparison; kept real Git history and revision-linked coordination, verification and deployment explicit.
+- Documentation-only change; preserved existing working-tree edits and historical implementation records. Checked the updated wording and patch formatting; runtime checks were not rerun.
 - Isolated commit snapshot also passed TypeScript checks, lint and 247 unit tests; unrelated console/environment work remains outside the commit.
 
-### 2026-10-05 — first-project welcome
+### 2026-10-05 — welcome aligned with direct missions
 
-- Added a dark welcome explaining version control built for agents and the first steps: project creation, local agent connection and prompting, revision review and promotion. Includes a demo link, storage disclosure and a next-step note; no standalone intent form.
-- Desktop/mobile fixture checks confirmed no horizontal overflow and successful creation. UI TypeScript and focused lint checks passed.
+- Refined welcome copy to lead with version control built for agents and explain project creation → local agent connection and prompting → revision review and promotion. The next-step note now directs users to their first agent-created mission; production remains a separate human decision.
+- Preserved the dark layout and existing creation behavior. UI TypeScript checks and focused formatting/lint passed; local browser checks at 1440/768/390px confirmed no horizontal overflow and successful creation. Copy-only change, no deployment.
 
 ### 2026-10-05 — first alpha and release-tag deployments
 
@@ -153,3 +185,14 @@ Short, dated entries so another agent can continue. Newest last.
 - After explicit approval, created the account-scoped GitHub release token (expires 2027-10-05) and stored its value directly in the production environment secret without logging it or writing it to disk.
 - Pushed `v0.1.0-alpha.1` at `2e855cc31cb35783f05f7c4203885270441df272` and published concise GitHub prerelease notes. Checks and deployment succeeded in Actions run `37239987345`.
 - Cloudflare version `14e9d014-f887-435b-b3e8-f0ef34df8d37` serves 100% of traffic with the matching tag and commit. Live checks confirmed console sign-in redirect (302), OAuth discovery (200) and unauthenticated MCP rejection (401). Marked the changelog as released; unrelated local work stays uncommitted.
+
+## 2026-10-05 — Workspace → Repository → Session foundation
+
+- Replaced project/mission/workstream ownership with stable workspace/repository IDs, Access-based personal provisioning, shared membership, teams, email-bound invitations, repository grants and OAuth repository scopes. Workspace policy and atomic reservations govern explicit connected-account resources.
+- Added local Git registration, isolated agent worktrees, persistent writer locks plus server reservations, human terminal pairing, 30-second presence, advisory overlap and pinned instruction/structural context. Preserved real commits and explicit Git-pack publication.
+- Rebuilt revision-bound changes/reviews/evidence, immutable artifacts, reverse lineage, hosted non-forced promotion and artifact-derived deployments. Added lost-response recovery, token reconciliation, build/runtime correlation, failure/timeout/supersession and rollback validation.
+- Replaced the console and fixed-clock demo; removed Flight/radar routes, compatibility controllers, graph dependencies and obsolete token-exporting tools. Preserved reusable source overlays and pre-existing work in `/private/tmp/cruce-before-foundation-20261005.tgz` before the pivot.
+- Typecheck, lint, 69 unit/integration tests, eight browser journeys, scenario verification and offline/live builds passed. A concurrent native Git worktree race was found and fixed with a separate cross-process registry lock.
+- Deployed the foundation test Worker (`efdce200-c1de-4d68-a8a6-6b98c3850ba5`), retired ProjectDirectory and detached the obsolete queue consumer. Verified Access personal provisioning in the live console. Real Artifacts publication/fork/fetch/retention passed in `cruce-check-muuga1hc`, exact commit `3e72f788d0e6a8f4b1851277e6ae296c7fbbab78`. Successful Workers Builds deployment remains unverified pending a test Worker/build connection; no production deployment was performed.
+
+- Final test deployment: `2d7cbe7d-bdcd-48f1-b21e-4cd7324d9314`. Final suite: 69 unit/integration tests, eight browser journeys, typecheck/lint and deterministic scenario passed. Live discovery/authentication checks confirm public metadata and denial of unsigned MCP/forged human bridge requests. Removed the completed namespace-retirement marker; changes remain uncommitted.

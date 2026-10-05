@@ -1,4 +1,4 @@
-import { CoordinationError } from "../core/workstreams.ts";
+import { DomainError } from "../core/errors.ts";
 
 /** AES-GCM sealing with a key derived from CRUCE_SECRET: identity cookies and connected-account credentials. */
 export interface SealingEnv {
@@ -11,7 +11,7 @@ const encode = (b: Uint8Array) =>
 		.replaceAll("=", "");
 export const decode = (s: string) => Uint8Array.from(atob(s.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0));
 async function key(secret?: string) {
-	if (!secret) throw new CoordinationError(503, "Identity encryption not configured");
+	if (!secret) throw new DomainError(503, "Identity encryption not configured");
 	return crypto.subtle.importKey("raw", await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret)), "AES-GCM", false, [
 		"encrypt",
 		"decrypt",
@@ -33,6 +33,6 @@ export async function unseal<T>(env: SealingEnv, value: string): Promise<T> {
 			),
 		);
 	} catch {
-		throw new CoordinationError(401, "Sign in again");
+		throw new DomainError(401, "Sign in again");
 	}
 }

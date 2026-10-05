@@ -1,10 +1,14 @@
 import { type OAuthHelpers, OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { DEFAULT_AGENT_SCOPES, SCOPE_LABELS, SCOPES, type Scope } from "../core/capabilities.ts";
-import { CoordinationError } from "../core/workstreams.ts";
+import { DomainError as CoordinationError } from "../core/errors.ts";
+import type { Directory } from "./directory.ts";
 import { decode, seal, unseal } from "./sealing.ts";
+import type { WorkspaceRuntime } from "./workspace-runtime.ts";
 
 export { seal, unseal };
 export interface AuthEnv {
+	DIRECTORY: DurableObjectNamespace<Directory>;
+	WORKSPACE: DurableObjectNamespace<WorkspaceRuntime>;
 	OAUTH_KV: KVNamespace;
 	OAUTH_PROVIDER?: OAuthHelpers;
 	CRUCE_SECRET?: string;
@@ -13,6 +17,9 @@ export interface AuthEnv {
 	CRUCE_ACCESS_AUD?: string;
 }
 export interface AuthProps {
+	connectionId?: string;
+	repositoryIds?: string[];
+	clientName?: string;
 	developerId: string;
 	tenantId: string;
 	email: string;
@@ -84,7 +91,7 @@ export async function validateIdentity(props: AuthProps, env: AuthEnv) {
 	const current = await accessIdentity(env, props.accessJwt);
 	if (current.developerId !== props.developerId || current.tenantId !== props.tenantId)
 		throw new CoordinationError(403, "Identity changed");
-	return current;
+	return { ...current, connectionId: props.connectionId, repositoryIds: props.repositoryIds, clientName: props.clientName };
 }
 export async function consoleIdentity(request: Request, env: AuthEnv) {
 	if (!["GET", "HEAD"].includes(request.method) && request.headers.get("origin") !== new URL(request.url).origin)
@@ -113,6 +120,19 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 				"cache-control": "no-store",
 			},
 		});
+	const directory = env.DIRECTORY.getByName("directory");
+	const user = await directory.login(identity);
+	const personal = await directory.workspace(user.personalWorkspaceId);
+	await env.WORKSPACE.getByName(personal.id).initialize(personal);
+	const choices: { id: string; label: string }[] = [];
+	for (const workspace of await directory.workspaces()) {
+		try {
+			const view = await env.WORKSPACE.getByName(workspace.id).snapshot({
+				actor: { id: user.id, userId: user.id, kind: "human", name: user.name },
+			});
+			for (const repo of view.repositories) choices.push({ id: repo.id, label: `${workspace.handle}/${repo.name}` });
+		} catch {}
+	}
 	const oauth = env.OAUTH_PROVIDER;
 	if (!oauth) throw new CoordinationError(503, "OAuth unavailable");
 	if (request.method === "GET") {
@@ -126,7 +146,7 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 				`<label><input type="checkbox" name="scope" value="${scope}"${preset.includes(scope) ? " checked" : ""}${scope === "cruce:read" ? " disabled checked" : ""}> <code>${scope}</code> — ${escapeHtml(SCOPE_LABELS[scope])}</label><br>`,
 		).join("");
 		return new Response(
-			`<html lang="en"><meta charset="utf-8"><title>Connect to Cruce</title><h1>Connect to Cruce</h1><p>${escapeHtml(description.clientName ?? original.clientId)} requests access to Cruce projects you can contribute to.</p><p>Signed in as ${escapeHtml(identity.email)}.</p><form method="post"><input type="hidden" name="handle" value="${escapeHtml(consent.handle)}"><fieldset><legend>Allow this agent to</legend>${options}</fieldset><p>Agents never promote accepted source or deploy production; those remain human decisions. Metered Cloudflare operations stay subject to project policy and budgets.</p><p>Redirect: ${escapeHtml(original.redirectUri)}</p><button>Allow</button></form><a href="/">Cancel</a></html>`,
+			`<html lang="en"><meta charset="utf-8"><title>Connect to Cruce</title><h1>Connect to Cruce</h1><p>${escapeHtml(description.clientName ?? original.clientId)} requests access to the repositories you select.</p><p>Signed in as ${escapeHtml(identity.email)}.</p><form method="post"><input type="hidden" name="handle" value="${escapeHtml(consent.handle)}"><fieldset><legend>Allow this agent to</legend>${options}</fieldset><fieldset><legend>Repositories</legend>${choices.map((r) => `<label><input type="checkbox" name="repository" value="${escapeHtml(r.id)}"> ${escapeHtml(r.label)}</label><br>`).join("")}</fieldset><p>Agents never promote accepted source or deploy production; those remain human decisions. Metered Cloudflare operations stay subject to workspace policy and budgets.</p><p>Redirect: ${escapeHtml(original.redirectUri)}</p><button>Allow</button></form><a href="/">Cancel</a></html>`,
 			{ headers: consent.headers },
 		);
 	}
@@ -139,7 +159,15 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 			userId: identity.developerId,
 			metadata: {},
 			scope,
-			props: identity,
+			props: {
+				...identity,
+				connectionId: crypto.randomUUID(),
+				repositoryIds: form
+					.getAll("repository")
+					.map(String)
+					.filter((id) => choices.some((r) => r.id === id)),
+				clientName: (await oauth.describeConsent(approved.request)).clientName ?? "Agent",
+			},
 		});
 	approved.headers.set("location", result.redirectTo);
 	return new Response(null, { status: 302, headers: approved.headers });

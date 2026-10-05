@@ -14,9 +14,9 @@ Cruce's first alpha, **0.1.0-alpha.1**, was released on 2026-10-05. Future relea
 
 ## One-time GitHub setup
 
-The workflow in `.github/workflows/release.yml` deploys Cruce's own Worker, `cruce`, in the account already named in `cloudflare.config.ts`. It does not change the canonical Artifacts repositories or the product's project deployment decisions.
+The workflow in `.github/workflows/release.yml` deploys Cruce's own Worker, `cruce`, in the account already named in `cloudflare.config.ts`. It does not change the canonical Artifacts repositories or the product's repository deployment decisions.
 
-1. Configure the GitHub `production` environment. Add `CLOUDFLARE_API_TOKEN` as an environment secret, scoped to the existing Cloudflare account and the deployment permissions needed by this Worker and its bindings. Use a deployment token, not the project's connected-account credential or an Artifacts repository write token.
+1. Configure the GitHub `production` environment. Add `CLOUDFLARE_API_TOKEN` as an environment secret, scoped to the existing Cloudflare account and the deployment permissions needed by this Worker and its bindings. Use a deployment token, not the workspace's connected-account credential or an Artifacts repository write token.
 2. Set these environment variables in the GitHub `production` environment (Settings → Environments → production → Environment variables):
 
    | Variable | Value |
@@ -25,9 +25,9 @@ The workflow in `.github/workflows/release.yml` deploys Cruce's own Worker, `cru
    | `CRUCE_ACCESS_ISSUER` | Existing Access team URL from `.env.test` |
    | `CRUCE_ACCESS_AUD` | Existing Access application audience from `.env.test` |
 
-   These are configuration values, not secrets. Missing values stop deployment. Optional cloud AI stays off.
-3. Keep `CRUCE_SECRET` and `CF_EVENTS_API_TOKEN` configured on the existing Worker. The workflow preserves those server secrets; it does not upload secret files.
-4. If Workers Builds is connected to Cruce's own repository, disable its automatic production deployment so a branch push cannot bypass release tags. Project preview/deployment repositories are separate.
+   These are configuration values, not secrets. Missing values stop deployment.
+3. Keep `CRUCE_SECRET` configured on the existing Worker. The workflow preserves those server secrets; it does not upload secret files.
+4. If Workers Builds is connected to Cruce's own repository, disable its automatic production deployment so a branch push cannot bypass release tags. Repository preview/deployment repositories are separate.
 5. Protect `main` and restrict release-tag creation to maintainers with a GitHub tag ruleset where your plan supports it. A human pushing a release tag is the decision to deploy. Optional environment reviewers add an approval if wanted.
 
 GitHub Actions uses standard Ubuntu runners, Node 24 and pnpm 12.4.2 with the frozen lockfile. The deployment follows Cloudflare's [cf automation guide](https://developers.cloudflare.com/cf/ci/), using the project's installed CLI and deploying the same production build that passed the dry run. Only the deployment step receives the API token.

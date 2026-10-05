@@ -1,11 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { createMcpHandler } from "agents/mcp/server";
 import { COST_LABELS, type Scope } from "../core/capabilities.ts";
-import type { Command } from "../shared/coordination.ts";
-import type { PlatformCommand } from "../shared/platform.ts";
+import { domainStatus } from "../core/errors.ts";
+import type { Command } from "../shared/platform.ts";
 import { CRUCE_INSTRUCTIONS, CRUCE_TOOLS, toInternalCommand, toolInputShape } from "../shared/tools.ts";
 import { CRUCE_VERSION } from "../shared/version.ts";
-export type MachineCommand = Command | PlatformCommand;
+export type MachineCommand = Command;
 
 /**
  * Cruce MCP. Tools express Cruce's development lifecycle; resource-consuming tools say so in their
@@ -16,7 +16,8 @@ export function cruceServer(execute: (command: MachineCommand) => Promise<unknow
 	const server = new McpServer({ name: "Cruce", version: CRUCE_VERSION }, { instructions: CRUCE_INSTRUCTIONS });
 	for (const tool of CRUCE_TOOLS) {
 		if (scopes && !scopes.includes(tool.scope)) continue;
-		const cost = tool.class === "resource" ? ` Resource action: ${COST_LABELS[tool.cost]}; subject to project policy.` : "";
+		const cost =
+			tool.class === "resource" ? ` Resource action: ${COST_LABELS[tool.cost]}; subject to workspace and repository policy.` : "";
 		server.registerTool(
 			tool.name,
 			{
@@ -37,7 +38,11 @@ export function cruceServer(execute: (command: MachineCommand) => Promise<unknow
 						structuredContent: result as Record<string, unknown>,
 					};
 				} catch (error) {
-					return { isError: true, content: [{ type: "text" as const, text: (error as Error).message }] };
+					return {
+						isError: true,
+						structuredContent: { status: domainStatus(error) ?? 500 },
+						content: [{ type: "text" as const, text: (error as Error).message }],
+					};
 				}
 			},
 		);

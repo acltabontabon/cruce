@@ -29,7 +29,7 @@ export async function configureClient(cwd: string, client: "codex" | "claude" | 
 	const original = await read(instructionPath),
 		start = "<!-- Cruce participation -->",
 		end = "<!-- End Cruce participation -->",
-		block = `${start}\n${CRUCE_INSTRUCTIONS}\nUse the Cruce MCP tools at task start (get_context, start_mission), on scope changes, and to publish commits (publish_revision) and evidence.\n${end}`;
+		block = `${start}\n${CRUCE_INSTRUCTIONS}\nUse the Cruce MCP tools at task start (start_session, then get_context), on scope changes, and to publish commits (publish_revision) and evidence.\n${end}`;
 	const next =
 		original.includes(start) && original.includes(end)
 			? `${original.slice(0, original.indexOf(start))}${block}${original.slice(original.indexOf(end) + end.length)}`
@@ -39,8 +39,5 @@ export async function configureClient(cwd: string, client: "codex" | "claude" | 
 		instructionPath,
 		client === "cursor" && !original ? `---\ndescription: Cruce coordination\nalwaysApply: true\n---\n${next}` : next,
 	);
-	const exclude = join(cwd, ".gitignore"),
-		ignore = await read(exclude);
-	if (!ignore.split(/\r?\n/).includes(".cruce/")) await writeFile(exclude, `${ignore.trimEnd()}\n.cruce/\n`);
 	return { client, capabilities: ["git_observation", "coordination_mcp"], adaptiveVerified: false, hooksInstalled: false };
 }
