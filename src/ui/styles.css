@@ -668,19 +668,6 @@ form button[type="submit"]:hover {
 .overlap small {
 	color: #96835d;
 }
-.columns {
-	display: grid;
-	grid-template-columns: 1fr 1fr;
-	gap: 24px;
-}
-.columns > section {
-	min-width: 0;
-	background: #fff;
-	padding: 6px 22px 18px;
-	border: 1px solid var(--line);
-	border-radius: 12px;
-	margin: 10px 0;
-}
 .empty {
 	color: #849077;
 	padding: 20px;
@@ -1106,9 +1093,6 @@ dd {
 	}
 	.shell > main {
 		padding: 0 24px 40px;
-	}
-	.columns {
-		grid-template-columns: 1fr;
 	}
 	.tabs {
 		gap: 20px;

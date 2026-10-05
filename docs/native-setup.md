@@ -4,7 +4,7 @@
 
 This is the workflow supported by the current implementation. The current Worker/Access Git configuration still needs live verification; check [environment status](test-environment.md) before using hosted URLs. For a no-cloud tour, use the [local fixture](../CONTRIBUTING.md#set-up-and-explore).
 
-Use Git, Node 22.18+ and installed Cruce dependencies. Sign in through Access, connect the namespace's Cloudflare account with Artifacts access, and create a repository. Cruce initializes its configured default branch. Repository creation and writer attachment consume cloud resources; Workers Builds is optional.
+Use Git, Node 22.18+ and installed Cruce dependencies. Sign in through Access, connect the namespace's Cloudflare account with Artifacts access, and create a repository. Cruce initializes its configured default branch. Repository creation and writer attachment consume Artifacts resources. CI, releases and deployments remain external.
 
 ## Authenticate and clone with Git
 

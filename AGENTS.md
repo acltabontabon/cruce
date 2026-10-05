@@ -6,6 +6,7 @@ Read the [principles and guardrails](docs/principles.md), [architecture](docs/ar
 
 - If Git already has a primitive, use Git instead of inventing another one. Commit, clone, fetch, pull, push, branch, diff and log remain normal Git. Publication adds exact-revision retention/review, not source transport.
 - Coordinate across independent tools without launching agents or owning their runtimes. Cruce is not a Git/worktree replacement, a vendor-specific worktree manager, a GitHub/GitLab clone, an IDE, a cloud coding environment, a CI/CD replacement or a general agent orchestrator.
+- Cruce ends at reviewed reconciliation into canonical Git. CI, build/release orchestration, deployment, environments, rollback and runtime management remain external. Do not add deployment abstractions or orchestration. Cruce’s own hosting and release tooling is infrastructure, not a repository capability.
 - Keep architectural constraints, current implementation, proposed features and local/live verification distinct. Update the owning documentation with architectural changes; merge duplicate material and remove superseded instructions.
 
 ## Domain and boundaries
@@ -19,24 +20,24 @@ Read the [principles and guardrails](docs/principles.md), [architecture](docs/ar
 - Enforce both persistent local writer locks and server checkout reservations. Thirty-second heartbeats expire active presence after ninety seconds, never ownership of a locked checkout. Completion retains commits, artifacts and provenance. Cleanup only removes Cruce-owned contexts after checking dirty and unpublished work.
 - Overlap is advisory, initially based on changed paths including renames and binary files. Structural analysis enriches context; it never grants authority. Local work does not require a plan or scheduling clearance.
 - Changes preserve exact-revision review, reasoned disagreement, verification and promotion. Hosted source promotion is human-approved and non-forced. External integration is an observed record, never a claim that a remote push was independently verified.
-- Artifacts carry namespace, repository, workspace, actor, revision, hash, storage and trust. Deployment requires an immutable source artifact and derives its revision. Source acceptance and deployment are separate. Production is an authenticated console decision. Rollback names a prior deployed artifact.
+- Artifacts carry namespace, repository, workspace, actor, revision, hash, storage and trust. Source and evidence retention support exact-revision review and human-approved source promotion.
 - Namespace resource reservations are atomic across repositories. Retries reuse operation identity and reservation; uncertain outcomes remain charged until reconciled. No operator-account fallback. Repository policy may only narrow namespace policy.
-- Credentials remain sealed server-side. Git operations use 60-second tokens, revoked after use. Never expose credentials in source, remotes, configuration, logs or frontend responses. Retain source referenced by artifacts/deployments.
+- Credentials remain sealed server-side. Git operations use 60-second tokens, revoked after use. Never expose credentials in source, remotes, configuration, logs or frontend responses. Retain source referenced by artifacts.
 
 ## Implementation
 
 - Keep `src/core` pure and deterministic with injected time and IDs. Add tests for controller behavior. The UI renders controller-derived permissions and readiness.
 - `src/shared/tools.ts` is the single MCP command catalog. Reads do not mutate or provision. Every resource operation declares scope/cost and passes the authoritative namespace gate before infrastructure calls.
-- Directory DO: identity/address lookup. Namespace DO: membership and atomic reservations. Repository Control Tower: workspaces, changes, artifacts, Git and deployments.
-- Console navigation: Overview, Code, Work, Artifacts, Deployments, Settings. Persistent namespace/repository switchers; Members and Teams belong to shared namespaces. Keep account settings separate. Preserve keyboard navigation, deep links, Back, retries and late-response protection.
+- Directory DO: identity/address lookup. Namespace DO: membership and atomic reservations. Repository Control Tower: workspaces, changes, artifacts and Git.
+- Console navigation: Overview, Code, Work, Artifacts, Settings. Persistent namespace/repository switchers; Members and Teams belong to shared namespaces. Keep account settings separate. Preserve keyboard navigation, deep links, Back, retries and late-response protection.
 - Cruce coordinates local participants; it never launches agents. No coding chat, editor, agent runtime or intake forms. Offer Create repository, Clone and Attach local checkout. Disclose cloud setup/cost where resources are consumed.
 - Read current [Artifacts](https://developers.cloudflare.com/artifacts/llms.txt) and [cf](https://developers.cloudflare.com/cf/llms.txt) documentation before platform changes. Use `cf` and `cloudflare.config.ts`; never use wrangler project commands.
 - No legacy Flight/radar routes, project/mission aliases, migration adapters, shared-branch execution workspaces, mandatory scheduling, provider integrations or general workflow engine.
 
 ## Layout and verification
 
-`src/core`: ownership, repository decisions, capabilities. `src/worker`: authentication, directory/namespace/repository Durable Objects, Git transport, deployments. `src/shared`: contracts/catalog. `runner`: local bridge and isolation. `src/ui`: console. `src/intelligence`: Babel structural index. `test/browser`: explicitly isolated fixed-clock console fixture.
+`src/core`: ownership, repository decisions, capabilities. `src/worker`: authentication, directory/namespace/repository Durable Objects, Git transport and source retention. `src/shared`: contracts/catalog. `runner`: local bridge and isolation. `src/ui`: console. `src/intelligence`: Babel structural index. `test/browser`: explicitly isolated fixed-clock console fixture.
 
 Preserve pre-existing working changes. `demo/auth-service` and `demo/scenario` are reusable source fixtures: do not reformat them. Historic overlay directory names are fixture paths, not domain entities. Keep demo commit IDs reproducible.
 
-Before committing run `pnpm typecheck && pnpm lint && pnpm test`, `pnpm test:browser`, `pnpm verify:scenario` and `pnpm exec cf build --mode offline`. Validate hosted publication/deployment in the configured test environment before describing them as live-verified. Update `CHANGELOG.md` for user-facing changes and `docs/local-verification.md` when verification status changes. Record checks and limitations in the review description.
+Before committing run `pnpm typecheck && pnpm lint && pnpm test`, `pnpm test:browser`, `pnpm verify:scenario` and `pnpm exec cf build --mode offline`. Validate hosted publication/promotion in the configured test environment before describing them as live-verified. Update `CHANGELOG.md` for user-facing changes and `docs/local-verification.md` when verification status changes. Record checks and limitations in the review description.

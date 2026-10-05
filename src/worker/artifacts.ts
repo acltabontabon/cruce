@@ -1,6 +1,5 @@
 import { DomainError } from "../core/errors.ts";
-import type { ResourceAccount, SmokeCheck } from "../shared/platform.ts";
-import type { GitWorkspace } from "./git/workspace.ts";
+import type { ResourceAccount } from "../shared/platform.ts";
 import { type SealingEnv, seal, unseal } from "./sealing.ts";
 import type { Store } from "./store.ts";
 
@@ -207,55 +206,6 @@ export class ArtifactsRestHost implements RepositoryHost {
 	}
 }
 
-export interface BuildRecord {
-	build_uuid: string;
-	status: "queued" | "initializing" | "running" | "stopped";
-	build_outcome?: "success" | "fail" | "skipped" | "cancelled" | "terminated" | null;
-	preview_url?: string | null;
-	build_trigger_metadata?: { branch?: string; commit_hash?: string };
-}
-/** The few Workers Builds reads Cruce needs to tie a build and its preview URL to an exact revision. */
-export class WorkersBuildsClient {
-	constructor(
-		readonly accountId: string,
-		private readonly token: string,
-		private readonly send: Send = fetch,
-	) {}
-	async scriptTag(workerName: string): Promise<string | undefined> {
-		const scripts = await cloudflare<{ id: string; tag: string }[]>(this.send, this.token, `/accounts/${this.accountId}/workers/scripts`);
-		return scripts.find((s) => s.id === workerName)?.tag;
-	}
-	async buildFor(scriptTag: string, revision: string, branch: string): Promise<BuildRecord | undefined> {
-		const builds = await cloudflare<BuildRecord[]>(
-			this.send,
-			this.token,
-			`/accounts/${this.accountId}/builds/workers/${scriptTag}/builds?per_page=50`,
-		);
-		const match = builds.find((b) => b.build_trigger_metadata?.commit_hash === revision && b.build_trigger_metadata?.branch === branch);
-		if (match?.status !== "stopped") return match;
-		// preview_url is only supplied by the single-build endpoint.
-		return cloudflare<BuildRecord>(this.send, this.token, `/accounts/${this.accountId}/builds/builds/${match.build_uuid}`);
-	}
-	async runtimeVersion(worker: string, buildId: string): Promise<string | undefined> {
-		const versions = await cloudflare<{ items: { id: string }[] }>(
-			this.send,
-			this.token,
-			`/accounts/${this.accountId}/workers/scripts/${encodeURIComponent(worker)}/versions`,
-		);
-		const ids = versions.items.slice(0, 20).map((v) => v.id);
-		if (!ids.length) return undefined;
-		const result = await cloudflare<{ builds?: Record<string, BuildRecord> }>(
-			this.send,
-			this.token,
-			`/accounts/${this.accountId}/builds/builds?version_ids=${ids.join(",")}`,
-		);
-		return Object.entries(result.builds ?? {}).find(([, build]) => build.build_uuid === buildId)?.[0];
-	}
-	async verify(): Promise<void> {
-		await cloudflare(this.send, this.token, `/accounts/${this.accountId}/builds/account/limits`);
-	}
-}
-
 interface StoredAccount extends ResourceAccount {
 	sealed?: string;
 }
@@ -283,16 +233,11 @@ export class ResourceBoundary {
 		if (!/^[0-9a-f]{32}$/.test(input.accountId)) throw new DomainError(400, "Cloudflare account ID required");
 		if (input.token.length < 20 || input.token.length > 400) throw new DomainError(400, "Cloudflare API token required");
 		await cloudflare(this.send, input.token, `/accounts/${input.accountId}/artifacts/namespaces?limit=1`);
-		const builds = await new WorkersBuildsClient(input.accountId, input.token, this.send).verify().then(
-			() => true,
-			() => false,
-		);
 		const account: StoredAccount = {
 			mode: "connected",
 			accountId: input.accountId,
 			label: input.label?.slice(0, 80) || "Connected Cloudflare account",
 			credential: "stored",
-			capabilities: builds ? ["artifacts", "builds"] : ["artifacts"],
 			connectedBy: actor,
 			at: Date.now(),
 			sealed: await seal(this.env, { token: input.token }),
@@ -308,72 +253,11 @@ export class ResourceBoundary {
 		if (!stored?.sealed) throw new DomainError(409, "Connect a Cloudflare account with an Artifacts token first");
 		return (await unseal<{ token: string }>(this.env, stored.sealed)).token;
 	}
-	async builds(): Promise<WorkersBuildsClient> {
-		const account = this.account();
-		if (!account) throw new DomainError(409, "No Cloudflare account connected");
-		return new WorkersBuildsClient(account.accountId, await this.token(), this.send);
-	}
-	/** Where deploy repositories live: the account Workers Builds reads from. */
 	async host(): Promise<RepositoryHost> {
 		const account = this.account();
 		if (!account) throw new DomainError(409, "No Cloudflare account connected");
 		return new ArtifactsRestHost(account.accountId, this.resources.namespace, await this.token(), this.send);
 	}
-}
-
-/** Push an exact revision to a deploy repository branch. `main` is production; other branches are previews. */
-export async function pushDeployment(git: GitWorkspace, host: RepositoryHost, repository: string, revision: string, branch: string) {
-	const info = await host.info(repository);
-	const ref = `refs/cruce/deploy/${branch}`;
-	await git.setRef(ref, revision);
-	// The deploy repository mirrors deployment state, not history: production may move back for a rollback.
-	await host.withToken(repository, "write", (token) =>
-		git.push({ url: info.remote, token, localRef: ref, remoteRef: `refs/heads/${branch}`, force: true }),
-	);
-}
-
-export interface SmokeResult {
-	path: string;
-	status: number | null;
-	expected: number;
-	ok: boolean;
-	ms: number;
-	error?: string;
-}
-/** Smoke checks Cruce runs itself against a deployed URL: runtime-verified evidence, not agent assertions. */
-export async function runSmokeChecks(
-	url: string,
-	checks: SmokeCheck[],
-	send: Send = fetch,
-	clock: () => number = Date.now,
-): Promise<SmokeResult[]> {
-	const origin = new URL(url);
-	if (origin.protocol !== "https:") throw new DomainError(400, "Smoke checks require an HTTPS preview URL");
-	const results: SmokeResult[] = [];
-	for (const check of checks) {
-		const started = clock();
-		try {
-			const response = await send(new URL(check.path, origin).toString(), { redirect: "manual", signal: AbortSignal.timeout(10_000) });
-			await response.body?.cancel();
-			results.push({
-				path: check.path,
-				status: response.status,
-				expected: check.expectStatus,
-				ok: response.status === check.expectStatus,
-				ms: clock() - started,
-			});
-		} catch (error) {
-			results.push({
-				path: check.path,
-				status: null,
-				expected: check.expectStatus,
-				ok: false,
-				ms: clock() - started,
-				error: (error as Error).message.slice(0, 200),
-			});
-		}
-	}
-	return results;
 }
 
 /** Bounded transfer, including chunked requests. This is a Cruce limit, not an Artifacts repository limit. */

@@ -4,7 +4,7 @@
 
 Use this walkthrough to explore Cruce while it is in development. Screenshots were captured on 2026-10-05 from the local browser fixture. They illustrate the current console, not a stable UI contract or evidence of a live deployment.
 
-The fixture runs the real console and controllers with fixed time and deterministic Git objects. All names, account details and workspaces below are sample data. Authentication, Cloudflare storage and deployment behavior are simulated; no cloud resources are used. Storage identifiers and content hashes shown in artifact details are fixture placeholders.
+The fixture runs the real console and controllers with fixed time and deterministic Git objects. All names, account details and workspaces below are sample data. Authentication and Cloudflare storage are simulated; no cloud resources are used. Storage identifiers and content hashes shown in artifact details are fixture placeholders.
 
 ## Start the demo
 
@@ -43,7 +43,7 @@ Review decisions concern this exact revision. An authenticated human attestation
 
 Open **Artifacts**, then **Bounded retry policy**. Its details identify the exact revision, producing workspace, storage reference and content hash. **Trace lineage** provides provenance context. Here the storage and hash values are simulated placeholders, and the artifact is marked **reported**.
 
-Source acceptance and deployment are separate decisions. The starting fixture has no deployment environments configured; an empty **Deployments** view is expected.
+Cruce’s coordination boundary ends at reviewed reconciliation into canonical Git. External systems own subsequent builds, releases, deployments and runtime operation.
 
 ![Source artifact details identifying its revision, workspace and fixture storage](images/local-demo/artifact.jpg)
 

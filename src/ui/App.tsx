@@ -19,7 +19,7 @@ const count = (n: number, label: string) => `${n} ${label}${n === 1 ? "" : "s"}`
 const short = (s?: string) => s?.slice(0, 8) ?? "—";
 const time = (n: number) => new Date(n).toLocaleString();
 const namespaceTabs = ["repositories", "members", "teams", "settings"];
-const tabs = ["overview", "code", "work", "artifacts", "deployments", "settings"];
+const tabs = ["overview", "code", "work", "artifacts", "settings"];
 type NamespaceView = {
 	repositorySummaries?: { id: string; active: number; overlaps: number; latestArtifact?: Artifact }[];
 	activity?: { id: string; repositoryId: string; repositoryName: string; summary: string; at: number }[];
@@ -569,31 +569,17 @@ export function App() {
 										<h2>Active workspaces</h2>
 										<Workspaces view={view} open={(id) => navigate(route.namespaceId, route.repositoryId, "work", id)} />
 										<Overlaps view={view} />
-										<div className="columns">
-											<section>
-												<h2>Latest artifact</h2>
-												{view.artifacts.length ? (
-													<ArtifactRow
-														artifact={view.artifacts.at(-1)!}
-														open={(id) => navigate(route.namespaceId, route.repositoryId, "artifacts", id)}
-													/>
-												) : (
-													<Empty>No artifacts published yet.</Empty>
-												)}
-											</section>
-											<section>
-												<h2>Environments</h2>
-												{!view.environments.length && <Empty>No deployment environments configured.</Empty>}
-												{view.environments.map((env) => {
-													const live = view.deployments.filter((d) => d.environmentId === env.id && d.state === "deployed").at(-1);
-													return (
-														<p key={env.id}>
-															{env.name} <code>{live ? short(live.revision) : "Not deployed"}</code>
-														</p>
-													);
-												})}
-											</section>
-										</div>
+										<section>
+											<h2>Latest artifact</h2>
+											{view.artifacts.length ? (
+												<ArtifactRow
+													artifact={view.artifacts.at(-1)!}
+													open={(id) => navigate(route.namespaceId, route.repositoryId, "artifacts", id)}
+												/>
+											) : (
+												<Empty>No artifacts published yet.</Empty>
+											)}
+										</section>
 										<Activity view={view} />
 									</>
 								)}
@@ -738,134 +724,6 @@ export function App() {
 											/>
 										))}
 										{route.id && <ArtifactDetail key={route.id} id={route.id} view={view} execute={execute} />}
-									</>
-								)}
-								{route.tab === "deployments" && (
-									<>
-										<h1>Deployments</h1>
-										<p className="muted">Deployments consume immutable source artifacts. Build output is shown only when captured.</p>
-										{!view.environments.length && (
-											<Empty>
-												No environments configured. Connect Cloudflare in namespace settings, then configure an environment here.
-											</Empty>
-										)}
-										{view.environments.map((env) => (
-											<section key={env.id}>
-												<h2>
-													{env.name} <small>{env.kind}</small>
-												</h2>
-												<p>
-													Worker <code>{env.workerName}</code> · deployment repository <code>{env.deployRepository}</code>
-												</p>
-												<p className="muted">Connect this repository to Workers Builds in Cloudflare. Production branch: main.</p>
-												{view.permissions.write && (env.kind === "preview" || view.permissions.maintain) && (
-													<Form
-														label={env.kind === "production" ? "Deploy to production" : "Request preview"}
-														submit={(d) =>
-															execute({
-																tool: env.kind === "production" ? "deploy_artifact" : "request_preview",
-																environmentId: env.id,
-																artifactId: value(d, "artifactId"),
-															})
-														}
-													>
-														<label>
-															Source artifact
-															<select name="artifactId" required>
-																<option value="">Choose artifact</option>
-																{view.artifacts
-																	.filter((a) => a.kind === "source")
-																	.map((a) => (
-																		<option key={a.id} value={a.id}>
-																			{a.title} · {short(a.revision)}
-																		</option>
-																	))}
-															</select>
-														</label>
-														<p className="cost">Consumes Cloudflare build and deployment resources under namespace policy.</p>
-													</Form>
-												)}
-												{view.deployments
-													.filter((d) => d.environmentId === env.id)
-													.toReversed()
-													.map((d) => (
-														<div key={d.id} className="record">
-															<strong>{d.state}</strong> <code>{short(d.revision)}</code>
-															<p>
-																{d.actor.name} · {time(d.at)} · artifact{" "}
-																<button
-																	type="button"
-																	onClick={() => navigate(route.namespaceId, route.repositoryId, "artifacts", d.artifactId)}
-																>
-																	{short(d.artifactId)}
-																</button>
-															</p>
-															{d.url && (
-																<a href={d.url} target="_blank" rel="noreferrer">
-																	Open deployment
-																</a>
-															)}
-															<p>
-																Build {d.buildId ?? "not observed"} · runtime version {d.runtimeVersion ?? "not observed"}
-															</p>
-															<p>Last observed {time(d.updatedAt)}</p>
-															{d.error && <p role="alert">{d.error}</p>}
-															{d.smoke && <p>Runtime smoke checks {d.smoke.ok ? "passed" : "failed"}</p>}
-															{d.state === "deployed" && view.permissions.maintain && (
-																<button
-																	type="button"
-																	disabled={busy}
-																	onClick={() =>
-																		void execute({
-																			tool: "deploy_artifact",
-																			artifactId: d.artifactId,
-																			environmentId: env.id,
-																			deploymentId: d.id,
-																		}).catch((e) => setError(e))
-																	}
-																>
-																	Redeploy this artifact
-																</button>
-															)}
-														</div>
-													))}
-											</section>
-										))}
-										{view.permissions.maintain && (
-											<details>
-												<summary>Configure environment</summary>
-												<Form
-													label="Save environment"
-													submit={(d) =>
-														execute({
-															tool: "configure_environment",
-															environment: {
-																name: value(d, "name"),
-																kind: value(d, "kind") as "preview",
-																workerName: value(d, "workerName"),
-																smokeChecks: [{ path: "/", expectStatus: 200 }],
-															},
-														})
-													}
-												>
-													<label>
-														Name
-														<input name="name" required />
-													</label>
-													<label>
-														Kind
-														<select name="kind">
-															<option value="preview">Preview / staging</option>
-															<option value="production">Production</option>
-														</select>
-													</label>
-													<label>
-														Cloudflare Worker
-														<input name="workerName" required pattern="[a-z0-9-]+" />
-													</label>
-												</Form>
-											</details>
-										)}
 									</>
 								)}
 								{route.tab === "settings" && (
@@ -1206,7 +1064,6 @@ export function App() {
 										submit={(d) =>
 											mutate(`${base}/policy`, {
 												dailyLimit: Number(value(d, "dailyLimit")),
-												previewsPerWorkspace: Number(value(d, "previewsPerWorkspace")),
 												rules: Object.fromEntries(Object.keys(namespace.policy.rules).map((key) => [key, value(d, key)])),
 											})
 										}
@@ -1216,21 +1073,11 @@ export function App() {
 											Daily operations
 											<input name="dailyLimit" type="number" min="0" max="10000" defaultValue={namespace.policy.dailyLimit} />
 										</label>
-										<label>
-											Previews per workspace
-											<input
-												name="previewsPerWorkspace"
-												type="number"
-												min="0"
-												max="1000"
-												defaultValue={namespace.policy.previewsPerWorkspace}
-											/>
-										</label>
 										{Object.entries(namespace.policy.rules).map(([key, rule]) => (
 											<label key={key}>
 												{key}
 												<select name={key} defaultValue={rule}>
-													{key !== "production.deploy" && <option value="allow">Allow</option>}
+													<option value="allow">Allow</option>
 													<option value="approval">Human approval</option>
 													<option value="deny">Deny</option>
 												</select>

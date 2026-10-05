@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
 import type { Actor, Command, Repository, Workspace } from "../../src/shared/platform.ts";
-import { type RepositoryHost, ResourceBoundary } from "../../src/worker/deployments.ts";
+import { type RepositoryHost, ResourceBoundary } from "../../src/worker/artifacts.ts";
 import { MemoryFs } from "../../src/worker/git/memory-fs.ts";
 import { GitWorkspace } from "../../src/worker/git/workspace.ts";
 import { RepositoryRuntime } from "../../src/worker/repository-runtime.ts";
@@ -27,7 +27,7 @@ const repo: Repository = {
 };
 const grant: import("../../src/worker/namespace-runtime.ts").ConnectionGrant = {
 	actor: agent,
-	scopes: ["cruce:read", "workspace:write", "revision:publish", "artifact:publish", "change:write", "preview:request"],
+	scopes: ["cruce:read", "workspace:write", "revision:publish", "artifact:publish", "change:write"],
 	repositories: [repo.id],
 };
 function memory(): Store {
@@ -447,32 +447,9 @@ describe("repository runtime", () => {
 		expect(f.push.mock.calls.every(([input]) => input.remoteRef === "refs/heads/cruce-base")).toBe(true);
 		await expect(f.call("get_source", { revision: f.head }, dev)).rejects.toThrow("unavailable");
 	});
-	it("deploys source artifacts, never a caller supplied alternate revision", async () => {
-		const f = await fixture();
-		const artifact = (await f.call("publish_revision", { workspaceId: f.workspace.id, revision: f.head, pack: f.pack })) as { id: string };
-		const human = { actor: owner, scopes: [], repositories: [repo.id] };
-		const env = (await f.call(
-			"configure_environment",
-			{ environment: { name: "Staging", kind: "preview", workerName: "payments", smokeChecks: [] } },
-			human,
-		)) as { id: string };
-		const deployment = (await f.call("request_preview", { environmentId: env.id, artifactId: artifact.id, revision: f.base })) as {
-			id: string;
-			revision: string;
-			artifactId: string;
-		};
-		expect(deployment.revision).toBe(f.head);
-		expect(deployment.artifactId).toBe(artifact.id);
-		vi.spyOn(ResourceBoundary.prototype, "builds").mockResolvedValue({
-			scriptTag: async () => "tag",
-			buildFor: async () => ({ build_uuid: "build", status: "stopped", build_outcome: "fail" }),
-		} as never);
-		expect(await f.runtime.tick(deployment.id)).toBe("failed");
-		expect(f.runtime.state().deployments[0].error).toContain("fail");
-	});
 });
 
-describe("terminal and deployment recovery", () => {
+describe("terminal recovery and pinned context", () => {
 	it("atomically binds human terminal credentials to one workspace and permits the original retry", async () => {
 		const f = await fixture();
 		const human = { actor: { ...owner, connectionId: "terminal" } };
@@ -490,23 +467,6 @@ describe("terminal and deployment recovery", () => {
 			available: true,
 			structure: { revision: f.base, indexer: "babel-typescript" },
 		});
-	});
-	it("does not replay a superseded uncertain deployment over a newer request", async () => {
-		const f = await fixture();
-		const artifact = (await f.call("publish_revision", { workspaceId: f.workspace.id, revision: f.head, pack: f.pack })) as { id: string };
-		const env = (await f.call(
-			"configure_environment",
-			{ environment: { name: "Preview", kind: "preview", workerName: "worker", smokeChecks: [] } },
-			{ actor: owner },
-		)) as { id: string };
-		const old = { environmentId: env.id, artifactId: artifact.id, idempotencyKey: "old-deploy" };
-		f.push.mockRejectedValueOnce(new Error("lost push response"));
-		await expect(f.call("request_preview", old)).rejects.toThrow("lost push response");
-		const newer = (await f.call("request_preview", { ...old, idempotencyKey: "new-deploy" })) as { id: string };
-		await expect(f.call("request_preview", old)).rejects.toThrow("superseded");
-		const pushes = f.push.mock.calls.length;
-		expect(await f.runtime.tick(newer.id, true)).toBe("failed");
-		expect(f.push).toHaveBeenCalledTimes(pushes);
 	});
 });
 

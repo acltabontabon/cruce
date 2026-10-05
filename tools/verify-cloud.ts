@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { initialNamespace, NamespaceController } from "../src/core/ownership.ts";
 import type { Actor, Artifact, Command, Repository, Workspace } from "../src/shared/platform.ts";
-import { ResourceBoundary } from "../src/worker/deployments.ts";
+import { ResourceBoundary } from "../src/worker/artifacts.ts";
 import { MemoryFs } from "../src/worker/git/memory-fs.ts";
 import { GitWorkspace } from "../src/worker/git/workspace.ts";
 import type { ConnectionGrant } from "../src/worker/namespace-runtime.ts";
@@ -207,7 +207,6 @@ try {
 			"independent source fetch",
 			"source retention after workspace end",
 		],
-		deployment: "not configured",
 	};
 	await mkdir("dist/live-verification", { recursive: true });
 	await writeFile("dist/live-verification/result.json", JSON.stringify(result, null, 2));

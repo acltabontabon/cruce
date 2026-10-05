@@ -164,7 +164,6 @@ export class NamespaceController {
 	}
 	setPolicy(a: Authority, policy: ResourcePolicy) {
 		namespaceMaintain(a);
-		if (policy.rules["production.deploy"] === "allow") throw new DomainError(400, "Production always needs human approval");
 		this.state.policy = policy;
 		this.state.version++;
 	}
@@ -176,8 +175,7 @@ export class NamespaceController {
 		const rules = [this.state.policy.rules[action], repo.policy.resourceRules[action]];
 		if (rules.includes("deny")) throw new DomainError(403, "Resource policy denies this operation");
 		const human = a.actor.kind === "human" && a.repositoryRole === "maintain";
-		if ((action === "production.deploy" || rules.includes("approval")) && !human)
-			throw new DomainError(403, "Human maintainer approval required");
+		if (rules.includes("approval") && !human) throw new DomainError(403, "Human maintainer approval required");
 		const previous = this.state.reservations.find((r) => r.id === key);
 		if (previous) {
 			if (previous.fingerprint !== full) throw new DomainError(409, "Resource operation identity reused");
@@ -187,12 +185,6 @@ export class NamespaceController {
 		const used = this.state.reservations.filter((r) => r.state !== "released" && Math.floor(r.at / 86400000) === day);
 		if (used.length >= this.state.policy.dailyLimit)
 			throw new DomainError(403, "Namespace daily resource budget reached; update the namespace limit explicitly");
-		if (
-			action === "preview.deploy" &&
-			this.state.reservations.filter((r) => r.action === action && r.workspaceId === workspaceId && r.state !== "released").length >=
-				this.state.policy.previewsPerWorkspace
-		)
-			throw new DomainError(403, "Workspace preview budget reached; update the namespace limit explicitly");
 		const reservation = {
 			id: key,
 			fingerprint: full,

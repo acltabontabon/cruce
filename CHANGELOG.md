@@ -7,10 +7,12 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 ### Added
 
 - Illustrated local console walkthrough covering namespaces, concurrent work, exact-revision review, source artifacts and account access.
-- Local bridge worktrees, advisory overlap, upstream reconciliation and artifact-bound deployment provenance.
+- Local bridge worktrees, advisory overlap, upstream reconciliation and exact-revision source provenance.
 - Architectural principles and guardrails, Mermaid diagrams, contributor/MCP guidance and a roadmap of future candidates.
 
 ### Changed
+
+- End Cruce coordination at human-reviewed reconciliation into canonical Git; CI, releases, deployments and runtimes remain external.
 
 - Adopt Namespace → Repository → Workspace ownership with namespace access/budgets and durable human/agent workspaces.
 - Use canonical Artifacts repositories, isolated writer forks, normal Git transport, exact-revision publication and human-reviewed source promotion.
@@ -18,6 +20,9 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 - Consolidate product and architecture documentation around coordination across independent coding agents.
 
 ### Removed
+
+- Repository Deployments capability, environment configuration, preview/production operations, rollback, Workers Builds observation and deployment workflows, including their APIs, scopes, budgets and state.
+- Unused build-artifact and runtime-verification abstractions; source artifacts, reported evidence and human attestation remain.
 
 - Legacy radar routes and compatibility aliases.
 - Redundant progress log, superseded implementation plans and overlapping documentation.

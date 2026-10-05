@@ -48,7 +48,7 @@ export async function bridgeRoute(request: Request, env: PlatformEnv, ctx: Execu
 		);
 		if (request.method === "GET")
 			return new Response(
-				`<html lang="en"><title>Connect terminal</title><h1>Authorize your terminal</h1><p>This terminal will act as you in one workspace on ${repo.name}. It cannot administer the namespace, approve reviews, promote source, or deploy production.</p><form method="post"><button>Authorize terminal workspace</button></form></html>`,
+				`<html lang="en"><title>Connect terminal</title><h1>Authorize your terminal</h1><p>This terminal will act as you in one workspace on ${repo.name}. It cannot administer the namespace, approve reviews, or promote source.</p><form method="post"><button>Authorize terminal workspace</button></form></html>`,
 				{
 					headers: {
 						"content-type": "text/html; charset=utf-8",

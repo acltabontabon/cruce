@@ -29,9 +29,9 @@ Gemini CLI, future tools and internal agents are within the product model, but n
 | Attach or clean up a hosted fork | `attach_workspace`, `cleanup_workspace` | `workspace:write`; Artifacts resource operations |
 | Retain source or evidence | `publish_revision`, `publish_artifact` | `revision:publish` / `artifact:publish`; Artifacts resource operations |
 | Propose, review and report checks | `create_proposal`, `review_proposal`, `record_verification` | `change:write`; agent evidence stays reported |
-| Request decisions or previews | `request_promotion`, `request_preview` | `promotion:request` / `preview:request`; preview consumes metered resources |
+| Request source acceptance | `request_promotion` | `promotion:request`; requests a human decision |
 
-Hosted discovery filters tools by granted scope. Scope does not replace current membership, approved-repository checks, writer ownership or namespace resource policy. Human concern resolution, source promotion, environment configuration and production decisions are absent from the agent catalog. A promotion request is not an approval.
+Hosted discovery filters tools by granted scope. Scope does not replace current membership, approved-repository checks, writer ownership or namespace resource policy. Human concern resolution and source promotion are absent from the agent catalog. Deployment and environment orchestration are outside Cruce entirely. A promotion request is not an approval.
 
 ## Participation protocol
 

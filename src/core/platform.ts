@@ -3,7 +3,6 @@ import type {
 	Artifact,
 	Authority,
 	Command,
-	Deployment,
 	Overlap,
 	Proposal,
 	Repository,
@@ -23,8 +22,6 @@ export const initialRepository = (repository: Repository): RepositoryState => ({
 	proposals: [],
 	verifications: [],
 	promotions: [],
-	environments: [],
-	deployments: [],
 	refs: [],
 	activity: [],
 	receipts: {},
@@ -53,11 +50,6 @@ export class RepositoryController {
 		const a = this.state.artifacts.find((a) => a.id === id);
 		if (!a) throw new DomainError(404, "Artifact unavailable");
 		return a;
-	}
-	deployment(id?: string) {
-		const d = this.state.deployments.find((d) => d.id === id);
-		if (!d) throw new DomainError(404, "Deployment unavailable");
-		return d;
 	}
 	owned(a: Authority, id?: string, write = true) {
 		if (write) writeAccess(a);
@@ -107,12 +99,11 @@ export class RepositoryController {
 		if (!["completed", "cancelled"].includes(s.state)) reasons.push("End the workspace before cleaning up its fork");
 		return { ready: reasons.length === 0, reasons };
 	}
-	readiness(p: Proposal, accepted = false) {
+	readiness(p: Proposal) {
 		const reasons: string[] = [];
-		if (p.state !== "open" && !(accepted && p.state === "promoted")) reasons.push("Change is closed or promotion is in progress");
+		if (p.state !== "open") reasons.push("Change is closed or promotion is in progress");
 		const head = this.upstream();
-		if (head && p.base !== head && !(accepted && p.state === "promoted" && p.revision === head))
-			reasons.push("Base revision changed; refresh and propose the reconciled revision");
+		if (head && p.base !== head) reasons.push("Base revision changed; refresh and propose the reconciled revision");
 		const latest = new Map<string, (typeof p.reviews)[number]>();
 		for (const r of p.reviews.filter((r) => r.revision === p.revision)) latest.set(r.actor.id, r);
 		if (![...latest.values()].some((r) => r.actor.kind === "human" && r.outcome === "approve"))
@@ -151,7 +142,6 @@ export class RepositoryController {
 			...this.state.workspaces.map((s) => ({ type: "workspace", record: s, ids: [s.id, s.baseRevision, s.headRevision, s.actor.id] })),
 			...this.state.artifacts.map((a) => ({ type: "artifact", record: a, ids: [a.id, a.workspaceId, a.revision, a.actor.id] })),
 			...this.state.proposals.map((p) => ({ type: "change", record: p, ids: [p.id, p.workspaceId, p.artifactId, p.revision] })),
-			...this.state.deployments.map((d) => ({ type: "deployment", record: d, ids: [d.id, d.artifactId, d.workspaceId, d.revision] })),
 			...this.state.verifications.map((v) => ({ type: "verification", record: v, ids: [v.id, v.proposalId, v.revision] })),
 			...this.state.promotions.map((p) => ({ type: "promotion", record: p, ids: [p.id, p.proposalId, p.to] })),
 		];
@@ -358,16 +348,6 @@ export class RepositoryController {
 				this.event(a.actor, "change_rejected", requireValue(cmd.reason, "Reason required"), [p.id]);
 				return p;
 			}
-			case "configure_environment": {
-				humanMaintain(a);
-				const input = requireValue(cmd.environment, "Environment required");
-				if (cmd.environmentId && !this.state.environments.some((e) => e.id === cmd.environmentId))
-					throw new DomainError(404, "Environment unavailable");
-				const env = { id: cmd.environmentId ?? this.nextId(), ...input, deployRepository: `repo-${this.state.repository.id}-deploy` };
-				this.state.environments = [...this.state.environments.filter((e) => e.id !== env.id), env];
-				this.event(a.actor, "environment_configured", `Configured ${env.name}`, [env.id]);
-				return env;
-			}
 			default:
 				throw new DomainError(400, "Unsupported repository command");
 		}
@@ -376,48 +356,5 @@ export class RepositoryController {
 		this.state.artifacts.push(artifact);
 		this.event(artifact.actor, "artifact_published", artifact.title, [artifact.id, artifact.workspaceId, artifact.revision]);
 		return artifact;
-	}
-	prepareDeployment(cmd: Command, a: Authority): Deployment {
-		const artifact = this.artifact(cmd.artifactId),
-			env = this.state.environments.find((e) => e.id === cmd.environmentId);
-		if (!env) throw new DomainError(404, "Environment unavailable");
-		if (artifact.kind !== "source") throw new DomainError(400, "Deployment requires an immutable source artifact");
-		if (env.kind === "production") {
-			humanMaintain(a);
-			if (!cmd.deploymentId) {
-				const proposal = this.state.proposals.find((p) => p.artifactId === artifact.id);
-				if (!proposal || !this.readiness(proposal, true).ready)
-					throw new DomainError(409, "Production requires exact-revision review and verification");
-			}
-		} else writeAccess(a);
-		const previous = this.state.deployments.filter((d) => d.environmentId === env.id && d.state === "deployed").at(-1);
-		if (
-			cmd.deploymentId &&
-			!this.state.deployments.some(
-				(d) => d.id === cmd.deploymentId && d.environmentId === env.id && d.artifactId === artifact.id && d.state === "deployed",
-			)
-		)
-			throw new DomainError(409, "Rollback must name a previously deployed artifact in this environment");
-		for (const pending of this.state.deployments.filter((d) => d.environmentId === env.id && ["queued", "building"].includes(d.state))) {
-			pending.state = "superseded";
-			pending.updatedAt = this.now;
-		}
-		const deployment: Deployment = {
-			id: this.nextId(),
-			environmentId: env.id,
-			artifactId: artifact.id,
-			revision: artifact.revision,
-			workspaceId: artifact.workspaceId,
-			actor: a.actor,
-			state: "queued",
-			branch: env.kind === "production" ? "main" : `cruce/${env.id}`,
-			previous: previous?.id,
-			rollbackOf: cmd.deploymentId,
-			at: this.now,
-			updatedAt: this.now,
-		};
-		this.state.deployments.push(deployment);
-		this.event(a.actor, "deployment_requested", `Requested ${env.name}`, [deployment.id, artifact.id]);
-		return deployment;
 	}
 }

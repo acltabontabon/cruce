@@ -28,14 +28,11 @@ export default defineConfig(({ mode }) => {
 				ControlTower: exports.durableObject({ storage: "sqlite" }),
 				Directory: exports.durableObject({ storage: "sqlite" }),
 				NamespaceRuntime: exports.durableObject({ storage: "sqlite" }),
-				// Durable orchestration for deployments of exact revisions (build → smoke checks → evidence).
-				DeploymentWorkflow: exports.workflow({ name: "cruce-deployment" }),
 			},
 			env: {
 				CONTROL_TOWER: bindings.durableObject({ worker: "cruce", exportName: "ControlTower" }),
 				DIRECTORY: bindings.durableObject({ worker: "cruce", exportName: "Directory" }),
 				NAMESPACE: bindings.durableObject({ worker: "cruce", exportName: "NamespaceRuntime" }),
-				DEPLOYMENT_WORKFLOW: bindings.workflow({ name: "cruce-deployment", worker: "cruce", exportName: "DeploymentWorkflow" }),
 				OAUTH_KV: bindings.kv(),
 				CRUCE_PUBLIC_ORIGIN: bindings.text(
 					env.CRUCE_PUBLIC_ORIGIN ?? (offline ? "http://localhost:5173" : "https://cruce.acltabontabon.workers.dev"),

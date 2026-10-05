@@ -2,7 +2,7 @@ import type { Scope } from "../core/capabilities.ts";
 import { DomainError } from "../core/errors.ts";
 import { type Authority, type Command, CommandInput, type CostClass, type ResourceAction } from "./platform.ts";
 export const CRUCE_INSTRUCTIONS =
-	"Cruce coordinates developers and agents through Namespace → Repository → Workspace. Start a workspace at an exact Git revision. Writers attach an exclusive execution context; agent writers work in the dedicated directory returned by the bridge. Hosted writers use normal Git to push into their own workspace fork; publish_revision seals an exact pushed revision for review. Report changes and inspect advisory overlap and get_workspace_updates. Use get_git_access for canonical and fork remotes. Fetch and merge with normal Git when ready, verify, then publish exact revisions and artifacts. Keep the original starting revision and previous published commits reachable. Local reports are not runtime verification. Source promotion and production deployment require a human decision. Never discard working changes to refresh a workspace.";
+	"Cruce coordinates developers and agents through Namespace → Repository → Workspace. Start a workspace at an exact Git revision. Writers attach an exclusive execution context; agent writers work in the dedicated directory returned by the bridge. Hosted writers use normal Git to push into their own workspace fork; publish_revision seals an exact pushed revision for review. Report changes and inspect advisory overlap and get_workspace_updates. Use get_git_access for canonical and fork remotes. Fetch and merge with normal Git when ready, verify, then publish exact revisions and artifacts. Keep the original starting revision and previous published commits reachable. Local reports are not runtime verification. Source promotion requires a human decision. Cruce coordination ends at canonical Git; CI, release, deployment and runtime management remain external. Never discard working changes to refresh a workspace.";
 export interface Tool {
 	name: string;
 	description: string;
@@ -35,13 +35,13 @@ const write = (
 	scope,
 	mutation: true,
 	class: action ? "resource" : "control",
-	cost: action ? (action === "preview.deploy" ? "metered" : "artifacts") : "none",
+	cost: action ? "artifacts" : "none",
 	action,
 });
 export const CRUCE_TOOLS: Tool[] = [
 	read("list_namespaces", "List your authorized namespaces."),
 	read("list_repositories", "List repositories authorized for this connection.", ["namespaceId"]),
-	read("get_repository", "Repository state, current workspaces, changes, artifacts, deployments and observation freshness."),
+	read("get_repository", "Repository state, current workspaces, changes, artifacts and observation freshness."),
 	read("get_context", "Instructions at a workspace's immutable base revision, with namespace and repository policies.", ["workspaceId"]),
 	read("get_workspace", "Inspect a workspace and its execution context.", ["workspaceId"]),
 	read(
@@ -58,7 +58,7 @@ export const CRUCE_TOOLS: Tool[] = [
 	read("get_history", "Git commit history for an uploaded revision.", ["revision"]),
 	read("get_diff", "Exact Git diff between uploaded revisions.", ["baseRevision", "revision", "path"]),
 	read("read_artifact", "Read immutable artifact metadata and stored content.", ["artifactId"]),
-	read("get_lineage", "Trace workspace, actor, commit, artifact, review and deployment provenance.", ["subjectId"]),
+	read("get_lineage", "Trace workspace, actor, commit, artifact, review and source promotion provenance.", ["subjectId"]),
 	write("start_workspace", "Register bounded work from an exact Git revision; use the local bridge for isolated execution.", [
 		"title",
 		"baseRevision",
@@ -112,16 +112,9 @@ export const CRUCE_TOOLS: Tool[] = [
 		["proposalId", "revision", "kind", "outcome", "reason", "artifactId"],
 		"change:write",
 	),
-	write(
-		"request_preview",
-		"Build and deploy an immutable source artifact to a configured preview environment.",
-		["artifactId", "environmentId"],
-		"preview:request",
-		"preview.deploy",
-	),
 	write("request_promotion", "Request human review and source promotion.", ["proposalId"], "promotion:request"),
 ];
-export const HUMAN_TOOLS = new Set(["resolve_review", "reject_proposal", "promote_proposal", "configure_environment", "deploy_artifact"]);
+export const HUMAN_TOOLS = new Set(["resolve_review", "reject_proposal", "promote_proposal"]);
 export function toolByName(name: string) {
 	return CRUCE_TOOLS.find((t) => t.name === name);
 }

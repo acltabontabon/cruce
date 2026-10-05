@@ -12,7 +12,7 @@ Use commits, refs, worktrees, clone, fetch, merge and push directly. Publication
 
 ## 2. Coordinate across tools; leave execution with participants
 
-Worktrees isolate work. Cruce coordinates workers. Any adapter must use the same repository, workspace and authority model regardless of client brand. No client label confers identity or a special role. Cruce never launches agents, edits on their behalf through a hosted IDE, owns their conversation or schedules their local work. Cloudflare Workflows may observe deployments; they are not an agent runtime.
+Worktrees isolate work. Cruce coordinates workers. Any adapter must use the same repository, workspace and authority model regardless of client brand. No client label confers identity or a special role. Cruce never launches agents, edits on their behalf through a hosted IDE, owns their conversation or schedules their local work.
 
 ## 3. Make ownership durable and addresses mutable
 
@@ -36,13 +36,13 @@ Overlap is an advisory observation based initially on paths, including rename en
 
 Retain exact source revisions, review bases, hashes, storage identity and producing actors. Review and verification concern a revision, not a moving branch label. Source changes require fresh evidence and review for the new revision. A stale proposal cannot be made current by rewriting its base metadata. Record reasons for disagreement and human resolution.
 
-Keep reported evidence, authenticated human attestation and runtime verification distinct. Publication proves which source was retained, not that it is correct. A local ref report is not an independently verified remote push. Missing source or provider observations stay unavailable, rather than being inferred as success.
+Keep reported evidence, authenticated human attestation and independent verification distinct. Publication proves which source was retained, not that it is correct. A local ref report is not an independently verified remote push. Missing source or provider observations stay unavailable, rather than being inferred as success.
 
-## 7. Converge explicitly; deploy separately
+## 7. End coordination at canonical Git
 
 Hosted source promotion requires human approval, controller readiness and a non-forced Git update. Fetching updates does not integrate them; ending a workspace does not accept it. Participants use Git to reconcile before proposing a new exact artifact.
 
-Deployment names an immutable source artifact and derives its revision. Production is an authenticated console decision. Rollback names a previously deployed artifact in that environment; it does not rewrite accepted source. A successful build is not a downloadable build artifact unless its outputs were actually captured.
+Cruce’s responsibility ends when isolated concurrent work is safely reviewed and reconciled into the canonical Git repository. CI, build/release orchestration, deployment, environment management, rollback and runtime operation belong to external systems. Cruce records revision-linked evidence supplied by participants; it does not execute their builds or operate their applications. Cruce’s own hosting and release tooling remains necessary infrastructure.
 
 ## 8. Account for resources where they are owned
 
@@ -52,7 +52,7 @@ Retries reuse operation identity, exact input and reservation. An uncertain outc
 
 ## 9. Retain work; make cleanup explicit
 
-Workspace completion preserves commits, artifacts and provenance. Local cleanup removes only Cruce-owned contexts after checking dirty and unpublished work. Hosted fork cleanup requires an ended workspace and proof that every remote ref is retained; uncertain retention blocks deletion. Retain source referenced by artifacts or deployments. Heartbeat expiry is never a cleanup trigger.
+Workspace completion preserves commits, artifacts and provenance. Local cleanup removes only Cruce-owned contexts after checking dirty and unpublished work. Hosted fork cleanup requires an ended workspace and proof that every remote ref is retained; uncertain retention blocks deletion. Retain source referenced by artifacts. Heartbeat expiry is never a cleanup trigger.
 
 ## 10. Keep decisions testable and documentation accountable
 

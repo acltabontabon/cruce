@@ -63,16 +63,13 @@ export const RESOURCE_ACTIONS = [
 	"workspace.cleanup",
 	"revision.publish",
 	"artifact.publish",
-	"preview.deploy",
-	"production.deploy",
 ] as const;
 export type ResourceAction = (typeof RESOURCE_ACTIONS)[number];
 export type ResourceRule = "allow" | "approval" | "deny";
-export type CostClass = "none" | "local" | "artifacts" | "metered" | "metered_production";
+export type CostClass = "none" | "artifacts";
 export interface ResourcePolicy {
 	rules: Record<ResourceAction, ResourceRule>;
 	dailyLimit: number;
-	previewsPerWorkspace: number;
 }
 export interface ResourceReservation {
 	id: string;
@@ -89,7 +86,6 @@ export interface ResourceAccount {
 	accountId: string;
 	label: string;
 	credential: "stored" | "none";
-	capabilities: ("artifacts" | "builds")[];
 	connectedBy?: string;
 	at?: number;
 }
@@ -176,10 +172,10 @@ export interface Artifact {
 	actor: Actor;
 	revision: string;
 	baseRevision?: string;
-	kind: "source" | "evidence" | "build";
+	kind: "source" | "evidence";
 	title: string;
 	contentHash: string;
-	trust: "reported" | "human_attested" | "runtime_verified";
+	trust: "reported" | "human_attested";
 	storage: { repository: string; revision: string; ref?: string; path?: string };
 	at: number;
 }
@@ -198,7 +194,7 @@ export interface Verification {
 	revision: string;
 	kind: string;
 	outcome: "pass" | "fail";
-	trust: "reported" | "human_attested" | "runtime_verified";
+	trust: "reported" | "human_attested";
 	actor: Actor;
 	summary: string;
 	artifactId?: string;
@@ -225,41 +221,6 @@ export interface Promotion {
 	at: number;
 	state: "prepared" | "complete";
 }
-export interface SmokeCheck {
-	path: string;
-	expectStatus: number;
-}
-export interface Environment {
-	id: string;
-	name: string;
-	kind: "preview" | "production";
-	workerName: string;
-	deployRepository: string;
-	scriptTag?: string;
-	smokeChecks: SmokeCheck[];
-}
-export interface Deployment {
-	id: string;
-	environmentId: string;
-	artifactId: string;
-	revision: string;
-	workspaceId: string;
-	actor: Actor;
-	state: "queued" | "building" | "deployed" | "failed" | "superseded";
-	branch: string;
-	buildId?: string;
-	runtimeVersion?: string;
-	url?: string;
-	previous?: string;
-	rollbackOf?: string;
-	error?: string;
-	smoke?: { ok: boolean; at: number };
-	at: number;
-	updatedAt: number;
-}
-export type DeploymentProfile =
-	| { kind: "unknown"; revision: string }
-	| { kind: "cloudflare_worker"; revision: string; configPath: string; workerName?: string };
 export interface ActivityEvent {
 	id: string;
 	actor: Actor;
@@ -276,8 +237,6 @@ export interface RepositoryState {
 	proposals: Proposal[];
 	verifications: Verification[];
 	promotions: Promotion[];
-	environments: Environment[];
-	deployments: Deployment[];
 	refs: RefObservation[];
 	activity: ActivityEvent[];
 	receipts: Record<string, { fingerprint: string; result: unknown }>;
@@ -365,18 +324,6 @@ export const CommandInput = z
 		reason: z.string().min(1).max(2000).optional(),
 		reviewIndex: z.number().int().nonnegative().optional(),
 		humanAttested: z.boolean().optional(),
-		environmentId: id.optional(),
-		environment: z
-			.object({
-				name: z.string().min(1).max(80),
-				kind: z.enum(["preview", "production"]),
-				workerName: name,
-				smokeChecks: z
-					.array(z.object({ path: z.string().regex(/^\/(?!\/)[^\r\n]*$/), expectStatus: z.number().int().min(100).max(599) }))
-					.max(10),
-			})
-			.optional(),
-		deploymentId: id.optional(),
 		ref: branch.optional(),
 		path: path.optional(),
 	})

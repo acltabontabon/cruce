@@ -94,6 +94,24 @@ test("overview shows human and agent workspaces, reported overlap and source art
 	await page.getByText("Overlap is awareness, not a Git conflict.").waitFor();
 	await page.screenshot({ path: "dist/ui-checks/repository.png", fullPage: true });
 });
+test("repository navigation ends at source coordination and removed routes use the normal fallback", async () => {
+	await openRepo();
+	const navigation = page.getByRole("navigation", { name: "Repository navigation" });
+	assert.deepEqual(
+		(await navigation.getByRole("button").allTextContents()).map((text) => text.trim().toLowerCase()),
+		["overview", "code", "work", "artifacts", "settings"],
+	);
+	assert.equal(await page.getByRole("heading", { name: "Environments", exact: true }).count(), 0);
+	await navigation.getByRole("button", { name: "work", exact: true }).click();
+	await page.goto(page.url().replace(/#.*$/, "#deployments"));
+	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
+	assert.equal(await page.getByRole("heading", { name: "Deployments", exact: true }).count(), 0);
+	await page.goBack();
+	await page.getByRole("heading", { name: "Work", exact: true }).waitFor();
+	await page.goto(`${server.origin}/?namespace=fernloop#settings`);
+	await page.getByRole("heading", { name: "Shared resource budgets", exact: true }).waitFor();
+	assert.equal(await page.getByLabel("Previews per workspace").count(), 0);
+});
 test("repository switcher supports keyboard selection and Back navigation", async () => {
 	await openRepo();
 	await page.keyboard.press("Meta+k");

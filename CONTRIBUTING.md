@@ -52,7 +52,7 @@ pnpm exec cf build --mode offline
 
 `test:browser` uses Playwright Chromium and starts its own isolated fixture server. If Chromium is missing, install the matching browser with `pnpm exec playwright install chromium`, then rerun. `pnpm release:check` additionally validates release metadata when version/changelog changes are involved.
 
-See [verification](docs/local-verification.md) for what each layer proves, provider-test resource use and evidence locations. Hosted publication/deployment must pass the configured live test environment before being described as live-verified. A local passing suite, mock or offline build does not satisfy that gate. Record executed and unrun checks in the review description. Update the verification guide when evidence or live status changes.
+See [verification](docs/local-verification.md) for what each layer proves, provider-test resource use and evidence locations. Hosted publication/promotion must pass the configured live test environment before being described as live-verified. A local passing suite, mock or offline build does not satisfy that gate. Record executed and unrun checks in the review description. Update the verification guide when evidence or live status changes.
 
 ## Keep the documentation authoritative
 

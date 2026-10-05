@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_AGENT_SCOPES, SCOPE_LABELS, SCOPES } from "../../src/core/capabilities.ts";
 import { DirectoryController, initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
 import { initialRepository, RepositoryController, WORKSPACE_TTL } from "../../src/core/platform.ts";
 import type { Actor, Authority, Command, Repository, Workspace } from "../../src/shared/platform.ts";
-import { authorizeMachine, CRUCE_TOOLS } from "../../src/shared/tools.ts";
+import { CommandInput, RESOURCE_ACTIONS } from "../../src/shared/platform.ts";
+import { authorizeMachine, CRUCE_TOOLS, HUMAN_TOOLS, toolByName } from "../../src/shared/tools.ts";
 
 const human: Actor = { id: "human", userId: "owner", name: "Cris", kind: "human" };
 const agent: Actor = { id: "agent-a", userId: "owner", name: "Codex", kind: "agent", connectionId: "oauth-a" };
@@ -26,6 +28,28 @@ const authority = (actor = human): Authority => ({
 });
 const base = "a".repeat(40),
 	head = "b".repeat(40);
+
+describe("canonical Git product boundary", () => {
+	it.each(["request_preview", "configure_environment", "deploy_artifact"])("does not expose or execute %s", (tool) => {
+		expect(toolByName(tool)).toBeUndefined();
+		expect(HUMAN_TOOLS.has(tool)).toBe(false);
+		expect(() => controller().command(cmd(tool), authority())).toThrow("Unsupported repository command");
+		expect(() => authorizeMachine(authority(agent), cmd(tool))).toThrow("capability denied");
+	});
+	it.each(["environmentId", "environment", "deploymentId"])("rejects removed command field %s", (field) => {
+		expect(CommandInput.safeParse({ tool: "get_repository", [field]: field === "environment" ? {} : "old" }).success).toBe(false);
+	});
+	it("exposes only coordination scopes, resource actions and state", () => {
+		expect(SCOPES).not.toContain("preview:request");
+		expect(DEFAULT_AGENT_SCOPES).not.toContain("preview:request");
+		expect(SCOPE_LABELS).not.toHaveProperty("preview:request");
+		expect(RESOURCE_ACTIONS).toEqual(["repository.create", "workspace.fork", "workspace.cleanup", "revision.publish", "artifact.publish"]);
+		const snapshot = controller().snapshot(authority());
+		expect(snapshot).not.toHaveProperty("environments");
+		expect(snapshot).not.toHaveProperty("deployments");
+		expect(namespace().state.policy).not.toHaveProperty("previewsPerWorkspace");
+	});
+});
 function namespace() {
 	return new NamespaceController(
 		initialNamespace({ id: "namespace", name: "Team", handle: "team", kind: "shared", ownerId: "owner", createdAt: 0 }),
@@ -116,9 +140,9 @@ describe("namespace ownership", () => {
 		c.state.policy.dailyLimit = 0;
 		expect(() => c.reserve(authority(), "human", "inputs", "repository.create")).toThrow("budget");
 		c.state.policy.dailyLimit = 1;
-		c.reserve(authority(agent), "retry", "inputs", "preview.deploy", "workspace");
-		c.state.policy.rules["preview.deploy"] = "deny";
-		expect(() => c.reserve(authority(agent), "retry", "inputs", "preview.deploy", "workspace")).toThrow("policy denies");
+		c.reserve(authority(agent), "retry", "inputs", "workspace.fork", "workspace");
+		c.state.policy.rules["workspace.fork"] = "deny";
+		expect(() => c.reserve(authority(agent), "retry", "inputs", "workspace.fork", "workspace")).toThrow("policy denies");
 	});
 	it("serializes concurrent first-login decisions and denies cross-namespace repository grants", async () => {
 		let id = 0;
@@ -135,12 +159,15 @@ describe("namespace ownership", () => {
 		c.repository(authority(), repo);
 		c.repository(authority(), { ...repo, id: "second", name: "second" });
 		c.state.policy.dailyLimit = 1;
-		const reservation = c.reserve(a, "operation", "exact inputs", "preview.deploy", "workspace");
+		const reservation = c.reserve(a, "operation", "exact inputs", "workspace.fork", "workspace");
 		reservation.state = "uncertain";
-		expect(c.reserve(a, "operation", "exact inputs", "preview.deploy", "workspace")).toBe(reservation);
-		expect(() => c.reserve({ ...a, repositoryId: "second" }, "other", "inputs", "preview.deploy", "workspace")).toThrow("budget");
-		expect(() => c.reserve(a, "operation", "different", "preview.deploy", "workspace")).toThrow("reused");
-		expect(() => c.reserve(a, "production", "inputs", "production.deploy")).toThrow("Human");
+		expect(c.reserve(a, "operation", "exact inputs", "workspace.fork", "workspace")).toBe(reservation);
+		expect(() => c.reserve({ ...a, repositoryId: "second" }, "other", "inputs", "workspace.fork", "workspace")).toThrow("budget");
+		expect(() => c.reserve(a, "operation", "different", "workspace.fork", "workspace")).toThrow("reused");
+		c.state.repositories[0].policy.resourceRules["workspace.fork"] = "approval";
+		expect(() => c.reserve(a, "operation", "exact inputs", "workspace.fork", "workspace")).toThrow("Human");
+		c.state.repositories[0].policy.resourceRules["workspace.fork"] = "deny";
+		expect(() => c.reserve(a, "operation", "exact inputs", "workspace.fork", "workspace")).toThrow("policy denies");
 	});
 });
 describe("actor-neutral workspaces", () => {
@@ -258,7 +285,7 @@ describe("actor-neutral workspaces", () => {
 		expect(() => authorizeMachine(authority(agent), cmd("record_verification", { humanAttested: true }))).toThrow();
 	});
 });
-describe("revision-bound review and deployment", () => {
+describe("revision-bound review", () => {
 	it("pins a proposal's base to its artifact even after later workspace integration", () => {
 		const c = controller(),
 			s = start(c);
@@ -318,29 +345,22 @@ describe("revision-bound review and deployment", () => {
 		c.state.sourceHead = "c".repeat(40);
 		expect(c.readiness(p).ready).toBe(false);
 	});
-	it("derives deployment revision from immutable source artifact and traces both directions", () => {
+	it("traces source, workspace, review evidence and canonical promotion in both directions", () => {
 		const { c, s, p } = proposed();
-		const env = c.command(
-			cmd("configure_environment", { environment: { name: "Production", kind: "production", workerName: "payments", smokeChecks: [] } }),
+		const verification = c.command(
+			cmd("record_verification", {
+				proposalId: p.id,
+				revision: head,
+				kind: "tests",
+				outcome: "pass",
+				reason: "Inspected",
+				humanAttested: true,
+			}),
 			authority(),
 		) as { id: string };
-		expect(() => c.prepareDeployment(cmd("deploy_artifact", { environmentId: env.id, artifactId: "source" }), authority(agent))).toThrow(
-			"Human",
-		);
-		expect(() => c.prepareDeployment(cmd("deploy_artifact", { environmentId: env.id, artifactId: "source" }), authority())).toThrow(
-			"exact-revision",
-		);
-		c.command(cmd("review_proposal", { proposalId: p.id, revision: head, outcome: "approve", reason: "Inspected" }), authority());
-		const d = c.prepareDeployment(cmd("deploy_artifact", { environmentId: env.id, artifactId: "source", revision: base }), authority());
-		expect(d.revision).toBe(head);
-		expect(c.trace(d.id).some((r) => r.record.id === s.id)).toBe(true);
-		expect(c.trace(s.id).some((r) => r.record.id === d.id)).toBe(true);
-		d.state = "deployed";
-		const rollback = c.prepareDeployment(
-			cmd("deploy_artifact", { environmentId: env.id, artifactId: "source", deploymentId: d.id }),
-			authority(),
-		);
-		expect(rollback.rollbackOf).toBe(d.id);
-		expect(rollback.artifactId).toBe("source");
+		c.state.promotions.push({ id: "promotion", proposalId: p.id, from: base, to: head, actor: human, at: 100, state: "complete" });
+		const expected = [s.id, "source", p.id, verification.id, "promotion"];
+		for (const subject of [s.id, "source", "promotion"])
+			expect(c.trace(subject).map(({ record }) => record.id)).toEqual(expect.arrayContaining(expected));
 	});
 });

@@ -73,6 +73,22 @@ function fixture() {
 	return { call, path, repo, directory, controller, command, user };
 }
 describe("namespace repository contracts", () => {
+	it.each(["environments", "environments/old", "deployments", "deployments/old"])(
+		"returns 404 for removed collection %s",
+		async (section) => {
+			const f = fixture();
+			await expect(f.call(`${f.path}/${section}`)).rejects.toMatchObject({ status: 404 });
+		},
+	);
+	it.each(["request_preview", "configure_environment", "deploy_artifact"])(
+		"rejects removed console command %s without changing repository state",
+		async (tool) => {
+			const f = fixture();
+			const before = structuredClone(f.controller.state);
+			await expect(f.call(`${f.path}/command`, { tool, idempotencyKey: "removed" })).rejects.toThrow("Unsupported repository command");
+			expect(f.controller.state).toEqual(before);
+		},
+	);
 	it("first-login API reads share a stable personal identity", async () => {
 		const f = fixture();
 		const responses = await Promise.all(Array.from({ length: 10 }, () => f.call("/api/me")));
@@ -102,7 +118,7 @@ describe("namespace repository contracts", () => {
 		await expect(f.call("/mcp/command", { ...c, actor: { kind: "human" } }, { ...props, repositoryIds: [f.repo.id] })).rejects.toThrow();
 		expect(f.controller.state.workspaces).toHaveLength(0);
 	});
-	it("human bridge credentials cannot invoke production or namespace administration", async () => {
+	it("human bridge credentials cannot invoke human source promotion", async () => {
 		const f = fixture();
 		const bridge = {
 			identity: { accessJwt: "fixture", tenantId: "issuer", developerId: "subject", email: "owner@example.com" },
@@ -114,7 +130,7 @@ describe("namespace repository contracts", () => {
 		await expect(
 			f.call(
 				"/bridge/command",
-				{ tool: "deploy_artifact", namespaceId: f.repo.namespaceId, repositoryId: f.repo.id, idempotencyKey: "production" },
+				{ tool: "promote_proposal", namespaceId: f.repo.namespaceId, repositoryId: f.repo.id, idempotencyKey: "promotion" },
 				undefined,
 				bridge,
 			),

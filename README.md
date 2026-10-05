@@ -14,6 +14,10 @@ flowchart TB
     WB <-->|Context, reports, exact artifacts| C
     C --> R[Human review of exact revisions]
     R -->|Non-forced Git promotion| G[Canonical repository]
+    G --> X[CRUCE BOUNDARY]
+    X --> CI[External CI / Build / Release]
+    CI --> D[Deployment]
+    D --> RT[Runtime]
 ```
 
 Worktrees isolate work. Cruce coordinates workers. Cruce does not launch agents, host an editor or require scheduling clearance before local edits. Overlap is advisory; it does not prove a semantic conflict or guarantee compatibility.
@@ -26,7 +30,7 @@ Keep using `git clone`, `git fetch`, `git pull`, `git push`, `git commit`, `git 
 
 The ownership model is **Namespace → Repository → Workspace**. A namespace owns access and budgets. Every repository has canonical Cloudflare Artifacts storage. Each writer workspace owns one reusable fork and records an actor, task and immutable starting commit; a worktree or clone holds its local files. Existing checkout attachment preserves remotes and never silently uploads history.
 
-Normal pushes go to the writer's fork. Publication retains an exact pushed revision as a source artifact; human-reviewed promotion advances canonical source. Deployment is a separate, optional decision. See the [architecture](docs/architecture.md) for the complete flow and its trust boundaries.
+Normal pushes go to the writer's fork. Publication retains an exact pushed revision as a source artifact; human-reviewed promotion advances canonical source. Cruce’s responsibility ends when isolated concurrent work is safely reviewed and reconciled into the canonical Git repository. CI, build/release orchestration, deployment, environment management, rollback and runtime operation belong to external systems. See the [architecture](docs/architecture.md) for the complete flow and its trust boundaries.
 
 ## Try the local console
 
@@ -45,7 +49,7 @@ To use Cruce with real repositories, follow [Git and bridge setup](docs/native-s
 
 ## Status
 
-Cruce is early, experimental software, and its name remains provisional. The current foundation has local controller, Git, bridge and browser coverage. The native Git gateway and current namespace model have **not been verified in the configured live Worker**; earlier provider checks covered an older implementation. Successful Workers Builds deployment and a heterogeneous-agent workflow pilot remain open. [Verification](docs/local-verification.md) records the evidence and limits.
+Cruce is early, experimental software, and its name remains provisional. The current foundation has local controller, Git, bridge and browser coverage. The native Git gateway and current namespace model have **not been verified in the configured live Worker**; earlier provider checks covered an older implementation. A heterogeneous-agent workflow pilot remains open. [Verification](docs/local-verification.md) records the evidence and limits.
 
 Cruce is not a Git/Git-worktree replacement, a Claude Code worktree manager, a GitHub/GitLab clone, a remote IDE, a cloud coding environment, an agent runtime, a general agent orchestrator or a CI/CD replacement. Its scope is coordination of concurrent repository work. See [product boundaries](docs/product-thesis.md).
 

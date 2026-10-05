@@ -5,7 +5,6 @@ import { bridgeRoute } from "./bridge-auth.ts";
 import { json, type PlatformEnv, platformRoute } from "./platform-router.ts";
 
 export { ControlTower } from "./control-tower.ts";
-export { DeploymentWorkflow } from "./deployment-workflow.ts";
 export { Directory } from "./directory.ts";
 export { NamespaceRuntime } from "./namespace-runtime.ts";
 

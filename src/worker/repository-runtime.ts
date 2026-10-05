@@ -5,7 +5,7 @@ import { buildIndex } from "../intelligence/structural-index.ts";
 import { gitRemotePath, parseGitRoute } from "../shared/git-access.ts";
 import type { Artifact, Command, Repository, RepositoryState, ResourceAction, WorkspaceUpdateDetails } from "../shared/platform.ts";
 import { authorizeMachine, HUMAN_TOOLS, toolByName } from "../shared/tools.ts";
-import { boundedBody, pushDeployment, type RepositoryHost, ResourceBoundary, runSmokeChecks } from "./deployments.ts";
+import { boundedBody, type RepositoryHost, ResourceBoundary } from "./artifacts.ts";
 import type { GitWorkspace } from "./git/workspace.ts";
 import type { ConnectionGrant, NamespaceRuntime } from "./namespace-runtime.ts";
 import { hash, Serial, type Store } from "./store.ts";
@@ -23,7 +23,6 @@ export class RepositoryRuntime {
 		readonly namespace: NamespacePort,
 		readonly env: { CRUCE_SECRET?: string },
 		readonly now = Date.now,
-		readonly orchestrate: (id: string) => Promise<void> = async () => {},
 	) {}
 	initialize(repository: Repository) {
 		const state = this.store.get<RepositoryState>("repository") ?? initialRepository(repository);
@@ -496,34 +495,6 @@ export class RepositoryRuntime {
 					c.event(a.actor, "source_promoted", p.title, [p.id, p.revision]);
 					return promotion;
 				});
-			} else if (cmd.tool === "request_preview" || cmd.tool === "deploy_artifact") {
-				if (cmd.tool === "deploy_artifact") humanMaintain(a);
-				else writeAccess(a);
-				const environment = state.environments.find((e) => e.id === cmd.environmentId);
-				if (!environment || (cmd.tool === "request_preview" && environment.kind !== "preview"))
-					throw new DomainError(400, "Choose an appropriate configured environment");
-				const pendingKey = `deployment:${op}`;
-				const existing = this.store.get<string>(pendingKey);
-				const d = existing ? c.deployment(existing) : c.prepareDeployment(cmd, a);
-				if (d.state === "superseded") throw new DomainError(409, "A newer deployment superseded this operation");
-				result = await this.gate(
-					grant,
-					{ ...cmd, workspaceId: d.workspaceId },
-					environment.kind === "production" ? "production.deploy" : "preview.deploy",
-					async (host) => {
-						if (!existing) {
-							this.store.put(pendingKey, d.id);
-							this.save(c);
-						}
-						await host.ensure(environment.deployRepository, `Cruce deployments ${repo.id}`);
-						await pushDeployment(this.git, host, environment.deployRepository, d.revision, d.branch);
-						d.state = "building";
-						d.updatedAt = this.now();
-						this.save(c);
-						await this.orchestrate(d.id);
-						return d;
-					},
-				);
 			} else result = c.command(cmd, a);
 			if (mutation) {
 				if (cmd.tool === "start_workspace" && a.actor.kind === "human" && a.actor.connectionId)
@@ -541,46 +512,6 @@ export class RepositoryRuntime {
 			await this.namespace.authority(grant, state.repository.id);
 			await this.known(new RepositoryController(state, this.now(), () => "read"), revision);
 			return this.git.exportPack(revision);
-		});
-	}
-	tick(id: string, expire = false) {
-		return this.serial.run(async () => {
-			const c = new RepositoryController(this.state(), this.now(), () => crypto.randomUUID()),
-				d = c.deployment(id);
-			if (!["queued", "building"].includes(d.state)) return d.state;
-			if (expire) {
-				d.state = "failed";
-				d.error = "Build did not finish within the observation window";
-				this.save(c);
-				return d.state;
-			}
-			const env = c.state.environments.find((e) => e.id === d.environmentId)!;
-			const builds = await (await this.resources()).builds();
-			const tag = env.scriptTag ?? (await builds.scriptTag(env.workerName));
-			if (!tag) return d.state;
-			env.scriptTag = tag;
-			const build = await builds.buildFor(tag, d.revision, d.branch);
-			if (build) d.buildId = build.build_uuid;
-			if (build?.status === "stopped") {
-				d.state = build.build_outcome === "success" ? "deployed" : "failed";
-				d.url = build.preview_url ?? undefined;
-				if (d.state === "deployed") d.runtimeVersion = await builds.runtimeVersion(env.workerName, build.build_uuid);
-				if (d.state === "failed") d.error = `Build outcome: ${build.build_outcome ?? "unknown"}`;
-				if (d.state === "deployed" && d.url && env.smokeChecks.length) {
-					const results = await runSmokeChecks(d.url, env.smokeChecks);
-					d.smoke = { ok: results.every((r) => r.ok), at: this.now() };
-					c.event(
-						{ id: "cruce-runtime", name: "Cruce", kind: "system", userId: "" },
-						"smoke_verified",
-						d.smoke.ok ? "Runtime smoke checks passed" : "Runtime smoke checks failed",
-						[d.id, d.artifactId],
-					);
-				}
-				c.event(d.actor, `deployment_${d.state}`, `${env.name} ${d.state}`, [d.id, d.artifactId]);
-			}
-			d.updatedAt = this.now();
-			this.save(c);
-			return d.state;
 		});
 	}
 }

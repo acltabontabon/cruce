@@ -31,6 +31,7 @@ These fit the product direction but need evidence that their benefit justifies t
 | More useful advisory overlap | Path-only signals repeatedly miss relevant interactions or create too much noise | Explore symbol/dependency context from pinned source; label uncertainty and never claim semantic compatibility or grant authority |
 | More timely upstream awareness | Polling or delayed observations measurably cause stale work | Evaluate push/lifecycle event reconciliation; tolerate duplicates and reordered delivery; events do not approve changes or launch agents |
 | Focused source/context retrieval | Agents spend material time or tokens retrieving unrelated source | Evaluate pinned file/tree/history retrieval and caching; provider reconciliation is explicit and gated, while ordinary coordination reads remain on recorded state |
+| External CI/release handoff or provenance | Users repeatedly need to locate external results for an accepted revision | Explore links or externally reported provenance tied to exact canonical revisions; this is uncommitted and would not trigger builds, manage environments, deploy, roll back or operate runtimes |
 | Better review and evidence navigation | Humans repeatedly reconstruct what changed or which checks apply | Improve comparison and evidence-freshness explanations across publications; each artifact, review and attestation keeps its original exact revision |
 | Resource and retention visibility | Users cannot explain operation usage, uncertain reservations or cleanup blockers | Show ownership, budget and retention reasons; distinguish logical operations from provider billing and never delete referenced or unpublished source automatically |
 | Larger-transfer support | Representative repositories exceed the current gateway's transfer bound | Investigate bounded streaming while preserving credential isolation, retry safety and provider limits; do not promise unrestricted repository size |
@@ -44,7 +45,6 @@ These are verification gaps in the existing foundation, not new feature promises
 - Exercise two writers starting from one revision, accept one result, then fetch, merge, verify and freshly review the other. Include a behavioral incompatibility whose patches merge cleanly; passing a merge is not proof of correctness.
 - Verify the current hosted Git/publication path and reconciliation flow against the explicit test account, including distinct forks, fork reuse, retention, lost-response recovery and revocation. Declare the resource budget before running it.
 - Exercise actual browser consent and independent bridge processes with different tools. Adapter tests with in-memory grants do not establish client interoperability or that an agent consumes updates.
-- Verify optional Workers Builds deployment, runtime observations and rollback separately. Deployment success is not required to establish the value of cross-agent coordination.
 
 The [verification guide](docs/local-verification.md) owns detailed status and costs. Keep required contributor checks and deterministic fixture history intact when extending these scenarios.
 
@@ -58,4 +58,4 @@ Agree on what improvement would justify continued use before evaluating results.
 
 When an idea ships, update architecture/setup documentation and the changelog, record verification evidence, and remove or narrow its roadmap entry. Drop ideas when their premise no longer holds; Git history preserves the decision trail. Do not retain completed checklists here.
 
-Agent runtimes, remote IDEs, mandatory scheduling, automatic source acceptance, forge/provider integrations and a general workflow engine remain outside the current product boundary. A roadmap idea cannot silently override that boundary.
+Agent runtimes, remote IDEs, mandatory scheduling, automatic source acceptance, forge/provider integrations, CI/build/release orchestration, deployments, environments, rollback, runtime management and a general workflow engine remain outside the current product boundary. A roadmap idea cannot silently override that boundary.

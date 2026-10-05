@@ -175,7 +175,6 @@ export async function platformRoute(
 				active: s.workspaces.filter((x) => x.state === "active").length,
 				overlaps: s.overlaps.length,
 				latestArtifact: s.artifacts.at(-1),
-				deployments: s.deployments.filter((d) => d.state === "deployed"),
 			}));
 			const activity = snapshots
 				.flatMap((s) => s.activity.map((event) => ({ ...event, repositoryId: s.repository.id, repositoryName: s.repository.name })))
@@ -228,7 +227,6 @@ export async function platformRoute(
 			.object({
 				rules: z.record(z.enum(RESOURCE_ACTIONS), z.enum(["allow", "approval", "deny"])),
 				dailyLimit: z.number().int().min(0).max(10000),
-				previewsPerWorkspace: z.number().int().min(0).max(1000),
 			})
 			.parse(await input(request));
 		await namespace.policy(grant, body);
@@ -303,8 +301,6 @@ export async function platformRoute(
 			workspaces: "workspaces",
 			changes: "proposals",
 			artifacts: "artifacts",
-			environments: "environments",
-			deployments: "deployments",
 			activity: "activity",
 		};
 		if (!collections[section] || parts.length > 7) throw new DomainError(404, "Not found");

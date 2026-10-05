@@ -12,7 +12,7 @@ import type {
 	ResourcePolicy,
 	User,
 } from "../shared/platform.ts";
-import { ResourceBoundary } from "./deployments.ts";
+import { ResourceBoundary } from "./artifacts.ts";
 import { Serial, sqlStore } from "./store.ts";
 export interface ConnectionGrant {
 	actor: Actor;
