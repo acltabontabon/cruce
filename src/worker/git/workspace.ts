@@ -1,9 +1,12 @@
 import { createTwoFilesPatch, diffLines } from "diff";
 import git, { Errors, type PromiseFsClient, type TreeEntry } from "isomorphic-git";
 import http from "isomorphic-git/http/web";
+import { DomainError } from "../../core/errors.ts";
 import { changedRanges } from "../../core/line-diff.ts";
 import type { ChangesResponse } from "../../shared/api.ts";
 import type { ChangedFile } from "../../shared/git.ts";
+import { TRANSFER_LIMITS } from "../../shared/limits.ts";
+import { MemoryFs } from "./memory-fs.ts";
 
 /**
  * Real Git, inside the control plane. A bare Git workspace repository (no working tree) where Cruce
@@ -32,16 +35,32 @@ export class GitUpdateRejected extends Error {}
 
 export const NOTES_REF = "refs/notes/cruce";
 
-type Fs = PromiseFsClient;
+type Fs = PromiseFsClient & { trimCache?: (prefix: string) => boolean; removeTree?: (prefix: string) => void };
 
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
+
+function boundedInspection<T>(result: T): T {
+	if (encoder.encode(JSON.stringify(result)).byteLength > 1_000_000)
+		throw new DomainError(413, "Source inspection exceeds its response limit");
+	return result;
+}
 
 export class GitWorkspace {
 	private cache = {};
 
 	clearCache() {
 		this.cache = {};
+	}
+	maintainCache() {
+		if (this.fs.trimCache?.(this.gitdir)) this.clearCache();
+		// Decoded pack/object caches are operation-local, even when the SQL generation remains.
+		this.clearCache();
+	}
+	resetCache() {
+		if (!this.fs.removeTree) throw new DomainError(503, "Git cache reset unavailable");
+		this.fs.removeTree(this.gitdir);
+		this.clearCache();
 	}
 
 	constructor(
@@ -76,25 +95,61 @@ export class GitWorkspace {
 		return result.oids;
 	}
 
-	/** Export immutable source using real Git objects; external hosting is never required. */
-	async exportPack(head: string, stop?: string): Promise<Uint8Array> {
+	/** Complete all-parent graph, including blobs. A shallow boundary never proves ancestry or retention. */
+	private async sourceObjects(head: string, stop?: string) {
 		const oids = new Set<string>();
-		const tree = async (oid: string) => {
-			if (oids.has(oid)) return;
+		const pending: { oid: string; type: "commit" | "tree" | "blob" }[] = [{ oid: head, type: "commit" }];
+		let bytes = 0;
+		while (pending.length) {
+			const { oid, type } = pending.pop()!;
+			if (oid === stop || oids.has(oid)) continue;
 			oids.add(oid);
-			for (const e of (await git.readTree({ ...this.base, oid })).tree) {
-				if (e.type === "tree") await tree(e.oid);
-				else if (e.type === "blob") oids.add(e.oid);
+			if (oids.size > 20_000) throw new DomainError(413, "Git source exceeds the object traversal limit");
+			const object = await git.readObject({ ...this.base, oid, format: "wrapped" });
+			if (!(object.object instanceof Uint8Array)) throw new DomainError(409, "Git source object is unavailable");
+			let wrapped = object.object;
+			// isomorphic-git returns packed objects as content even when wrapped was requested.
+			if (object.format === "content") {
+				if (object.type !== type) throw new DomainError(409, "Git source object type differs from its graph");
+				const header = encoder.encode(`${type} ${object.object.byteLength}\0`);
+				wrapped = new Uint8Array(header.length + object.object.length);
+				wrapped.set(header);
+				wrapped.set(object.object, header.length);
 			}
-		};
-		const commit = async (oid: string) => {
-			if (oid === stop || oids.has(oid)) return;
-			oids.add(oid);
-			const c = await git.readCommit({ ...this.base, oid });
-			await tree(c.commit.tree);
-			for (const parent of c.commit.parent) await commit(parent);
-		};
-		await commit(head);
+			bytes += wrapped.byteLength;
+			if (bytes > 64 * 1024 * 1024) throw new DomainError(413, "Git source exceeds the expanded object limit");
+			const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-1", Uint8Array.from(wrapped))), (b) =>
+				b.toString(16).padStart(2, "0"),
+			).join("");
+			if (digest !== oid) throw new Errors.InternalError("Git cache object checksum mismatch");
+			if (type === "commit") {
+				const c = await git.readCommit({ ...this.base, oid });
+				// Preserve the original tree-first, parent-order export so existing pack hashes remain reproducible.
+				pending.push(...[...c.commit.parent].reverse().map((oid) => ({ oid, type: "commit" as const })), {
+					oid: c.commit.tree,
+					type: "tree",
+				});
+			} else if (type === "tree") {
+				const tree = (await git.readTree({ ...this.base, oid })).tree;
+				for (const e of [...tree].reverse()) if (e.type === "tree" || e.type === "blob") pending.push({ oid: e.oid, type: e.type });
+			}
+		}
+		return oids;
+	}
+	async hasCompleteSource(head: string) {
+		try {
+			await this.sourceObjects(head);
+			return true;
+		} catch (error) {
+			// A missing/corrupt pack may be surfaced as InternalError by isomorphic-git.
+			// Treat it as unavailable, never as proof of ancestry; clean staging must validate recovery.
+			if (error instanceof Errors.NotFoundError || error instanceof Errors.InternalError) return false;
+			throw error;
+		}
+	}
+	/** Export exact source; every merge parent is retained. */
+	async exportPack(head: string, stop?: string): Promise<Uint8Array> {
+		const oids = await this.sourceObjects(head, stop);
 		const result = await git.packObjects({ ...this.base, oids: [...oids] });
 		if (!result.packfile || result.packfile.length > 32 * 1024 * 1024) throw new Error("Source export exceeds the 32 MiB transfer limit");
 		return result.packfile;
@@ -179,15 +234,29 @@ export class GitWorkspace {
 		const oid = await git.resolveRef({ ...this.base, ref }).catch(() => ref);
 		const commit = await git.readCommit({ ...this.base, oid });
 		const out: Record<string, string> = {};
+		let entries = 0,
+			bytes = 0;
 		const walk = async (treeOid: string, prefix: string) => {
 			for (const e of (await git.readTree({ ...this.base, oid: treeOid })).tree) {
+				if (++entries > 5000) throw new DomainError(413, "Source tree exceeds the inspection limit");
 				const path = prefix + e.path;
 				if (e.type === "tree") await walk(e.oid, `${path}/`);
-				else if (e.type === "blob" && filter(path)) out[path] = decoder.decode((await git.readBlob({ ...this.base, oid: e.oid })).blob);
+				else if (e.type === "blob" && filter(path)) {
+					const blob = (await git.readBlob({ ...this.base, oid: e.oid })).blob;
+					bytes += blob.length;
+					if (blob.length > 256_000 || bytes > 1_000_000)
+						throw new DomainError(413, "Source exceeds inline inspection limits; request a smaller file");
+					if (blob.includes(0)) throw new DomainError(415, "Binary file; inline source unavailable");
+					try {
+						out[path] = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(blob);
+					} catch {
+						throw new DomainError(415, "Binary file; inline source unavailable");
+					}
+				}
 			}
 		};
 		await walk(commit.commit.tree, "");
-		return out;
+		return boundedInspection(out);
 	}
 
 	/** Files that differ between two commits, with changed line ranges in base coordinates. */
@@ -238,8 +307,10 @@ export class GitWorkspace {
 	): Promise<Pick<ChangesResponse, "files" | "additions" | "deletions" | "statsComplete" | "file">> {
 		const blobs = async (ref: string) => {
 			const result = new Map<string, string>();
+			let entries = 0;
 			const walk = async (oid: string, prefix = "") => {
 				for (const entry of (await git.readTree({ ...this.base, oid })).tree) {
+					if (++entries > 5000) throw new DomainError(413, "Diff tree exceeds the inspection limit");
 					if (entry.type === "tree") await walk(entry.oid, `${prefix}${entry.path}/`);
 					else if (entry.type === "blob") result.set(`${prefix}${entry.path}`, entry.oid);
 				}
@@ -254,21 +325,28 @@ export class GitWorkspace {
 			deletions: 0,
 			statsComplete: true,
 		};
+		let inspectedBytes = 0;
 		for (const path of [...new Set([...before.keys(), ...after.keys()])].sort()) {
 			const a = before.get(path);
 			const b = after.get(path);
 			if (a === b) continue;
 			const read = async (oid?: string) => (oid ? (await git.readBlob({ ...this.base, oid })).blob : new Uint8Array());
 			const [oldBytes, newBytes] = await Promise.all([read(a), read(b)]);
+			inspectedBytes += oldBytes.byteLength + newBytes.byteLength;
 			const binary = oldBytes.includes(0) || newBytes.includes(0);
-			const tooLarge = oldBytes.byteLength + newBytes.byteLength > 256_000;
+			const fileTooLarge = oldBytes.byteLength + newBytes.byteLength > 256_000;
+			const tooLarge = fileTooLarge || (inspectedBytes > 1_000_000 && requestedPath !== path);
 			let additions: number | null = null;
 			let deletions: number | null = null;
 			let patch: string | null = null;
 			let reason: string | undefined;
 			if (binary || tooLarge) {
 				result.statsComplete = false;
-				reason = binary ? "Binary file; source diff unavailable." : "File is too large for an inline diff.";
+				reason = binary
+					? "Binary file; source diff unavailable."
+					: fileTooLarge
+						? "File is too large for an inline diff."
+						: "Inline comparison byte limit reached.";
 			} else {
 				const oldText = decoder.decode(oldBytes);
 				const newText = decoder.decode(newBytes);
@@ -298,7 +376,7 @@ export class GitWorkspace {
 			result.files.push({ path, status: !a ? "added" : !b ? "deleted" : "modified", additions, deletions, binary, tooLarge });
 			if (requestedPath === path) result.file = { path, patch, ...(reason ? { reason } : {}) };
 		}
-		return result;
+		return boundedInspection(result);
 	}
 
 	/**
@@ -371,13 +449,15 @@ export class GitWorkspace {
 	async log(ref: string, depth = 30) {
 		try {
 			const entries = await git.log({ ...this.base, ref, depth });
-			return entries.map((e) => ({
-				oid: e.oid,
-				message: e.commit.message.trim(),
-				parents: e.commit.parent,
-				at: e.commit.author.timestamp,
-				author: e.commit.author.name,
-			}));
+			return boundedInspection(
+				entries.map((e) => ({
+					oid: e.oid,
+					message: e.commit.message.trim(),
+					parents: e.commit.parent,
+					at: e.commit.author.timestamp,
+					author: e.commit.author.name,
+				})),
+			);
 		} catch (e) {
 			if (e instanceof Errors.NotFoundError) return [];
 			throw e;
@@ -389,18 +469,85 @@ export class GitWorkspace {
 		await this.prepareFetch();
 		const result = await git.fetch({
 			...this.base,
-			http,
 			remote: "artifacts",
 			url: input.url,
 			ref: input.remoteBranch ?? "main",
 			singleBranch: true,
 			tags: false,
 			depth: input.depth,
+			http: this.boundedHttp,
 			headers: { Authorization: `Bearer ${input.token}` },
 		});
 		if (result.fetchHead) await this.setRef(input.localRef, result.fetchHead);
 		return result.fetchHead ?? null;
 	}
+	/** Cold staging has no negotiation refs or shallow markers from a damaged cache. */
+	async recover(input: { url: string; token: string; ref: string; expected: string }) {
+		const staging = new GitWorkspace(new MemoryFs() as Fs);
+		await staging.ensureInit();
+		const head = await staging.fetch({ url: input.url, token: input.token, remoteBranch: input.ref, localRef: "refs/cruce/retained" });
+		if (head !== input.expected) throw new DomainError(409, "Retained source ref differs from the recorded revision");
+		const pack = await staging.exportPack(input.expected);
+		try {
+			await this.importPack(pack);
+		} catch (error) {
+			if (!(error instanceof DomainError) || error.status !== 413 || !this.fs.removeTree) throw error;
+			this.resetCache();
+			await this.ensureInit();
+			await this.importPack(pack);
+		}
+		const damaged = !(await this.hasCompleteSource(input.expected));
+		if (damaged && this.fs.removeTree) this.resetCache();
+		if (damaged || this.fs.trimCache?.(this.gitdir)) {
+			this.clearCache();
+			await this.ensureInit();
+			await this.importPack(pack);
+		}
+	}
+	private readonly boundedHttp: typeof http = {
+		request: async (args) => {
+			async function* boundedRequest() {
+				let bytes = 0;
+				for await (const chunk of args.body ?? []) {
+					bytes += chunk.length;
+					if (bytes > 32 * 1024 * 1024) throw new DomainError(413, "Git transfer exceeds the 32 MiB gateway limit");
+					yield chunk;
+				}
+			}
+			const result = await http.request({ ...args, body: args.body ? boundedRequest() : undefined });
+			const body = result.body ?? [];
+			const advertisement = new URL(args.url).pathname.endsWith("/info/refs");
+			const responseLimit = advertisement ? TRANSFER_LIMITS.gitAdvertisementBytes : TRANSFER_LIMITS.gitBytes;
+			if (advertisement) {
+				// The Git pkt-line reader treats iterator errors as EOF. Reject oversize
+				// advertisements before handing bytes to that parser, preserving 413.
+				let size = 0;
+				const chunks: Uint8Array[] = [];
+				for await (const chunk of body) {
+					size += chunk.length;
+					if (size > responseLimit) throw new DomainError(413, "Git ref advertisement exceeds the inspection limit");
+					chunks.push(chunk.slice());
+				}
+				async function* verified() {
+					yield* chunks;
+				}
+				return { ...result, body: verified() };
+			}
+			async function* bounded() {
+				let bytes = 0;
+				for await (const chunk of body) {
+					bytes += chunk.length;
+					if (bytes > responseLimit)
+						throw new DomainError(
+							413,
+							advertisement ? "Git ref advertisement exceeds the inspection limit" : "Git transfer exceeds the 32 MiB gateway limit",
+						);
+					yield chunk;
+				}
+			}
+			return { ...result, body: bounded() };
+		},
+	};
 
 	/** Fetch the notes ref from a remote (best effort; absent notes are fine). */
 	async fetchNotes(input: { url: string; token: string }) {
@@ -408,7 +555,7 @@ export class GitWorkspace {
 			await this.prepareFetch();
 			const result = await git.fetch({
 				...this.base,
-				http,
+				http: this.boundedHttp,
 				remote: "artifacts",
 				url: input.url,
 				ref: NOTES_REF,
@@ -441,7 +588,7 @@ export class GitWorkspace {
 		const result = await git
 			.push({
 				...this.base,
-				http,
+				http: this.boundedHttp,
 				url: input.url,
 				ref: input.localRef,
 				remoteRef: input.remoteRef,
@@ -466,13 +613,13 @@ export class GitWorkspace {
 	}
 
 	async remoteRefs(input: { url: string; token: string }) {
-		return git.listServerRefs({ http, url: input.url, headers: { Authorization: `Bearer ${input.token}` } });
+		return git.listServerRefs({ http: this.boundedHttp, url: input.url, headers: { Authorization: `Bearer ${input.token}` } });
 	}
 
 	async deleteRemote(input: { url: string; token: string; remoteRef: string }) {
 		await git.push({
 			...this.base,
-			http,
+			http: this.boundedHttp,
 			url: input.url,
 			remoteRef: input.remoteRef,
 			delete: true,

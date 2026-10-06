@@ -1,11 +1,12 @@
 import { vi } from "vitest";
 import type { StorageEnv } from "../../src/worker/artifacts.ts";
-import type { Store } from "../../src/worker/store.ts";
+import { memoryStore, type Store } from "../../src/worker/store.ts";
 
 export const ACCOUNT = "0123456789abcdef0123456789abcdef";
 export function memory() {
 	const data = new Map<string, unknown>();
 	const store: Store = {
+		...memoryStore(data),
 		get: <T>(key: string) => data.get(key) as T | undefined,
 		put: vi.fn((key, value) => {
 			data.set(key, value);
@@ -20,6 +21,12 @@ export function provider() {
 	const infos = new Map<string, ArtifactsRepoInfo>();
 	const tokens = new Map<string, ArtifactsTokenInfo[]>();
 	const disposed = vi.fn();
+	const readCommit = vi.fn(async (_name: string, _oid: string): Promise<ArtifactsCommitMetadata | null> => null);
+	const readTree = vi.fn(async (_name: string, _oid: string): Promise<ArtifactsTreeEntry[] | null> => null);
+	const readFile = vi.fn(async (_name: string, _args: { ref: string; path: string }): Promise<Blob | null> => null);
+	const log = vi.fn(
+		async (_name: string, _opts?: { ref?: string; limit?: number; offset?: number }): Promise<ArtifactsCommitMetadata[]> => [],
+	);
 	const missing = () => Object.assign(new Error("private provider detail"), { code: "NOT_FOUND" });
 	const create = vi.fn(async (name: string, opts?: { description?: string; setDefaultBranch?: string }) => {
 		const info = {
@@ -82,10 +89,42 @@ export function provider() {
 				active();
 				return fork(name, target, opts);
 			},
+			readCommit: async (oid: string) => {
+				active();
+				return readCommit(name, oid);
+			},
+			readTree: async (oid: string) => {
+				active();
+				return readTree(name, oid);
+			},
+			readFile: async (args: { ref: string; path: string }) => {
+				active();
+				return readFile(name, args);
+			},
+			log: async (opts?: { ref?: string; limit?: number; offset?: number }) => {
+				active();
+				return log(name, opts);
+			},
 		} as unknown as ArtifactsRepo;
 	});
 	const remove = vi.fn(async (_name: string) => true);
 	const artifacts = { create, get, delete: remove } as unknown as Artifacts;
 	const env: StorageEnv = { ARTIFACTS: artifacts, CRUCE_STORAGE_ACCOUNT_ID: ACCOUNT, CRUCE_ARTIFACTS_NAMESPACE: "cruce" };
-	return { artifacts, env, infos, tokens, create, get, fork, remove, revokeToken, createToken, disposed };
+	return {
+		artifacts,
+		env,
+		infos,
+		tokens,
+		create,
+		get,
+		fork,
+		remove,
+		revokeToken,
+		createToken,
+		disposed,
+		readCommit,
+		readTree,
+		readFile,
+		log,
+	};
 }

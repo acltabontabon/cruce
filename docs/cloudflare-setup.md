@@ -50,13 +50,15 @@ For local UI/controller checks use `pnpm dev:fixture`; for an offline Worker bui
 
 Artifacts documents limits of 1 GB per repository, 32 MB per file/blob and 1 TB per account as reviewed on 2026-10-06. See [current limits](https://developers.cloudflare.com/artifacts/platform/limits/) and [pricing](https://developers.cloudflare.com/artifacts/platform/pricing/) before estimating capacity or cost. Cruce also bounds each Git gateway request/response to 32 MiB. Git cache growth and reachable-pack export still need representative measurement.
 
-## Proposed inspection, observations and import
+## Source inspection, proposed observations and import
 
-Source inspection currently uses the derived Git cache in the Repository DO. The binding offers exact commit/tree/blob/file/history reads; first-parent history cannot replace complete merge ancestry checks. Cache eviction and cold recovery remain roadmap work.
+Cache-only coordination inspection uses the bounded derived Git cache in the Repository DO. Explicit `inspect_source` uses identity-checked binding commit/tree/file/history APIs for equivalent views; `recover_source` restores retained exact Git source after cache loss. Both pass the namespace `source.read` policy/budget gate. Provider history is labelled first-parent and never substitutes for complete ancestry. Cache generations are bounded and evictable without deleting remote retention or metadata; see [limits and recovery](architecture.md#bounded-source-inspection-and-recovery) and [F4 local evidence](local-verification.md#bounded-source-inspection-and-cache-recovery-f4). Hosted binding recovery and peak-memory acceptance remain unverified.
 
 [Artifacts events](https://developers.cloudflare.com/artifacts/guides/event-subscriptions/) deliver account event subscriptions to Queues. They are proposed, not configured. Subscription permissions, event identity, duplicates, replay, reordering and bounded backfill require separate verification. Events never approve/promote source or start agents.
 
 Creating a Cruce repository initializes new source; checkout attachment is not import. [Native import](https://developers.cloudflare.com/artifacts/guides/import-repositories/) documents public HTTPS sources. Private import and upstream publication remain roadmap work; no silent synchronization or second canonical authority is introduced.
+
+Coordination records have separate [byte/count and cardinality bounds](architecture.md#bounded-coordination-state-and-retention-recovery). Indexed receipts/activity/reservations remain retained, with reserved recovery headroom. `pnpm verify:limits` measures local SQLite and the 32 MiB buffered gateway; it does not establish Worker peak memory. DO alarms recover only explicitly authorized fork cleanup, under the original reservation and current authority/policy. No scheduled expiry cleanup or new Workflow/Queue binding is configured. Hosted alarm delivery, OAuth KV revocation propagation and provider deletion/Worker memory acceptance remain unverified.
 
 ## Platform references
 

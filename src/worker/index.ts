@@ -1,17 +1,13 @@
-import { DomainError, publicError } from "../core/errors.ts";
+import { DomainError } from "../core/errors.ts";
 import { type AuthProps, authRoute, oauthProvider } from "./auth.ts";
 import { bridgeRoute } from "./bridge-auth.ts";
+import { httpFailure } from "./diagnostics.ts";
 import { json, type PlatformEnv, platformRoute } from "./platform-router.ts";
 
 export { ControlTower } from "./control-tower.ts";
 export { Directory } from "./directory.ts";
 export { NamespaceRuntime } from "./namespace-runtime.ts";
 
-function failure(error: unknown) {
-	const { status, message } = publicError(error);
-	if (status === 500) console.error(JSON.stringify({ event: "unexpected_error", name: (error as Error)?.name }));
-	return json({ error: message }, status);
-}
 const consoleHandler = {
 	async fetch(request, env, ctx) {
 		try {
@@ -22,7 +18,7 @@ const consoleHandler = {
 				json({ error: "Not found" }, 404)
 			);
 		} catch (error) {
-			return failure(error);
+			return httpFailure(error);
 		}
 	},
 } satisfies ExportedHandler<PlatformEnv>;
@@ -33,42 +29,46 @@ const api = {
 			if (!auth.auth?.scope.includes("cruce:read")) throw new DomainError(403, "Read scope required");
 			return (await platformRoute(request, env, ctx, auth.props, auth.auth.scope)) ?? json({ error: "Not found" }, 404);
 		} catch (error) {
-			return failure(error);
+			return httpFailure(error);
 		}
 	},
 } satisfies ExportedHandler<PlatformEnv>;
 export default {
-	fetch(request, env, ctx) {
-		const url = new URL(request.url),
-			terminal = url.searchParams.get("terminal");
-		// The existing /mcp transport exception also carries the separately authenticated human bridge.
-		// Browser approval stays behind Access; no additional hostname bypass is needed.
-		if (url.pathname === "/mcp" && ["start", "poll", "command"].includes(terminal ?? "")) {
-			url.pathname = `/bridge/${terminal}`;
-			url.search = "";
-			return consoleHandler.fetch(new Request(url, request) as Parameters<typeof consoleHandler.fetch>[0], env, ctx);
-		}
-		// Git credential helpers speak Basic; authenticate the contained OAuth token
-		// with the same provider as MCP. Never infer identity from the username.
-		if (url.pathname.startsWith("/mcp/git/") && request.headers.get("authorization")?.startsWith("Basic ")) {
-			try {
-				const decoded = atob(request.headers.get("authorization")!.slice(6));
-				const token = decoded.slice(decoded.indexOf(":") + 1);
-				if (!decoded.includes(":") || !token || /[\r\n]/.test(token)) throw new Error("Invalid credentials");
-				const headers = new Headers(request.headers);
-				headers.set("authorization", `Bearer ${token}`);
-				request = new Request(request, { headers }) as typeof request;
-			} catch {
-				return json({ error: "Invalid Git credentials" }, 401);
+	async fetch(request, env, ctx) {
+		try {
+			const url = new URL(request.url),
+				terminal = url.searchParams.get("terminal");
+			// The existing /mcp transport exception also carries the separately authenticated human bridge.
+			// Browser approval stays behind Access; no additional hostname bypass is needed.
+			if (url.pathname === "/mcp" && ["start", "poll", "command"].includes(terminal ?? "")) {
+				url.pathname = `/bridge/${terminal}`;
+				url.search = "";
+				return consoleHandler.fetch(new Request(url, request) as Parameters<typeof consoleHandler.fetch>[0], env, ctx);
 			}
+			// Git credential helpers speak Basic; authenticate the contained OAuth token
+			// with the same provider as MCP. Never infer identity from the username.
+			if (url.pathname.startsWith("/mcp/git/") && request.headers.get("authorization")?.startsWith("Basic ")) {
+				try {
+					const decoded = atob(request.headers.get("authorization")!.slice(6));
+					const token = decoded.slice(decoded.indexOf(":") + 1);
+					if (!decoded.includes(":") || !token || /[\r\n]/.test(token)) throw new Error("Invalid credentials");
+					const headers = new Headers(request.headers);
+					headers.set("authorization", `Bearer ${token}`);
+					request = new Request(request, { headers }) as typeof request;
+				} catch {
+					return json({ error: "Invalid Git credentials" }, 401);
+				}
+			}
+			if (url.pathname.startsWith("/mcp/git/") && !request.headers.has("authorization"))
+				return new Response("Git authentication required", {
+					status: 401,
+					headers: { "www-authenticate": 'Basic realm="Cruce Git"', "cache-control": "no-store" },
+				});
+			if (url.pathname.startsWith("/mcp/git/") && /^Bearer [0-9a-f-]{72}$/.test(request.headers.get("authorization") ?? ""))
+				return consoleHandler.fetch(request, env, ctx);
+			return await oauthProvider(api, consoleHandler, env.CRUCE_PUBLIC_ORIGIN ?? new URL(request.url).origin).fetch(request, env, ctx);
+		} catch (error) {
+			return httpFailure(error);
 		}
-		if (url.pathname.startsWith("/mcp/git/") && !request.headers.has("authorization"))
-			return new Response("Git authentication required", {
-				status: 401,
-				headers: { "www-authenticate": 'Basic realm="Cruce Git"', "cache-control": "no-store" },
-			});
-		if (url.pathname.startsWith("/mcp/git/") && /^Bearer [0-9a-f-]{72}$/.test(request.headers.get("authorization") ?? ""))
-			return consoleHandler.fetch(request, env, ctx);
-		return oauthProvider(api, consoleHandler, env.CRUCE_PUBLIC_ORIGIN ?? new URL(request.url).origin).fetch(request, env, ctx);
 	},
 } satisfies ExportedHandler<PlatformEnv>;

@@ -56,6 +56,28 @@ describe("deployment resource boundary", () => {
 });
 
 describe("Artifacts binding host", () => {
+	it("reads exact source through an identity-checked disposable binding without Git tokens", async () => {
+		const p = provider(),
+			host = new ArtifactsBindingHost(p.artifacts, ACCOUNT, "cruce", "team", new ProviderIdentity(memory().store));
+		const info = await host.ensure("repo", "owned");
+		p.readFile.mockResolvedValue(new Blob(["source"]));
+		p.disposed.mockClear();
+		expect(
+			await host.withSource("repo", info.id, async (source) => {
+				await source.log({ ref: "a".repeat(40), limit: 30 });
+				const file = await source.readFile({ ref: "a".repeat(40), path: "README.md" });
+				expect(p.disposed).not.toHaveBeenCalled();
+				return file!.text();
+			}),
+		).toBe("source");
+		expect(p.disposed).toHaveBeenCalledTimes(1);
+		expect(p.createToken).not.toHaveBeenCalled();
+		p.infos.get("ns-team-repo")!.id = "replacement";
+		await expect(host.withSource("repo", info.id, (source) => source.readFile({ ref: "a".repeat(40), path: "README.md" }))).rejects.toThrow(
+			"identity changed",
+		);
+		expect(p.readFile).toHaveBeenCalledTimes(1);
+	});
 	it("isolates identical logical names across application namespaces and revokes creation tokens", async () => {
 		const p = provider();
 		for (const ns of ["team-a", "team-b"]) {

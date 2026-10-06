@@ -161,7 +161,7 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 			},
 		});
 	const choices: { id: string; label: string }[] = [];
-	for (const namespace of await directory.namespaces()) {
+	for (const namespace of await directory.namespaces(user.id)) {
 		try {
 			const view = await env.NAMESPACE.getByName(namespace.id).snapshot({
 				actor: { id: user.id, userId: user.id, kind: "human", name: user.name },

@@ -13,6 +13,7 @@ const actionLabels: Record<string, { label: string; detail: string }> = {
 	"revision.publish": { label: "Push and publish revisions", detail: "Pushes to forks and retained source." },
 	"artifact.publish": { label: "Store evidence", detail: "Test reports and other evidence files." },
 	"workspace.cleanup": { label: "Delete workspace forks", detail: "Only after every ref is retained." },
+	"source.read": { label: "Inspect and recover stored source", detail: "Explicit cloud reads and local Git cache recovery." },
 };
 const ruleLabels: Record<string, string> = { allow: "Allowed", approval: "Maintainers only", deny: "Not allowed" };
 const roleLabels: Record<NamespaceRole, string> = { owner: "Owner", maintainer: "Maintainer", developer: "Developer", viewer: "Viewer" };

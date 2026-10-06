@@ -41,6 +41,8 @@ const write = (
 export const CRUCE_TOOLS: Tool[] = [
 	read("list_namespaces", "List your authorized namespaces."),
 	read("list_repositories", "List repositories authorized for this connection.", ["namespaceId"]),
+	read("get_activity", "Read retained activity in bounded pages; pass the returned cursor for the next page.", ["cursor"]),
+	read("get_retention", "Inspect recorded retention blockers and authorized cleanup recovery without provider calls.", ["workspaceId"]),
 	read("get_repository", "Repository state, current workspaces, changes, artifacts and observation freshness."),
 	read("get_workspace", "Inspect a workspace: owner, baseline, fork, current execution attachment and revisions.", ["workspaceId"]),
 	read(
@@ -53,11 +55,39 @@ export const CRUCE_TOOLS: Tool[] = [
 	read("get_git_access", "Inspect canonical and workspace Git remote paths. Authenticate Git with your Cruce OAuth connection.", [
 		"workspaceId",
 	]),
-	read("get_source", "Read an uploaded immutable source revision. Unavailable until source is explicitly published.", ["revision", "path"]),
-	read("get_history", "Git commit history for an uploaded revision.", ["revision"]),
-	read("get_diff", "Exact Git diff between uploaded revisions.", ["baseRevision", "revision", "path"]),
-	read("read_artifact", "Read immutable artifact metadata and stored content.", ["artifactId"]),
+	read(
+		"get_source",
+		"Read bounded retained source from the local cache. For explicit cloud inspection use inspect_source; for cache loss use recover_source.",
+		["revision", "path"],
+	),
+	read("get_history", "Read up to 30 cached Git commits. For explicitly labelled stored first-parent history use inspect_source.", [
+		"revision",
+	]),
+	read(
+		"get_diff",
+		"Bounded exact Git diff between retained revisions in the local cache. inspect_source can explicitly recover missing objects.",
+		["baseRevision", "revision", "path"],
+	),
+	read(
+		"read_artifact",
+		"Read immutable artifact metadata and locally cached content. inspect_source explicitly reads stored evidence after cache loss.",
+		["artifactId"],
+	),
 	read("get_lineage", "Trace workspace, actor, commit, artifact, review and source promotion provenance.", ["subjectId"]),
+	write(
+		"inspect_source",
+		"Explicit cloud source inspection: bounded file listing/content, first-parent history, diff, or stored evidence. Uses one namespace resource reservation. Files/history use provider APIs; diffs may recover bounded Git objects. Never approves source.",
+		["sourceView", "revision", "baseRevision", "path", "artifactId"],
+		"cruce:read",
+		"source.read",
+	),
+	write(
+		"recover_source",
+		"Explicitly recover retained source into the bounded Git cache for ancestry, diffs and pack operations. Uses one namespace resource reservation; exact storage identity and refs are checked.",
+		["revision"],
+		"cruce:read",
+		"source.read",
+	),
 	write("start_workspace", "Start a durable workspace at an exact baseline revision; use the local bridge for an isolated checkout.", [
 		"title",
 		"baseRevision",
@@ -86,8 +116,15 @@ export const CRUCE_TOOLS: Tool[] = [
 		"commits",
 	]),
 	write(
+		"inspect_retention",
+		"Explicitly check every fork ref against retained source and record bounded blockers. This consumes a source-read reservation and never deletes a fork.",
+		["workspaceId"],
+		"cruce:read",
+		"source.read",
+	),
+	write(
 		"cleanup_workspace",
-		"Delete an ended workspace fork only after every remote ref is retained. Local files are unaffected.",
+		"Authorize deletion of an ended workspace fork after every remote ref is retained. The journal resumes this exact operation after interruption under current authority. Local files are unaffected.",
 		["workspaceId"],
 		"workspace:write",
 		"workspace.cleanup",

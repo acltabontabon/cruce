@@ -1030,6 +1030,42 @@ test("stored evidence is readable beside its change and links back to it", async
 	await page.getByRole("button", { name: "View change #1 →", exact: true }).click();
 	assert.equal(await page.getByRole("button", { name: "Promote to main", exact: true }).isDisabled(), true);
 });
+test("explicit stored inspection and recovery remain usable when cached source is unavailable", async () => {
+	await page.route("**/command", async (route) => {
+		const { tool } = route.request().postDataJSON();
+		if (["get_source", "get_history", "get_diff", "read_artifact"].includes(tool))
+			return route.fulfill({ status: 404, json: { error: "Source cache unavailable; explicitly recover retained source" } });
+		return route.continue();
+	});
+	await openChange();
+	await page.getByRole("alert").filter({ hasText: "Source cache unavailable; explicitly recover retained source" }).waitFor();
+	await page.getByText("Inspect stored diff", { exact: true }).click();
+	await page.getByRole("button", { name: "Load stored diff", exact: true }).click();
+	await page.locator(".patch").getByText("export const retries = 3;", { exact: false }).waitFor();
+	await page.goto(`${root()}#/history/source`);
+	await page.getByRole("button", { name: "Browse files", exact: true }).waitFor();
+	await page.getByText("Inspect stored source", { exact: true }).click();
+	await page.getByText(/Each request uses cloud storage and one namespace resource operation/).waitFor();
+	await page.getByRole("button", { name: "List stored files", exact: true }).click();
+	await page
+		.getByRole("navigation", { name: "Stored repository files", exact: true })
+		.getByRole("button", { name: "src/retry.ts", exact: true })
+		.click();
+	await page.locator("pre").getByText("export const retries = 3;", { exact: false }).waitFor();
+	await page.getByRole("button", { name: "Stored history", exact: true }).click();
+	await page.getByText("First-parent history", { exact: true }).waitFor();
+	await page.getByRole("button", { name: "Recover source cache", exact: true }).click();
+	await page.getByText(/Source recovered/).waitFor();
+	await page.evaluate(() => {
+		window.scrollTo(0, 0);
+		document.activeElement?.blur();
+	});
+	await page.screenshot({ path: "dist/ui-checks/stored-source-recovery.png", fullPage: true });
+	await page.goto(`${root()}#/history/test-report`);
+	await page.getByText("Inspect stored evidence", { exact: true }).click();
+	await page.getByRole("button", { name: "Load stored evidence", exact: true }).click();
+	await page.locator("pre").getByText("Reported tests: 12 passed", { exact: false }).waitFor();
+});
 test("changes exclude stale and unrelated reports while keeping explicitly linked evidence", async () => {
 	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
 		const data = await (await route.fetch()).json();
@@ -1337,4 +1373,28 @@ test("many workspaces, long paths and read-only authority stay usable on a phone
 	assert.equal(await page.getByRole("button", { name: "Approve", exact: true }).count(), 0);
 	assert.equal(await page.getByRole("button", { name: "Promote to main", exact: true }).count(), 0);
 	await page.getByText("A repository maintainer confirms checks and promotes.", { exact: true }).waitFor();
+});
+
+test("retention inspection discloses cloud cost and shows exact unpublished refs without deleting", async () => {
+	await openRepo();
+	await repoNav()
+		.getByRole("button", { name: /^Workspaces/ })
+		.click();
+	await page.getByRole("button", { name: /^Inspect payment timeout/ }).click();
+	await page.getByRole("button", { name: "Inspect retention", exact: true }).waitFor();
+	assert.match(await page.locator(".workspace-page").innerText(), /Checks cloud storage using one namespace operation/);
+	await page.getByRole("button", { name: "Inspect retention", exact: true }).click();
+	await page.getByRole("region", { name: "Retention blockers" }).waitFor();
+	assert.match(await page.getByRole("region", { name: "Retention blockers" }).innerText(), /refs\/heads\/unpublished/);
+	assert.match(await page.getByRole("region", { name: "Retention blockers" }).innerText(), /not retained/);
+	assert.match(await page.locator(".workspace-page").innerText(), /Workspace fork is available/);
+	await page.screenshot({ path: "dist/ui-checks/retention-blockers.png", fullPage: true });
+});
+
+test("History can inspect retained activity through a read-only page", async () => {
+	await openRepo();
+	await page.getByRole("button", { name: "History", exact: true }).click();
+	await page.getByText("Retained activity", { exact: true }).click();
+	await page.getByRole("button", { name: "Browse retained activity", exact: true }).click();
+	await page.getByText("End of retained activity.", { exact: true }).waitFor();
 });

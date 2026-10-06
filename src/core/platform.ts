@@ -1,3 +1,4 @@
+import { STATE_LIMITS } from "../shared/limits.ts";
 import type {
 	Actor,
 	Artifact,
@@ -171,7 +172,12 @@ export class RepositoryController {
 	}
 	snapshot(a: Authority): RepositorySnapshot {
 		const { receipts: _, ...state } = structuredClone(this.state);
-		state.workspaces = state.workspaces.map((s) => ({ ...s, state: s.state === "active" && !this.live(s) ? "disconnected" : s.state }));
+		state.activity = state.activity.slice(-STATE_LIMITS.recentActivity);
+		state.workspaces = state.workspaces.map((s) => ({
+			...s,
+			cleanup: s.cleanup ? { ...s.cleanup, command: s.cleanup.actorId === a.actor.id ? s.cleanup.command : undefined } : undefined,
+			state: s.state === "active" && !this.live(s) ? "disconnected" : s.state,
+		}));
 		return {
 			...state,
 			overlaps: this.overlaps(),

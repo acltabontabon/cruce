@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Artifact, RepositorySnapshot } from "../shared/platform.ts";
+import type { ActivityEvent, Artifact, RepositorySnapshot } from "../shared/platform.ts";
 import { Form, short, time, value } from "./controls.tsx";
 import { Icon } from "./design.tsx";
 import type { Execute } from "./inspect.tsx";
@@ -47,16 +47,23 @@ function RecordInspection({ record, execute }: { record: Artifact; execute: Exec
 		},
 		[],
 	);
-	const load = async (kind: "artifact" | "lineage") => {
+	const load = async (kind: "artifact" | "lineage" | "stored") => {
 		const current = ++ticket.current;
 		setError("");
 		try {
-			const result = await execute(kind === "lineage" ? { tool: "get_lineage", subjectId: id } : { tool: "read_artifact", artifactId: id });
+			const result = await execute(
+				kind === "lineage"
+					? { tool: "get_lineage", subjectId: id }
+					: kind === "stored"
+						? { tool: "inspect_source", sourceView: "artifact", artifactId: id }
+						: { tool: "read_artifact", artifactId: id },
+			);
 			if (current !== ticket.current) return;
 			if (kind === "lineage") setLineage(result as NonNullable<typeof lineage>);
 			else
 				setContent(
 					(result as { content?: string }).content ??
+						(result as { reason?: string }).reason ??
 						(record.kind === "source"
 							? "This published revision retains exact Git objects. Use Browse source to inspect its files."
 							: "Evidence content is unavailable."),
@@ -76,6 +83,15 @@ function RecordInspection({ record, execute }: { record: Artifact; execute: Exec
 				</button>
 			</div>
 			{error && <p role="alert">{error}</p>}
+			{record.kind === "evidence" && (
+				<details>
+					<summary>Inspect stored evidence</summary>
+					<p className="muted">Uses cloud storage and one namespace resource operation.</p>
+					<button type="button" onClick={() => void load("stored")}>
+						Load stored evidence
+					</button>
+				</details>
+			)}
 			{content && <pre>{content}</pre>}
 			{lineage && (
 				<ol className="lineage">
@@ -196,5 +212,54 @@ export function RetainedRecordDetail({
 				</Form>
 			)}
 		</section>
+	);
+}
+
+export function RetainedActivity({ execute }: { execute: Execute }) {
+	const [page, setPage] = useState<{ items: ActivityEvent[]; cursor?: string }>(),
+		[error, setError] = useState(""),
+		[loading, setLoading] = useState(false);
+	const ticket = useRef(0);
+	useEffect(
+		() => () => {
+			ticket.current++;
+		},
+		[],
+	);
+	const load = async () => {
+		const current = ++ticket.current;
+		setLoading(true);
+		setError("");
+		try {
+			const result = (await execute({ tool: "get_activity", cursor: page?.cursor })) as { items: ActivityEvent[]; cursor?: string };
+			if (current === ticket.current) setPage(result);
+		} catch (failure) {
+			if (current === ticket.current) setError((failure as Error).message);
+		} finally {
+			if (current === ticket.current) setLoading(false);
+		}
+	};
+	return (
+		<details className="group">
+			<summary>Retained activity</summary>
+			<p className="muted">All recorded activity is kept. Browse from the oldest event, one page at a time.</p>
+			{page && (
+				<ol className="feed">
+					{page.items.map((event) => (
+						<li key={event.id}>
+							<time>{time(event.at)}</time>
+							<span>{event.summary}</span>
+						</li>
+					))}
+				</ol>
+			)}
+			{(!page || page.cursor) && (
+				<button type="button" className="ghost" disabled={loading} onClick={() => void load()}>
+					{loading ? "Loading…" : error ? "Retry activity" : page ? "Next activity page" : "Browse retained activity"}
+				</button>
+			)}
+			{page && !page.cursor && <p className="muted">End of retained activity.</p>}
+			{error && <p role="alert">{error}</p>}
+		</details>
 	);
 }

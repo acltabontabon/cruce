@@ -1,7 +1,11 @@
 import { DomainError } from "../core/errors.ts";
+import { TRANSFER_LIMITS } from "../shared/limits.ts";
 import type { ResourceStorage } from "../shared/platform.ts";
+import { diagnose } from "./diagnostics.ts";
 import { ProviderIdentity, ProviderIdentityError } from "./provider-identity.ts";
 import type { Store } from "./store.ts";
+
+export type SourceReader = Pick<ArtifactsRepo, "readCommit" | "readTree" | "readFile" | "log">;
 
 /** Resource calls use the explicitly configured installation storage. */
 export interface RepoRef {
@@ -18,6 +22,7 @@ export interface RepositoryHost {
 	gitRequest(name: string, request: Request, expectedId?: string): Promise<Response>;
 	info(name: string): Promise<{ name: string; description?: string | null; remote: string; id?: string }>;
 	withToken<T>(name: string, scope: "read" | "write", fn: (token: string) => Promise<T>): Promise<{ result: T; tokenId: string }>;
+	withSource?<T>(name: string, expectedId: string, run: (source: SourceReader) => Promise<T>): Promise<T>;
 }
 
 const API = "https://api.cloudflare.com/client/v4";
@@ -25,7 +30,7 @@ type Send = typeof fetch;
 
 /**
  * Public text for a failed provider call. Provider paths, account IDs and raw provider messages stay out of
- * responses; they are logged for operators instead.
+ * responses or logs. Diagnostics contain only allowlisted metadata and redacted correlation.
  */
 export function providerMessage(status: number, codes: number[]) {
 	if (status === 401 || status === 403 || codes.some((c) => c === 10000 || c === 1000 || c === 9109))
@@ -35,26 +40,23 @@ export function providerMessage(status: number, codes: number[]) {
 	if (status === 429) return "Cloudflare is rate limiting requests. Retry the same operation shortly.";
 	return "Cloudflare could not complete the request. Retry the same operation.";
 }
-async function cloudflare<T>(send: Send, token: string, path: string, init: RequestInit = {}): Promise<T> {
+async function cloudflare<T>(send: Send, token: string, path: string, init: RequestInit = {}, maxBytes?: number): Promise<T> {
 	const response = await send(`${API}${path}`, {
 		...init,
 		headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...init.headers },
 	});
-	const body = (await response.json().catch(() => ({}))) as {
+	const body = (
+		maxBytes
+			? JSON.parse(new TextDecoder().decode(await boundedBody(response, maxBytes, "Source inspection exceeds its response limit")))
+			: await response.json().catch(() => ({}))
+	) as {
 		success?: boolean;
 		result?: T;
 		errors?: { code?: number; message: string }[];
 	};
 	if (!response.ok || body.success === false) {
-		const codes = (body.errors ?? []).map((e) => e.code ?? 0);
-		console.error(
-			JSON.stringify({
-				event: "provider_error",
-				status: response.status,
-				codes,
-				operation: path.split("?")[0].replace(/^\/accounts\/[0-9a-f]{32}/, "/accounts/:account"),
-			}),
-		);
+		const codes = Array.isArray(body.errors) ? body.errors.flatMap((e) => (typeof e?.code === "number" ? [e.code] : [])) : [];
+		diagnose("provider_error", { provider: "rest", status: response.status });
 		throw new DomainError([404, 409, 429].includes(response.status) ? response.status : 502, providerMessage(response.status, codes));
 	}
 	return body.result as T;
@@ -71,6 +73,41 @@ export class ArtifactsRestHost implements RepositoryHost {
 	) {}
 	private path(suffix = "") {
 		return `/accounts/${this.accountId}/artifacts/namespaces/${this.namespace}${suffix}`;
+	}
+	async withSource<T>(name: string, expectedId: string, run: (source: SourceReader) => Promise<T>) {
+		if ((await this.info(name)).id !== expectedId) throw new ProviderIdentityError("Artifacts repository identity changed");
+		const json = async <V>(suffix: string): Promise<V | null> => {
+			try {
+				return await cloudflare<V>(this.send, this.token, this.path(`/repos/${name}/${suffix}`), {}, 1_000_000);
+			} catch (error) {
+				if (error instanceof DomainError && error.status === 404) return null;
+				throw error;
+			}
+		};
+		return run({
+			readCommit: (oid) => json<ArtifactsCommitMetadata>(`commit/${oid}`),
+			readTree: (oid) => json<ArtifactsTreeEntry[]>(`tree/${oid}`),
+			log: async (opts) =>
+				(await json<ArtifactsCommitMetadata[]>(
+					`log?${new URLSearchParams({ ref: opts?.ref ?? "HEAD", limit: String(opts?.limit ?? 30), offset: String(opts?.offset ?? 0) })}`,
+				)) ?? [],
+			readFile: async ({ ref, path }) => {
+				const response = await this.send(`${API}${this.path(`/repos/${name}/file?${new URLSearchParams({ ref, path })}`)}`, {
+					headers: { authorization: `Bearer ${this.token}` },
+					redirect: "manual",
+				});
+				if (response.status === 404) {
+					await response.body?.cancel();
+					return null;
+				}
+				if (!response.ok) {
+					await response.body?.cancel();
+					diagnose("provider_error", { provider: "rest", status: response.status });
+					throw new DomainError(502, "Artifacts source read unavailable");
+				}
+				return new Blob([await boundedBody(response, 256_000, "File is too large for inline source inspection")]);
+			},
+		});
 	}
 	async info(name: string) {
 		const info = await cloudflare<{ name: string; description?: string | null; remote: string; id: string }>(
@@ -205,6 +242,28 @@ export class ArtifactsRestHost implements RepositoryHost {
 	}
 }
 
+const verifiedBodies = new WeakMap<Request, ArrayBuffer>();
+/** Internal handoff of the gateway's already-bounded body. Keeps normal Request
+ * semantics for adapters without allocating/buffering the same pack twice. */
+export function bufferedGitRequest(template: Request, bytes?: ArrayBuffer) {
+	if (bytes && bytes.byteLength > TRANSFER_LIMITS.gitBytes) throw new DomainError(413, "Git transfer exceeds the 32 MiB gateway limit");
+	const request = new Request(template.url, {
+		method: template.method,
+		headers: template.headers,
+		body: bytes
+			? new ReadableStream({
+					start(controller) {
+						controller.enqueue(new Uint8Array(bytes));
+						controller.close();
+					},
+				})
+			: undefined,
+		duplex: "half",
+	} as RequestInit);
+	if (bytes) verifiedBodies.set(request, bytes);
+	return request;
+}
+
 async function forwardGit(
 	host: RepositoryHost,
 	accountId: string,
@@ -245,12 +304,13 @@ async function forwardGit(
 			const response = await send(target, {
 				method: request.method,
 				headers,
-				body: request.method === "POST" ? await boundedBody(request) : undefined,
+				body: request.method === "POST" ? (verifiedBodies.get(request) ?? (await boundedBody(request))) : undefined,
 				redirect: "manual",
 			});
 			// Consume before revoking the token; return only Git payload headers, never cookies or redirects.
 			if (!response.ok) {
 				await response.body?.cancel();
+				diagnose("provider_error", { provider: "git", status: response.status });
 				throw new DomainError(502, "Artifacts Git request failed");
 			}
 			const bytes = await boundedBody(response);
@@ -329,7 +389,7 @@ export class ResourceBoundary {
 }
 
 function providerCode(error: unknown): string | undefined {
-	return error && typeof error === "object" && "code" in error ? String(error.code) : undefined;
+	return error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : undefined;
 }
 
 /** One deployment binding; stable application namespace IDs isolate physical repo names. */
@@ -353,6 +413,10 @@ export class ArtifactsBindingHost implements RepositoryHost {
 		} catch (error) {
 			if (error instanceof DomainError) throw error;
 			const code = providerCode(error);
+			diagnose("provider_error", {
+				provider: "binding",
+				code: code === "NOT_FOUND" || code === "ALREADY_EXISTS" || code === "RATE_LIMITED" ? code : "UNKNOWN",
+			});
 			if (code === "NOT_FOUND") throw new DomainError(404, "Artifacts repository unavailable");
 			if (code === "ALREADY_EXISTS") throw new DomainError(409, "Artifacts repository already exists; retry the same operation");
 			throw new DomainError(code === "RATE_LIMITED" ? 429 : 502, "Artifacts operation unavailable; retry the same operation identity");
@@ -366,6 +430,18 @@ export class ArtifactsBindingHost implements RepositoryHost {
 	}
 	async info(name: string) {
 		return this.repository(name, async (_repo, info) => ({ ...info, name }));
+	}
+	async withSource<T>(name: string, expectedId: string, run: (source: SourceReader) => Promise<T>) {
+		this.identities.require(name);
+		return this.repository(name, async (repo, info) => {
+			if (info.id !== expectedId) throw new ProviderIdentityError("Artifacts repository identity changed");
+			return run({
+				readCommit: (oid) => this.provider(() => repo.readCommit(oid)),
+				readTree: (oid) => this.provider(() => repo.readTree(oid)),
+				readFile: (args) => this.provider(() => repo.readFile(args)),
+				log: (opts) => this.provider(() => repo.log(opts)),
+			});
+		});
 	}
 	private validate(name: string, info: Pick<ArtifactsRepoInfo, "id" | "name" | "remote">) {
 		const remote = new URL(info.remote);
@@ -478,7 +554,16 @@ export class ArtifactsBindingHost implements RepositoryHost {
 }
 
 /** Bounded transfer, including chunked requests. This is a Cruce limit, not an Artifacts repository limit. */
-export async function boundedBody(message: Request | Response, limit = 32 * 1024 * 1024): Promise<ArrayBuffer> {
+export async function boundedBody(
+	message: Request | Response,
+	limit: number = TRANSFER_LIMITS.gitBytes,
+	reason = "Git transfer exceeds the 32 MiB gateway limit",
+): Promise<ArrayBuffer> {
+	const length = message.headers.get("content-length");
+	if (length !== null && /^\d+$/.test(length) && Number(length) > limit) {
+		await message.body?.cancel();
+		throw new DomainError(413, reason);
+	}
 	const reader = message.body?.getReader();
 	if (!reader) return new ArrayBuffer(0);
 	const chunks: Uint8Array[] = [];
@@ -489,10 +574,12 @@ export async function boundedBody(message: Request | Response, limit = 32 * 1024
 		size += value.length;
 		if (size > limit) {
 			await reader.cancel();
-			throw new DomainError(413, "Git transfer exceeds the 32 MiB gateway limit");
+			throw new DomainError(413, reason);
 		}
-		chunks.push(value);
+		// Do not retain an oversized backing buffer supplied as a small view.
+		chunks.push(value.slice());
 	}
+	if (chunks.length === 1) return chunks[0].buffer as ArrayBuffer;
 	const bytes = new Uint8Array(size);
 	let offset = 0;
 	for (const chunk of chunks) {

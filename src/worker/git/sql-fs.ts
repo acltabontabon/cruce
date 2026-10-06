@@ -6,7 +6,10 @@
  * the offline demo backend survives restarts.
  */
 
+import { DomainError } from "../../core/errors.ts";
 import { sqlTableExists } from "../store.ts";
+
+export const GIT_CACHE_LIMITS = { retainedBytes: 48 * 1024 * 1024, maxBytes: 64 * 1024 * 1024, maxEntries: 20_000 } as const;
 
 interface Row {
 	path: string;
@@ -77,7 +80,33 @@ export class SqlFs {
 
 	private exists = false;
 	private initialized = false;
-	constructor(private readonly sql: SqlStorage) {}
+	constructor(
+		private readonly sql: SqlStorage,
+		private readonly limits: { retainedBytes: number; maxBytes: number; maxEntries: number } = GIT_CACHE_LIMITS,
+	) {}
+
+	cacheUsage() {
+		if (!this.available()) return { bytes: 0, entries: 0 };
+		return this.sql
+			.exec<{ bytes: number; entries: number }>(
+				`SELECT COALESCE(SUM(COALESCE(LENGTH(data), 0) + LENGTH(CAST(path AS BLOB))), 0) AS bytes, COUNT(*) AS entries FROM gitfs`,
+			)
+			.toArray()[0];
+	}
+	/** Whole generations are evicted together: packs, indexes, refs and shallow state cannot outlive each other. */
+	trimCache(prefix: string) {
+		const usage = this.cacheUsage();
+		if (usage.bytes <= this.limits.retainedBytes && usage.entries < Math.floor(this.limits.maxEntries / 2)) return false;
+		this.removeTree(prefix);
+		return true;
+	}
+	private capacity(path: string, bytes: number) {
+		const usage = this.cacheUsage(),
+			old = this.metadata(path);
+		const size = usage.bytes - (old?.bytes ?? 0) + bytes + (old ? 0 : encoder.encode(path).length);
+		if (size > this.limits.maxBytes || usage.entries + (old ? 0 : 1) > this.limits.maxEntries)
+			throw new DomainError(413, "Git source exceeds the bounded cache limit; use normal Git for larger repositories");
+	}
 
 	private available() {
 		if (!this.exists) this.exists = sqlTableExists(this.sql, "gitfs");
@@ -104,6 +133,15 @@ export class SqlFs {
 		if (!this.available()) return;
 		return this.sql.exec<Row>(`SELECT path, dir, data, mtime FROM gitfs WHERE path = ?`, path).toArray()[0];
 	}
+	private metadata(path: string) {
+		if (!this.available()) return;
+		return this.sql
+			.exec<Row & { bytes: number }>(
+				`SELECT path, dir, NULL AS data, mtime, COALESCE(LENGTH(data), 0) AS bytes FROM gitfs WHERE path = ?`,
+				path,
+			)
+			.toArray()[0];
+	}
 
 	async readFile(path: string, options?: string | { encoding?: string }) {
 		const p = norm(path);
@@ -119,8 +157,9 @@ export class SqlFs {
 		const p = norm(path);
 		await this.mkdir(parent(p), { recursive: true });
 		const bytes = typeof data === "string" ? encoder.encode(data) : data instanceof Uint8Array ? data : new Uint8Array(data);
-		const existing = this.row(p);
+		const existing = this.metadata(p);
 		if (existing?.dir) throw new FsError("EISDIR", p);
+		this.capacity(p, bytes.byteLength);
 		this.sql.exec(
 			`INSERT INTO gitfs (path, dir, data, mtime) VALUES (?, 0, ?, ?) ON CONFLICT(path) DO UPDATE SET data = excluded.data, mtime = excluded.mtime`,
 			p,
@@ -131,7 +170,7 @@ export class SqlFs {
 
 	async unlink(path: string) {
 		const p = norm(path);
-		const r = this.row(p);
+		const r = this.metadata(p);
 		if (!r) throw new FsError("ENOENT", p);
 		if (r.dir) throw new FsError("EISDIR", p);
 		this.sql.exec(`DELETE FROM gitfs WHERE path = ?`, p);
@@ -166,6 +205,7 @@ export class SqlFs {
 			if (typeof options === "object" && options?.recursive) await this.mkdir(par, { recursive: true });
 			else throw new FsError("ENOENT", par);
 		}
+		this.capacity(p, 0);
 		this.sql.exec(`INSERT OR IGNORE INTO gitfs (path, dir, data, mtime) VALUES (?, 1, NULL, ?)`, p, Date.now());
 	}
 
@@ -180,9 +220,9 @@ export class SqlFs {
 
 	async stat(path: string) {
 		const p = norm(path);
-		const r = this.row(p);
+		const r = this.metadata(p);
 		if (!r) throw new FsError("ENOENT", p);
-		return new Stats(r, r.data ? r.data.byteLength : 0);
+		return new Stats(r, r.bytes);
 	}
 
 	async readlink(path: string): Promise<string> {

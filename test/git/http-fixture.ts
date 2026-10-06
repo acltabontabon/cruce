@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,6 +25,13 @@ export async function gitServer(source: GitWorkspace, base: string, candidates: 
 		beforeUpdate: () => {},
 		afterUpdate: () => {},
 		setHead,
+		setRef: (ref: string, oid: string) => {
+			native(["update-ref", ref, oid]);
+		},
+		deleteRef: (ref: string) => {
+			native(["update-ref", "-d", ref]);
+		},
+		setShallow: (oid: string) => writeFile(join(directory, "shallow"), `${oid}\n`),
 		head: () => native(["rev-parse", "refs/heads/trunk"]).toString().trim(),
 		close: async () => {
 			await new Promise<void>((resolve) => server.close(() => resolve()));

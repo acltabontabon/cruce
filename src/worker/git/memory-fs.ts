@@ -16,6 +16,10 @@ const decoder = new TextDecoder();
 
 export class MemoryFs {
 	private readonly entries = new Map<string, Entry>([["/", { kind: "dir", mtime: 0 }]]);
+	removeTree(prefix: string) {
+		const path = norm(prefix);
+		for (const key of this.entries.keys()) if (key === path || key.startsWith(`${path}/`)) this.entries.delete(key);
+	}
 
 	readonly promises = {
 		readFile: async (path: string, options?: string | { encoding?: string }) => {

@@ -8,10 +8,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
 import type { Actor, Command, Proposal, Repository, RepositorySnapshot, Workspace } from "../../src/shared/platform.ts";
 import { type RepositoryHost, ResourceBoundary } from "../../src/worker/artifacts.ts";
+import { diagnosticId } from "../../src/worker/diagnostics.ts";
 import { MemoryFs } from "../../src/worker/git/memory-fs.ts";
 import { GitWorkspace } from "../../src/worker/git/workspace.ts";
 import { RepositoryRuntime } from "../../src/worker/repository-runtime.ts";
-import type { Store } from "../../src/worker/store.ts";
+import { memoryStore, type Store } from "../../src/worker/store.ts";
 import { gitServer } from "../git/http-fixture.ts";
 
 const owner: Actor = { id: "human", userId: "owner", name: "Cris", kind: "human" };
@@ -34,6 +35,7 @@ const grant: import("../../src/worker/namespace-runtime.ts").ConnectionGrant = {
 function memory(): Store {
 	const map = new Map<string, unknown>();
 	return {
+		...memoryStore(map),
 		get: <T>(key: string) => structuredClone(map.get(key)) as T | undefined,
 		put: (key, value) => {
 			map.set(key, structuredClone(value));
@@ -127,6 +129,79 @@ async function fixture(_hosted = true) {
 	return { w, git, host, push, store, port, runtime, call, workspace: s, execution, base, head, pack };
 }
 describe("repository runtime", () => {
+	it("correlates an uncertain evidence publication across restart without logging content or operation keys", async () => {
+		const f = await fixture();
+		const log = vi.spyOn(console, "log").mockImplementation(() => {});
+		const secret = "private-oauth-token-and-source";
+		const cmd: Command = {
+			tool: "publish_artifact",
+			namespaceId: repo.namespaceId,
+			repositoryId: repo.id,
+			workspaceId: f.workspace.id,
+			revision: f.base,
+			idempotencyKey: secret,
+			content: secret,
+			title: secret,
+		};
+		vi.mocked(f.host.ensure).mockRejectedValueOnce(Object.assign(new Error(secret), { name: secret }));
+		await expect(f.runtime.command(cmd, grant)).rejects.toThrow(secret);
+		const restart = new RepositoryRuntime(f.store, f.git, f.port, {}, () => 1001);
+		await restart.command(cmd, grant);
+		const reservation = f.w.state.reservations.find((r) => r.id === `${agent.id}:${secret}`)!;
+		expect(reservation.state).toBe("complete");
+		expect(f.w.state.reservations.filter((r) => r.id === reservation.id)).toHaveLength(1);
+		const records = log.mock.calls.map(([value]) => JSON.parse(value));
+		const settled = records.filter((r) => r.event === "resource_settled");
+		expect(settled.map((r) => r.phase)).toEqual(["uncertain", "complete"]);
+		for (const record of settled)
+			expect(record).toMatchObject({
+				namespaceId: await diagnosticId("namespaceId", repo.namespaceId),
+				repositoryId: await diagnosticId("repositoryId", repo.id),
+				workspaceId: await diagnosticId("workspaceId", f.workspace.id),
+				revision: await diagnosticId("revision", f.base),
+				operationId: await diagnosticId("operationId", reservation.id),
+				reservationId: await diagnosticId("reservationId", reservation.id),
+			});
+		expect(records.some((r) => r.event === "operation_failed" && r.status === 500)).toBe(true);
+		expect(JSON.stringify(records)).not.toContain(secret);
+	});
+	it("reconstructs the same pending evidence commit after cache loss and a later retry", async () => {
+		const f = await fixture();
+		const fields = { workspaceId: f.workspace.id, revision: f.base, content: "test report", idempotencyKey: "pending-evidence" };
+		f.push.mockRejectedValueOnce(new Error("retention response lost"));
+		await expect(f.call("publish_artifact", fields)).rejects.toThrow("response lost");
+		const ref = f.push.mock.calls.at(-1)![0].localRef;
+		const original = await f.git.resolve(ref);
+		f.git.resetCache();
+		const later = new RepositoryRuntime(f.store, f.git, f.port, {}, () => 50_000);
+		const artifact = (await later.command(
+			{ tool: "publish_artifact", namespaceId: repo.namespaceId, repositoryId: repo.id, ...fields },
+			grant,
+		)) as { storage: { revision: string } };
+		expect(artifact.storage.revision).toBe(original);
+		expect(f.w.state.reservations.filter((r) => r.action === "artifact.publish")).toHaveLength(1);
+	});
+	it("keeps provider inspection behind explicit identity, scope, policy and retry reservations", async () => {
+		const f = await fixture();
+		const source = {
+			log: vi.fn(async () => [{ hash: f.base }]),
+			readCommit: vi.fn(async () => ({ hash: f.base, parents: [], treeHash: f.base })),
+			readFile: vi.fn(async () => new Blob(["stored source"])),
+		};
+		f.host.withSource = vi.fn(async (_name, _id, run) => run(source as never));
+		const before = structuredClone(f.runtime.state());
+		const fields = { sourceView: "files" as const, revision: f.base, path: "README.md", idempotencyKey: "inspect-stored" };
+		expect(await f.call("inspect_source", fields)).toMatchObject({ file: { content: "stored source" } });
+		expect(await f.call("inspect_source", fields)).toMatchObject({ file: { content: "stored source" } });
+		expect(f.runtime.state()).toEqual(before);
+		expect(f.w.state.reservations.filter((r) => r.action === "source.read")).toHaveLength(1);
+		const calls = vi.mocked(f.host.withSource).mock.calls.length;
+		f.w.state.policy.rules["source.read"] = "deny";
+		await expect(f.call("inspect_source", fields)).rejects.toThrow("policy denies");
+		expect(f.host.withSource).toHaveBeenCalledTimes(calls);
+		await expect(f.call("inspect_source", fields, { ...grant, scopes: [] })).rejects.toThrow("authorized");
+		await expect(f.call("inspect_source", { ...fields, idempotencyKey: undefined })).rejects.toThrow("idempotency key");
+	});
 	it("forks canonical directly and keeps hosted identity out of local execution metadata", async () => {
 		const f = await fixture(true);
 		expect(f.host.fork).toHaveBeenCalledWith("repo-repo", expect.any(String), expect.any(String));
@@ -193,7 +268,7 @@ describe("repository runtime", () => {
 		expect(f.w.state.reservations.filter((r) => r.action === "workspace.cleanup")).toHaveLength(1);
 		expect(f.runtime.state().workspaces[0].baseRevision).toBe(f.base);
 	});
-	it("rejects unavailable hosted baselines before provisioning any fork resources", async () => {
+	it("reserves bounded baseline recovery but rejects unavailable source before provisioning a fork", async () => {
 		const f = await fixture(true);
 		const s = (await f.call("start_workspace", { title: "Missing base", baseRevision: "d".repeat(40) })) as Workspace;
 		const calls = vi.mocked(f.host.ensure).mock.calls.length,
@@ -205,7 +280,8 @@ describe("repository runtime", () => {
 			}),
 		).rejects.toThrow("unavailable");
 		expect(f.host.ensure).toHaveBeenCalledTimes(calls);
-		expect(f.w.state.reservations).toHaveLength(reservations);
+		expect(f.w.state.reservations).toHaveLength(reservations + 1);
+		expect(f.w.state.reservations.at(-1)?.state).toBe("uncertain");
 	});
 	it("pins a reconciled publication's review base across uncertain push retries even as upstream advances", async () => {
 		const f = await fixture();
@@ -651,6 +727,49 @@ describe("exact approved-base promotion", () => {
 		const restart = () => new RepositoryRuntime(f.store, f.git, f.port, {}, () => 1001);
 		return { ...f, proposal, middle, candidate, remote, cmd, run, restart };
 	}
+	it.each([false, true])("recovers retained source after cache loss before promotion (interrupted: %s)", async (interrupted) => {
+		const f = await prepared();
+		try {
+			const independent = new GitWorkspace(new MemoryFs() as never);
+			await independent.ensureInit();
+			await independent.importPack(await f.git.exportPack(f.candidate));
+			const artifact = f.runtime.state().artifacts.find((a) => a.id === f.proposal.artifactId)!;
+			f.remote.setRef(artifact.storage.ref!, f.candidate);
+			const metadata = async (oid: string) => {
+				const c = (await independent.log(oid, 1))[0];
+				return c
+					? {
+							hash: oid,
+							treeHash: f.base,
+							message: c.message,
+							parents: c.parents,
+							authoredAt: c.at,
+							committedAt: c.at,
+							author: { name: c.author, email: "fixture@local" },
+							committer: { name: c.author, email: "fixture@local" },
+						}
+					: null;
+			};
+			f.host.withSource = vi.fn(async (_name, _id, run) =>
+				run({ readCommit: metadata, log: async () => [await metadata(f.candidate)!] } as never),
+			);
+			if (interrupted) {
+				f.remote.afterUpdate = () => {
+					throw new Error("lost successful response");
+				};
+				await expect(f.run()).rejects.toThrow();
+				f.remote.afterUpdate = () => {};
+			}
+			f.git.resetCache();
+			await expect(f.call("get_source", { revision: f.candidate })).rejects.toThrow("explicitly recover");
+			expect(await f.run(f.restart())).toMatchObject({ state: "complete", from: f.base, to: f.candidate });
+			expect(f.remote.head()).toBe(f.candidate);
+			expect(f.remote.updates).toBe(1);
+			expect(f.host.fork).toHaveBeenCalledTimes(1);
+		} finally {
+			await f.remote.close();
+		}
+	});
 	it.each([
 		["beforeAdvertisement", "middle"],
 		["beforeUpdate", "middle"],
@@ -701,6 +820,7 @@ describe("exact approved-base promotion", () => {
 	});
 	it("reconciles a lost successful push response after restart without re-pushing", async () => {
 		const f = await prepared();
+		const log = vi.spyOn(console, "log").mockImplementation(() => {});
 		try {
 			f.remote.afterUpdate = () => {
 				throw new Error("response lost after ref update");
@@ -715,6 +835,23 @@ describe("exact approved-base promotion", () => {
 			expect(f.runtime.state().promotions).toHaveLength(1);
 			expect(f.runtime.state().activity.filter((e) => e.kind === "source_promoted")).toHaveLength(1);
 			expect(f.w.state.reservations.filter((r) => r.id === "human:exact-promotion")).toHaveLength(1);
+			const records = log.mock.calls.map(([value]) => JSON.parse(value));
+			const phases = records.filter((r) => r.event === "promotion_phase");
+			expect(phases.map((r) => r.phase)).toEqual(["prepared", "attempted", "uncertain", "attempted", "complete"]);
+			for (const record of phases)
+				expect(record).toMatchObject({
+					namespaceId: await diagnosticId("namespaceId", repo.namespaceId),
+					repositoryId: await diagnosticId("repositoryId", repo.id),
+					workspaceId: await diagnosticId("workspaceId", f.workspace.id),
+					proposalId: await diagnosticId("proposalId", f.proposal.id),
+					promotionId: await diagnosticId("promotionId", f.runtime.state().promotions[0].id),
+					revision: await diagnosticId("revision", f.candidate),
+					operationId: await diagnosticId("operationId", "human:exact-promotion"),
+					reservationId: await diagnosticId("reservationId", "human:exact-promotion"),
+				});
+			expect(records.some((r) => r.event === "operation_replayed" && r.phase === "complete")).toBe(true);
+			for (const value of ["response lost after ref update", "exact-promotion", "Keep retries bounded", f.candidate])
+				expect(JSON.stringify(records)).not.toContain(value);
 			expect(f.w.state.reservations.at(-1)?.state).toBe("complete");
 		} finally {
 			await f.remote.close();
@@ -723,19 +860,20 @@ describe("exact approved-base promotion", () => {
 	it.each(["confirmed", "complete"])("recovers a persistence failure at %s", async (phase) => {
 		const f = await prepared();
 		try {
-			const put = f.store.put.bind(f.store);
+			const batch = f.store.batch.bind(f.store);
 			let interrupted = false;
-			vi.spyOn(f.store, "put").mockImplementation((key, value) => {
-				const promotion = (value as import("../../src/shared/platform.ts").RepositoryState).promotions?.[0];
+			vi.spyOn(f.store, "batch").mockImplementation((entries) => {
+				const value = entries.find((entry) => entry.key === "repository")?.value;
+				const promotion = (value as import("../../src/shared/platform.ts").RepositoryState | undefined)?.promotions?.[0];
 				if (
 					!interrupted &&
-					key === "repository" &&
+					value &&
 					(phase === "complete" ? promotion?.state === "complete" : promotion?.operation?.phase === "confirmed")
 				) {
 					interrupted = true;
 					throw new Error("interrupted persistence");
 				}
-				put(key, value);
+				batch(entries);
 			});
 			await expect(f.run()).rejects.toThrow("interrupted persistence");
 			expect(f.remote.head()).toBe(f.candidate);
@@ -906,5 +1044,214 @@ describe("exact approved-base promotion", () => {
 		} finally {
 			await f.remote.close();
 		}
+	});
+});
+
+describe("authorized retention recovery (F6)", () => {
+	it("records inspectable blockers without deleting, and never treats expiry as deletion authority", async () => {
+		const f = await fixture();
+		vi.spyOn(f.git, "remoteRefs").mockResolvedValue([{ ref: "refs/heads/unpublished", oid: f.head }]);
+		const result = (await f.call("inspect_retention", { workspaceId: f.workspace.id })) as { refs: unknown[]; blockers: string[] };
+		expect(result).toMatchObject({ refs: [{ ref: "refs/heads/unpublished", revision: f.head, retained: false }] });
+		expect(result.blockers).toContain("Unretained fork refs; publish their commits before cleanup");
+		expect(f.host.remove).not.toHaveBeenCalled();
+		const read = await f.call("get_retention", { workspaceId: f.workspace.id });
+		expect(read).toMatchObject({ inspection: { refs: result.refs } });
+		const state = structuredClone(f.runtime.state());
+		const recovered = new RepositoryRuntime(f.store, f.git, f.port, {}, () => 10 ** 12, { schedule: vi.fn(), authorize: async (g) => g });
+		await recovered.recoverCleanup();
+		expect(f.runtime.state()).toEqual(state);
+		expect(f.host.remove).not.toHaveBeenCalled();
+	});
+	it.each(["delete-response", "confirmed-save", "settlement"])("recovers %s after restart using the same reservation", async (fault) => {
+		const f = await fixture();
+		await f.call("end_workspace", { workspaceId: f.workspace.id });
+		vi.spyOn(f.git, "remoteRefs").mockResolvedValue([{ ref: "refs/heads/trunk", oid: f.base }]);
+		let time = 1000,
+			requests = 0,
+			deleted = false;
+		const schedule = vi.fn(async (_at: number) => {}),
+			authorize = vi.fn(async (g: typeof grant) => g);
+		vi.mocked(f.host.remove).mockImplementation(async () => {
+			if (!deleted) {
+				requests++;
+				deleted = true;
+				if (fault === "delete-response") throw new Error("Lost deletion response");
+			}
+			return true;
+		});
+		if (fault === "confirmed-save") {
+			const batch = f.store.batch.bind(f.store);
+			let interrupted = false;
+			vi.spyOn(f.store, "batch").mockImplementation((entries) => {
+				const operation = entries.find((entry) => entry.key === `cleanup:${f.workspace.id}`)?.value as { phase?: string } | undefined;
+				if (!interrupted && operation?.phase === "confirmed") {
+					interrupted = true;
+					throw new Error("Lost confirmation persistence");
+				}
+				batch(entries);
+			});
+		}
+		if (fault === "settlement") {
+			const settle = f.port.settle;
+			let interrupted = false;
+			vi.spyOn(f.port, "settle").mockImplementation((id, state) => {
+				if (!interrupted && state === "complete") {
+					interrupted = true;
+					throw new Error("Lost settlement");
+				}
+				settle(id, state);
+			});
+		}
+		const cmd = {
+			tool: "cleanup_workspace",
+			namespaceId: repo.namespaceId,
+			repositoryId: repo.id,
+			workspaceId: f.workspace.id,
+			idempotencyKey: "durable-cleanup",
+		};
+		let runtime = new RepositoryRuntime(f.store, f.git, f.port, {}, () => time, { schedule, authorize });
+		await expect(runtime.command(cmd, grant)).rejects.toThrow();
+		expect(schedule).toHaveBeenCalled();
+		expect(runtime.state().workspaces[0].cleanup?.state).toBe("pending");
+		time += 3_600_000;
+		runtime = new RepositoryRuntime(f.store, f.git, f.port, {}, () => time, { schedule, authorize });
+		await runtime.recoverCleanup();
+		expect(requests).toBe(1);
+		expect(runtime.state().workspaces[0]).toMatchObject({ fork: { state: "deleted" }, cleanup: { state: "complete", phase: "confirmed" } });
+		expect(runtime.state().activity.filter((event) => event.kind === "fork_deleted")).toHaveLength(1);
+		expect(f.w.state.reservations.filter((r) => r.action === "workspace.cleanup")).toHaveLength(1);
+		expect(f.w.state.reservations.at(-1)?.state).toBe("complete");
+		const calls = vi.mocked(f.host.remove).mock.calls.length;
+		await runtime.recoverCleanup();
+		expect(f.host.remove).toHaveBeenCalledTimes(calls);
+	});
+	it.each(["membership", "policy", "scope", "identity"])("blocks background recovery after %s changes", async (change) => {
+		const f = await fixture();
+		await f.call("end_workspace", { workspaceId: f.workspace.id });
+		vi.spyOn(f.git, "remoteRefs").mockResolvedValue([{ ref: "refs/heads/trunk", oid: f.base }]);
+		vi.mocked(f.host.remove).mockResolvedValueOnce(false);
+		let time = 1000;
+		const authorize = async (g: typeof grant) => (change === "scope" && time > 1000 ? { ...g, scopes: ["cruce:read"] } : g);
+		let runtime = new RepositoryRuntime(f.store, f.git, f.port, {}, () => time, { schedule: vi.fn(), authorize });
+		await runtime.command(
+			{
+				tool: "cleanup_workspace",
+				namespaceId: repo.namespaceId,
+				repositoryId: repo.id,
+				workspaceId: f.workspace.id,
+				idempotencyKey: "bounded-cleanup",
+			},
+			grant,
+		);
+		if (change === "membership") delete f.w.state.members.owner;
+		if (change === "policy") f.w.state.policy.rules["workspace.cleanup"] = "deny";
+		if (change === "identity")
+			vi.mocked(f.host.remove).mockRejectedValueOnce(
+				new (await import("../../src/worker/provider-identity.ts")).ProviderIdentityError("Replacement provider repository"),
+			);
+		time += 3_600_000;
+		runtime = new RepositoryRuntime(f.store, f.git, f.port, {}, () => time, { schedule: vi.fn(), authorize });
+		await runtime.recoverCleanup();
+		expect(runtime.state().workspaces[0].cleanup?.state).toBe("blocked");
+		expect(runtime.state().workspaces[0].fork?.state).toBe("deleting");
+		expect(f.w.state.reservations.at(-1)?.state).toBe("uncertain");
+		expect(f.host.remove).toHaveBeenCalledTimes(change === "identity" ? 2 : 1);
+	});
+	it("bounds remote ref inspection and preserves the full inventory when refusing cleanup", async () => {
+		const f = await fixture();
+		await f.call("end_workspace", { workspaceId: f.workspace.id });
+		vi.spyOn(f.git, "remoteRefs").mockResolvedValue(Array.from({ length: 257 }, (_, n) => ({ ref: `refs/heads/${n}`, oid: f.base })));
+		await expect(f.call("cleanup_workspace", { workspaceId: f.workspace.id })).rejects.toThrow("inventory exceeds");
+		expect(f.runtime.state().workspaces[0].retention).toMatchObject({ complete: false, refs: [] });
+		expect(f.host.remove).not.toHaveBeenCalled();
+	});
+});
+
+describe("bounded retained state (F6)", () => {
+	it("archives activity and replays the original receipt after the hot history window has advanced", async () => {
+		const f = await fixture();
+		const controller = new (await import("../../src/core/platform.ts")).RepositoryController(f.runtime.state(), 1000, () => "unused");
+		for (let n = 0; n < 205; n++) controller.event(agent, "measured_event", `Event ${n}`, [f.workspace.id]);
+		f.runtime.save(controller);
+		expect(f.runtime.state().activity).toHaveLength(100);
+		expect(f.runtime.state().receipts).toEqual({});
+		const first = (await f.call("get_activity")) as { items: unknown[]; cursor: string };
+		expect(first.items).toHaveLength(100);
+		const second = (await f.call("get_activity", { cursor: first.cursor })) as { items: unknown[]; cursor: string };
+		expect(second.items).toHaveLength(100);
+		const third = (await f.call("get_activity", { cursor: second.cursor })) as { items: unknown[]; cursor?: string };
+		expect(third.items.length).toBeGreaterThan(5);
+		expect(third.cursor).toBeUndefined();
+		const before = f.runtime.state();
+		const replay = (await f.call("start_workspace", { idempotencyKey: "key-1", title: "Retry", baseRevision: f.base })) as Workspace;
+		expect(replay.id).toBe(f.workspace.id);
+		expect(f.runtime.state()).toEqual(before);
+		await expect(f.call("start_workspace", { idempotencyKey: "key-1", title: "Changed input", baseRevision: f.base })).rejects.toThrow(
+			"identity reused",
+		);
+	});
+	it("rejects publication at the retained record ceiling before reserving or contacting the provider", async () => {
+		const f = await fixture();
+		const state = f.runtime.state();
+		state.artifacts = Array.from({ length: 1024 }, (_, n) => ({
+			id: `evidence-${n}`,
+			namespaceId: repo.namespaceId,
+			repositoryId: repo.id,
+			workspaceId: f.workspace.id,
+			actor: agent,
+			revision: f.head,
+			kind: "evidence",
+			title: "Evidence",
+			contentHash: "digest",
+			trust: "reported",
+			storage: { repository: "retained", providerId: "retained-id", revision: f.head },
+			at: 1000,
+		}));
+		f.store.put("repository", state);
+		const charged = f.w.state.reservations.length,
+			calls = vi.mocked(f.host.ensure).mock.calls.length;
+		await expect(
+			f.call("publish_artifact", { workspaceId: f.workspace.id, revision: f.head, title: "Extra", content: "Evidence" }),
+		).rejects.toThrow("capacity reached");
+		expect(f.w.state.reservations).toHaveLength(charged);
+		expect(f.host.ensure).toHaveBeenCalledTimes(calls);
+	});
+	it("finishes an already explicitly requested deletion when its original caller retries", async () => {
+		const f = await fixture();
+		await f.call("end_workspace", { workspaceId: f.workspace.id });
+		const state = f.runtime.state();
+		state.workspaces[0].fork!.state = "deleting";
+		f.store.put("repository", state);
+		expect(await f.call("cleanup_workspace", { workspaceId: f.workspace.id })).toMatchObject({ state: "deleted" });
+		expect(f.host.remove).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("compact immutable observation replies", () => {
+	it("shares unchanged workspace snapshots while replaying exact historic results, and refuses a missing template", async () => {
+		const f = await fixture();
+		let now = 2000;
+		const runtime = new RepositoryRuntime(f.store, f.git, f.port, {}, () => now);
+		const command = {
+			tool: "heartbeat",
+			namespaceId: repo.namespaceId,
+			repositoryId: repo.id,
+			workspaceId: f.workspace.id,
+			execution: f.execution,
+			idempotencyKey: "first-beat",
+		};
+		const original = await runtime.command(command, grant);
+		now = 3000;
+		await runtime.command({ ...command, idempotencyKey: "second-beat" }, grant);
+		expect(f.store.scan("workspace-result:")).toHaveLength(1);
+		const before = runtime.state();
+		now = 4000;
+		expect(await runtime.command(command, grant)).toEqual(original);
+		expect(runtime.state()).toEqual(before);
+		const row = f.store.scan("workspace-result:")[0];
+		f.store.delete(row.key);
+		await expect(runtime.command(command, grant)).rejects.toThrow("Retained operation result unavailable");
+		expect(runtime.state()).toEqual(before);
 	});
 });

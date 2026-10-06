@@ -52,6 +52,7 @@ function fixture() {
 			resolve: (v: { tenantId: string; developerId: string }) => directory.resolve(v.tenantId, v.developerId),
 			namespace: (id: string) => directory.state.namespaces.find((w) => w.id === id)!,
 			namespaces: () => directory.state.namespaces,
+			candidate: vi.fn(),
 			users: () => [user],
 		};
 	});

@@ -231,7 +231,7 @@ export function App() {
 		};
 	}, [route.namespaceId, route.repositoryId, refresh]);
 
-	const mutate = async <T,>(url: string, body: Record<string, unknown>, method = "POST") => {
+	const mutate = async <T,>(url: string, body: Record<string, unknown>, method = "POST", refreshAfter = true) => {
 		const fingerprint = JSON.stringify({ url, body, method }),
 			key = (body.idempotencyKey as string | undefined) ?? retries.current.get(fingerprint) ?? crypto.randomUUID();
 		retries.current.set(fingerprint, key);
@@ -244,13 +244,14 @@ export function App() {
 			method,
 		);
 		retries.current.delete(fingerprint);
-		reload();
+		if (refreshAfter) reload();
 		return result;
 	};
 	const execute = async (command: Partial<Command> & { tool: string }) => {
 		if (!view) throw new Error("Repository unavailable");
 		const url = `/api/namespaces/${route.namespaceId}/repositories/${route.repositoryId}/command`;
 		if (command.tool.startsWith("get_") || command.tool === "read_artifact") return request(url, command);
+		if (command.tool === "inspect_source" || command.tool === "recover_source") return mutate(url, command, "POST", false);
 		setBusy(true);
 		try {
 			const result = await mutate(url, command);

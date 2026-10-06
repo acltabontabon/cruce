@@ -5,6 +5,25 @@ const ok = (result: unknown) => new Response(JSON.stringify({ success: true, err
 const ACCOUNT = "0123456789abcdef0123456789abcdef";
 
 describe("resource boundary", () => {
+	it("uses native REST commit/tree/file/history routes with bounded content and identity checks", async () => {
+		const send = vi.fn(async (url: string | URL | Request) => {
+			const u = new URL(String(url));
+			if (u.pathname.endsWith("/repos/repo")) return ok({ id: "stable", name: "repo" });
+			if (u.pathname.endsWith("/file")) return new Response("source");
+			return ok([]);
+		}) as unknown as typeof fetch;
+		const host = new ArtifactsRestHost(ACCOUNT, "cruce", "private", send);
+		expect(
+			await host.withSource("repo", "stable", async (source) => {
+				await source.readCommit("a".repeat(40));
+				await source.readTree("b".repeat(40));
+				await source.log({ ref: "a".repeat(40), limit: 30 });
+				return (await source.readFile({ ref: "a".repeat(40), path: "src/a b.txt" }))!.text();
+			}),
+		).toBe("source");
+		expect(vi.mocked(send).mock.calls.map(([u]) => String(u))).toContainEqual(expect.stringContaining("path=src%2Fa+b.txt"));
+		await expect(host.withSource("repo", "replacement", (source) => source.log())).rejects.toThrow("identity changed");
+	});
 	it("uses 60-second repository tokens through the REST API and revokes them", async () => {
 		const calls: string[] = [];
 		const send = (async (url: string | URL | Request, init?: RequestInit) => {

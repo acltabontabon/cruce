@@ -4,7 +4,7 @@ import type { Proposal, RepositorySnapshot } from "../shared/platform.ts";
 import { ChangeDetail } from "./change.tsx";
 import { Form, value } from "./controls.tsx";
 import { BackLink, CopyCommand, Dialog, Icon, Initials, PageHeader, Pill, Section, SettingRow } from "./design.tsx";
-import { RetainedRecordDetail, RetainedRecordRow } from "./records.tsx";
+import { RetainedActivity, RetainedRecordDetail, RetainedRecordRow } from "./records.tsx";
 import { type Execute, RevisionBrowser } from "./source.tsx";
 import {
 	activityText,
@@ -374,6 +374,7 @@ function HistoryScreen({ view, id, execute, open }: { view: RepositorySnapshot; 
 					) : (
 						<p className="panel-note">No activity yet.</p>
 					)}
+					<RetainedActivity execute={execute} />
 				</Section>
 			</div>
 			<aside className="overview-side" aria-label="Retained records">
@@ -474,6 +475,31 @@ function RepositorySettings({
 	const manage = view.permissions.maintain && namespace;
 	return (
 		<div className="settings">
+			{view.capacity && (
+				<SettingRow
+					title="Coordination capacity"
+					detail="Retained records are never deleted by expiry. New work stops at the supported capacity; authorized recovery keeps reserved headroom."
+				>
+					<dl className="facts">
+						<dt>Current state</dt>
+						<dd>
+							{Math.ceil(view.capacity.stateBytes / 1024)} / {view.capacity.limits.stateBytes / 1024} KiB
+						</dd>
+						<dt>Retained coordination records</dt>
+						<dd>
+							{view.capacity.records} / {view.capacity.limits.storeRecords}
+						</dd>
+						<dt>Stored coordination data</dt>
+						<dd>
+							{(view.capacity.bytes / 1024 / 1024).toFixed(2)} / {view.capacity.limits.storeBytes / 1024 / 1024} MiB
+						</dd>
+						<dt>Workspaces</dt>
+						<dd>
+							{view.workspaces.length} / {view.capacity.limits.workspaces}
+						</dd>
+					</dl>
+				</SettingRow>
+			)}
 			<SettingRow
 				title="Connect"
 				detail="Clone canonical, connect a coding tool and start a workspace. Cruce coordinates the work; your tools run it."

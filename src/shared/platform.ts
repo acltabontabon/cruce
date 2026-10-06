@@ -63,6 +63,7 @@ export const RESOURCE_ACTIONS = [
 	"workspace.cleanup",
 	"revision.publish",
 	"artifact.publish",
+	"source.read",
 ] as const;
 export type ResourceAction = (typeof RESOURCE_ACTIONS)[number];
 export type ResourceRule = "allow" | "approval" | "deny";
@@ -91,6 +92,8 @@ export interface NamespaceState {
 	policy: ResourcePolicy;
 	reservations: ResourceReservation[];
 	version: number;
+	/** Adapter-projected daily charge counter; historical reservations are stored separately. */
+	reservationUsage?: { day: number; used: number };
 }
 /** Local materialization and ownership metadata; the Workspace remains the durable work identity. */
 export interface ExecutionContext {
@@ -130,6 +133,17 @@ export interface Workspace {
 	branch?: string;
 	execution?: ExecutionAttachment;
 	fork?: { name: string; id: string; remote: string; state: "ready" | "deleting" | "deleted" };
+	retention?: RetentionInspection;
+	cleanup?: {
+		operationId: string;
+		actorId: string;
+		command?: Command;
+		state: "pending" | "blocked" | "complete";
+		phase: "authorized" | "deleting" | "confirmed";
+		attempts: number;
+		nextAttempt?: number;
+		reason?: string;
+	};
 	/** `disconnected` is derived presence for snapshots, never stored. */
 	state: "preparing" | "active" | "detached" | "disconnected" | "completed" | "cancelled";
 	startedAt: number;
@@ -139,6 +153,13 @@ export interface Workspace {
 	commits: string[];
 	publishedRevision?: string;
 	integratedRevision?: string;
+}
+export interface RetentionInspection {
+	checkedAt: number;
+	forkId: string;
+	complete: boolean;
+	refs: { ref: string; revision: string; retained: boolean; reason?: "unretained" | "unavailable" }[];
+	blockers: string[];
 }
 export interface WorkspaceUpdates {
 	baselineRevision: string;
@@ -245,7 +266,7 @@ export interface RepositoryState {
 	verifications: Verification[];
 	promotions: Promotion[];
 	activity: ActivityEvent[];
-	receipts: Record<string, { fingerprint: string; result: unknown }>;
+	receipts: Record<string, { fingerprint: string; result: unknown; workspaceResult?: { templateId: string; lastActivity: number } }>;
 	sourceHead?: string;
 	canonical?: { id: string; name: string; remote: string };
 }
@@ -275,6 +296,7 @@ export interface RepositorySnapshot extends Omit<RepositoryState, "receipts"> {
 	executionRelease: Record<string, { ready: boolean; reasons: string[] }>;
 	/** Canonical storage is missing after a failed creation; `retry` says whether this viewer may replay setup. */
 	canonicalSetup: { required: boolean; retry: boolean };
+	capacity?: { bytes: number; records: number; stateBytes: number; limits: typeof import("./limits.ts").STATE_LIMITS };
 }
 
 export const id = z.string().min(1).max(160);
@@ -349,6 +371,8 @@ export const CommandInput = z
 		humanAttested: z.boolean().optional(),
 		ref: branch.optional(),
 		path: path.optional(),
+		cursor: z.string().max(1000).optional(),
+		sourceView: z.enum(["files", "history", "diff", "artifact"]).optional(),
 	})
 	.strict();
 export type Command = z.infer<typeof CommandInput>;

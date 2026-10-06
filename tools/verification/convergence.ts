@@ -13,7 +13,7 @@ import { MemoryFs } from "../../src/worker/git/memory-fs.ts";
 import { GitWorkspace } from "../../src/worker/git/workspace.ts";
 import type { ConnectionGrant } from "../../src/worker/namespace-runtime.ts";
 import { RepositoryRuntime } from "../../src/worker/repository-runtime.ts";
-import type { Store } from "../../src/worker/store.ts";
+import { memoryStore, type Store } from "../../src/worker/store.ts";
 
 export const CONVERGENCE_TIME = 1791158400000;
 export const CONVERGENCE_BUDGET = 20;
@@ -55,6 +55,7 @@ export async function nativeGit(args: string[], token?: string) {
 export function convergenceRuntime(namespace: string) {
 	const values = new Map<string, unknown>();
 	const store: Store = {
+		...memoryStore(values),
 		get: <T>(key: string) => structuredClone(values.get(key)) as T | undefined,
 		put: (key, value) => {
 			values.set(key, structuredClone(value));
@@ -358,7 +359,7 @@ export async function runConvergenceScenario(f: ConvergenceRuntime, host: Reposi
 			reason: "Fixture approval exercises the failing-evidence safeguard; this source remains incorrect",
 		});
 		assert.deepEqual(readiness(incompatible.proposal).reasons, ["Trusted passing tests evidence required"]);
-		await assert.rejects(f.call("promote_proposal", { proposalId: incompatible.proposal.id }), /Trusted passing tests evidence required/);
+		await assert.rejects(f.call("promote_proposal", { proposalId: incompatible.proposal.id }), /Promotion is blocked/);
 		assert.equal(await remoteHead(), a1);
 		progress("fetch does not incorporate; clean two-parent merge fails exact 2000 ms assertion with 2 ms");
 		const b2 = await commit(b, "repair", "Convert retry seconds to milliseconds");

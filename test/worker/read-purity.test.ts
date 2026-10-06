@@ -53,7 +53,23 @@ function database() {
 	});
 	return {
 		sql: { exec } as unknown as SqlStorage,
-		ctx: { storage: { sql: { exec } } } as unknown as DurableObjectState,
+		ctx: {
+			storage: {
+				sql: { exec },
+				transactionSync: <T>(run: () => T) => {
+					db.exec("SAVEPOINT fixture");
+					try {
+						const value = run();
+						db.exec("RELEASE fixture");
+						return value;
+					} catch (error) {
+						db.exec("ROLLBACK TO fixture");
+						db.exec("RELEASE fixture");
+						throw error;
+					}
+				},
+			},
+		} as unknown as DurableObjectState,
 		freeze: () => {
 			readOnly = true;
 			exec.mockClear();
@@ -387,9 +403,7 @@ describe("pure coordination reads through persisted adapters", () => {
 	});
 	it("does not create an unknown authenticated identity on API or MCP reads", async () => {
 		const f = await fixture();
-		const directoryState = sqlStore(f.d.sql).get<import("../../src/core/ownership.ts").DirectoryState>("directory")!;
-		directoryState.users = [];
-		sqlStore(f.d.sql).put("directory", directoryState);
+		sqlStore(f.d.sql).delete(`identity:${JSON.stringify([identity.tenantId, identity.developerId])}`);
 		const before = f.snapshot();
 		f.freeze();
 		f.restart();

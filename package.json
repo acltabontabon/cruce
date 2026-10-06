@@ -20,6 +20,7 @@
 		"release:check": "node tools/check-release.mjs",
 		"test:browser": "node --test test/browser/console.browser.mjs",
 		"verify:cloud": "tsx tools/verify-cloud.ts",
+		"verify:limits": "tsx tools/measure-state.ts",
 		"verify:scenario": "tsx tools/verify-scenario.ts && bash demo/scripts/verify-scenario.sh",
 		"dev:fixture": "node test/browser/server.mjs",
 		"setup:check": "node tools/installation-config.mjs"

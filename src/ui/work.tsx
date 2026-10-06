@@ -250,6 +250,43 @@ export function WorkspaceDetail({ view, id, execute, open }: { view: RepositoryS
 										Workspace fork{" "}
 										{w.fork.state === "ready" ? "is available" : w.fork.state === "deleting" ? "is being deleted" : "was deleted"}.
 									</p>
+									{w.cleanup && (
+										<p role="status">
+											{w.cleanup.state === "pending"
+												? `Authorized cleanup will recover automatically. Attempt ${w.cleanup.attempts}.`
+												: (w.cleanup.reason ?? "Authorized cleanup completed.")}
+										</p>
+									)}
+									{w.retention && (
+										<section aria-label="Retention blockers">
+											<p>
+												Last checked {ago(w.retention.checkedAt)}.{" "}
+												{w.retention.complete ? "Ref inventory complete." : "Ref inventory incomplete."}
+											</p>
+											{w.retention.blockers.map((blocker) => (
+												<p key={blocker}>{blocker}</p>
+											))}
+											<ul className="file-list">
+												{w.retention.refs
+													.filter((ref) => !ref.retained)
+													.map((ref) => (
+														<li key={ref.ref}>
+															<code>{ref.ref}</code>
+															<code>{short(ref.revision)}</code>
+															<span>{ref.reason === "unavailable" ? "retention unavailable" : "not retained"}</span>
+														</li>
+													))}
+											</ul>
+										</section>
+									)}
+									{w.fork.state === "ready" && (
+										<div>
+											<button type="button" className="ghost" onClick={() => run({ tool: "inspect_retention", workspaceId: w.id })}>
+												Inspect retention
+											</button>
+											<small className="muted">Checks cloud storage using one namespace operation. Inspection never deletes a fork.</small>
+										</div>
+									)}
 									{w.fork.state === "ready" && (
 										<CopyCommand
 											text={`git fetch ${location.origin}${gitRemotePath(view.repository.namespaceId, view.repository.id, w.id)}`}
@@ -260,11 +297,15 @@ export function WorkspaceDetail({ view, id, execute, open }: { view: RepositoryS
 											<button
 												type="button"
 												className="ghost"
-												disabled={!cleanup?.ready}
+												disabled={!cleanup?.ready || (!!w.cleanup && !w.cleanup.command)}
 												title={cleanup?.reasons.join("; ")}
-												onClick={() => run({ tool: "cleanup_workspace", workspaceId: w.id })}
+												onClick={() => run(w.cleanup?.command ?? { tool: "cleanup_workspace", workspaceId: w.id })}
 											>
-												{w.fork.state === "deleting" ? "Check fork deletion" : "Delete fork"}
+												{w.cleanup?.state === "blocked"
+													? "Retry authorized deletion"
+													: w.fork.state === "deleting"
+														? "Check fork deletion"
+														: "Delete fork"}
 											</button>
 											<small className="muted">
 												{!cleanup?.ready && cleanup?.reasons.length

@@ -44,7 +44,14 @@ describe("canonical Git product boundary", () => {
 		expect(SCOPES).not.toContain("preview:request");
 		expect(DEFAULT_AGENT_SCOPES).not.toContain("preview:request");
 		expect(SCOPE_LABELS).not.toHaveProperty("preview:request");
-		expect(RESOURCE_ACTIONS).toEqual(["repository.create", "workspace.fork", "workspace.cleanup", "revision.publish", "artifact.publish"]);
+		expect(RESOURCE_ACTIONS).toEqual([
+			"repository.create",
+			"workspace.fork",
+			"workspace.cleanup",
+			"revision.publish",
+			"artifact.publish",
+			"source.read",
+		]);
 		const snapshot = controller().snapshot(authority());
 		expect(snapshot).not.toHaveProperty("environments");
 		expect(snapshot).not.toHaveProperty("deployments");
@@ -182,6 +189,19 @@ describe("namespace ownership", () => {
 		expect(() => c.reserve(a, "operation", "exact inputs", "workspace.fork", "workspace")).toThrow("Human");
 		c.state.repositories[0].policy.resourceRules["workspace.fork"] = "deny";
 		expect(() => c.reserve(a, "operation", "exact inputs", "workspace.fork", "workspace")).toThrow("policy denies");
+	});
+	it("gates explicit source reads for repository readers and rechecks policy before retry", () => {
+		const c = namespace();
+		c.repository(authority(), repo);
+		const reader = { ...authority(agent), repositoryRole: "read" as const };
+		const r = c.reserve(reader, "inspect", "exact revision", "source.read");
+		expect(c.reserve(reader, "inspect", "exact revision", "source.read")).toBe(r);
+		expect(c.budget().used).toBe(1);
+		expect(() => c.reserve(reader, "publish", "revision", "revision.publish")).toThrow("write permission");
+		c.state.repositories[0].policy.resourceRules["source.read"] = "approval";
+		expect(() => c.reserve(reader, "inspect", "exact revision", "source.read")).toThrow("Human");
+		c.state.policy.rules["source.read"] = "deny";
+		expect(() => c.reserve(authority(), "inspect2", "exact revision", "source.read")).toThrow("policy denies");
 	});
 });
 describe("actor-neutral workspaces", () => {

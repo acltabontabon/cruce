@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Actor, Repository } from "../../src/shared/platform.ts";
 import type { StorageEnv } from "../../src/worker/artifacts.ts";
 import { NamespaceRuntime } from "../../src/worker/namespace-runtime.ts";
-import type { Store } from "../../src/worker/store.ts";
+import { memoryStore, type Store } from "../../src/worker/store.ts";
 
 vi.mock("cloudflare:workers", () => ({
 	DurableObject: class {
@@ -12,11 +12,12 @@ vi.mock("cloudflare:workers", () => ({
 		) {}
 	},
 }));
-vi.mock("../../src/worker/store.ts", () => ({ sqlStore: (store: Store) => store }));
+vi.mock("../../src/worker/store.ts", async (original) => ({ ...(await original<object>()), sqlStore: (store: Store) => store }));
 const owner: Actor = { id: "owner", userId: "owner", kind: "human", name: "Owner" };
 function fixture() {
 	const data = new Map<string, unknown>();
 	const store: Store = {
+		...memoryStore(data),
 		get: <T>(key: string) => structuredClone(data.get(key)) as T | undefined,
 		put: vi.fn((key, value) => {
 			data.set(key, structuredClone(value));
@@ -55,32 +56,34 @@ describe("namespace storage gate", () => {
 		expect(f.store.put).not.toHaveBeenCalled();
 		expect(f.get).not.toHaveBeenCalled();
 	});
-	it("reserves resources without a customer account and reuses the reservation on retry", () => {
+	it("reserves resources without a customer account and reuses the reservation on retry", async () => {
 		const f = fixture();
-		const first = f.runtime.reserve({ actor: owner }, "repo", "operation", "input", "repository.create");
-		expect(f.runtime.reserve({ actor: owner }, "repo", "operation", "input", "repository.create").id).toBe(first.id);
+		const first = await f.runtime.reserve({ actor: owner }, "repo", "operation", "input", "repository.create");
+		expect((await f.runtime.reserve({ actor: owner }, "repo", "operation", "input", "repository.create")).id).toBe(first.id);
 		expect(f.runtime.snapshot({ actor: owner }).reservations).toHaveLength(1);
 		expect(f.runtime.resourceConfiguration().binding).toEqual({ accountId: "a".repeat(32), namespace: "cruce" });
 		expect(f.data.has("resource-account")).toBe(false);
 		expect(f.get).not.toHaveBeenCalled();
 	});
-	it("checks current authority and namespace budgets before pinning storage", () => {
+	it("checks current authority and namespace budgets before pinning storage", async () => {
 		const f = fixture();
-		expect(() =>
+		await expect(
 			f.runtime.reserve({ actor: { ...owner, id: "outsider", userId: "outsider" } }, "repo", "denied", "input", "repository.create"),
-		).toThrow();
+		).rejects.toThrow();
 		const policy = f.runtime.snapshot({ actor: owner }).policy;
 		f.runtime.policy({ actor: owner }, { ...policy, dailyLimit: 0 });
-		expect(() => f.runtime.reserve({ actor: owner }, "repo", "budget", "input", "repository.create")).toThrow();
+		await expect(f.runtime.reserve({ actor: owner }, "repo", "budget", "input", "repository.create")).rejects.toThrow();
 		expect(f.runtime.resourceConfiguration().binding).toBeUndefined();
 		expect(f.runtime.snapshot({ actor: owner }).reservations).toHaveLength(0);
 		expect(f.get).not.toHaveBeenCalled();
 	});
-	it("rejects a changed deployment binding even on reservation replay", () => {
+	it("rejects a changed deployment binding even on reservation replay", async () => {
 		const f = fixture();
-		f.runtime.reserve({ actor: owner }, "repo", "operation", "input", "repository.create");
+		await f.runtime.reserve({ actor: owner }, "repo", "operation", "input", "repository.create");
 		f.env.CRUCE_STORAGE_ACCOUNT_ID = "b".repeat(32);
-		expect(() => f.runtime.reserve({ actor: owner }, "repo", "operation", "input", "repository.create")).toThrow("identity changed");
+		await expect(f.runtime.reserve({ actor: owner }, "repo", "operation", "input", "repository.create")).rejects.toThrow(
+			"identity changed",
+		);
 		expect(f.runtime.snapshot({ actor: owner }).reservations).toHaveLength(1);
 		expect(f.get).not.toHaveBeenCalled();
 	});

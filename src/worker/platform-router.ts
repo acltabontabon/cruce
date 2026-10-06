@@ -3,8 +3,11 @@ import { namespaceMaintain, SCOPES, type Scope } from "../core/capabilities.ts";
 import { DomainError, requireValue } from "../core/errors.ts";
 import { repositorySummary } from "../shared/coordination.ts";
 import { parseGitRoute } from "../shared/git-access.ts";
+import { TRANSFER_LIMITS } from "../shared/limits.ts";
 import { type Actor, branch, CommandInput, id, name, path, RESOURCE_ACTIONS, type Repository } from "../shared/platform.ts";
+import { boundedBody } from "./artifacts.ts";
 import { type AuthEnv, type AuthProps, consoleIdentity, validateIdentity } from "./auth.ts";
+import { cleanupTokenGrant } from "./continuation.ts";
 import type { ControlTower } from "./control-tower.ts";
 import { namespaceDirectory } from "./directory-access.ts";
 import { remoteMcp } from "./mcp.ts";
@@ -15,8 +18,7 @@ export interface PlatformEnv extends AuthEnv {
 }
 export const json = (data: unknown, status = 200) => Response.json(data, { status, headers: { "cache-control": "no-store" } });
 export async function input(request: Request) {
-	const raw = await request.text();
-	if (new TextEncoder().encode(raw).length > 45 * 1024 * 1024) throw new DomainError(413, "Request too large");
+	const raw = new TextDecoder().decode(await boundedBody(request, TRANSFER_LIMITS.commandBytes, "Request too large"));
 	try {
 		return JSON.parse(raw) as unknown;
 	} catch {
@@ -32,6 +34,8 @@ const repositoryInput = z.object({
 });
 const humanBridgeTools = new Set([
 	"get_repository",
+	"get_activity",
+	"get_retention",
 	"get_workspace",
 	"list_active_workspaces",
 	"inspect_overlap",
@@ -99,7 +103,7 @@ export async function platformRoute(
 	}
 	const namespaces = async () => {
 		const allowed = [];
-		for (const w of await directory.namespaces())
+		for (const w of await directory.namespaces(user.id))
 			try {
 				const view = await env.NAMESPACE.getByName(w.id).snapshot(grant);
 				if (!props || view.repositories.length) allowed.push(w);
@@ -119,6 +123,14 @@ export async function platformRoute(
 				throw new DomainError(403, "Human bridge workspace scope denied");
 			// The repository DO enforces workspace binding atomically, including lost-response retries.
 		}
+		if (cmd.tool === "cleanup_workspace") {
+			if (bridge) grant.continuation = { kind: "terminal", key: bridge.tokenKey };
+			else if (!props) grant.continuation = { kind: "console" };
+			else {
+				const token = (ctx as ExecutionContext & { auth?: { token?: string } }).auth?.token;
+				Object.assign(grant, await cleanupTokenGrant(grant, token, env.OAUTH_KV));
+			}
+		}
 		const result = await env.CONTROL_TOWER.getByName(repo.id).command(repo, cmd, grant);
 		if (bridge && cmd.tool === "start_workspace") {
 			bridge.workspaceId = (result as { id: string }).id;
@@ -126,11 +138,16 @@ export async function platformRoute(
 		}
 		return result;
 	};
-	if (url.pathname === "/mcp")
+	if (url.pathname === "/mcp") {
+		const bounded =
+			request.method === "POST"
+				? new Request(request, { body: await boundedBody(request, TRANSFER_LIMITS.commandBytes, "Request too large") })
+				: request;
 		return remoteMcp(
 			execute,
 			scopes?.filter((s): s is Scope => (SCOPES as readonly string[]).includes(s)),
-		)(request, env, ctx);
+		)(bounded, env, ctx);
+	}
 	if (url.pathname === "/mcp/command" || url.pathname === "/bridge/command") {
 		if (request.method !== "POST") throw new DomainError(405, "POST required");
 		return json(await execute(await input(request)));
@@ -152,6 +169,7 @@ export async function platformRoute(
 		namespace = env.NAMESPACE.getByName(namespaceId);
 	if (parts[3] === "accept" && request.method === "POST") {
 		const body = z.object({ token: z.string().min(20).max(200) }).parse(await input(request));
+		await directory.candidate(user.id, namespaceId);
 		await namespace.accept({ ...user, email: identity.email }, await hash(body.token));
 		return json({ accepted: true });
 	}
@@ -193,6 +211,7 @@ export async function platformRoute(
 	if (parts[3] === "members" && request.method === "POST") {
 		const body = z.object({ userId: id, role: role.optional() }).parse(await input(request));
 		await directory.user(body.userId);
+		if (body.role) await directory.candidate(body.userId, namespaceId);
 		await namespace.member(grant, body.userId, body.role);
 		return json({ saved: true });
 	}
@@ -207,6 +226,8 @@ export async function platformRoute(
 		await namespace.invite(grant, { id: crypto.randomUUID(), ...body, tokenHash: await hash(token), expiresAt: Date.now() + 7 * 86400000 });
 		return json({ url: `${url.origin}/invite/${namespaceId}#${token}` });
 	}
+	if (parts[3] === "reservations" && request.method === "GET")
+		return json(await namespace.reservations(grant, url.searchParams.get("cursor") ?? undefined));
 	if (parts[3] === "policy" && request.method === "POST") {
 		const body = z
 			.object({
@@ -269,6 +290,16 @@ export async function platformRoute(
 	}
 	if (request.method === "GET") {
 		const tower = env.CONTROL_TOWER.getByName(repo.id);
+		if (parts[5] === "retention" && parts[6])
+			return json(await tower.command(repo, { tool: "get_retention", namespaceId, repositoryId, workspaceId: parts[6] }, grant));
+		if (parts[5] === "activity" && !parts[6] && url.searchParams.has("cursor"))
+			return json(
+				await tower.command(
+					repo,
+					{ tool: "get_activity", namespaceId, repositoryId, cursor: url.searchParams.get("cursor") ?? undefined },
+					grant,
+				),
+			);
 		if (parts[5] === "export") {
 			const revision = z
 				.string()

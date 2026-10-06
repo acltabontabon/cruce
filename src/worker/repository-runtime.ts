@@ -1,28 +1,60 @@
 import { humanMaintain, writeAccess } from "../core/capabilities.ts";
 import { DomainError, requireValue, stable } from "../core/errors.ts";
 import { initialRepository, RepositoryController } from "../core/platform.ts";
+import { PUBLIC_ERRORS } from "../core/public-errors.ts";
+import { assertRepositoryCapacity, assertStateBytes } from "../core/state-limits.ts";
 import { gitRemotePath, parseGitRoute } from "../shared/git-access.ts";
-import type { Artifact, Command, Repository, RepositoryState, ResourceAction, WorkspaceUpdateDetails } from "../shared/platform.ts";
+import { STATE_LIMITS } from "../shared/limits.ts";
+import type {
+	ActivityEvent,
+	Artifact,
+	Command,
+	Repository,
+	RepositoryState,
+	ResourceAction,
+	RetentionInspection,
+	Workspace,
+	WorkspaceUpdateDetails,
+} from "../shared/platform.ts";
 import { authorizeMachine, HUMAN_TOOLS, toolByName } from "../shared/tools.ts";
-import { boundedBody, type RepositoryHost, ResourceBoundary, type StorageEnv } from "./artifacts.ts";
+import { boundedBody, bufferedGitRequest, type RepositoryHost, ResourceBoundary, type StorageEnv } from "./artifacts.ts";
+import { commandContext, correlate, diagnose, diagnoseError, withDiagnostics } from "./diagnostics.ts";
 import { GitUpdateRejected, type GitWorkspace } from "./git/workspace.ts";
 import type { ConnectionGrant, NamespaceRuntime } from "./namespace-runtime.ts";
 import { ProviderIdentity, ProviderIdentityError } from "./provider-identity.ts";
-import { hash, Serial, type Store } from "./store.ts";
+import { SourceInspection } from "./source-inspection.ts";
+import { hash, jsonBytes, memoryStore, Serial, type Store } from "./store.ts";
 
+interface CleanupOperation {
+	command: Command;
+	grant: ConnectionGrant;
+	fingerprint: string;
+	reservationId?: string;
+	phase: "authorized" | "deleting" | "confirmed";
+	state: "pending" | "blocked" | "complete";
+	attempts: number;
+	nextAttempt?: number;
+	reason?: string;
+}
+type RecoveryPort = {
+	schedule: (at: number) => Promise<void>;
+	authorize: (grant: ConnectionGrant) => Promise<ConnectionGrant>;
+};
 type NamespacePort = {
 	[K in "authority" | "repository" | "reserve" | "settle" | "resourceConfiguration"]: (
 		...args: Parameters<NamespaceRuntime[K]>
-	) => ReturnType<NamespaceRuntime[K]> | Promise<ReturnType<NamespaceRuntime[K]>>;
+	) => Awaited<ReturnType<NamespaceRuntime[K]>> | Promise<Awaited<ReturnType<NamespaceRuntime[K]>>>;
 };
 export class RepositoryRuntime {
 	private serial = new Serial();
+	private maintenanceNeeded = false;
 	constructor(
 		readonly store: Store,
 		readonly git: GitWorkspace,
 		readonly namespace: NamespacePort,
 		readonly env: StorageEnv,
 		readonly now = Date.now,
+		readonly recovery?: RecoveryPort,
 	) {}
 	initialize(repository: Repository) {
 		const state = this.store.get<RepositoryState>("repository");
@@ -36,12 +68,25 @@ export class RepositoryRuntime {
 	state() {
 		return requireValue(this.store.get<RepositoryState>("repository"), "Repository not initialized");
 	}
-	save(c: RepositoryController) {
-		this.store.put("repository", c.state);
+	save(c: RepositoryController, extra: { key: string; value: unknown }[] = []) {
+		const latest = this.store.get<number>("activity-version") ?? 0;
+		const activity = c.state.activity.filter((event) => Number(event.id.slice(6)) > latest);
+		const entries: { key: string; value: unknown }[] = [
+			...extra,
+			...activity.map((event) => ({ key: `activity:${event.id.slice(6).padStart(16, "0")}`, value: event })),
+		];
+		for (const [id, receipt] of Object.entries(c.state.receipts)) entries.push({ key: `receipt:${id}`, value: receipt });
+		const state = { ...c.state, receipts: {}, activity: c.state.activity.slice(-STATE_LIMITS.recentActivity) };
+		assertRepositoryCapacity(state);
+		entries.push({ key: "repository", value: state }, { key: "activity-version", value: c.state.version });
+		this.store.batch(entries);
+		c.state.receipts = {};
+		c.state.activity = state.activity;
 	}
 	private async resources() {
 		const config = await this.namespace.resourceConfiguration();
 		const local: Store = {
+			...memoryStore(),
 			get: <T>(key: string) =>
 				(key === "storage-binding" ? config.binding : key === "resource-account" && config.legacyAccount ? true : undefined) as
 					| T
@@ -64,15 +109,18 @@ export class RepositoryRuntime {
 			action,
 			cmd.workspaceId,
 		);
+		await correlate({ reservationId: r.id, ...commandContext(cmd, grant.actor.id) });
+		diagnose("resource_reserved", { action, phase: r.state });
+		this.maintenanceNeeded = true;
 		try {
 			const result = await run(await (await this.resources()).host());
-			await this.namespace.settle(
-				r.id,
-				action === "workspace.cleanup" && (result as { state?: string }).state === "deleting" ? "uncertain" : "complete",
-			);
+			const phase = action === "workspace.cleanup" && (result as { state?: string }).state === "deleting" ? "uncertain" : "complete";
+			await this.namespace.settle(r.id, phase);
+			diagnose("resource_settled", { action, phase });
 			return result;
 		} catch (error) {
 			await this.namespace.settle(r.id, "uncertain");
+			diagnose("resource_settled", { action, phase: "uncertain" });
 			throw error;
 		}
 	}
@@ -83,6 +131,8 @@ export class RepositoryRuntime {
 				...c.state.artifacts.filter((a) => a.kind === "source").map((a) => a.revision),
 			]),
 		];
+		if (!(await this.git.hasCompleteSource(revision)))
+			throw new DomainError(404, "Source cache unavailable; explicitly recover retained source");
 		if (tips.includes(revision)) return;
 		if ((await this.git.log(revision, 1)).length) {
 			for (const tip of tips) if ((await this.git.mergeBase(revision, tip)) === revision) return;
@@ -93,402 +143,756 @@ export class RepositoryRuntime {
 	gitRequest(request: Request, grant: ConnectionGrant): Promise<Response> {
 		return this.serial.run(async () => {
 			const route = requireValue(parseGitRoute(new URL(request.url)), "Unsupported Git route");
-			const state = structuredClone(this.state());
-			if (route.repositoryId !== state.repository.id || route.namespaceId !== state.repository.namespaceId)
-				throw new DomainError(403, "Repository identity mismatch");
-			const a = await this.namespace.authority(grant, route.repositoryId);
-			if (a.actor.kind === "agent" && !a.scopes?.includes("cruce:read")) throw new DomainError(403, "Git read scope required");
-			if (!state.sourceHead) throw new DomainError(409, "Canonical repository unavailable");
-			const service = route.endpoint === "info/refs" ? new URL(request.url).searchParams.get("service") : route.endpoint;
-			if (
-				!["git-upload-pack", "git-receive-pack"].includes(service ?? "") ||
-				(route.endpoint === "info/refs" ? request.method !== "GET" : request.method !== "POST")
-			)
-				throw new DomainError(400, "Unsupported Git request");
-			const write = service === "git-receive-pack";
-			if (a.actor.kind === "human" && a.actor.connectionId && route.workspaceId) {
-				const bound = this.store.get<string>(`human-workspace:${a.actor.connectionId}`);
-				if (bound && bound !== route.workspaceId) throw new DomainError(403, "Terminal Git scope denied");
-			}
-			const c = new RepositoryController(state, this.now(), () => "git");
-			let name = requireValue(state.repository.storageName, "Canonical storage missing");
-			let providerId = state.canonical?.id;
-			if (route.workspaceId) {
-				const workspace = c.workspace(route.workspaceId);
-				if (workspace.fork?.state !== "ready") throw new DomainError(409, "Fork unavailable");
-				name = workspace.fork.name;
-				providerId = workspace.fork.id;
-				if (write) {
-					c.owned(a, workspace.id);
-					if (a.actor.kind === "agent" && (!a.scopes?.includes("revision:publish") || !a.scopes?.includes("workspace:write")))
-						throw new DomainError(403, "Git write scopes required");
-				}
-			} else if (write) throw new DomainError(403, "Canonical writes require reviewed human promotion");
-			const bytes = request.method === "POST" ? await boundedBody(request) : undefined;
-			const forward = () => new Request(request.url, { method: request.method, headers: request.headers, body: bytes });
-			if (write) {
-				// A push is content addressed for retry accounting, but always replays Git so
-				// the remote checks current refs. No success response is cached.
-				const digest = bytes
-					? Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("")
-					: "advertise";
-				const cmd: Command = {
-					tool: "git_receive_pack",
-					namespaceId: route.namespaceId,
-					repositoryId: route.repositoryId,
-					workspaceId: route.workspaceId,
-					idempotencyKey: `git-${route.workspaceId}-${digest}`,
-				};
-				return (await this.gate(grant, cmd, "revision.publish", (host) => host.gitRequest(name, forward(), providerId))) as Response;
-			}
-			return (await (await this.resources()).host()).gitRequest(name, forward(), providerId);
+			return withDiagnostics(
+				{
+					...route,
+					tool:
+						route.endpoint === "git-receive-pack" || new URL(request.url).searchParams.get("service") === "git-receive-pack"
+							? "git_receive_pack"
+							: "git_upload_pack",
+				},
+				async () => {
+					const started = Date.now();
+					diagnose("operation_started");
+					try {
+						const response = await this.gitTransport(request, grant, route);
+						diagnose("operation_completed", { durationMs: Date.now() - started, status: response.status });
+						return response;
+					} catch (error) {
+						diagnoseError("operation_failed", error, { durationMs: Date.now() - started });
+						throw error;
+					}
+				},
+			);
 		});
+	}
+	private async gitTransport(
+		request: Request,
+		grant: ConnectionGrant,
+		route: NonNullable<ReturnType<typeof parseGitRoute>>,
+	): Promise<Response> {
+		const state = structuredClone(this.state());
+		if (route.repositoryId !== state.repository.id || route.namespaceId !== state.repository.namespaceId)
+			throw new DomainError(403, "Repository identity mismatch");
+		const a = await this.namespace.authority(grant, route.repositoryId);
+		if (a.actor.kind === "agent" && !a.scopes?.includes("cruce:read")) throw new DomainError(403, "Git read scope required");
+		if (!state.sourceHead) throw new DomainError(409, "Canonical repository unavailable");
+		const service = route.endpoint === "info/refs" ? new URL(request.url).searchParams.get("service") : route.endpoint;
+		if (
+			!["git-upload-pack", "git-receive-pack"].includes(service ?? "") ||
+			(route.endpoint === "info/refs" ? request.method !== "GET" : request.method !== "POST")
+		)
+			throw new DomainError(400, "Unsupported Git request");
+		const write = service === "git-receive-pack";
+		if (a.actor.kind === "human" && a.actor.connectionId && route.workspaceId) {
+			const bound = this.store.get<string>(`human-workspace:${a.actor.connectionId}`);
+			if (bound && bound !== route.workspaceId) throw new DomainError(403, "Terminal Git scope denied");
+		}
+		const c = new RepositoryController(state, this.now(), () => "git");
+		let name = requireValue(state.repository.storageName, "Canonical storage missing");
+		let providerId = state.canonical?.id;
+		if (route.workspaceId) {
+			const workspace = c.workspace(route.workspaceId);
+			if (workspace.fork?.state !== "ready") throw new DomainError(409, "Fork unavailable");
+			name = workspace.fork.name;
+			providerId = workspace.fork.id;
+			if (write) {
+				c.owned(a, workspace.id);
+				if (a.actor.kind === "agent" && (!a.scopes?.includes("revision:publish") || !a.scopes?.includes("workspace:write")))
+					throw new DomainError(403, "Git write scopes required");
+			}
+		} else if (write) throw new DomainError(403, "Canonical writes require reviewed human promotion");
+		const bytes = request.method === "POST" ? await boundedBody(request) : undefined;
+		const forward = () => bufferedGitRequest(request, bytes);
+		if (write) {
+			// A push is content addressed for retry accounting, but always replays Git so
+			// the remote checks current refs. No success response is cached.
+			const digest = bytes
+				? Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("")
+				: "advertise";
+			const cmd: Command = {
+				tool: "git_receive_pack",
+				namespaceId: route.namespaceId,
+				repositoryId: route.repositoryId,
+				workspaceId: route.workspaceId,
+				idempotencyKey: `git-${route.workspaceId}-${digest}`,
+			};
+			return (await this.gate(grant, cmd, "revision.publish", (host) => host.gitRequest(name, forward(), providerId))) as Response;
+		}
+		return (await (await this.resources()).host()).gitRequest(name, forward(), providerId);
 	}
 
 	command(cmd: Command, grant: ConnectionGrant): Promise<unknown> {
-		return this.serial.run(async () => {
-			const repoId = requireValue(cmd.repositoryId, "Repository required"),
-				a = await this.namespace.authority(grant, repoId);
-			authorizeMachine(a, cmd);
-			const repository = await this.namespace.repository(grant, repoId);
-			if (cmd.tool === "retry_repository_setup" && !cmd.idempotencyKey) throw new DomainError(400, "Mutation requires an idempotency key");
-			const stored = this.store.get<RepositoryState>("repository");
-			if (
-				cmd.namespaceId !== repository.namespaceId ||
-				(stored && (stored.repository.id !== repoId || stored.repository.namespaceId !== repository.namespaceId))
-			)
-				throw new DomainError(403, "Repository identity mismatch");
-			// An interrupted registration can still be inspected and retried from the console.
-			// This empty projection is not persisted until explicit canonical setup.
-			const state = stored ? structuredClone(stored) : initialRepository(repository);
-			state.repository = repository;
-			if (cmd.tool === "retry_repository_setup") {
-				// Replay the original provisioning intent so a failed creation reuses its operation identity
-				// and charged reservation. Repositories created before intent was recorded use a stable key.
-				humanMaintain(a);
-				if (state.canonical) throw new DomainError(409, "Canonical repository is already set up");
-				cmd = this.store.get<Command>("provision-command") ?? {
-					tool: "provision_repository",
-					namespaceId: state.repository.namespaceId,
-					repositoryId: repoId,
-					idempotencyKey: `provision-${repoId}`,
-				};
-			}
-			const op = cmd.idempotencyKey ? await hash(`${a.actor.id}:${cmd.idempotencyKey}`) : "read";
-			let sequence = 0;
-			const c = new RepositoryController(state, this.now(), () => `${op.slice(0, 24)}-${sequence++}`);
-			const mutation = HUMAN_TOOLS.has(cmd.tool) || toolByName(cmd.tool)?.mutation || cmd.tool === "provision_repository";
-			if (mutation && !cmd.idempotencyKey) throw new DomainError(400, "Mutation requires an idempotency key");
-			if (mutation && !stored) {
-				if (cmd.tool !== "provision_repository") throw new DomainError(409, "Set up the canonical repository first");
-				humanMaintain(a);
-				this.initialize(repository);
-			}
-			if (a.actor.kind === "human" && a.actor.connectionId) {
-				const bound = this.store.get<string>(`human-workspace:${a.actor.connectionId}`);
-				if (bound && cmd.tool === "start_workspace" && !state.receipts[op])
-					throw new DomainError(409, "Terminal authorization is bound to an existing workspace");
-				if (bound && cmd.workspaceId && bound !== cmd.workspaceId) throw new DomainError(403, "Terminal workspace scope denied");
-			}
-			const fingerprint = stable(cmd),
-				receipt = state.receipts[op];
-			if (cmd.tool === "promote_proposal") {
-				humanMaintain(a);
-				if (receipt && receipt.fingerprint !== fingerprint) throw new DomainError(409, "Operation identity reused");
-				return this.promote(c, cmd, grant, op, fingerprint);
-			}
-			if (mutation && receipt) {
-				if (receipt.fingerprint !== fingerprint) throw new DomainError(409, "Operation identity reused");
-				return receipt.result;
-			}
-			if (mutation) await this.git.ensureInit();
-			let result: unknown;
-			const repo = state.repository;
-			if (cmd.tool === "provision_repository") {
-				humanMaintain(a);
-				if (!this.store.get("provision-command")) this.store.put("provision-command", cmd);
-				result = await this.gate(grant, cmd, "repository.create", async (host) => {
-					const name = requireValue(repo.storageName, "Source storage missing"),
-						info = await host.ensure(name, `Cruce repository ${repo.id}`, repo.defaultBranch);
-					const fetched = await host.withToken(name, "read", (token) =>
-						this.git.fetch({ url: info.remote, token, remoteBranch: repo.defaultBranch, localRef: "refs/cruce/source" }),
-					);
-					let head = fetched.result;
-					if (!head) {
-						head =
-							this.store.get<string>("initial-revision") ??
-							(await this.git.commit({
-								ref: "refs/cruce/source",
-								parent: null,
-								files: { "README.md": `# ${repo.name}\n` },
-								message: "Initialize repository",
-								author: { name: a.actor.name, email: "cruce@localhost", timestamp: Math.floor(repo.createdAt / 1000) },
-							}));
-						this.store.put("initial-revision", head);
-						await host.withToken(name, "write", (token) =>
-							this.git.push({ url: info.remote, token, localRef: "refs/cruce/source", remoteRef: `refs/heads/${repo.defaultBranch}` }),
-						);
-					}
-					state.canonical = { name: info.name, id: info.id, remote: info.remote };
-					state.sourceHead = head;
-					c.event(a.actor, "repository_created", `Created ${repo.name}`, [repo.id, head]);
-					return { revision: head, remote: info.remote };
-				});
-			} else if (cmd.tool === "get_workspace_updates") {
-				const s = c.workspace(cmd.workspaceId),
-					updates = c.workspaceUpdates(s);
-				let available = false;
-				let comparison: WorkspaceUpdateDetails["comparison"] = "unavailable";
-				let files: import("../shared/platform.ts").WorkspaceChange[] = [];
+		return this.serial.run(() =>
+			withDiagnostics(commandContext(cmd, grant.actor.id), async () => {
+				this.maintenanceNeeded = false;
+				const started = Date.now();
+				diagnose("operation_started");
 				try {
-					await this.known(c, requireValue(updates.revision, "Upstream unavailable"));
-					available = true;
-					await this.known(c, updates.baselineRevision);
-					files = (await this.git.reviewChanges(updates.baselineRevision, updates.revision!)).files.map(({ path, status, binary }) => ({
-						path,
-						status,
-						binary,
-					}));
-					await this.known(c, s.headRevision);
-					const common = await this.git.mergeBase(s.headRevision, updates.revision!);
-					comparison =
-						s.headRevision === updates.revision
-							? "current"
-							: common === updates.revision
-								? "ahead"
-								: common === s.headRevision
-									? "behind"
-									: common
-										? "diverged"
-										: "unrelated";
+					let result: unknown;
+					try {
+						result = await this.execute(cmd, grant);
+					} finally {
+						if (this.maintenanceNeeded) this.git.maintainCache();
+						else this.git.clearCache();
+					}
+					if (cmd.tool === "start_workspace") await correlate({ workspaceId: (result as { id: string }).id });
+					if (cmd.tool === "create_proposal") await correlate({ proposalId: (result as { id: string }).id });
+					diagnose("operation_completed", { durationMs: Date.now() - started });
+					return result;
 				} catch (error) {
-					if (!(error instanceof DomainError)) throw error;
+					diagnoseError("operation_failed", error, { durationMs: Date.now() - started });
+					throw error;
 				}
-				const touched = new Set(s.changes.flatMap((f) => [f.path, ...(f.previousPath ? [f.previousPath] : [])]));
-				result = {
-					...updates,
-					available,
-					comparison,
-					changes: files,
-					overlappingPaths: files.map((f) => f.path).filter((p) => touched.has(p)),
-					overlapTrust: "reported",
-				} satisfies WorkspaceUpdateDetails;
-			} else if (cmd.tool === "get_git_access") {
-				if (!state.sourceHead) throw new DomainError(409, "Canonical Git repository is not ready");
-				const workspace = cmd.workspaceId ? c.workspace(cmd.workspaceId) : undefined;
-				result = {
-					canonical: gitRemotePath(repo.namespaceId, repo.id),
-					fork: workspace?.fork?.state === "ready" ? gitRemotePath(repo.namespaceId, repo.id, workspace.id) : undefined,
-					defaultBranch: repo.defaultBranch,
-					baseRevision: workspace?.baseRevision,
-					canonicalWrite: false,
-				};
-			} else if (cmd.tool === "get_source" || cmd.tool === "get_history") {
-				const revision = requireValue(cmd.revision ?? state.sourceHead, "Choose a published revision");
-				await this.known(c, revision);
-				result =
-					cmd.tool === "get_history"
-						? await this.git.log(revision)
-						: { revision, files: await this.git.readFiles(revision, (p) => !cmd.path || p === cmd.path) };
-			} else if (cmd.tool === "get_diff") {
-				const base = requireValue(cmd.baseRevision, "Base required"),
-					head = requireValue(cmd.revision, "Head required");
-				await this.known(c, base);
-				await this.known(c, head);
-				result = await this.git.reviewChanges(base, head, cmd.path);
-			} else if (cmd.tool === "read_artifact") {
-				const artifact = c.artifact(cmd.artifactId);
-				result = {
-					artifact,
-					content: artifact.storage.path
-						? (await this.git.readFiles(artifact.storage.revision, (p) => p === artifact.storage.path))[artifact.storage.path]
-						: undefined,
-				};
-			} else if (cmd.tool === "attach_workspace") {
-				result = c.command(cmd, a);
-				const s = c.workspace(cmd.workspaceId);
-				if (!s.fork) {
-					await this.known(c, s.baseRevision);
-					await this.gate(grant, cmd, "workspace.fork", async (host) => {
-						const canonical = requireValue(repo.storageName, "Canonical storage missing");
-						const name = `repo-${repo.id}-workspace-${s.id}`;
-						const fork = await host.fork(canonical, name, `Cruce workspace ${s.id}`);
-						// The provider forks refs at request time, not at a requested SHA. Pin the
-						// exact base without rewriting inherited branches or canonical history.
-						await this.git.setRef("refs/cruce/baseline", s.baseRevision);
-						await host.withToken(name, "write", (token) =>
-							this.git.push({ url: fork.remote, token, localRef: "refs/cruce/baseline", remoteRef: "refs/heads/cruce-base" }),
-						);
-						s.fork = { name, id: fork.id, remote: fork.remote, state: "ready" };
-					});
-				}
-			} else if (cmd.tool === "cleanup_workspace") {
-				const workspace = c.workspace(cmd.workspaceId);
-				writeAccess(a);
-				if (a.actor.kind === "agent" && workspace.ownerId !== a.actor.userId)
-					throw new DomainError(403, "Workspace belongs to another user");
-				if (a.actor.kind === "human") humanMaintain(a);
-				const ready = c.forkCleanup(workspace);
-				if (!ready.ready) throw new DomainError(409, ready.reasons.join("; "));
-				result = await this.gate(grant, cmd, "workspace.cleanup", async (host) => {
-					const fork = workspace.fork!;
-					if (fork.state === "ready") {
-						const info = await host.info(fork.name);
-						if (info.id !== fork.id) throw new DomainError(409, "Fork identity changed; cleanup refused");
-						const { result: refs } = await host.withToken(fork.name, "read", (token) => this.git.remoteRefs({ url: info.remote, token }));
-						for (const ref of refs) {
-							if (ref.ref.endsWith("^{}")) continue;
-							// Annotated tags and non-commit refs are conservatively retained until removed explicitly with Git.
-							try {
-								await this.known(c, ref.oid);
-							} catch {
-								throw new DomainError(409, `Unretained fork ref ${ref.ref}; publish its commit before cleanup`);
-							}
-						}
-						fork.state = "deleting";
-						this.save(c);
-					}
-					if (await host.remove(fork.name, fork.id)) {
-						fork.state = "deleted";
-						c.event(a.actor, "fork_deleted", `Removed fork for ${workspace.title}`, [workspace.id]);
-					} else c.event(a.actor, "fork_deleting", `Fork deletion requested for ${workspace.title}`, [workspace.id]);
-					return { workspaceId: workspace.id, state: fork.state };
-				});
-			} else if (cmd.tool === "publish_revision" || cmd.tool === "publish_artifact") {
-				// Publication reads the pushed fork, so any authorized connection of the owner may publish.
-				const s = c.owned(a, cmd.workspaceId),
-					revision = requireValue(cmd.revision, "Revision required");
-				result = await this.gate(grant, cmd, cmd.tool === "publish_revision" ? "revision.publish" : "artifact.publish", async (host) => {
-					const artifactId = `${op.slice(0, 24)}-artifact`;
-					let storage: Artifact["storage"], contentHash: string, baseRevision: string | undefined;
-					if (cmd.tool === "publish_revision") {
-						const fork = requireValue(s.fork, "Attach a hosted fork first");
-						if (fork.state !== "ready") throw new DomainError(409, "Fork unavailable");
-						const forkInfo = await host.info(fork.name);
-						if (forkInfo.id !== fork.id) throw new DomainError(409, "Fork identity changed; publication refused");
-						const storageName = `repo-${repo.id}-artifacts`;
-						const retainedId = new ProviderIdentity(this.store).expected(storageName);
-						if (retainedId && (await host.info(storageName)).id !== retainedId)
-							throw new ProviderIdentityError("Retained source provider identity changed; publication refused");
-						if (this.store.get<string>(`publication-revision:${op}`) !== revision) {
-							const { result: pushed } = await host.withToken(fork.name, "read", (token) =>
-								this.git.fetch({
-									url: forkInfo.remote,
-									token,
-									remoteBranch: requireValue(cmd.ref, "Pushed fork branch required"),
-									localRef: `refs/cruce/checkpoint/${s.id}`,
-								}),
-							);
-							if (pushed !== revision) throw new DomainError(409, "Fork ref moved; publish its exact current revision");
-						}
-						if (
-							!(await this.git.log(revision, 1)).length ||
-							(await this.git.mergeBase(s.publishedRevision ?? s.baseRevision, revision)) !== (s.publishedRevision ?? s.baseRevision)
-						)
-							throw new DomainError(409, "Published commits must descend from the workspace baseline and previous publication");
-						const upstream = c.upstream();
-						const pinnedBase = this.store.get<string>(`publication-base:${op}`);
-						baseRevision =
-							pinnedBase ??
-							cmd.baseRevision ??
-							(upstream && (await this.git.log(upstream, 1)).length && (await this.git.mergeBase(upstream, revision)) === upstream
-								? upstream
-								: (s.integratedRevision ?? s.baseRevision));
-						if (!pinnedBase && baseRevision !== s.baseRevision && baseRevision !== s.integratedRevision && baseRevision !== upstream)
-							throw new DomainError(409, "Review base must name the workspace baseline or observed upstream revision");
-						if (!(await this.git.log(baseRevision, 1)).length)
-							throw new DomainError(409, "Review base objects unavailable; fetch upstream first");
-						if (
-							(await this.git.mergeBase(s.baseRevision, baseRevision)) !== s.baseRevision ||
-							(await this.git.mergeBase(baseRevision, revision)) !== baseRevision
-						)
-							throw new DomainError(409, "Integrate the review base with Git before publishing");
-						const diff = await this.git.reviewChanges(baseRevision, revision);
-						if (
-							a.repositoryRole !== "maintain" &&
-							diff.files.some((f) => repo.policy.protectedPaths.some((p) => f.path === p || f.path.startsWith(`${p}/`)))
-						)
-							throw new DomainError(403, "Protected paths require a repository maintainer");
-						this.store.put(`publication-base:${op}`, baseRevision);
-						this.store.put(`publication-revision:${op}`, revision);
-						const info = await host.ensure(storageName, `Cruce source artifacts ${repo.id}`, repo.defaultBranch);
-						const ref = `refs/heads/artifact-${artifactId}`;
-						await this.git.setRef(ref, revision);
-						await host.withToken(storageName, "write", (token) =>
-							this.git.push({ url: info.remote, token, localRef: ref, remoteRef: ref }),
-						);
-						storage = { repository: storageName, providerId: info.id, revision, ref };
-						contentHash = Array.from(
-							new Uint8Array(await crypto.subtle.digest("SHA-256", Uint8Array.from(await this.git.exportPack(revision)))),
-							(b) => b.toString(16).padStart(2, "0"),
-						).join("");
-						s.changes = diff.files.map(({ path, status, binary }) => ({ path, status, binary }));
-						s.commits = [];
-						for (const commit of await this.git.log(revision, 1000)) {
-							if (commit.oid === baseRevision) break;
-							s.commits.push(commit.oid);
-						}
-						s.publishedRevision = revision;
-						s.headRevision = revision;
-						s.integratedRevision = baseRevision;
-					} else {
-						if (
-							revision !== s.baseRevision &&
-							!state.artifacts.some((a) => a.kind === "source" && a.workspaceId === s.id && a.revision === revision)
-						)
-							throw new DomainError(409, "Evidence must name the base or a published workspace revision");
-						const content = requireValue(cmd.content, "Artifact content required"),
-							path = `artifacts/${artifactId}.txt`,
-							name = `repo-${repo.id}-evidence`,
-							info = await host.ensure(name, `Cruce evidence ${repo.id}`);
-						const key = `artifact-commit:${op}`;
-						const oid =
-							this.store.get<string>(key) ??
-							(await this.git.commit({
-								ref: `refs/cruce/evidence/${artifactId}`,
-								parent: null,
-								files: { [path]: content },
-								message: `Evidence for ${revision}`,
-								author: { name: a.actor.name, email: "cruce@localhost", timestamp: Math.floor(this.now() / 1000) },
-							}));
-						this.store.put(key, oid);
-						await this.git.setRef(`refs/cruce/evidence/${artifactId}`, oid);
-						await host.withToken(name, "write", (token) =>
-							this.git.push({
-								url: info.remote,
-								token,
-								localRef: `refs/cruce/evidence/${artifactId}`,
-								remoteRef: `refs/heads/artifact-${artifactId}`,
-							}),
-						);
-						storage = { repository: name, providerId: info.id, path, revision: oid, ref: `refs/heads/artifact-${artifactId}` };
-						contentHash = await hash(content);
-					}
-					return c.addArtifact({
-						id: artifactId,
-						namespaceId: repo.namespaceId,
-						repositoryId: repo.id,
-						workspaceId: s.id,
-						actor: a.actor,
-						revision,
-						baseRevision,
-						kind: cmd.tool === "publish_revision" ? "source" : "evidence",
-						title: cmd.title ?? s.title,
-						contentHash,
-						trust: "reported",
-						storage,
-						at: this.now(),
-					});
-				});
-			} else result = c.command(cmd, a);
-			if (mutation) {
-				if (cmd.tool === "start_workspace" && a.actor.kind === "human" && a.actor.connectionId)
-					this.store.put(`human-workspace:${a.actor.connectionId}`, (result as { id: string }).id);
-				if (cmd.tool !== "cleanup_workspace" || (result as { state: string }).state === "deleted")
-					state.receipts[op] = { fingerprint, result };
-				this.save(c);
+			}),
+		);
+	}
+	private async execute(cmd: Command, grant: ConnectionGrant): Promise<unknown> {
+		const repoId = requireValue(cmd.repositoryId, "Repository required"),
+			a = await this.namespace.authority(grant, repoId);
+		authorizeMachine(a, cmd);
+		const repository = await this.namespace.repository(grant, repoId);
+		if (cmd.tool === "retry_repository_setup" && !cmd.idempotencyKey) throw new DomainError(400, "Mutation requires an idempotency key");
+		const stored = this.store.get<RepositoryState>("repository");
+		if (
+			cmd.namespaceId !== repository.namespaceId ||
+			(stored && (stored.repository.id !== repoId || stored.repository.namespaceId !== repository.namespaceId))
+		)
+			throw new DomainError(403, "Repository identity mismatch");
+		// An interrupted registration can still be inspected and retried from the console.
+		// This empty projection is not persisted until explicit canonical setup.
+		const state = stored ? structuredClone(stored) : initialRepository(repository);
+		state.repository = repository;
+		if (cmd.tool === "retry_repository_setup") {
+			// Replay the original provisioning intent so a failed creation reuses its operation identity
+			// and charged reservation. Repositories created before intent was recorded use a stable key.
+			humanMaintain(a);
+			if (state.canonical) throw new DomainError(409, "Canonical repository is already set up");
+			cmd = this.store.get<Command>("provision-command") ?? {
+				tool: "provision_repository",
+				namespaceId: state.repository.namespaceId,
+				repositoryId: repoId,
+				idempotencyKey: `provision-${repoId}`,
+			};
+		}
+		const op = cmd.idempotencyKey ? await hash(`${a.actor.id}:${cmd.idempotencyKey}`) : "read";
+		await correlate(commandContext(cmd, a.actor.id));
+		const proposal = state.proposals.find((p) => p.id === cmd.proposalId);
+		const artifact = state.artifacts.find((item) => item.id === (cmd.artifactId ?? proposal?.artifactId));
+		if (artifact) await correlate({ workspaceId: artifact.workspaceId, revision: artifact.revision });
+		let sequence = 0;
+		const c = new RepositoryController(state, this.now(), () => `${op.slice(0, 24)}-${sequence++}`);
+		const mutation = HUMAN_TOOLS.has(cmd.tool) || toolByName(cmd.tool)?.mutation || cmd.tool === "provision_repository";
+		if (mutation && !cmd.idempotencyKey) throw new DomainError(400, "Mutation requires an idempotency key");
+		if (mutation && !stored) {
+			if (cmd.tool !== "provision_repository") throw new DomainError(409, "Set up the canonical repository first");
+			humanMaintain(a);
+			this.initialize(repository);
+		}
+		if (a.actor.kind === "human" && a.actor.connectionId) {
+			const bound = this.store.get<string>(`human-workspace:${a.actor.connectionId}`);
+			if (bound && cmd.tool === "start_workspace" && !(this.store.get(`receipt:${op}`) ?? state.receipts[op]))
+				throw new DomainError(409, "Terminal authorization is bound to an existing workspace");
+			if (bound && cmd.workspaceId && bound !== cmd.workspaceId) throw new DomainError(403, "Terminal workspace scope denied");
+		}
+		const rawFingerprint = stable(cmd),
+			fingerprint = await hash(rawFingerprint),
+			receipt = this.store.get<RepositoryState["receipts"][string]>(`receipt:${op}`) ?? state.receipts[op];
+		if (mutation) {
+			const inspectionIntent = this.store.get<string>(`source-intent:${op}`);
+			if (
+				(receipt && receipt.fingerprint !== fingerprint && receipt.fingerprint !== rawFingerprint) ||
+				(inspectionIntent && inspectionIntent !== fingerprint && inspectionIntent !== rawFingerprint)
+			)
+				throw new DomainError(409, "Operation identity reused");
+		}
+		if (cmd.tool === "promote_proposal") {
+			humanMaintain(a);
+			if (!state.promotions.some((p) => p.operation?.id === op)) {
+				assertStateBytes(cmd, 32 * 1024);
+				assertStateBytes({ ...state, receipts: {} }, STATE_LIMITS.admissionBytes);
+				if (state.promotions.length >= STATE_LIMITS.promotions)
+					throw new DomainError(409, "Repository record capacity reached; inspect retained records before adding work");
+				this.store.admit();
 			}
-			return result;
+			if (receipt && receipt.fingerprint !== fingerprint && receipt.fingerprint !== rawFingerprint)
+				throw new DomainError(409, "Operation identity reused");
+			return this.promote(c, cmd, grant, op, fingerprint);
+		}
+		if (mutation && receipt && cmd.tool !== "inspect_source" && cmd.tool !== "recover_source" && cmd.tool !== "cleanup_workspace") {
+			if (receipt.fingerprint !== fingerprint && receipt.fingerprint !== rawFingerprint)
+				throw new DomainError(409, "Operation identity reused");
+			diagnose("operation_replayed");
+			if (receipt.workspaceResult) {
+				const template = this.store.get<Omit<Workspace, "lastActivity">>(`workspace-result:${receipt.workspaceResult.templateId}`);
+				if (!template || (await hash(stable(template))) !== receipt.workspaceResult.templateId)
+					throw new DomainError(409, "Retained operation result unavailable; restore its recorded state before retrying");
+				return { ...template, lastActivity: receipt.workspaceResult.lastActivity };
+			}
+			return receipt.result;
+		}
+		if (mutation && !receipt && cmd.tool !== "cleanup_workspace") this.store.admit();
+		if (mutation && !["cleanup_workspace", "end_workspace", "detach_workspace", "heartbeat", "report_change"].includes(cmd.tool)) {
+			const recovery = cmd.tool === "promote_proposal" && state.promotions.some((p) => p.operation?.id === op);
+			if (!recovery) {
+				assertStateBytes({ ...state, receipts: {} }, STATE_LIMITS.admissionBytes);
+			}
+			const additions: Record<string, keyof typeof STATE_LIMITS> = {
+				start_workspace: "workspaces",
+				publish_revision: "artifacts",
+				publish_artifact: "artifacts",
+				create_proposal: "proposals",
+				record_verification: "verifications",
+			};
+			const field = additions[cmd.tool] as "workspaces" | "artifacts" | "proposals" | "verifications" | undefined;
+			if (field && state[field].length >= STATE_LIMITS[field])
+				throw new DomainError(409, "Repository record capacity reached; inspect retained records before adding work");
+		}
+		let result: unknown;
+		const repo = state.repository;
+		if (cmd.tool === "inspect_source" || cmd.tool === "recover_source") {
+			return this.gate(grant, cmd, "source.read", async (host) => {
+				if (!this.store.get(`source-intent:${op}`)) this.store.put(`source-intent:${op}`, fingerprint);
+				const source = new SourceInspection(host, state);
+				return cmd.tool === "inspect_source"
+					? source.inspect(cmd, this.git)
+					: source.recover(this.git, requireValue(cmd.revision ?? state.sourceHead, "Choose a published revision"));
+			});
+		} else if (cmd.tool === "provision_repository") {
+			humanMaintain(a);
+			if (!this.store.get("provision-command")) this.store.put("provision-command", cmd);
+			result = await this.gate(grant, cmd, "repository.create", async (host) => {
+				await this.git.ensureInit();
+				const name = requireValue(repo.storageName, "Source storage missing"),
+					info = await host.ensure(name, `Cruce repository ${repo.id}`, repo.defaultBranch);
+				const fetched = await host.withToken(name, "read", (token) =>
+					this.git.fetch({ url: info.remote, token, remoteBranch: repo.defaultBranch, localRef: "refs/cruce/source" }),
+				);
+				let head = fetched.result;
+				if (!head) {
+					const previous = this.store.get<string>("initial-revision");
+					const author = this.store.get<import("./git/workspace.ts").GitAuthor>("initial-author") ?? {
+						name: a.actor.name,
+						email: "cruce@localhost",
+						timestamp: Math.floor(repo.createdAt / 1000),
+					};
+					this.store.put("initial-author", author);
+					head =
+						previous && (await this.git.hasCompleteSource(previous))
+							? previous
+							: await this.git.commit({
+									ref: "refs/cruce/source",
+									parent: null,
+									files: { "README.md": `# ${repo.name}\n` },
+									message: "Initialize repository",
+									author,
+								});
+					if (previous && previous !== head) throw new DomainError(409, "Repository setup retry differs from its recorded commit");
+					this.store.put("initial-revision", head);
+					await host.withToken(name, "write", (token) =>
+						this.git.push({ url: info.remote, token, localRef: "refs/cruce/source", remoteRef: `refs/heads/${repo.defaultBranch}` }),
+					);
+				}
+				state.canonical = { name: info.name, id: info.id, remote: info.remote };
+				state.sourceHead = head;
+				c.event(a.actor, "repository_created", `Created ${repo.name}`, [repo.id, head]);
+				return { revision: head, remote: info.remote };
+			});
+		} else if (cmd.tool === "get_workspace_updates") {
+			const s = c.workspace(cmd.workspaceId),
+				updates = c.workspaceUpdates(s);
+			let available = false;
+			let comparison: WorkspaceUpdateDetails["comparison"] = "unavailable";
+			let files: import("../shared/platform.ts").WorkspaceChange[] = [];
+			try {
+				await this.known(c, requireValue(updates.revision, "Upstream unavailable"));
+				available = true;
+				await this.known(c, updates.baselineRevision);
+				files = (await this.git.reviewChanges(updates.baselineRevision, updates.revision!)).files.map(({ path, status, binary }) => ({
+					path,
+					status,
+					binary,
+				}));
+				await this.known(c, s.headRevision);
+				const common = await this.git.mergeBase(s.headRevision, updates.revision!);
+				comparison =
+					s.headRevision === updates.revision
+						? "current"
+						: common === updates.revision
+							? "ahead"
+							: common === s.headRevision
+								? "behind"
+								: common
+									? "diverged"
+									: "unrelated";
+			} catch (error) {
+				if (!(error instanceof DomainError)) throw error;
+			}
+			const touched = new Set(s.changes.flatMap((f) => [f.path, ...(f.previousPath ? [f.previousPath] : [])]));
+			result = {
+				...updates,
+				available,
+				comparison,
+				changes: files,
+				overlappingPaths: files.map((f) => f.path).filter((p) => touched.has(p)),
+				overlapTrust: "reported",
+			} satisfies WorkspaceUpdateDetails;
+		} else if (cmd.tool === "get_git_access") {
+			if (!state.sourceHead) throw new DomainError(409, "Canonical Git repository is not ready");
+			const workspace = cmd.workspaceId ? c.workspace(cmd.workspaceId) : undefined;
+			result = {
+				canonical: gitRemotePath(repo.namespaceId, repo.id),
+				fork: workspace?.fork?.state === "ready" ? gitRemotePath(repo.namespaceId, repo.id, workspace.id) : undefined,
+				defaultBranch: repo.defaultBranch,
+				baseRevision: workspace?.baseRevision,
+				canonicalWrite: false,
+			};
+		} else if (cmd.tool === "get_source" || cmd.tool === "get_history") {
+			const revision = requireValue(cmd.revision ?? state.sourceHead, "Choose a published revision");
+			await this.known(c, revision);
+			result =
+				cmd.tool === "get_history"
+					? await this.git.log(revision)
+					: { revision, files: await this.git.readFiles(revision, (p) => !cmd.path || p === cmd.path) };
+		} else if (cmd.tool === "get_diff") {
+			const base = requireValue(cmd.baseRevision, "Base required"),
+				head = requireValue(cmd.revision, "Head required");
+			await this.known(c, base);
+			await this.known(c, head);
+			result = await this.git.reviewChanges(base, head, cmd.path);
+		} else if (cmd.tool === "read_artifact") {
+			const artifact = c.artifact(cmd.artifactId);
+			result = {
+				artifact,
+				content: artifact.storage.path
+					? (await this.git.readFiles(artifact.storage.revision, (p) => p === artifact.storage.path))[artifact.storage.path]
+					: undefined,
+			};
+		} else if (cmd.tool === "attach_workspace") {
+			result = c.command(cmd, a);
+			const s = c.workspace(cmd.workspaceId);
+			if (!s.fork) {
+				await this.gate(grant, cmd, "workspace.fork", async (host) => {
+					await this.git.ensureInit();
+					if (!(await this.git.hasCompleteSource(s.baseRevision)))
+						await new SourceInspection(host, state).recover(this.git, s.baseRevision);
+					await this.known(c, s.baseRevision);
+					const canonical = requireValue(repo.storageName, "Canonical storage missing");
+					const name = `repo-${repo.id}-workspace-${s.id}`;
+					const fork = await host.fork(canonical, name, `Cruce workspace ${s.id}`);
+					// The provider forks refs at request time, not at a requested SHA. Pin the
+					// exact base without rewriting inherited branches or canonical history.
+					await this.git.setRef("refs/cruce/baseline", s.baseRevision);
+					await host.withToken(name, "write", (token) =>
+						this.git.push({ url: fork.remote, token, localRef: "refs/cruce/baseline", remoteRef: "refs/heads/cruce-base" }),
+					);
+					s.fork = { name, id: fork.id, remote: fork.remote, state: "ready" };
+				});
+			}
+		} else if (cmd.tool === "get_activity") {
+			const after = cmd.cursor ? `activity:${cmd.cursor}` : "activity:";
+			const indexed = this.store.scan<ActivityEvent>("activity:", after, STATE_LIMITS.pageSize + 1);
+			const legacy = state.activity
+				.map((value) => ({ key: `activity:${value.id.slice(6).padStart(16, "0")}`, value }))
+				.filter(({ key }) => key > after);
+			const rows = [...new Map([...legacy, ...indexed].map((row) => [row.key, row])).values()]
+				.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+				.slice(0, STATE_LIMITS.pageSize + 1);
+			return {
+				items: rows.slice(0, STATE_LIMITS.pageSize).map(({ value }) => value),
+				cursor: rows.length > STATE_LIMITS.pageSize ? rows[STATE_LIMITS.pageSize - 1].key.slice("activity:".length) : undefined,
+			};
+		} else if (cmd.tool === "get_retention") {
+			const workspace = c.workspace(cmd.workspaceId);
+			const operation = workspace.cleanup && {
+				...workspace.cleanup,
+				command: workspace.cleanup.actorId === a.actor.id ? workspace.cleanup.command : undefined,
+			};
+			return { lifecycle: c.forkCleanup(workspace), inspection: workspace.retention, operation };
+		} else if (cmd.tool === "inspect_retention") {
+			const workspace = c.workspace(cmd.workspaceId);
+			result = await this.gate(grant, cmd, "source.read", (host) => this.inspectRetention(c, workspace, host));
+		} else if (cmd.tool === "cleanup_workspace") {
+			return this.cleanup(c, cmd, grant, op, fingerprint);
+		} else if (cmd.tool === "publish_revision" || cmd.tool === "publish_artifact") {
+			// Publication reads the pushed fork, so any authorized connection of the owner may publish.
+			const s = c.owned(a, cmd.workspaceId),
+				revision = requireValue(cmd.revision, "Revision required");
+			result = await this.gate(grant, cmd, cmd.tool === "publish_revision" ? "revision.publish" : "artifact.publish", async (host) => {
+				await this.git.ensureInit();
+				const artifactId = `${op.slice(0, 24)}-artifact`;
+				let storage: Artifact["storage"], contentHash: string, baseRevision: string | undefined;
+				if (cmd.tool === "publish_revision") {
+					const fork = requireValue(s.fork, "Attach a hosted fork first");
+					if (fork.state !== "ready") throw new DomainError(409, "Fork unavailable");
+					const forkInfo = await host.info(fork.name);
+					if (forkInfo.id !== fork.id) throw new DomainError(409, "Fork identity changed; publication refused");
+					const storageName = `repo-${repo.id}-artifacts`;
+					const retainedId = new ProviderIdentity(this.store).expected(storageName);
+					if (retainedId && (await host.info(storageName)).id !== retainedId)
+						throw new ProviderIdentityError("Retained source provider identity changed; publication refused");
+					if (
+						retainedId &&
+						host.withSource &&
+						this.store.get<string>(`publication-revision:${op}`) === revision &&
+						!(await this.git.hasCompleteSource(revision))
+					) {
+						const ref = `refs/heads/artifact-${artifactId}`;
+						const tip = await host.withSource(storageName, retainedId, (source) => source.log({ ref, limit: 1 }));
+						if (tip.length) {
+							if (tip[0].hash !== revision) throw new DomainError(409, "Retained publication ref differs from its exact revision");
+							await new SourceInspection(host, state).recover(this.git, revision, {
+								repository: storageName,
+								providerId: retainedId,
+								revision,
+								ref,
+							});
+						}
+					}
+					if (this.store.get<string>(`publication-revision:${op}`) !== revision || !(await this.git.hasCompleteSource(revision))) {
+						const { result: pushed } = await host.withToken(fork.name, "read", async (token) => {
+							const pushed = await this.git.fetch({
+								url: forkInfo.remote,
+								token,
+								remoteBranch: requireValue(cmd.ref, "Pushed fork branch required"),
+								localRef: `refs/cruce/checkpoint/${s.id}`,
+							});
+							if (pushed === revision && !(await this.git.hasCompleteSource(revision)))
+								await this.git.recover({ url: forkInfo.remote, token, ref: cmd.ref!, expected: revision });
+							return pushed;
+						});
+						if (pushed !== revision) throw new DomainError(409, "Fork ref moved; publish its exact current revision");
+					}
+					const source = new SourceInspection(host, state);
+					for (const needed of new Set(
+						[s.baseRevision, s.publishedRevision, s.integratedRevision, state.sourceHead, cmd.baseRevision].filter((r): r is string => !!r),
+					)) {
+						if (!(await this.git.hasCompleteSource(needed))) await source.recover(this.git, needed);
+					}
+					if (!(await this.git.hasCompleteSource(revision))) throw new DomainError(409, "Pushed source graph is incomplete");
+					if (
+						!(await this.git.log(revision, 1)).length ||
+						(await this.git.mergeBase(s.publishedRevision ?? s.baseRevision, revision)) !== (s.publishedRevision ?? s.baseRevision)
+					)
+						throw new DomainError(409, "Published commits must descend from the workspace baseline and previous publication");
+					const upstream = c.upstream();
+					const pinnedBase = this.store.get<string>(`publication-base:${op}`);
+					baseRevision =
+						pinnedBase ??
+						cmd.baseRevision ??
+						(upstream && (await this.git.log(upstream, 1)).length && (await this.git.mergeBase(upstream, revision)) === upstream
+							? upstream
+							: (s.integratedRevision ?? s.baseRevision));
+					if (!pinnedBase && baseRevision !== s.baseRevision && baseRevision !== s.integratedRevision && baseRevision !== upstream)
+						throw new DomainError(409, "Review base must name the workspace baseline or observed upstream revision");
+					if (!(await this.git.log(baseRevision, 1)).length)
+						throw new DomainError(409, "Review base objects unavailable; fetch upstream first");
+					if (
+						(await this.git.mergeBase(s.baseRevision, baseRevision)) !== s.baseRevision ||
+						(await this.git.mergeBase(baseRevision, revision)) !== baseRevision
+					)
+						throw new DomainError(409, "Integrate the review base with Git before publishing");
+					const diff = await this.git.reviewChanges(baseRevision, revision);
+					if (
+						a.repositoryRole !== "maintain" &&
+						diff.files.some((f) => repo.policy.protectedPaths.some((p) => f.path === p || f.path.startsWith(`${p}/`)))
+					)
+						throw new DomainError(403, "Protected paths require a repository maintainer");
+					this.store.put(`publication-base:${op}`, baseRevision);
+					this.store.put(`publication-revision:${op}`, revision);
+					const info = await host.ensure(storageName, `Cruce source artifacts ${repo.id}`, repo.defaultBranch);
+					const ref = `refs/heads/artifact-${artifactId}`;
+					await this.git.setRef(ref, revision);
+					await host.withToken(storageName, "write", (token) => this.git.push({ url: info.remote, token, localRef: ref, remoteRef: ref }));
+					storage = { repository: storageName, providerId: info.id, revision, ref };
+					contentHash = Array.from(
+						new Uint8Array(await crypto.subtle.digest("SHA-256", Uint8Array.from(await this.git.exportPack(revision)))),
+						(b) => b.toString(16).padStart(2, "0"),
+					).join("");
+					s.changes = diff.files.map(({ path, status, binary }) => ({ path, status, binary }));
+					s.commits = [];
+					for (const commit of await this.git.log(revision, 1000)) {
+						if (commit.oid === baseRevision) break;
+						s.commits.push(commit.oid);
+					}
+					s.publishedRevision = revision;
+					s.headRevision = revision;
+					s.integratedRevision = baseRevision;
+				} else {
+					if (
+						revision !== s.baseRevision &&
+						!state.artifacts.some((a) => a.kind === "source" && a.workspaceId === s.id && a.revision === revision)
+					)
+						throw new DomainError(409, "Evidence must name the base or a published workspace revision");
+					const content = requireValue(cmd.content, "Artifact content required"),
+						path = `artifacts/${artifactId}.txt`,
+						name = `repo-${repo.id}-evidence`,
+						info = await host.ensure(name, `Cruce evidence ${repo.id}`);
+					const key = `artifact-commit:${op}`;
+					const authorKey = `artifact-author:${op}`;
+					const author = this.store.get<import("./git/workspace.ts").GitAuthor>(authorKey) ?? {
+						name: a.actor.name,
+						email: "cruce@localhost",
+						timestamp: Math.floor(this.now() / 1000),
+					};
+					this.store.put(authorKey, author);
+					let oid = this.store.get<string>(key);
+					if (!oid || !(await this.git.hasCompleteSource(oid))) {
+						const previous = oid;
+						oid = await this.git.commit({
+							ref: `refs/cruce/evidence/${artifactId}`,
+							parent: null,
+							files: { [path]: content },
+							message: `Evidence for ${revision}`,
+							author,
+						});
+						if (previous && previous !== oid) throw new DomainError(409, "Evidence retry differs from its recorded commit");
+					}
+					this.store.put(key, oid);
+					await this.git.setRef(`refs/cruce/evidence/${artifactId}`, oid);
+					await host.withToken(name, "write", (token) =>
+						this.git.push({
+							url: info.remote,
+							token,
+							localRef: `refs/cruce/evidence/${artifactId}`,
+							remoteRef: `refs/heads/artifact-${artifactId}`,
+						}),
+					);
+					storage = { repository: name, providerId: info.id, path, revision: oid, ref: `refs/heads/artifact-${artifactId}` };
+					contentHash = await hash(content);
+				}
+				return c.addArtifact({
+					id: artifactId,
+					namespaceId: repo.namespaceId,
+					repositoryId: repo.id,
+					workspaceId: s.id,
+					actor: a.actor,
+					revision,
+					baseRevision,
+					kind: cmd.tool === "publish_revision" ? "source" : "evidence",
+					title: cmd.title ?? s.title,
+					contentHash,
+					trust: "reported",
+					storage,
+					at: this.now(),
+				});
+			});
+		} else {
+			result = c.command(cmd, a);
+			if (cmd.tool === "get_repository")
+				(result as import("../shared/platform.ts").RepositorySnapshot).capacity = {
+					...this.store.usage(),
+					stateBytes: jsonBytes(state),
+					limits: STATE_LIMITS,
+				};
+		}
+		if (mutation) {
+			if (cmd.tool === "start_workspace" && a.actor.kind === "human" && a.actor.connectionId)
+				this.store.put(`human-workspace:${a.actor.connectionId}`, (result as { id: string }).id);
+			const extra: { key: string; value: unknown }[] = [];
+			if (cmd.tool === "heartbeat" || cmd.tool === "report_change") {
+				const { lastActivity, ...template } = result as Workspace;
+				const templateId = await hash(stable(template));
+				const key = `workspace-result:${templateId}`;
+				if (!this.store.get(key)) {
+					this.store.admit(jsonBytes(template) * 2 + 4096, 4);
+					extra.push({ key, value: template });
+				}
+				state.receipts[op] = { fingerprint, result: undefined, workspaceResult: { templateId, lastActivity } };
+			} else state.receipts[op] = { fingerprint, result };
+			this.save(c, extra);
+		}
+		return result;
+	}
+	private async inspectRetention(c: RepositoryController, workspace: Workspace, host: RepositoryHost): Promise<RetentionInspection> {
+		const fork = requireValue(workspace.fork, "No retained fork");
+		if (fork.state !== "ready") throw new DomainError(409, "Fork unavailable");
+		const info = await host.info(fork.name);
+		if (info.id !== fork.id) throw new ProviderIdentityError("Fork identity changed; cleanup refused");
+		const { result: refs } = await host.withToken(fork.name, "read", (token) => this.git.remoteRefs({ url: info.remote, token }));
+		const valid =
+			refs.length <= STATE_LIMITS.cleanupRefs &&
+			refs.every((ref) => new TextEncoder().encode(ref.ref).length <= 256 && /^[a-f0-9]{40}$/.test(ref.oid));
+		const inspection: RetentionInspection = { checkedAt: this.now(), forkId: fork.id, complete: valid, refs: [], blockers: [] };
+		if (!inspection.complete) inspection.blockers.push("Fork ref inventory exceeds the cleanup limit");
+		const source = new SourceInspection(host, c.state);
+		for (const ref of valid ? refs : []) {
+			if (ref.ref.endsWith("^{}")) continue;
+			let retained = false;
+			let reason: "unretained" | "unavailable" | undefined;
+			try {
+				if (host.withSource) await source.locate(ref.oid);
+				else await this.known(c, ref.oid);
+				retained = true;
+			} catch (error) {
+				if (!(error instanceof DomainError) || ![404, 409, 413].includes(error.status)) throw error;
+				reason = error.status === 404 && !error.message.includes("cache unavailable") ? "unretained" : "unavailable";
+			}
+			inspection.refs.push({ ref: ref.ref, revision: ref.oid, retained, reason });
+		}
+		if (inspection.refs.some((ref) => ref.reason === "unavailable"))
+			inspection.blockers.push("Retention proof unavailable; recover or inspect source before cleanup");
+		if (inspection.refs.some((ref) => ref.reason === "unretained"))
+			inspection.blockers.push("Unretained fork refs; publish their commits before cleanup");
+		workspace.retention = inspection;
+		this.save(c);
+		return inspection;
+	}
+	private cleanupAuthority(c: RepositoryController, cmd: Command, a: import("../shared/platform.ts").Authority) {
+		const workspace = c.workspace(cmd.workspaceId);
+		authorizeMachine(a, cmd);
+		writeAccess(a);
+		if (a.actor.kind === "agent" && workspace.ownerId !== a.actor.userId) throw new DomainError(403, "Workspace belongs to another user");
+		if (a.actor.kind === "human") humanMaintain(a);
+		const readiness = c.forkCleanup(workspace);
+		if (workspace.fork?.state !== "deleted" && !readiness.ready) throw new DomainError(409, readiness.reasons[0]);
+		return workspace;
+	}
+	private async scheduleCleanup(at: number) {
+		if (this.recovery) await this.recovery.schedule(at);
+	}
+	private cleanupView(op: string, operation: CleanupOperation): NonNullable<Workspace["cleanup"]> {
+		const { state, phase, attempts, nextAttempt, reason } = operation;
+		return { operationId: op, actorId: operation.grant.actor.id, command: operation.command, state, phase, attempts, nextAttempt, reason };
+	}
+	private async cleanup(c: RepositoryController, cmd: Command, grant: ConnectionGrant, op: string, fingerprint: string) {
+		const workspace = this.cleanupAuthority(c, cmd, await this.namespace.authority(grant, c.state.repository.id));
+		assertStateBytes(cmd, 8192);
+		const key = `cleanup:${workspace.id}`;
+		let operation = this.store.get<CleanupOperation>(key);
+		if (operation) {
+			if (workspace.cleanup?.operationId !== op || (operation.fingerprint !== fingerprint && operation.fingerprint !== stable(cmd)))
+				throw new DomainError(409, "Resume the existing authorized cleanup operation");
+			// A current authenticated retry can renew a connection's continuation proof.
+			operation.grant = grant;
+		} else {
+			if (workspace.fork?.state === "deleted") throw new DomainError(409, "No retained fork");
+			operation = {
+				command: cmd,
+				grant,
+				fingerprint,
+				phase: workspace.fork?.state === "deleting" ? "deleting" : "authorized",
+				state: "pending",
+				attempts: 0,
+			};
+			this.store.admit(jsonBytes(operation) + 128 * 1024, 6);
+		}
+		if (operation.state === "complete") return { workspaceId: workspace.id, state: "deleted" };
+		operation.state = "pending";
+		operation.reason = undefined;
+		operation.attempts++;
+		operation.nextAttempt = this.now() + Math.min(3_600_000, 30_000 * 2 ** Math.min(operation.attempts - 1, 7));
+		// Arm the wakeup before accepting the durable intent. A crash after this save
+		// has a wakeup; a crash before it has neither deletion authority nor effects.
+		await this.scheduleCleanup(operation.nextAttempt);
+		workspace.cleanup = this.cleanupView(op, operation);
+		this.save(c, [{ key, value: operation }]);
+		let reservation: Awaited<ReturnType<NamespacePort["reserve"]>> | undefined;
+		try {
+			reservation = await this.namespace.reserve(
+				grant,
+				c.state.repository.id,
+				cmd.idempotencyKey!,
+				stable(cmd),
+				"workspace.cleanup",
+				workspace.id,
+			);
+			operation.reservationId = reservation.id;
+			await correlate({ reservationId: reservation.id });
+			diagnose("resource_reserved", { action: "workspace.cleanup", phase: reservation.state });
+			if (operation.phase !== "confirmed") {
+				const host = await (await this.resources()).host();
+				if (operation.phase === "authorized") {
+					const inspection = await this.inspectRetention(c, workspace, host);
+					if (!inspection.complete || inspection.blockers.length) throw new DomainError(409, inspection.blockers[0]);
+					this.cleanupAuthority(c, cmd, await this.namespace.authority(grant, c.state.repository.id));
+					// Recheck narrowed resource policy immediately before the irreversible request.
+					await this.namespace.reserve(grant, c.state.repository.id, cmd.idempotencyKey!, stable(cmd), "workspace.cleanup", workspace.id);
+					operation.phase = "deleting";
+					workspace.fork!.state = "deleting";
+					workspace.cleanup = this.cleanupView(op, operation);
+					c.event(grant.actor, "fork_deleting", `Fork deletion authorized for ${workspace.title}`, [workspace.id]);
+					this.save(c, [{ key, value: operation }]);
+				}
+				const currentGrant = grant.continuation && this.recovery ? await this.recovery.authorize(grant) : grant;
+				this.cleanupAuthority(c, cmd, await this.namespace.authority(currentGrant, c.state.repository.id));
+				await this.namespace.reserve(
+					currentGrant,
+					c.state.repository.id,
+					cmd.idempotencyKey!,
+					stable(cmd),
+					"workspace.cleanup",
+					workspace.id,
+				);
+				if (!(await host.remove(workspace.fork!.name, workspace.fork!.id))) {
+					await this.namespace.settle(reservation.id, "uncertain");
+					return { workspaceId: workspace.id, state: "deleting" };
+				}
+				operation.phase = "confirmed";
+				workspace.fork!.state = "deleted";
+				c.event(grant.actor, "fork_deleted", `Removed fork for ${workspace.title}`, [workspace.id]);
+				workspace.cleanup = this.cleanupView(op, operation);
+				c.state.receipts[op] = { fingerprint, result: { workspaceId: workspace.id, state: "deleted" } };
+				this.save(c, [{ key, value: operation }]);
+			}
+			await this.namespace.settle(reservation.id, "complete");
+			diagnose("resource_settled", { action: "workspace.cleanup", phase: "complete" });
+			operation.state = "complete";
+			operation.nextAttempt = undefined;
+			workspace.cleanup = this.cleanupView(op, operation);
+			this.save(c, [{ key, value: operation }]);
+			return { workspaceId: workspace.id, state: "deleted" };
+		} catch (error) {
+			// Reload after failed persistence so an uncommitted confirmation cannot
+			// overwrite the durable phase or cause deletion to be marked complete.
+			const durable = this.state(),
+				saved = this.store.get<CleanupOperation>(key)!;
+			const current = durable.workspaces.find((w) => w.id === workspace.id)!;
+			const blocked = error instanceof DomainError && [400, 401, 403, 409, 413].includes(error.status);
+			saved.state = blocked ? "blocked" : "pending";
+			saved.reason = blocked
+				? "Cleanup blocked; inspect retention, authority and storage identity before retrying"
+				: "Cleanup interrupted; recovery will retry the authorized operation";
+			if (blocked) saved.nextAttempt = undefined;
+			current.cleanup = this.cleanupView(op, saved);
+			this.save(new RepositoryController(durable, this.now(), () => "cleanup-recovery"), [{ key, value: saved }]);
+			if (reservation) await this.namespace.settle(reservation.id, saved.phase === "confirmed" ? "complete" : "uncertain");
+			throw error;
+		}
+	}
+	/** Bounded recovery of submitted deletion intents only. Expiry creates no intent. */
+	recoverCleanup() {
+		return this.serial.run(async () => {
+			const state = this.store.get<RepositoryState>("repository");
+			if (!state) return;
+			const due = state.workspaces
+				.filter((w) => w.cleanup?.state === "pending" && (w.cleanup.nextAttempt ?? 0) <= this.now())
+				.slice(0, STATE_LIMITS.recoveryBatch);
+			for (const workspace of due) {
+				const key = `cleanup:${workspace.id}`,
+					operation = this.store.get<CleanupOperation>(key);
+				if (!operation || !this.recovery) continue;
+				try {
+					const grant = await this.recovery.authorize(operation.grant);
+					await withDiagnostics(commandContext(operation.command, grant.actor.id), () => this.execute(operation.command, grant));
+				} catch (error) {
+					const c = new RepositoryController(this.state(), this.now(), () => "cleanup-recovery"),
+						saved = this.store.get<CleanupOperation>(key)!;
+					if (error instanceof DomainError && [401, 403, 409, 413].includes(error.status)) {
+						saved.state = "blocked";
+						saved.nextAttempt = undefined;
+						saved.reason = "Cleanup recovery needs current authorization or retention proof";
+					} else if ((saved.nextAttempt ?? 0) <= this.now()) saved.nextAttempt = this.now() + 3_600_000;
+					c.workspace(workspace.id).cleanup = this.cleanupView(workspace.cleanup!.operationId, saved);
+					this.save(c, [{ key, value: saved }]);
+				} finally {
+					this.git.clearCache();
+				}
+			}
+			const pending = this.state().workspaces.flatMap((w) =>
+				w.cleanup?.state === "pending" && w.cleanup.nextAttempt !== undefined ? [w.cleanup.nextAttempt] : [],
+			);
+			if (pending.length) await this.scheduleCleanup(Math.max(this.now() + 1000, Math.min(...pending)));
 		});
 	}
 	/** Journal before I/O; a retry reconciles an attempted update and never sends it twice. */
@@ -496,21 +900,37 @@ export class RepositoryRuntime {
 		const state = c.state,
 			repo = state.repository;
 		let promotion = state.promotions.find((p) => p.operation?.id === op);
-		if (promotion && (promotion.operation!.fingerprint !== fingerprint || promotion.proposalId !== cmd.proposalId))
+		await correlate({ promotionId: promotion?.id ?? `${op.slice(0, 24)}-promotion` });
+		if (
+			promotion &&
+			((promotion.operation!.fingerprint !== fingerprint && promotion.operation!.fingerprint !== stable(cmd)) ||
+				promotion.proposalId !== cmd.proposalId)
+		)
 			throw new DomainError(409, "Operation identity reused");
 		const p = c.proposal(cmd.proposalId);
+		await correlate({ workspaceId: p.workspaceId, revision: p.revision });
 		if (promotion?.state === "failed") throw new DomainError(409, "Promotion failed; reconcile source and obtain fresh review");
 		if (promotion?.state !== "complete") {
 			if (state.promotions.some((other) => other !== promotion && ["prepared", "uncertain"].includes(other.state)))
 				throw new DomainError(409, "Reconcile the pending promotion before another canonical update");
 			const ready = c.readiness(p, promotion);
-			if (!ready.ready) throw new DomainError(409, ready.reasons.join("; "));
+			if (!ready.ready)
+				throw new DomainError(
+					409,
+					ready.reasons.find((reason) => PUBLIC_ERRORS[409].includes(reason)) ??
+						"Promotion is blocked; inspect the change readiness checklist",
+				);
 		}
-		const reservation = await this.namespace.reserve(grant, repo.id, cmd.idempotencyKey!, fingerprint, "revision.publish", cmd.workspaceId);
+		const reservation = await this.namespace.reserve(grant, repo.id, cmd.idempotencyKey!, stable(cmd), "revision.publish", cmd.workspaceId);
+		await correlate({ reservationId: reservation.id });
+		diagnose("resource_reserved", { action: "revision.publish", phase: reservation.state });
+		this.maintenanceNeeded = true;
 		// Completion and the receipt are durable before settlement. Lost settlement is retried
 		// under current authority without fetching or pushing canonical again.
 		if (promotion?.state === "complete") {
+			diagnose("operation_replayed", { phase: "complete" });
 			await this.namespace.settle(reservation.id, "complete");
+			diagnose("resource_settled", { action: "revision.publish", phase: "complete" });
 			promotion.operation!.settled = true;
 			this.save(c);
 			return promotion;
@@ -533,6 +953,7 @@ export class RepositoryRuntime {
 		let unexpectedMovement = false;
 		try {
 			this.save(c);
+			diagnose("promotion_phase", { phase: operation.phase });
 			await this.git.ensureInit();
 			const artifact = c.artifact(p.artifactId);
 			if (artifact.kind !== "source" || artifact.revision !== p.revision || artifact.baseRevision !== p.base)
@@ -541,6 +962,7 @@ export class RepositoryRuntime {
 			const retained = await host.info(artifact.storage.repository);
 			if (!artifact.storage.providerId || retained.id !== artifact.storage.providerId)
 				throw new ProviderIdentityError("Retained source provider identity changed; promotion refused");
+			if (!(await this.git.hasCompleteSource(p.revision))) await new SourceInspection(host, state).recover(this.git, p.revision);
 			// Validate full retained source, even on retries; local refs cannot prove success.
 			await this.git.exportPack(p.revision);
 			if ((await this.git.mergeBase(p.base, p.revision)) !== p.base || p.base === p.revision)
@@ -576,12 +998,14 @@ export class RepositoryRuntime {
 								humanMaintain(await this.namespace.authority(grant, repo.id));
 								operation.phase = "attempted";
 								this.save(c);
+								diagnose("promotion_phase", { phase: "attempted" });
 							},
 						},
 					});
 					// Record the acknowledged update before token cleanup can fail.
 					operation.phase = "confirmed";
 					this.save(c);
+					diagnose("promotion_phase", { phase: "confirmed" });
 				});
 			}
 			// Independent provider observation, including interrupted-response reconciliation.
@@ -598,6 +1022,7 @@ export class RepositoryRuntime {
 			c.event(promotion.actor, "source_promoted", p.title, [p.id, p.revision, promotion.id]);
 			state.receipts[op] = { fingerprint, result: promotion };
 			this.save(c);
+			diagnose("promotion_phase", { phase: "complete" });
 		} catch (error) {
 			// Reload: a failed persistence call must not leave an in-memory completion
 			// capable of overwriting the durable journal on error handling.
@@ -611,23 +1036,39 @@ export class RepositoryRuntime {
 						? "failed"
 						: "uncertain";
 				if (pending.state === "failed") durable.proposals.find((item) => item.id === p.id)!.state = "rejected";
-				this.store.put("repository", durable);
+				this.save(new RepositoryController(durable, this.now(), () => "recovery"));
+				diagnose("promotion_phase", { phase: pending.state });
 			}
 			await this.namespace.settle(reservation.id, "uncertain");
+			diagnose("resource_settled", { action: "revision.publish", phase: "uncertain" });
 			throw error;
 		}
 		await this.namespace.settle(reservation.id, "complete");
+		diagnose("resource_settled", { action: "revision.publish", phase: "complete" });
 		operation.settled = true;
 		this.save(c);
 		return promotion;
 	}
 
 	exportSource(revision: string, grant: ConnectionGrant) {
-		return this.serial.run(async () => {
-			const state = this.state();
-			await this.namespace.authority(grant, state.repository.id);
-			await this.known(new RepositoryController(state, this.now(), () => "read"), revision);
-			return this.git.exportPack(revision);
-		});
+		return this.serial.run(() =>
+			withDiagnostics({ tool: "export_source", revision }, async () => {
+				try {
+					const state = this.state();
+					await correlate({ namespaceId: state.repository.namespaceId, repositoryId: state.repository.id });
+					diagnose("operation_started");
+					await this.namespace.authority(grant, state.repository.id);
+					await this.known(new RepositoryController(state, this.now(), () => "read"), revision);
+					const pack = await this.git.exportPack(revision);
+					diagnose("operation_completed");
+					return pack;
+				} catch (error) {
+					diagnoseError("operation_failed", error);
+					throw error;
+				} finally {
+					this.git.clearCache();
+				}
+			}),
+		);
 	}
 }

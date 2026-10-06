@@ -5,6 +5,102 @@ import { short } from "./status.ts";
 
 export type Execute = (cmd: Partial<Command> & { tool: string }) => Promise<unknown>;
 
+/** Explicit storage operations are separate from cache-only coordination reads. */
+function StoredSource({ revision, execute }: { revision: string; execute: Execute }) {
+	const [paths, setPaths] = useState<string[]>(),
+		[file, setFile] = useState<{ path: string; content: string | null; reason?: string }>(),
+		[history, setHistory] = useState<{ commits: { oid: string; message: string }[]; truncated: boolean }>(),
+		[error, setError] = useState(""),
+		[status, setStatus] = useState("");
+	const ticket = useTicket();
+	const load = async (kind: "files" | "history" | "recover", path?: string) => {
+		const current = ++ticket.current;
+		setError("");
+		setStatus("Loading stored source…");
+		try {
+			const result = await execute(
+				kind === "recover" ? { tool: "recover_source", revision } : { tool: "inspect_source", revision, sourceView: kind, path },
+			);
+			if (current !== ticket.current) return;
+			if (kind === "recover") setStatus("Source recovered. Browse files or commit history above to read the local cache.");
+			else if (kind === "history") {
+				setHistory(result as NonNullable<typeof history>);
+				setPaths(undefined);
+				setFile(undefined);
+				setStatus("");
+			} else {
+				const source = result as { paths?: string[]; file?: NonNullable<typeof file> };
+				if (source.paths) {
+					setPaths(source.paths);
+					setFile(undefined);
+				}
+				if (source.file) setFile(source.file);
+				setHistory(undefined);
+				setStatus("");
+			}
+		} catch (e) {
+			if (current === ticket.current) {
+				setError((e as Error).message);
+				setStatus("");
+			}
+		}
+	};
+	return (
+		<details>
+			<summary>Inspect stored source</summary>
+			<p className="muted">
+				Each request uses cloud storage and one namespace resource operation. History follows first parents; it does not show every merge
+				ancestor.
+			</p>
+			<div className="actions">
+				<button type="button" onClick={() => void load("files")}>
+					List stored files
+				</button>
+				<button type="button" onClick={() => void load("history")}>
+					Stored history
+				</button>
+				<button type="button" onClick={() => void load("recover")}>
+					Recover source cache
+				</button>
+			</div>
+			{status && <p role="status">{status}</p>}
+			{error && <p role="alert">{error}</p>}
+			{paths && (
+				<div className="source-browser">
+					<nav aria-label="Stored repository files">
+						{paths.map((path) => (
+							<button type="button" key={path} className={file?.path === path ? "selected" : ""} onClick={() => void load("files", path)}>
+								{path}
+							</button>
+						))}
+					</nav>
+					<section>
+						<h3>{file?.path ?? "Select a stored file"}</h3>
+						{file?.content !== null && file?.content !== undefined ? (
+							<pre>{file.content}</pre>
+						) : (
+							<p className="muted">{file?.reason ?? "Choose a file on the left."}</p>
+						)}
+					</section>
+				</div>
+			)}
+			{history && (
+				<>
+					<p className="muted">First-parent history{history.truncated ? " · first 30 commits" : ""}</p>
+					<ol className="commit-history">
+						{history.commits.map((c) => (
+							<li key={c.oid}>
+								<code>{short(c.oid)}</code>
+								<strong>{c.message}</strong>
+							</li>
+						))}
+					</ol>
+				</>
+			)}
+		</details>
+	);
+}
+
 /** Ignore responses that arrive after a newer request or after unmount. */
 function useTicket() {
 	const ticket = useRef(0);
@@ -34,17 +130,25 @@ export function ChangeDiff({ base, revision, execute }: { base: string; revision
 	const [diff, setDiff] = useState<ChangesResponse>(),
 		[error, setError] = useState(""),
 		[loading, setLoading] = useState(false);
+	const [stored, setStored] = useState(false);
 	const ticket = useTicket();
-	const load = async (path?: string) => {
+	const load = async (path?: string, fromStorage = stored) => {
 		const current = ++ticket.current;
 		setLoading(true);
 		setError("");
 		try {
-			const result = (await execute({ tool: "get_diff", baseRevision: base, revision, path })) as ChangesResponse;
+			const result = (await execute({
+				tool: fromStorage ? "inspect_source" : "get_diff",
+				...(fromStorage ? { sourceView: "diff" as const } : {}),
+				baseRevision: base,
+				revision,
+				path,
+			})) as ChangesResponse;
 			if (current !== ticket.current) return;
 			setDiff(result);
+			setStored(fromStorage);
 			// Open the first changed file straight away rather than asking for a click.
-			if (!path && !result.file && result.files[0]) void load(result.files[0].path);
+			if (!path && !result.file && result.files[0]) void load(result.files[0].path, fromStorage);
 		} catch (e) {
 			if (current === ticket.current) setError((e as Error).message);
 		} finally {
@@ -53,10 +157,18 @@ export function ChangeDiff({ base, revision, execute }: { base: string; revision
 	};
 	// biome-ignore lint/correctness/useExhaustiveDependencies: load once per exact revision pair.
 	useEffect(() => {
-		void load();
+		setStored(false);
+		void load(undefined, false);
 	}, [base, revision]);
 	return (
 		<section className="diff-view" aria-label="Files changed">
+			<details>
+				<summary>Inspect stored diff</summary>
+				<p className="muted">Each request uses cloud storage and one namespace resource operation, and may recover retained Git objects.</p>
+				<button type="button" onClick={() => void load(undefined, true)}>
+					Load stored diff
+				</button>
+			</details>
 			{error && (
 				<p role="alert">
 					{error}{" "}
@@ -163,6 +275,7 @@ export function RevisionBrowser({
 					</button>
 				</div>
 			</div>
+			<StoredSource key={revision} revision={revision} execute={execute} />
 			{loading && <p role="status">Loading revision…</p>}
 			{error && <p role="alert">{error}</p>}
 			{files && (

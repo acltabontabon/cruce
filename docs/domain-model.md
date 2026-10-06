@@ -190,6 +190,7 @@ Authority is derived on every request, including retries, from the authenticated
 | Manage namespace membership, teams and policy | Namespace Owner (Maintainer where policy allows) |
 | Create a repository / provision canonical | Authenticated human with Maintain |
 | Read repository state, source, provenance; clone or fetch canonical and forks | Read grant; agents need `cruce:read` |
+| Explicit stored-source inspection and cache recovery | Read grant; agents need `cruce:read`; namespace/repository `source.read` policy and budget apply, with an operation identity |
 | Start a workspace | Write grant; agents need `workspace:write` |
 | Attach, detach, report, heartbeat, end a workspace | The workspace owner, through any authorized connection; agents need `workspace:write`; a paired terminal is bound to one workspace |
 | Push to a workspace fork | The workspace owner; agents need `workspace:write` and `revision:publish` |
@@ -207,5 +208,10 @@ Effective agent authority is the intersection of its user's current authority, t
 - Completion preserves commits, published revisions, evidence and provenance. Ending a workspace never accepts or deletes source.
 - Local cleanup removes only Cruce-owned worktrees, and only when they are clean and their head is published or still at the retained baseline.
 - Fork cleanup requires an ended workspace and proof that every fork ref is retained by canonical or retained storage. Unretained commits, annotated tags and unknown refs block deletion, and so does uncertainty.
+- Explicit retention inspection records exact fork refs, retained/unretained results, completeness and check time. Recorded inspection is an observation; cleanup checks again before accepting deletion.
+- Cleanup authorization is durable for one exact operation and fork ID. An alarm may resume only that submitted operation, using its original reservation under current membership, repository access, scopes and resource policy. It never creates a new system actor or derives permission from age. OAuth grant removal, expiry or changed repository approval blocks recovery until a current authenticated retry. Confirmed deletion is recorded before reservation settlement.
 - Source referenced by a published revision is retained.
+- The local Git cache is disposable. Eviction preserves retained source and provenance; explicit identity-checked recovery restores exact source without requiring the workspace fork. Cache-only coordination reads may show source or ancestry as unavailable. Provider first-parent history does not establish complete Git ancestry.
 - Presence expiry, disconnection and detachment are never cleanup triggers. Cleanup is always an explicit, authorized operation.
+
+Coordination capacity is finite and inspectable. A full current-state or retained-record envelope rejects new work before resource I/O while preserving records and recovery headroom. Activity windows are views over retained history; receipts and charged uncertainty never expire into permission to repeat an effect. [ADR 0005](decisions/0005-bounded-state-and-authorized-cleanup-recovery.md) records this policy.

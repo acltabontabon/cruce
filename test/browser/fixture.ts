@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { stable } from "../../src/core/errors.ts";
 import { DirectoryController, initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
 import { initialRepository, RepositoryController } from "../../src/core/platform.ts";
 import { repositorySummary } from "../../src/shared/coordination.ts";
@@ -229,6 +230,51 @@ export async function fixture() {
 			if (req.method === "GET") return json(res, runtime.snapshot(authority));
 			const cmd = CommandInput.parse({ ...body, namespaceId: w.state.namespace.id, repositoryId: runtime.state.repository.id });
 			calls.push(cmd);
+			if (cmd.tool === "get_activity") return json(res, { items: runtime.state.activity, cursor: undefined });
+			if (cmd.tool === "inspect_retention") {
+				const workspace = runtime.workspace(cmd.workspaceId);
+				const reservation = w.reserve(authority, cmd.idempotencyKey!, stable(cmd), "source.read", workspace.id);
+				workspace.retention = {
+					checkedAt: FIXED_TIME,
+					forkId: workspace.fork?.id ?? "fixture-fork",
+					complete: true,
+					refs: [{ ref: "refs/heads/unpublished", revision: head, retained: false }],
+					blockers: ["Unretained fork refs; publish their commits before cleanup"],
+				};
+				reservation.state = "complete";
+				return json(res, workspace.retention);
+			}
+			if (cmd.tool === "inspect_source" || cmd.tool === "recover_source") {
+				if (!cmd.idempotencyKey) return json(res, { error: "Mutation requires an idempotency key" }, 400);
+				const reservation = w.reserve(authority, cmd.idempotencyKey, stable(cmd), "source.read");
+				const revision = cmd.revision ?? runtime.state.sourceHead ?? head;
+				let result: unknown;
+				if (cmd.tool === "recover_source") result = { revision, recovered: true };
+				else if (cmd.sourceView === "diff") result = await git.reviewChanges(cmd.baseRevision ?? base, revision, cmd.path);
+				else if (cmd.sourceView === "artifact")
+					result = {
+						artifact: runtime.artifact(cmd.artifactId),
+						content: "Reported tests: 12 passed for the bounded retry revision. Fixture evidence only.",
+					};
+				else if (cmd.sourceView === "history") {
+					const commits: Awaited<ReturnType<GitWorkspace["log"]>> = [];
+					let oid: string | undefined = revision;
+					while (oid && commits.length < 31) {
+						const c: Awaited<ReturnType<GitWorkspace["log"]>>[number] | undefined = (await git.log(oid, 1))[0];
+						if (!c) break;
+						commits.push(c);
+						oid = c.parents[0];
+					}
+					result = { revision, traversal: "first-parent", truncated: commits.length > 30, commits: commits.slice(0, 30) };
+				} else {
+					const files = await git.readFiles(revision);
+					result = cmd.path
+						? { revision, file: { path: cmd.path, content: files[cmd.path] } }
+						: { revision, paths: Object.keys(files).sort() };
+				}
+				reservation.state = "complete";
+				return json(res, result);
+			}
 			if (cmd.tool === "get_workspace_updates") {
 				const workspace = runtime.workspace(cmd.workspaceId),
 					updates = runtime.workspaceUpdates(workspace);

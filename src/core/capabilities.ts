@@ -31,6 +31,7 @@ export const DEFAULT_RESOURCE_POLICY: ResourcePolicy = {
 		"workspace.cleanup": "allow",
 		"revision.publish": "allow",
 		"artifact.publish": "allow",
+		"source.read": "allow",
 	},
 	dailyLimit: 100,
 };

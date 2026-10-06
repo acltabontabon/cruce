@@ -1,6 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
-import { DomainError } from "../core/errors.ts";
+import { DomainError, stable } from "../core/errors.ts";
 import { initialNamespace, NamespaceController } from "../core/ownership.ts";
+import { assertNamespaceCapacity } from "../core/state-limits.ts";
+import { STATE_LIMITS } from "../shared/limits.ts";
 import type {
 	Actor,
 	Invitation,
@@ -10,21 +12,35 @@ import type {
 	Repository,
 	ResourceAction,
 	ResourcePolicy,
+	ResourceReservation,
 	User,
 } from "../shared/platform.ts";
 import { ResourceBoundary, type StorageEnv } from "./artifacts.ts";
-import { sqlStore } from "./store.ts";
+import { hash, sqlStore } from "./store.ts";
+export type ContinuationAuthorization =
+	| { kind: "console" }
+	| { kind: "oauth"; key: string; propsHash: string }
+	| { kind: "terminal"; key: string };
 export interface ConnectionGrant {
 	actor: Actor;
 	scopes?: string[];
 	repositories?: string[];
+	continuation?: ContinuationAuthorization;
 }
 export class NamespaceRuntime extends DurableObject<StorageEnv> {
-	private store = sqlStore(this.ctx.storage.sql);
+	private store = sqlStore(this.ctx.storage.sql, (run) => this.ctx.storage.transactionSync(run));
 	private controller() {
 		const state = this.store.get<NamespaceState>("namespace");
 		if (!state) throw new DomainError(404, "Namespace unavailable");
-		return new NamespaceController(state, Date.now());
+		state.reservations = state.reservations.map(
+			(reservation) => this.store.get<ResourceReservation>(this.reservationKey(reservation.id)) ?? reservation,
+		);
+		const now = Date.now(),
+			day = Math.floor(now / 86400000);
+		const recorded = this.store.get<number>(`budget:${day}`);
+		if (recorded !== undefined) state.reservationUsage = { day, used: recorded };
+		else if (!state.reservations.length) state.reservationUsage = { day, used: 0 };
+		return new NamespaceController(state, now);
 	}
 	initialize(namespace: Namespace) {
 		const old = this.store.get<NamespaceState>("namespace");
@@ -38,7 +54,32 @@ export class NamespaceRuntime extends DurableObject<StorageEnv> {
 		this.save(c);
 	}
 	private save(c: NamespaceController) {
-		this.store.put("namespace", c.state);
+		assertNamespaceCapacity({ ...c.state, reservations: [] });
+		const entries: { key: string; value: unknown }[] = c.state.reservations.map((reservation) => ({
+			key: this.reservationKey(reservation.id),
+			value: reservation,
+		}));
+		const day = Math.floor(c.now / 86400000);
+		entries.push({ key: `budget:${day}`, value: c.budget().used });
+		this.store.batch([...entries, { key: "namespace", value: { ...c.state, reservations: [], reservationUsage: undefined } }]);
+	}
+	private reservationKey(id: string) {
+		return `reservation:${id}`;
+	}
+	reservations(grant: ConnectionGrant, cursor?: string) {
+		const c = this.controller();
+		const a = c.authority(grant.actor);
+		if (a.actor.kind !== "human" || !["owner", "maintainer"].includes(a.role)) throw new DomainError(403, "Human maintainer required");
+		const after = cursor ? `reservation:${cursor}` : "reservation:";
+		const indexed = this.store.scan<ResourceReservation>("reservation:", after, STATE_LIMITS.pageSize + 1);
+		const legacy = c.state.reservations.map((value) => ({ key: this.reservationKey(value.id), value })).filter(({ key }) => key > after);
+		const rows = [...new Map([...legacy, ...indexed].map((row) => [row.key, row])).values()]
+			.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+			.slice(0, STATE_LIMITS.pageSize + 1);
+		return {
+			items: rows.slice(0, STATE_LIMITS.pageSize).map(({ value }) => value),
+			cursor: rows.length > STATE_LIMITS.pageSize ? rows[STATE_LIMITS.pageSize - 1].key.slice("reservation:".length) : undefined,
+		};
 	}
 	authority(grant: ConnectionGrant, repositoryId?: string) {
 		return this.controller().authority(grant.actor, repositoryId, grant.scopes, grant.repositories);
@@ -63,7 +104,8 @@ export class NamespaceRuntime extends DurableObject<StorageEnv> {
 			teams: maintain ? c.state.teams : [],
 			policy: c.state.policy,
 			storage: new ResourceBoundary(this.store, this.env, { namespace: c.state.namespace.id }).storage(),
-			reservations: maintain ? c.state.reservations : [],
+			reservations: maintain ? this.reservations(grant).items : [],
+			capacity: { ...this.store.usage(), limits: STATE_LIMITS },
 			budget: c.budget(),
 			permissions: { maintain, owner: maintain && a.role === "owner" },
 		};
@@ -104,20 +146,50 @@ export class NamespaceRuntime extends DurableObject<StorageEnv> {
 		c.setPolicy(c.authority(grant.actor), policy);
 		this.save(c);
 	}
-	reserve(grant: ConnectionGrant, repositoryId: string, id: string, fingerprint: string, action: ResourceAction, workspaceId?: string) {
+	async reserve(
+		grant: ConnectionGrant,
+		repositoryId: string,
+		id: string,
+		fingerprint: string,
+		action: ResourceAction,
+		workspaceId?: string,
+	) {
+		const compactFingerprint = await hash(fingerprint);
 		const c = this.controller(),
 			a = c.authority(grant.actor, repositoryId, grant.scopes, grant.repositories);
-		const reservation = c.reserve(a, id, fingerprint, action, workspaceId);
+		const previous =
+			this.store.get<ResourceReservation>(this.reservationKey(`${a.actor.id}:${id}`)) ??
+			c.state.reservations.find((r) => r.id === `${a.actor.id}:${id}`);
+		if (previous && !c.state.reservations.some((r) => r.id === previous.id)) c.state.reservations.push(previous);
+		if (!previous) this.store.admit(8192, 3);
+		// Same-domain storage compaction preserves existing operation identities.
+		if (previous) {
+			const legacy = stable({ fingerprint, action, repositoryId, workspaceId });
+			if (previous.fingerprint === legacy)
+				previous.fingerprint = stable({ fingerprint: compactFingerprint, action, repositoryId, workspaceId });
+		}
+		const reservation = c.reserve(a, id, compactFingerprint, action, workspaceId);
 		new ResourceBoundary(this.store, this.env, { namespace: c.state.namespace.id }).bind();
 		this.save(c);
 		return reservation;
 	}
 	settle(id: string, state: "complete" | "uncertain" | "released") {
 		const c = this.controller();
-		const r = c.state.reservations.find((r) => r.id === id);
+		const r = this.store.get<ResourceReservation>(this.reservationKey(id)) ?? c.state.reservations.find((r) => r.id === id);
 		if (!r) throw new DomainError(404, "Resource reservation unavailable");
-		r.state = state;
-		this.save(c);
+		const day = Math.floor(r.at / 86400000);
+		if (state === "released" && r.state !== "released") {
+			if (["reserved", "uncertain"].includes(r.state)) throw new DomainError(409, "Uncertain resource reservations cannot be released");
+			const used = this.store.get<number>(`budget:${day}`) ?? c.budget().used;
+			r.state = state;
+			this.store.batch([
+				{ key: this.reservationKey(id), value: r },
+				{ key: `budget:${day}`, value: Math.max(0, used - 1) },
+			]);
+		} else {
+			r.state = state;
+			this.store.put(this.reservationKey(id), r);
+		}
 	}
 	/** Internal DO RPC only: pinned storage identity, never credentials. */
 	resourceConfiguration() {

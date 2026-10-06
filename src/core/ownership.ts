@@ -176,14 +176,18 @@ export class NamespaceController {
 	budget() {
 		const day = Math.floor(this.now / 86400000);
 		return {
-			used: this.state.reservations.filter((r) => r.state !== "released" && Math.floor(r.at / 86400000) === day).length,
+			used:
+				this.state.reservationUsage?.day === day
+					? this.state.reservationUsage.used
+					: this.state.reservations.filter((r) => r.state !== "released" && Math.floor(r.at / 86400000) === day).length,
 			limit: this.state.policy.dailyLimit,
 			resetsAt: (day + 1) * 86400000,
 		};
 	}
 	reserve(a: Authority, id: string, fingerprint: string, action: ResourceAction, workspaceId?: string) {
 		const repo = this.state.repositories.find((r) => r.id === a.repositoryId);
-		if (!repo || !a.repositoryRole || a.repositoryRole === "read") throw new DomainError(403, "Repository write permission required");
+		if (!repo || !a.repositoryRole || (a.repositoryRole === "read" && action !== "source.read"))
+			throw new DomainError(403, "Repository write permission required");
 		const key = `${a.actor.id}:${id}`,
 			full = stable({ fingerprint, action, repositoryId: repo.id, workspaceId });
 		const rules = [this.state.policy.rules[action], repo.policy.resourceRules[action]];
@@ -193,6 +197,7 @@ export class NamespaceController {
 		const previous = this.state.reservations.find((r) => r.id === key);
 		if (previous) {
 			if (previous.fingerprint !== full) throw new DomainError(409, "Resource operation identity reused");
+			if (previous.state === "released") throw new DomainError(409, "Resource reservation was released; use a new operation identity");
 			return previous;
 		}
 		if (this.budget().used >= this.state.policy.dailyLimit)
@@ -208,6 +213,7 @@ export class NamespaceController {
 			state: "reserved" as const,
 		};
 		this.state.reservations.push(reservation);
+		if (this.state.reservationUsage?.day === Math.floor(this.now / 86400000)) this.state.reservationUsage.used++;
 		return reservation;
 	}
 }
