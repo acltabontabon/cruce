@@ -145,6 +145,12 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 			},
 		});
 	const identity = await requestIdentity(request, env);
+	// Identity and personal namespace initialization belong to explicit sign-in/authorization,
+	// never to coordination routing or terminal approval.
+	const directory = namespaceDirectory(env);
+	const user = await directory.login(identity);
+	const personal = await directory.namespace(user.personalNamespaceId);
+	await env.NAMESPACE.getByName(personal.id).initialize(personal);
 	if (url.pathname === "/auth/login")
 		return new Response(null, {
 			status: 302,
@@ -154,10 +160,6 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 				"cache-control": "no-store",
 			},
 		});
-	const directory = namespaceDirectory(env);
-	const user = await directory.login(identity);
-	const personal = await directory.namespace(user.personalNamespaceId);
-	await env.NAMESPACE.getByName(personal.id).initialize(personal);
 	const choices: { id: string; label: string }[] = [];
 	for (const namespace of await directory.namespaces()) {
 		try {

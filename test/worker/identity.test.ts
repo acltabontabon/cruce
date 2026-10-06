@@ -1,5 +1,6 @@
 import { AuthorizationError } from "@cloudflare/workers-oauth-provider";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DirectoryController } from "../../src/core/ownership.ts";
 import { type AuthEnv, accessIdentity, authRoute, oauthProvider, seal, unseal } from "../../src/worker/auth.ts";
 
 vi.mock("cloudflare:workers", () => ({
@@ -69,6 +70,38 @@ async function identityFixture() {
 }
 describe("native identity", () => {
 	afterEach(() => vi.unstubAllGlobals());
+	it("explicit sign-in initializes one stable identity and personal namespace before issuing a session", async () => {
+		const f = await identityFixture();
+		vi.stubGlobal("fetch", f.send);
+		let id = 0;
+		const c = new DirectoryController({ users: [], namespaces: [] }, 1000, () => `id-${++id}`);
+		const initialize = vi.fn(async () => {});
+		const directory = {
+			login: vi.fn(async (v: { tenantId: string; developerId: string; email: string }) => c.login(v.tenantId, v.developerId, v.email)),
+			namespace: async (id: string) => c.state.namespaces.find((n) => n.id === id),
+		};
+		const env = {
+			...f.env,
+			DIRECTORY: { getByName: () => directory },
+			NAMESPACE: { getByName: () => ({ initialize }) },
+		} as unknown as AuthEnv;
+		const request = new Request("https://cruce.example.test/auth/login", {
+			headers: { "cf-access-jwt-assertion": await f.token({ exp: Math.floor(Date.now() / 1000) + 600 }) },
+		});
+		const responses = await Promise.all(Array.from({ length: 5 }, () => authRoute(request, env)));
+		expect(c.state.users).toHaveLength(1);
+		expect(c.state.namespaces).toHaveLength(1);
+		for (const response of responses) {
+			expect(response!.status).toBe(302);
+			expect(response!.headers.get("set-cookie")).toContain("__Host-cruce=");
+		}
+		expect(initialize).toHaveBeenCalledWith(c.state.namespaces[0]);
+		initialize.mockRejectedValueOnce(new Error("Interrupted personal setup"));
+		await expect(authRoute(request, env)).rejects.toThrow("Interrupted personal setup");
+		expect((await authRoute(request, env))!.status).toBe(302);
+		expect(c.state.users).toHaveLength(1);
+		expect(c.state.namespaces).toHaveLength(1);
+	});
 	it.each([false, true])("renders consent and rejected-consent retry pages as HTML (rejected: %s)", async (rejected) => {
 		const f = await identityFixture();
 		vi.stubGlobal("fetch", f.send);

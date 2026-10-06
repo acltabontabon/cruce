@@ -14,14 +14,14 @@ Canonical lifecycle, the namespace/repository/workspace model, fork lifecycle, e
 | --- | --- | --- | --- |
 | F1 | Promotion against the exact approved base | Now | **Done**, locally verified ([evidence](docs/local-verification.md#exact-base-promotion-verification)); hosted validation in D2 |
 | F2 | Durable provider ownership and identity | Now | **Done**, locally verified ([evidence](docs/local-verification.md#durable-provider-identity-verification-f2)); hosted validation in D2 |
-| F3 | Pure coordination reads | Now | Open |
+| F3 | Pure coordination reads | Now | **Done**, locally verified ([evidence](docs/local-verification.md#pure-coordination-read-verification-f3)); hosted acceptance remains unverified |
 | F4 | Bounded source inspection and recoverable cache | Next | Open |
 | F5 | Diagnosable operations and safe errors | Next | **Safe errors done** 2026-10-06; structured correlation open |
 | F6 | Bounded state, transfers and explicit retention operations | Later | Open |
 
 **F2 — Durable provider ownership and identity.** *Done locally:* deployment storage pins its account and physical namespace; the Repository DO journals canonical, fork, source-retention and evidence-retention provider IDs before token cleanup or Git access. Resource operations validate recorded IDs and addresses, including fork parents, publication checkpoints and promotion recovery. Recreated or missing recorded repositories fail closed; names and descriptions cannot establish an unrecorded identity. Restoring the original installation binding and repository identities reuses provenance, operations and reservations. Fault tests cover recreation after interruption, unknown creation responses and restoration. Hosted binding acceptance remains in D2; publication receipt/settlement recovery is R3.
 
-**F3 — Pure coordination reads.** HTTP/MCP routing calls `Directory.login` and repository initialization on reads, and both persist metadata. *Target:* established coordination reads cause no domain or storage mutation and no provider call. Initialization becomes an explicit step.
+**F3 — Pure coordination reads.** *Done locally:* HTTP, MCP and terminal coordination routes resolve established identities without login writes. Explicit sign-in/authorization initializes identities and personal namespaces; canonical setup or setup retry initializes repository state. Cold Durable Object and SQLite/Git-cache reads create no schema or metadata and make no Artifacts call. Current repository metadata and permissions are projected from Namespace authority without saving them. Interrupted registration remains inspectable with an authorized setup retry; missing source stays unavailable rather than triggering repair. SQL-backed route tests exercise every catalog read, the actual MCP handler, restarts, missing state and revoked access. Hosted acceptance remains unverified; cache recovery is F4.
 
 **F4 — Bounded source inspection and recoverable cache.** The SQLite Git object cache supports ancestry, diffs and transport, but has no eviction or cold-cache rehydration. *Target:* use Artifacts file/history APIs where they are equivalent, keep bounded Git data only where ancestry, packs or retention need it, and recover retained source after a cache loss. First-parent history is not complete ancestry.
 

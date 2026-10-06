@@ -42,7 +42,7 @@ export async function bridgeRoute(request: Request, env: PlatformEnv, ctx: Execu
 		const pair = await env.OAUTH_KV.get<Pair>(`pair:${code}`, "json");
 		if (!pair || pair.expiresAt < Date.now()) throw new DomainError(403, "Pairing request expired");
 		const directory = namespaceDirectory(env),
-			user = await directory.login(identity);
+			user = await directory.resolve(identity);
 		const repo = await env.NAMESPACE.getByName(pair.namespaceId).repository(
 			{ actor: { id: user.id, userId: user.id, name: user.name, kind: "human" } },
 			pair.repositoryId,

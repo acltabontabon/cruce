@@ -6,6 +6,7 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Fixed
 
+- Keep HTTP, MCP and terminal coordination reads free of metadata, schema and Git-cache writes or Artifacts calls, including after restart. Initialize identity during explicit sign-in/authorization and repository state during canonical setup or setup retry. Interrupted repository registration stays inspectable, and reads use current permissions and policy without saving a copy. Persist only the exact bytes of Git-cache buffer views.
 - Pin provider repository IDs before token cleanup or Git access and validate canonical, fork and source/evidence retention identities on resource operations and retries. Recreated names fail closed. Storage restoration preserves interrupted promotion recovery and existing reservations. Published storage records now include the provider ID; unrecorded existing storage requires administrator reconciliation.
 
 ### Changed

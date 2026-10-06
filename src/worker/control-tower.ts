@@ -22,7 +22,6 @@ export class ControlTower extends DurableObject<Env> {
 				this.env.NAMESPACE.getByName(repository.namespaceId),
 				this.env,
 			);
-		this.runtime.initialize(repository);
 		return this.runtime;
 	}
 	command(repository: Repository, cmd: Command, grant: ConnectionGrant) {

@@ -24,6 +24,11 @@ export class DirectoryController {
 		readonly now: number,
 		readonly nextId: () => string,
 	) {}
+	resolve(issuer: string, subject: string) {
+		const user = this.state.users.find((u) => u.issuer === issuer && u.subject === subject);
+		if (!user) throw new DomainError(401, "Sign in to initialize your Cruce identity");
+		return user;
+	}
 	login(issuer: string, subject: string, email: string) {
 		let user = this.state.users.find((u) => u.issuer === issuer && u.subject === subject);
 		if (user) {

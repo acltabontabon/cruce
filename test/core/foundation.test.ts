@@ -90,6 +90,14 @@ describe("namespace ownership", () => {
 		let n = 0;
 		const c = new DirectoryController({ users: [], namespaces: [] }, 1, () => `${++n}`);
 		const first = c.login("issuer", "a", "cris@example.com");
+		const before = structuredClone(c.state);
+		expect(c.resolve("issuer", "a").id).toBe(first.id);
+		for (const [issuer, subject] of [
+			["other", "a"],
+			["issuer", "unknown"],
+		])
+			expect(() => c.resolve(issuer, subject)).toThrow("Sign in to initialize");
+		expect(c.state).toEqual(before);
 		expect(c.login("issuer", "a", "renamed@example.com").id).toBe(first.id);
 		c.login("issuer", "b", "cris@elsewhere.com");
 		expect(c.state.namespaces.map((w) => w.handle)).toEqual(["cris", "cris-1"]);

@@ -25,10 +25,13 @@ export class RepositoryRuntime {
 		readonly now = Date.now,
 	) {}
 	initialize(repository: Repository) {
-		const state = this.store.get<RepositoryState>("repository") ?? initialRepository(repository);
-		if (state.repository.id !== repository.id) throw new DomainError(403, "Repository mismatch");
-		state.repository = repository;
-		this.store.put("repository", state);
+		const state = this.store.get<RepositoryState>("repository");
+		if (state) {
+			if (state.repository.id !== repository.id || state.repository.namespaceId !== repository.namespaceId)
+				throw new DomainError(403, "Repository mismatch");
+			return;
+		}
+		this.store.put("repository", initialRepository(repository));
 	}
 	state() {
 		return requireValue(this.store.get<RepositoryState>("repository"), "Repository not initialized");
@@ -147,8 +150,18 @@ export class RepositoryRuntime {
 			const repoId = requireValue(cmd.repositoryId, "Repository required"),
 				a = await this.namespace.authority(grant, repoId);
 			authorizeMachine(a, cmd);
-			const state = structuredClone(this.state());
-			state.repository = await this.namespace.repository(grant, repoId);
+			const repository = await this.namespace.repository(grant, repoId);
+			if (cmd.tool === "retry_repository_setup" && !cmd.idempotencyKey) throw new DomainError(400, "Mutation requires an idempotency key");
+			const stored = this.store.get<RepositoryState>("repository");
+			if (
+				cmd.namespaceId !== repository.namespaceId ||
+				(stored && (stored.repository.id !== repoId || stored.repository.namespaceId !== repository.namespaceId))
+			)
+				throw new DomainError(403, "Repository identity mismatch");
+			// An interrupted registration can still be inspected and retried from the console.
+			// This empty projection is not persisted until explicit canonical setup.
+			const state = stored ? structuredClone(stored) : initialRepository(repository);
+			state.repository = repository;
 			if (cmd.tool === "retry_repository_setup") {
 				// Replay the original provisioning intent so a failed creation reuses its operation identity
 				// and charged reservation. Repositories created before intent was recorded use a stable key.
@@ -166,6 +179,11 @@ export class RepositoryRuntime {
 			const c = new RepositoryController(state, this.now(), () => `${op.slice(0, 24)}-${sequence++}`);
 			const mutation = HUMAN_TOOLS.has(cmd.tool) || toolByName(cmd.tool)?.mutation || cmd.tool === "provision_repository";
 			if (mutation && !cmd.idempotencyKey) throw new DomainError(400, "Mutation requires an idempotency key");
+			if (mutation && !stored) {
+				if (cmd.tool !== "provision_repository") throw new DomainError(409, "Set up the canonical repository first");
+				humanMaintain(a);
+				this.initialize(repository);
+			}
 			if (a.actor.kind === "human" && a.actor.connectionId) {
 				const bound = this.store.get<string>(`human-workspace:${a.actor.connectionId}`);
 				if (bound && cmd.tool === "start_workspace" && !state.receipts[op])

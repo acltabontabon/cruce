@@ -6,6 +6,8 @@ This is the workflow supported by the current implementation. Real-provider conv
 
 Use Git, Node 22.18+ and installed Cruce dependencies. Once the administrator has configured installation storage, sign in through Access and create a repository. No developer Cloudflare account or API token is required. Cruce initializes its configured default branch. Repository creation and writer attachment consume Artifacts resources. CI, releases and deployments remain external.
 
+Explicit console sign-in or OAuth authorization initializes your Cruce identity and personal namespace. Coordination reads never create identity, repository metadata or source storage. If canonical setup was interrupted, inspect the registered repository and use its maintainer-only setup retry; reading it consumes no Artifacts operation. An unknown identity must sign in again. See the [read boundary](architecture.md#coordination-read-boundary).
+
 ## Authenticate and clone with Git
 
 The repository's Clone control shows the canonical remote with stable IDs:

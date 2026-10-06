@@ -75,9 +75,7 @@ export async function platformRoute(
 			? validateIdentity(bridge.identity, env)
 			: consoleIdentity(request, env));
 	const directory = namespaceDirectory(env),
-		user = await directory.login(identity);
-	const personal = await directory.namespace(user.personalNamespaceId);
-	await env.NAMESPACE.getByName(personal.id).initialize(personal);
+		user = await directory.resolve(identity);
 	const actor: Actor = {
 		id: props ? `agent-${requireValue(props.connectionId, "Reconnect this agent")}` : user.id,
 		userId: user.id,
@@ -154,7 +152,7 @@ export async function platformRoute(
 		namespace = env.NAMESPACE.getByName(namespaceId);
 	if (parts[3] === "accept" && request.method === "POST") {
 		const body = z.object({ token: z.string().min(20).max(200) }).parse(await input(request));
-		await namespace.accept(user, await hash(body.token));
+		await namespace.accept({ ...user, email: identity.email }, await hash(body.token));
 		return json({ accepted: true });
 	}
 	const a = await namespace.authority(grant);

@@ -36,6 +36,8 @@ The bridge supplies namespace, repository, workspace and execution identities, p
 
 Hosted discovery filters tools by granted scope. Scope never replaces current membership, approved repositories, workspace ownership or namespace resource policy. Human concern resolution, rejection, attestation and promotion are absent from the agent catalog. An agent review with outcome `approve` never satisfies human approval.
 
+Every coordination read uses established identity, current Namespace authority and recorded repository/cache state. HTTP, MCP and terminal routing perform no login, metadata save, schema creation or Artifacts call for these reads, including after a restart. Explicit sign-in/authorization creates the identity and personal namespace; human canonical setup or setup retry initializes repository state. MCP discovery does not initialize anything. Authentication still verifies Access identity and may refresh its signing certificates.
+
 There is deliberately no tool to launch, pause, resume, message or schedule an agent. There is no acknowledgement protocol, no ref-claim store, and no `clone`/`fetch`/`push` replacement.
 
 ## Participation protocol
@@ -53,9 +55,9 @@ These steps are cooperative guidance, not scheduling gates. Cruce cannot make an
 
 Mutations require an idempotency key. Retry with the same key and the exact same request after an uncertain outcome; the bridge keeps pending operation state for this. Changed input needs a new operation once the earlier outcome is known. Access is checked again on every retry, so a stored receipt cannot authorize a revoked connection.
 
-Unavailable source requires explicit publication or Git transport, never a read that silently provisions or fetches. A `preparing` workspace can be re-attached after a failed first attachment. Attaching a workspace that is attached elsewhere fails until that execution is detached. A lost heartbeat leaves locks and the attachment intact. Cleanup can return `deleting`; repeat the original operation until `deleted`. Report these states honestly.
+An unknown authenticated identity returns 401 with a sign-in instruction; reading never registers it. A registered repository whose setup was interrupted can be inspected without persisting an empty state; its console offers human maintainers an explicit setup retry. Unavailable source requires explicit publication or Git transport, never a read that silently provisions or fetches. A `preparing` workspace can be re-attached after a failed first attachment. Attaching a workspace that is attached elsewhere fails until that execution is detached. A lost heartbeat leaves locks and the attachment intact. Cleanup can return `deleting`; repeat the original operation until `deleted`. Report these states honestly.
 
-The [implementation audit](architecture.md#architecture-contradictions-and-correctness-gaps) lists remaining provider-identity, publication-recovery and read-purity gaps.
+The [implementation audit](architecture.md#architecture-contradictions-and-correctness-gaps) lists remaining hosted provider-identity, publication-recovery and cache-recovery gaps. [F3 evidence](local-verification.md#pure-coordination-read-verification-f3) records local read-purity verification.
 
 ## Extending the surface
 

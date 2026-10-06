@@ -29,7 +29,8 @@ function fixture() {
 	namespace.repository(namespace.authority(actor), repo);
 	const controller = new RepositoryController(initialRepository(repo), 100, () => `record-${++id}`);
 	const port = {
-		initialize: (_w: Namespace) => {},
+		initialize: vi.fn((_w: Namespace) => {}),
+		accept: vi.fn(),
 		authority: (g: ConnectionGrant, r?: string) => namespace.authority(g.actor, r, g.scopes, g.repositories),
 		snapshot: (g: ConnectionGrant) => {
 			const a = namespace.authority(g.actor);
@@ -48,7 +49,7 @@ function fixture() {
 		if (name === "directory") throw new Error(`Retired directory: ${JSON.stringify(retired)}`);
 		if (name !== "namespace-directory") throw new Error("Unknown directory");
 		return {
-			login: (v: { tenantId: string; developerId: string; email: string }) => directory.login(v.tenantId, v.developerId, v.email),
+			resolve: (v: { tenantId: string; developerId: string }) => directory.resolve(v.tenantId, v.developerId),
 			namespace: (id: string) => directory.state.namespaces.find((w) => w.id === id)!,
 			namespaces: () => directory.state.namespaces,
 			users: () => [user],
@@ -74,7 +75,7 @@ function fixture() {
 			["cruce:read", "workspace:write"],
 			bridge,
 		);
-	return { call, path, repo, directory, controller, command, user, namespace, getDirectory, retired };
+	return { call, path, repo, directory, controller, command, user, namespace, getDirectory, retired, port };
 }
 describe("namespace repository contracts", () => {
 	it.each(["account", "account/verify"])("rejects the retired namespace storage endpoint %s", async (endpoint) => {
@@ -112,12 +113,14 @@ describe("namespace repository contracts", () => {
 			expect(f.controller.state).toEqual(before);
 		},
 	);
-	it("first-login API reads share a stable personal identity", async () => {
+	it("established API reads share a stable personal identity without initializing it", async () => {
 		const f = fixture();
+		const before = structuredClone(f.directory.state);
 		const responses = await Promise.all(Array.from({ length: 10 }, () => f.call("/api/me")));
 		const ids = await Promise.all(responses.map(async (r) => ((await r!.json()) as { user: { id: string } }).user.id));
 		expect(new Set(ids).size).toBe(1);
 		expect(f.directory.state.namespaces).toHaveLength(1);
+		expect(f.directory.state).toEqual(before);
 	});
 	it("loads the current personal namespace without reading or rewriting retired development identities", async () => {
 		const f = fixture();
@@ -127,6 +130,15 @@ describe("namespace repository contracts", () => {
 		expect(f.getDirectory).toHaveBeenCalledWith("namespace-directory");
 		expect(f.getDirectory).not.toHaveBeenCalledWith("directory");
 		expect(f.retired).toEqual(before);
+	});
+	it("binds invitation acceptance to the current verified email without refreshing Directory metadata", async () => {
+		const f = fixture();
+		f.user.email = "previous@example.com";
+		const before = structuredClone(f.directory.state);
+		expect((await f.call(`/api/namespaces/${f.repo.namespaceId}/accept`, { token: "invitation-token-1234567890" }))!.status).toBe(200);
+		expect(f.port.accept).toHaveBeenCalledWith(expect.objectContaining({ id: f.user.id, email: "owner@example.com" }), expect.any(String));
+		expect(f.directory.state).toEqual(before);
+		expect(f.port.initialize).not.toHaveBeenCalled();
 	});
 	it("returns repository collections and record details; rejects obsolete routes and unknown records", async () => {
 		const f = fixture();

@@ -6,6 +6,8 @@
  * the offline demo backend survives restarts.
  */
 
+import { sqlTableExists } from "../store.ts";
+
 interface Row {
 	path: string;
 	dir: number;
@@ -73,18 +75,33 @@ export class SqlFs {
 		chmod: async () => {},
 	};
 
-	constructor(private readonly sql: SqlStorage) {
-		sql.exec(`CREATE TABLE IF NOT EXISTS gitfs (path TEXT PRIMARY KEY, dir INTEGER NOT NULL, data BLOB, mtime INTEGER NOT NULL)`);
-		if (!this.row("/")) sql.exec(`INSERT INTO gitfs (path, dir, data, mtime) VALUES ('/', 1, NULL, ?)`, Date.now());
+	private exists = false;
+	private initialized = false;
+	constructor(private readonly sql: SqlStorage) {}
+
+	private available() {
+		if (!this.exists) this.exists = sqlTableExists(this.sql, "gitfs");
+		return this.exists;
+	}
+	private initialize() {
+		if (this.initialized) return;
+		if (!this.available()) {
+			this.sql.exec(`CREATE TABLE gitfs (path TEXT PRIMARY KEY, dir INTEGER NOT NULL, data BLOB, mtime INTEGER NOT NULL)`);
+			this.exists = true;
+		}
+		if (!this.row("/")) this.sql.exec(`INSERT INTO gitfs (path, dir, data, mtime) VALUES ('/', 1, NULL, ?)`, Date.now());
+		this.initialized = true;
 	}
 
 	/** Remove a whole subtree (used to reset the object cache). */
 	removeTree(prefix: string) {
+		if (!this.available()) return;
 		const p = norm(prefix);
 		this.sql.exec(`DELETE FROM gitfs WHERE path = ? OR (path > ? AND path < ?)`, p, `${p}/`, `${p}0`);
 	}
 
 	private row(path: string): Row | undefined {
+		if (!this.available()) return;
 		return this.sql.exec<Row>(`SELECT path, dir, data, mtime FROM gitfs WHERE path = ?`, path).toArray()[0];
 	}
 
@@ -107,7 +124,7 @@ export class SqlFs {
 		this.sql.exec(
 			`INSERT INTO gitfs (path, dir, data, mtime) VALUES (?, 0, ?, ?) ON CONFLICT(path) DO UPDATE SET data = excluded.data, mtime = excluded.mtime`,
 			p,
-			bytes.slice().buffer,
+			Uint8Array.from(bytes).buffer,
 			Date.now(),
 		);
 	}
@@ -136,6 +153,7 @@ export class SqlFs {
 	}
 
 	async mkdir(path: string, options?: { recursive?: boolean } | number) {
+		this.initialize();
 		const p = norm(path);
 		const existing = this.row(p);
 		if (existing) {

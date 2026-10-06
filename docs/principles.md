@@ -56,7 +56,7 @@ Verify authentication, then resolve current membership, repository grants, appro
 
 ## 10. Account for resources where they are owned
 
-The installation configures its Cloudflare Artifacts binding once; the namespace owns resource policy, budgets and its recorded storage identity. Resource operations declare scope and cost and pass the namespace gate before infrastructure calls. Repository policy may only narrow namespace policy. The deployment binding is explicit storage authority, never a fallback to missing customer credentials. A changed storage account or physical namespace is rejected after first resource use. Retries reuse operation identity, exact input and reservation. Uncertain outcomes remain charged until reconciled. Coordination reads must not provision, fetch provider source or mutate state.
+The installation configures its Cloudflare Artifacts binding once; the namespace owns resource policy, budgets and its recorded storage identity. Resource operations declare scope and cost and pass the namespace gate before infrastructure calls. Repository policy may only narrow namespace policy. The deployment binding is explicit storage authority, never a fallback to missing customer credentials. A changed storage account or physical namespace is rejected after first resource use. Retries reuse operation identity, exact input and reservation. Uncertain outcomes remain charged until reconciled. Coordination reads must not provision, call the source provider or mutate state, including schema creation and initialization after a cold start. Initialization is an explicit sign-in or setup step; unavailable state never silently repairs itself during a read.
 
 ## 11. Retain work; make cleanup explicit
 

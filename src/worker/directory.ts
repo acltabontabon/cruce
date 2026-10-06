@@ -16,6 +16,9 @@ export class Directory extends DurableObject {
 		this.store.put("directory", c.state);
 		return user;
 	}
+	resolve(identity: { tenantId: string; developerId: string }) {
+		return this.controller().resolve(identity.tenantId, identity.developerId);
+	}
 	user(id: string) {
 		const user = this.controller().state.users.find((u) => u.id === id);
 		if (!user) throw new DomainError(404, "User unavailable");
