@@ -169,13 +169,19 @@ export async function fixture() {
 					Object.assign(w.state.namespace, directory.rename(w.state.namespace.id, body));
 					return json(res, w.state.namespace);
 				}
-				const repositorySummaries = w.state.repositories.map((r) => {
-					const snapshot = runtimes.get(r.id)!.snapshot({ ...a, repositoryId: r.id, repositoryRole: "maintain" });
-					return repositorySummary(snapshot);
-				});
+				const snapshots = w.state.repositories.map((r) =>
+					runtimes.get(r.id)!.snapshot({ ...a, repositoryId: r.id, repositoryRole: "maintain" }),
+				);
+				const repositorySummaries = snapshots.map(repositorySummary);
+				// Mirrors the Worker's namespace view: the newest events across its repositories.
+				const activity = snapshots
+					.flatMap((s) => s.activity.map((event) => ({ ...event, repositoryId: s.repository.id, repositoryName: s.repository.name })))
+					.sort((x, y) => y.at - x.at)
+					.slice(0, 20);
 				return json(res, {
 					...w.state,
 					repositorySummaries,
+					activity,
 					role: a.role,
 					people: [user],
 					permissions: { maintain: true, owner: true },

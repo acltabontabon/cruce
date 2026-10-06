@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Command, Namespace, Repository, RepositorySnapshot, User } from "../shared/platform.ts";
 import { BRAND } from "./brand.tsx";
-import { Empty, Form, value } from "./controls.tsx";
+import { Empty, Form, PrefixedInput, value } from "./controls.tsx";
 import { Dialog } from "./design.tsx";
 import { NamespaceHome } from "./home.tsx";
-import { NamespacePage, namespaceTabsFor } from "./namespace.tsx";
+import { NamespacePage, namespaceViews } from "./namespace.tsx";
 import { ConsoleHeader } from "./navigation.tsx";
 import { RepositoryPage, repositoryTabs } from "./repository.tsx";
 import { request } from "./request.ts";
@@ -12,7 +12,7 @@ import { Shell } from "./shell.tsx";
 import type { NamespaceView } from "./types.ts";
 import "./styles.css";
 
-const namespaceTabs = ["repositories", "members", "teams", "settings"];
+const namespaceTabs = namespaceViews;
 const tabs: readonly string[] = repositoryTabs;
 /** Retired repository routes resolve to their new homes so saved links keep working. */
 const legacyTabs: Record<string, string> = { overview: "changes", code: "history", artifacts: "history" };
@@ -121,7 +121,9 @@ export function App() {
 					repo.repository.name,
 				]
 			: namespace?.namespace.id === route.namespaceId && route.namespaceId
-				? [namespace.namespace.name]
+				? route.tab === "settings"
+					? ["Settings", namespace.namespace.name]
+					: [namespace.namespace.name]
 				: ["Your repositories"];
 		document.title = [...parts, BRAND.name].join(" · ");
 	}, [route, view, namespace]);
@@ -174,7 +176,8 @@ export function App() {
 	}, [route.screen]);
 
 	useEffect(() => {
-		setNamespace(undefined);
+		// Keep the current namespace on screen while a refresh loads; only a different namespace clears it.
+		setNamespace((current) => (current?.namespace.id === route.namespaceId ? current : undefined));
 		if (!route.namespaceId) return;
 		void refresh; // Explicit invalidation after a successful mutation.
 		const controller = new AbortController();
@@ -352,12 +355,11 @@ export function App() {
 				) : namespace ? (
 					<NamespacePage
 						namespace={namespace}
-						tab={namespaceTabsFor(namespace).includes(namespaceTab) ? namespaceTab : "repositories"}
+						tab={namespaceTab}
 						base={base}
 						mutate={mutate}
 						open={(repositoryId, tab) => navigate(route.namespaceId, repositoryId, tab)}
 						newRepository={() => setOverlay("repository")}
-						notify={setNotice}
 						renamed={(w) => setMe({ ...me, namespaces: me.namespaces.map((old) => (old.id === w.id ? w : old)) })}
 					/>
 				) : (
@@ -366,31 +368,28 @@ export function App() {
 			</main>
 			{overlay === "create-namespace" && (
 				<Dialog title="Create namespace" close={() => setOverlay(undefined)}>
-					<p className="muted">A shared place for your team's repositories.</p>
+					<p className="dialog-lead">A shared place for your team's repositories, people and limits.</p>
 					<Form
 						label="Create namespace"
+						primary
+						cancel={() => setOverlay(undefined)}
 						submit={async (d) => {
 							const w = await mutate<Namespace>("/api/namespaces", { name: value(d, "name"), handle: value(d, "handle") });
 							setMe({ ...me, namespaces: [...me.namespaces, w] });
 							navigate(w.id);
 						}}
 					>
-						<label>
-							Name
-							<input name="name" required placeholder="e.g. Acme engineering" />
-						</label>
-						<label>
-							Namespace handle
-							<input name="handle" required pattern="[a-z0-9-]+" placeholder="acme" />
-						</label>
+						<NamespaceFields />
 					</Form>
 				</Dialog>
 			)}
 			{overlay === "repository" && namespace?.permissions.maintain && (
 				<Dialog title="New repository" close={() => setOverlay(undefined)} className="repository-dialog">
-					<p className="muted">Add a repository to {namespace.namespace.name}.</p>
+					<p className="dialog-lead">Add a repository to {namespace.namespace.name}.</p>
 					<Form
 						label="Add repository"
+						primary
+						cancel={() => setOverlay(undefined)}
 						submit={async (d) => {
 							const repo = await mutate<Repository>(`${base}/repositories`, {
 								name: value(d, "name"),
@@ -399,24 +398,72 @@ export function App() {
 							navigate(namespace.namespace.id, repo.id);
 						}}
 					>
-						<p className="cost">
-							Creates canonical Git storage managed by this Cruce installation. Agent workspaces consume isolated forks under namespace
-							policy.
-						</p>
-						{!namespace.storage.ready && <p>{namespace.storage.reason}</p>}
-						<div className="form-fields">
-							<label>
-								Repository name
-								<input name="name" required pattern="[a-z0-9-]+" placeholder="e.g. auth-service" />
-							</label>
+						<div className="form-fields repository-fields">
+							<PrefixedInput
+								label="Repository name"
+								prefix={`${namespace.namespace.handle} /`}
+								name="name"
+								required
+								pattern="[a-z0-9-]+"
+								placeholder="auth-service"
+							/>
 							<label>
 								Default branch
 								<input name="branch" defaultValue="main" required />
 							</label>
 						</div>
+						<p className="cost">
+							Creates canonical Git storage managed by this Cruce installation. Agent workspaces consume isolated forks under namespace
+							policy.
+						</p>
+						{!namespace.storage.ready && <p role="alert">{namespace.storage.reason}</p>}
 					</Form>
 				</Dialog>
 			)}
 		</Shell>
+	);
+}
+
+/** Name and handle for a new namespace; the handle follows the name until someone edits it. */
+function NamespaceFields() {
+	const [name, setName] = useState(""),
+		[handle, setHandle] = useState(""),
+		[edited, setEdited] = useState(false);
+	const slug = (text: string) =>
+		text
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, "-")
+			.replace(/^-+|-+$/g, "")
+			.slice(0, 39);
+	return (
+		<>
+			<label>
+				Name
+				<input
+					name="name"
+					required
+					placeholder="e.g. Acme engineering"
+					value={name}
+					onChange={(e) => {
+						setName(e.target.value);
+						if (!edited) setHandle(slug(e.target.value));
+					}}
+				/>
+			</label>
+			<PrefixedInput
+				label="Namespace handle"
+				prefix="@"
+				hint="Lowercase letters, numbers and dashes. Used in links and Git remotes."
+				name="handle"
+				required
+				pattern="[a-z0-9-]+"
+				placeholder="acme"
+				value={handle}
+				onChange={(e) => {
+					setEdited(true);
+					setHandle(e.target.value);
+				}}
+			/>
+		</>
 	);
 }

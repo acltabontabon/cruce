@@ -414,11 +414,17 @@ test("home lists repositories by what needs attention and keeps its filter while
 	await page.keyboard.press("Escape");
 	await page.reload();
 	await page.getByRole("button", { name: "Fernloop", exact: true }).click();
-	await namespaceNav().getByRole("button", { name: "Teams", exact: true }).click();
+	await page.getByRole("heading", { name: "People", exact: true }).waitFor();
+	assert.equal(await namespaceNav().count(), 0);
+	await page.screenshot({ path: "dist/ui-checks/namespace.png", fullPage: true });
+	await page.getByRole("button", { name: "Settings", exact: true }).click();
 	await page.reload();
-	assert.equal(await namespaceNav().getByRole("button", { name: "Teams", exact: true }).getAttribute("aria-current"), "page");
+	await page.getByRole("heading", { name: "Daily operations", exact: true }).waitFor();
+	await page.getByRole("button", { name: "Fernloop", exact: true }).click();
+	await page.getByRole("heading", { name: "Fernloop", exact: true, level: 1 }).waitFor();
 	await page.goBack();
-	assert.equal(await namespaceNav().getByRole("button", { name: "Repositories", exact: true }).getAttribute("aria-current"), "page");
+	await page.getByRole("heading", { name: "Settings", exact: true, level: 1 }).waitFor();
+	await page.goBack();
 	await page.getByRole("heading", { name: "Fernloop", exact: true, level: 1 }).waitFor();
 });
 test("empty namespaces inherit installation storage and creation dialogs keep focus contained", async () => {
@@ -447,7 +453,8 @@ test("empty namespaces inherit installation storage and creation dialogs keep fo
 	await page.getByLabel("Namespace handle").fill("design-team");
 	await page.getByRole("button", { name: "Create namespace", exact: true }).click();
 	await page.getByRole("button", { name: "Switch namespace" }).filter({ hasText: "Design team" }).waitFor();
-	await namespaceNav().getByRole("button", { name: "Members", exact: true }).waitFor();
+	await page.getByRole("heading", { name: "People", exact: true }).waitFor();
+	await page.getByRole("heading", { name: "Teams", exact: true }).waitFor();
 });
 test("a new repository opens on Changes with a way to connect an agent", async () => {
 	await page.goto(`${server.origin}/?namespace=fernloop`);
@@ -559,10 +566,10 @@ test("namespace dropdown switches scope with keyboard selection and restores foc
 	await page.getByRole("heading", { name: "Alex Morgan", exact: true, level: 1 }).waitFor();
 	await trigger.filter({ hasText: "Alex Morgan" }).waitFor();
 	assert.equal(await page.getByRole("button", { name: "Switch repository", exact: true }).count(), 0);
-	assert.deepEqual(
-		(await page.getByRole("navigation", { name: "Namespace navigation" }).getByRole("button").allTextContents()).map((text) => text.trim()),
-		["Repositories", "Settings"],
-	);
+	// Personal namespaces have one owner: no People or Teams, just repositories, usage and settings.
+	await page.getByRole("heading", { name: "Today", exact: true }).waitFor();
+	assert.equal(await page.getByRole("heading", { name: "People", exact: true }).count(), 0);
+	assert.equal(await page.getByRole("heading", { name: "Teams", exact: true }).count(), 0);
 	await page.goBack();
 	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
 	trigger = page.getByRole("button", { name: "Switch namespace", exact: true });
@@ -1116,16 +1123,22 @@ test("late source responses cannot overwrite a newer history inspection", async 
 });
 test("teams and invitation links are functional", async () => {
 	await page.goto(`${server.origin}/?namespace=fernloop`);
-	await namespaceNav().getByRole("button", { name: "Teams", exact: true }).click();
-	await page.locator("summary").filter({ hasText: "Create team" }).click();
+	await page.getByRole("button", { name: "New team", exact: true }).click();
 	await page.getByLabel("Team name").fill("Platform");
 	await page.getByRole("checkbox", { name: "Alex Morgan" }).check();
 	await page.getByRole("button", { name: "Create team", exact: true }).click();
 	await page.locator("summary").filter({ hasText: "Platform" }).waitFor();
-	await namespaceNav().getByRole("button", { name: "Members", exact: true }).click();
+	assert.equal(await page.locator(".inline-panel").count(), 0);
+	await page.locator("summary").filter({ hasText: "Platform" }).click();
+	assert.equal(await page.locator("details.team-row").getByLabel("Team name").inputValue(), "Platform");
+	await page.getByRole("button", { name: "Invite", exact: true }).click();
 	await page.getByLabel("Email", { exact: true }).fill("alex@example.com");
 	await page.getByRole("button", { name: "Create invitation link" }).click();
+	// The link stays beside the form after the namespace refreshes.
 	await page.getByRole("status").filter({ hasText: "/invite/fernloop" }).waitFor();
+	await page.waitForTimeout(200);
+	await page.getByRole("status").filter({ hasText: "/invite/fernloop" }).waitFor();
+	await page.screenshot({ path: "dist/ui-checks/namespace-people.png", fullPage: true });
 });
 test("namespace settings inherit installation storage and show today's operation budget", async () => {
 	await page.goto(`${server.origin}/?namespace=fernloop#/settings`);

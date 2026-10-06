@@ -66,6 +66,13 @@ const paths: Record<string, ReactNode> = {
 		</>
 	),
 	check: <path d="m5 12 4 4L19 6" />,
+	invite: (
+		<>
+			<circle cx="10" cy="8" r="3.5" />
+			<path d="M3 20v-1.5a6.5 6.5 0 0 1 11-4.7M18 14v6m-3-3h6" />
+		</>
+	),
+	back: <path d="M20 12H4m6-6-6 6 6 6" />,
 };
 export function Icon({ name, className = "" }: { name: string; className?: string }) {
 	return (
@@ -143,6 +150,73 @@ export function Dialog({
 }
 export function Pill({ tone, children }: { tone: string; children: ReactNode }) {
 	return <span className={`pill ${tone}`}>{children}</span>;
+}
+/** Overview page heading: a mono kicker naming the scope, the title and the page's primary actions. */
+export function PageHeader({ kicker, title, children }: { kicker?: ReactNode; title: string; children?: ReactNode }) {
+	return (
+		<header className="page-header">
+			<div className="page-title">
+				{kicker && <p className="kicker">{kicker}</p>}
+				<h1>{title}</h1>
+			</div>
+			{children && <div className="actions">{children}</div>}
+		</header>
+	);
+}
+/** A strip of counts read at a glance; a count only gets colour when it asks for a person. */
+export function Stats({ label, items }: { label: string; items: { label: string; value: ReactNode; tone?: string }[] }) {
+	return (
+		<dl className="stats" aria-label={label}>
+			{items.map((item) => (
+				<div key={item.label} className={`stat ${item.tone ?? ""}`}>
+					<dt>{item.label}</dt>
+					<dd>{item.value}</dd>
+				</div>
+			))}
+		</dl>
+	);
+}
+/** A titled block under an ink rule, with an optional count and one header action. */
+export function Section({
+	title,
+	count,
+	action,
+	id,
+	className = "",
+	children,
+}: {
+	title: string;
+	count?: number;
+	action?: ReactNode;
+	id?: string;
+	className?: string;
+	children: ReactNode;
+}) {
+	const heading = useId();
+	return (
+		<section className={`panel ${className}`} aria-labelledby={heading} id={id}>
+			<div className="panel-head">
+				<h2 id={heading}>{title}</h2>
+				{count !== undefined && <span className="panel-count">{count}</span>}
+				{action && <div className="panel-action">{action}</div>}
+			</div>
+			{children}
+		</section>
+	);
+}
+/** Initials for a person or namespace tile. */
+export function Initials({ name, className = "" }: { name: string; className?: string }) {
+	const letters = name
+		.split(/[\s@._-]+/)
+		.filter(Boolean)
+		.slice(0, 2)
+		.map((part) => part[0])
+		.join("");
+	return (
+		<span className={`initials ${className}`} aria-hidden="true">
+			{(letters || "?").toUpperCase()}
+		</span>
+	);
 }
 /** A shell command with a copy button. Values shown are addresses and IDs, never credentials. */
 export function CopyCommand({ text, label }: { text: string; label?: string }) {
