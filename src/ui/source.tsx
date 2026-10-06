@@ -17,6 +17,18 @@ function useTicket() {
 	return ticket;
 }
 
+/** Colour for one unified-diff line: additions, removals, hunk headers and file headers. */
+const patchLine = (line: string) =>
+	line.startsWith("+++") || line.startsWith("---") || line.startsWith("===") || line.startsWith("Index:")
+		? "meta"
+		: line.startsWith("@@")
+			? "hunk"
+			: line.startsWith("+")
+				? "add"
+				: line.startsWith("-")
+					? "del"
+					: "";
+
 /** Files changed between a change's exact base and revision, loaded as soon as the review opens. */
 export function ChangeDiff({ base, revision, execute }: { base: string; revision: string; execute: Execute }) {
 	const [diff, setDiff] = useState<ChangesResponse>(),
@@ -71,7 +83,15 @@ export function ChangeDiff({ base, revision, execute }: { base: string; revision
 					<section>
 						<h3>{diff.file?.path ?? "Select a file to see its changes"}</h3>
 						{diff.file?.patch ? (
-							<pre className="patch">{diff.file.patch}</pre>
+							<pre className="patch">
+								{diff.file.patch.split("\n").map((line, i) => (
+									// biome-ignore lint/suspicious/noArrayIndexKey: patch lines are static and may repeat.
+									<span key={i} className={patchLine(line)}>
+										{line}
+										{"\n"}
+									</span>
+								))}
+							</pre>
 						) : (
 							<p className="muted">{diff.file?.reason ?? "Choose a file on the left."}</p>
 						)}

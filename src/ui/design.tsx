@@ -204,6 +204,27 @@ export function Section({
 		</section>
 	);
 }
+/** A settings section: heading and explanation on the left, controls on the right. */
+export function SettingRow({ title, detail, children }: { title: string; detail: string; children: ReactNode }) {
+	return (
+		<section className="setting">
+			<div className="setting-copy">
+				<h2>{title}</h2>
+				<p>{detail}</p>
+			</div>
+			<div className="setting-body">{children}</div>
+		</section>
+	);
+}
+/** Return link above a detail page's title. */
+export function BackLink({ label, onClick }: { label: string; onClick: () => void }) {
+	return (
+		<button type="button" className="back-link" onClick={onClick}>
+			<Icon name="back" />
+			{label}
+		</button>
+	);
+}
 /** Initials for a person or namespace tile. */
 export function Initials({ name, className = "" }: { name: string; className?: string }) {
 	const letters = name

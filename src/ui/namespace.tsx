@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { Namespace, NamespaceRole, Team } from "../shared/platform.ts";
 import { Form, value } from "./controls.tsx";
-import { CopyCommand, Icon, Initials, PageHeader, Section, Stats } from "./design.tsx";
+import { BackLink, CopyCommand, Icon, Initials, PageHeader, Section, SettingRow, Stats } from "./design.tsx";
 import { plural, RepositoryRow, totals } from "./home.tsx";
 import type { Mutate } from "./repository.tsx";
 import { activityText, ago } from "./status.ts";
@@ -401,18 +401,6 @@ function Overview({
 	);
 }
 
-function SettingsRow({ title, detail, children }: { title: string; detail: string; children: ReactNode }) {
-	return (
-		<section className="setting">
-			<div className="setting-copy">
-				<h2>{title}</h2>
-				<p>{detail}</p>
-			</div>
-			<div className="setting-body">{children}</div>
-		</section>
-	);
-}
-
 function Settings({
 	namespace,
 	base,
@@ -429,7 +417,7 @@ function Settings({
 		maintain = namespace.permissions.maintain;
 	return (
 		<div className="settings">
-			<SettingsRow title="Namespace" detail="The name people see and the handle used in links and Git remotes.">
+			<SettingRow title="Namespace" detail="The name people see and the handle used in links and Git remotes.">
 				{maintain ? (
 					<Form
 						label="Save namespace"
@@ -458,8 +446,8 @@ function Settings({
 						</dd>
 					</dl>
 				)}
-			</SettingsRow>
-			<SettingsRow
+			</SettingRow>
+			<SettingRow
 				title="Daily operations"
 				detail="Each repository, workspace fork, push, publication and fork deletion uses one operation in this Cruce installation. Retries of the same operation don't count twice."
 			>
@@ -522,8 +510,8 @@ function Settings({
 						))}
 					</dl>
 				)}
-			</SettingsRow>
-			<SettingsRow
+			</SettingRow>
+			<SettingRow
 				title="Git storage"
 				detail="Cloudflare Artifacts usage is billed to the installation's account. Namespace budgets apply across its repositories."
 			>
@@ -533,7 +521,7 @@ function Settings({
 						? "Managed by this Cruce installation. All repositories and workspaces inherit its storage."
 						: namespace.storage.reason}
 				</p>
-			</SettingsRow>
+			</SettingRow>
 		</div>
 	);
 }
@@ -570,12 +558,7 @@ export function NamespacePage({
 	);
 	return (
 		<>
-			{settings && (
-				<button type="button" className="back-link" onClick={() => open("")}>
-					<Icon name="back" />
-					{ns.name}
-				</button>
-			)}
+			{settings && <BackLink label={ns.name} onClick={() => open("")} />}
 			<PageHeader kicker={settings ? undefined : kicker} title={settings ? "Settings" : ns.name}>
 				{!settings && (
 					<>

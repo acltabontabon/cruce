@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { gitRemotePath } from "../shared/git-access.ts";
 import type { RepositorySnapshot, Workspace } from "../shared/platform.ts";
-import { Pill } from "./design.tsx";
+import { BackLink, CopyCommand, Icon, Pill, Section } from "./design.tsx";
 import { WorkspaceUpdateInspection } from "./inspect.tsx";
 import type { Execute } from "./source.tsx";
 import {
@@ -27,11 +27,16 @@ function WorkspaceRow({ view, w, open }: { view: RepositorySnapshot; w: Workspac
 	const changeLabel = change && changeStatus(view, change);
 	return (
 		<button type="button" className="workspace-row" onClick={() => open("workspaces", w.id)}>
+			<span className={`row-glyph ${w.execution ? "attached" : ""}`} aria-hidden="true">
+				<Icon name={w.execution ? "local" : "branch"} />
+			</span>
 			<span className="row-main">
 				<strong>{w.title}</strong>
-				<small>
-					{workedBy(w)} ·{" "}
-					{w.state === "active" || w.state === "disconnected" ? `reported ${ago(w.lastActivity)}` : `started ${ago(w.startedAt)}`}
+				<small className="row-meta">
+					<span>{workedBy(w)}</span>
+					<span>
+						{w.state === "active" || w.state === "disconnected" ? `reported ${ago(w.lastActivity)}` : `started ${ago(w.startedAt)}`}
+					</span>
 				</small>
 				{overlaps.length > 0 && (
 					<small className="overlap-note">
@@ -44,6 +49,7 @@ function WorkspaceRow({ view, w, open }: { view: RepositorySnapshot; w: Workspac
 				{!ended(w) && <Pill tone={relation.tone}>{relation.label}</Pill>}
 				{change && changeLabel && <Pill tone={changeLabel.tone}>{`#${change.number} ${changeLabel.label}`}</Pill>}
 			</span>
+			<Icon name="arrow" className="row-arrow" />
 		</button>
 	);
 }
@@ -53,7 +59,11 @@ export function WorkspaceList({ view, open }: { view: RepositorySnapshot; open: 
 	const live = sorted.filter((w) => !ended(w)),
 		done = sorted.filter(ended);
 	return (
-		<section className="workspaces-screen">
+		<section className="panel workspaces-screen">
+			<div className="panel-head">
+				<h2>Active workspaces</h2>
+				<span className="panel-count">{live.length}</span>
+			</div>
 			{live.length ? (
 				<div className="rows">
 					{live.map((w) => (
@@ -61,7 +71,7 @@ export function WorkspaceList({ view, open }: { view: RepositorySnapshot; open: 
 					))}
 				</div>
 			) : (
-				<p className="empty">
+				<p className="panel-note">
 					No active workspaces. One appears when you or an agent starts work through Cruce. Use Connect an agent to begin.
 				</p>
 			)}
@@ -101,40 +111,43 @@ export function WorkspaceDetail({ view, id, execute, open }: { view: RepositoryS
 		void execute(cmd).catch((e) => setError((e as Error).message));
 	};
 	return (
-		<article className="workspace-page">
-			<button type="button" className="text-button back" onClick={() => open("workspaces")}>
-				← Workspaces
-			</button>
-			<header className="change-header">
-				<span className="row-pills">
-					<Pill tone={status.tone}>{status.label}</Pill>
-					{!ended(w) && <Pill tone={relation.tone}>{relation.label}</Pill>}
-				</span>
-				<h1>{w.title}</h1>
-				<p className="change-meta">{workedBy(w)}</p>
-				{w.description && <p>{w.description}</p>}
+		<article className="workspace-page detail-page">
+			<BackLink label="Workspaces" onClick={() => open("workspaces")} />
+			<header className="page-header change-header">
+				<div className="page-title">
+					<p className="kicker">
+						<span>Workspace</span>
+						{w.branch && <code>{w.branch}</code>}
+					</p>
+					<h1>{w.title}</h1>
+					<p className="change-meta">
+						<Pill tone={status.tone}>{status.label}</Pill>
+						{!ended(w) && <Pill tone={relation.tone}>{relation.label}</Pill>}
+						<span>{workedBy(w)}</span>
+					</p>
+					{w.description && <p className="page-lead">{w.description}</p>}
+				</div>
 			</header>
-			<dl className="facts">
-				<dt>Started from</dt>
-				<dd>
-					<code title={w.baseRevision}>{short(w.baseRevision)}</code> · {ago(w.startedAt)} · fixed for the life of the workspace
-				</dd>
-				<dt>Latest reported head</dt>
-				<dd>
-					<code title={w.headRevision}>{short(w.headRevision)}</code>
-					{w.branch && (
-						<>
-							{" "}
-							on <code>{w.branch}</code>
-						</>
-					)}{" "}
-					· {w.commits.length} {w.commits.length === 1 ? "commit" : "commits"}, {w.changes.length}{" "}
-					{w.changes.length === 1 ? "file" : "files"} reported
-				</dd>
-				<dt>Canonical</dt>
-				<dd>{relation.detail}</dd>
+			<dl className="facts fact-grid">
+				<div>
+					<dt>Started from</dt>
+					<dd>
+						<code title={w.baseRevision}>{short(w.baseRevision)}</code> · {ago(w.startedAt)} · fixed for the life of the workspace
+					</dd>
+				</div>
+				<div>
+					<dt>Latest reported head</dt>
+					<dd>
+						<code title={w.headRevision}>{short(w.headRevision)}</code> · {w.commits.length} {w.commits.length === 1 ? "commit" : "commits"}
+						, {w.changes.length} {w.changes.length === 1 ? "file" : "files"} reported
+					</dd>
+				</div>
+				<div>
+					<dt>Canonical</dt>
+					<dd>{relation.detail}</dd>
+				</div>
 				{overlaps.length > 0 && (
-					<>
+					<div className="wide">
 						<dt>Overlap</dt>
 						<dd>
 							{overlaps.map((o) => (
@@ -144,121 +157,129 @@ export function WorkspaceDetail({ view, id, execute, open }: { view: RepositoryS
 							))}
 							<small className="muted">Shared files are a heads-up, not a conflict.</small>
 						</dd>
-					</>
+					</div>
 				)}
 			</dl>
 			{!ended(w) && relation.key === "behind" && <WorkspaceUpdateInspection id={w.id} execute={execute} />}
-			<h2>Changes</h2>
-			{changes.length ? (
-				<div className="rows">
-					{changes.map((p) => {
-						const s = changeStatus(view, p);
-						return (
-							<button type="button" key={p.id} className="change-row" onClick={() => open("changes", p.id)}>
-								<Pill tone={s.tone}>{s.label}</Pill>
-								<span className="row-main">
-									<strong>
-										{p.title} <span className="number">#{p.number}</span>
-									</strong>
-									<small>
-										<code>{short(p.revision)}</code> on <code>{short(p.base)}</code>
-									</small>
-								</span>
-							</button>
-						);
-					})}
+			<div className="overview">
+				<div className="overview-main">
+					<Section title="Changes" count={changes.length}>
+						{changes.length ? (
+							<div className="rows">
+								{changes.map((p) => {
+									const s = changeStatus(view, p);
+									return (
+										<button type="button" key={p.id} className="change-row" onClick={() => open("changes", p.id)}>
+											<span className="row-number">#{p.number}</span>
+											<span className="row-main">
+												<strong>{p.title}</strong>
+												<small className="row-meta">
+													<span>
+														<code>{short(p.revision)}</code> on <code>{short(p.base)}</code>
+													</span>
+												</small>
+											</span>
+											<Pill tone={s.tone}>{s.label}</Pill>
+											<Icon name="arrow" className="row-arrow" />
+										</button>
+									);
+								})}
+							</div>
+						) : (
+							<p className="panel-note">
+								{published.length
+									? "Published, but not proposed for review yet."
+									: "Nothing published yet. Push commits, then publish a revision."}
+							</p>
+						)}
+					</Section>
+					{w.changes.length > 0 && (
+						<details className="group">
+							<summary>
+								{w.changes.length} reported {w.changes.length === 1 ? "file" : "files"}
+							</summary>
+							<ul className="file-list">
+								{w.changes.map((c) => (
+									<li key={c.path}>
+										<code>
+											{c.previousPath ? `${c.previousPath} → ` : ""}
+											{c.path}
+										</code>
+										<span>
+											{c.status}
+											{c.binary ? " · binary" : ""}
+										</span>
+									</li>
+								))}
+							</ul>
+						</details>
+					)}
+					{activity.length > 0 && (
+						<Section title="Activity">
+							<ol className="feed">
+								{activity.map((e) => (
+									<li key={e.id}>
+										<time>{ago(e.at)}</time>
+										<span>{activityText(e)}</span>
+									</li>
+								))}
+							</ol>
+						</Section>
+					)}
 				</div>
-			) : (
-				<p className="muted">
-					{published.length
-						? "Published, but not proposed for review yet."
-						: "Nothing published yet. Push commits, then publish a revision."}
-				</p>
-			)}
-			{w.changes.length > 0 && (
-				<details className="group">
-					<summary>
-						{w.changes.length} reported {w.changes.length === 1 ? "file" : "files"}
-					</summary>
-					<ul className="file-list">
-						{w.changes.map((c) => (
-							<li key={c.path}>
-								<code>
-									{c.previousPath ? `${c.previousPath} → ` : ""}
-									{c.path}
-								</code>{" "}
-								· {c.status}
-								{c.binary ? " · binary" : ""}
-							</li>
-						))}
-					</ul>
-				</details>
-			)}
-			<h2>Checkout and storage</h2>
-			<div className="settings-card">
-				<p>
-					{w.execution
-						? `Attached to a ${w.execution.kind} through ${actorLabel(w.execution.attachedBy)} since ${ago(w.execution.attachedAt)}.`
-						: w.state === "detached"
-							? `Not attached to a checkout. Continue it anywhere with cruce resume --workspace ${w.id}.`
-							: ended(w)
-								? "Ended. Its commits, published revisions and history are kept."
-								: "Waiting for a checkout to attach."}
-				</p>
-				{release?.ready && (
-					<button type="button" onClick={() => run({ tool: "detach_workspace", workspaceId: w.id })}>
-						Release checkout
-					</button>
-				)}
-				{w.fork && (
-					<>
-						<p>
-							Workspace fork {w.fork.state === "ready" ? "is available" : w.fork.state === "deleting" ? "is being deleted" : "was deleted"}.
-							{w.fork.state === "ready" && (
+				<aside className="overview-side" aria-label="Checkout and storage">
+					<Section title="Checkout and storage">
+						<div className="side-body">
+							<p>
+								{w.execution
+									? `Attached to a ${w.execution.kind} through ${actorLabel(w.execution.attachedBy)} since ${ago(w.execution.attachedAt)}.`
+									: w.state === "detached"
+										? `Not attached to a checkout. Continue it anywhere with cruce resume --workspace ${w.id}.`
+										: ended(w)
+											? "Ended. Its commits, published revisions and history are kept."
+											: "Waiting for a checkout to attach."}
+							</p>
+							{release?.ready && (
+								<button type="button" className="ghost" onClick={() => run({ tool: "detach_workspace", workspaceId: w.id })}>
+									Release checkout
+								</button>
+							)}
+							{w.fork && (
 								<>
-									{" "}
-									Fetch it with{" "}
-									<code>
-										git fetch {location.origin}
-										{gitRemotePath(view.repository.namespaceId, view.repository.id, w.id)}
-									</code>
+									<p>
+										Workspace fork{" "}
+										{w.fork.state === "ready" ? "is available" : w.fork.state === "deleting" ? "is being deleted" : "was deleted"}.
+									</p>
+									{w.fork.state === "ready" && (
+										<CopyCommand
+											text={`git fetch ${location.origin}${gitRemotePath(view.repository.namespaceId, view.repository.id, w.id)}`}
+										/>
+									)}
+									{view.permissions.maintain && view.permissions.human && w.fork.state !== "deleted" && (
+										<div className="fork-actions">
+											<button
+												type="button"
+												className="ghost"
+												disabled={!cleanup?.ready}
+												title={cleanup?.reasons.join("; ")}
+												onClick={() => run({ tool: "cleanup_workspace", workspaceId: w.id })}
+											>
+												{w.fork.state === "deleting" ? "Check fork deletion" : "Delete fork"}
+											</button>
+											<small className="muted">
+												{!cleanup?.ready && cleanup?.reasons.length
+													? `${cleanup.reasons.join(". ")}.`
+													: "Deletion only proceeds when every fork ref is already retained. Published revisions and history stay."}
+											</small>
+										</div>
+									)}
 								</>
 							)}
-						</p>
-						{view.permissions.maintain && view.permissions.human && w.fork.state !== "deleted" && (
-							<div className="fork-actions">
-								<button
-									type="button"
-									disabled={!cleanup?.ready}
-									title={cleanup?.reasons.join("; ")}
-									onClick={() => run({ tool: "cleanup_workspace", workspaceId: w.id })}
-								>
-									{w.fork.state === "deleting" ? "Check fork deletion" : "Delete fork"}
-								</button>
-								<small className="muted">
-									{!cleanup?.ready && cleanup?.reasons.length
-										? `${cleanup.reasons.join(". ")}.`
-										: "Deletion only proceeds when every fork ref is already retained. Published revisions and history stay."}
-								</small>
-							</div>
-						)}
-					</>
-				)}
-				{error && <p role="alert">{error}</p>}
+							{error && <p role="alert">{error}</p>}
+						</div>
+					</Section>
+				</aside>
 			</div>
-			{activity.length > 0 && (
-				<>
-					<h2>Activity</h2>
-					<ol className="activity">
-						{activity.map((e) => (
-							<li key={e.id}>
-								<time>{ago(e.at)}</time>
-								<span>{activityText(e)}</span>
-							</li>
-						))}
-					</ol>
-				</>
-			)}
 		</article>
 	);
 }

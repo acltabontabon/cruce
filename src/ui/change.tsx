@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from "react";
 import type { Proposal, RepositorySnapshot } from "../shared/platform.ts";
-import { Pill } from "./design.tsx";
+import { BackLink, Pill, Section } from "./design.tsx";
 import { ChangeDiff, type Execute } from "./source.tsx";
 import { actorLabel, ago, changeStatus, short } from "./status.ts";
 
@@ -102,6 +102,9 @@ function ReviewChecklist({ view, p, execute, busy }: { view: RepositorySnapshot;
 	return (
 		<section className="review-panel" aria-label="Review checklist">
 			<h2>Review</h2>
+			<p className="review-revision">
+				Revision <code>{short(p.revision)}</code> against <code>{short(p.base)}</code>
+			</p>
 			<ol className="checklist">
 				<Check
 					done={checks.current}
@@ -296,96 +299,114 @@ export function ChangeDetail({
 			a.revision === p.revision &&
 			(a.workspaceId === p.workspaceId || verifications.some((v) => v.artifactId === a.id)),
 	);
+	const decision = p.state === "open" || (["promoting", "promoted"].includes(p.state) && recovery);
 	return (
-		<article className="change-page">
-			<button type="button" className="text-button back" onClick={() => open("changes")}>
-				← Changes
-			</button>
-			<header className="change-header">
-				<Pill tone={status.tone}>{status.label}</Pill>
-				<h1>
-					{p.title} <span className="number">#{p.number}</span>
-				</h1>
-				<p className="change-meta">
-					Revision <code title={p.revision}>{short(p.revision)}</code> on <code title={p.base}>{short(p.base)}</code>
-					{workspace && (
-						<>
-							{" · from "}
-							<button type="button" className="text-button" onClick={() => open("workspaces", workspace.id)}>
-								{workspace.title}
-							</button>
-						</>
-					)}
-					{artifact && ` · published by ${actorLabel(artifact.actor)} ${ago(artifact.at)}`}
-				</p>
-				{["stale", "superseded", "promoted", "rejected"].includes(status.key) && <p className="status-detail">{status.detail}</p>}
-			</header>
-			{p.state === "open" && <ReviewChecklist view={view} p={p} execute={execute} busy={busy} />}
-			{["promoting", "promoted"].includes(p.state) && recovery && (
-				<div className="promote-bar">
-					<p>
-						{p.state === "promoted"
-							? "Canonical was updated. Finish recording the completed promotion."
-							: "The promotion was interrupted. Check its exact remote outcome before anything else is promoted."}
+		<article className="change-page detail-page">
+			<BackLink label="Changes" onClick={() => open("changes")} />
+			<header className="page-header change-header">
+				<div className="page-title">
+					<p className="kicker">
+						<span>Change</span>
+						<code>#{p.number}</code>
 					</p>
-					<button
-						type="button"
-						className="primary"
-						disabled={busy || !recovery.ready}
-						onClick={() => {
-							setError("");
-							void execute(recovery.command).catch((e) => setError((e as Error).message));
-						}}
-					>
-						{p.state === "promoted" ? "Finish promotion" : "Reconcile promotion"}
-					</button>
-					{error && <p role="alert">{error}</p>}
+					<h1>{p.title}</h1>
+					<p className="change-meta">
+						<Pill tone={status.tone}>{status.label}</Pill>
+						<span>
+							Revision <code title={p.revision}>{short(p.revision)}</code> on <code title={p.base}>{short(p.base)}</code>
+						</span>
+						{workspace && (
+							<span>
+								{"from "}
+								<button type="button" className="text-button" onClick={() => open("workspaces", workspace.id)}>
+									{workspace.title}
+								</button>
+							</span>
+						)}
+						{artifact && <span>{`published by ${actorLabel(artifact.actor)} ${ago(artifact.at)}`}</span>}
+					</p>
+					{["stale", "superseded", "promoted", "rejected"].includes(status.key) && <p className="status-detail">{status.detail}</p>}
 				</div>
-			)}
-			<h2>Files changed</h2>
-			<ChangeDiff base={p.base} revision={p.revision} execute={execute} />
-			<h2>Evidence and reviews</h2>
-			<ul className="timeline">
-				{verifications.map((v) => (
-					<li key={v.id}>
-						<strong>
-							{v.kind} {v.outcome}
-						</strong>{" "}
-						· {v.trust === "reported" ? `reported by ${actorLabel(v.actor)}` : `confirmed by ${actorLabel(v.actor)}`}
-						{v.revision !== p.revision && " · earlier revision"}
-						<p>{v.summary}</p>
-					</li>
-				))}
-				{reports.map((a) => (
-					<li key={a.id}>
-						<button type="button" className="text-button" onClick={() => open("history", a.id)}>
-							{a.title}
-						</button>{" "}
-						· stored evidence from {actorLabel(a.actor)}
-					</li>
-				))}
-				{p.reviews.map((r) => (
-					<li key={r.id}>
-						<strong>{r.outcome === "approve" ? "Approved" : r.outcome === "concern" ? "Concern" : "Disagreed"}</strong> ·{" "}
-						{actorLabel(r.actor)}
-						{r.revision !== p.revision && " · earlier revision"}
-						<p>
-							{r.reason}
-							{r.resolution && ` — resolved by ${actorLabel(r.resolution.actor)}: ${r.resolution.reason}`}
-						</p>
-					</li>
-				))}
-				{!verifications.length && !reports.length && !p.reviews.length && <li className="muted">No evidence or reviews yet.</li>}
-			</ul>
-			{artifact && (
-				<p className="muted">
-					The exact source is retained as{" "}
-					<button type="button" className="text-button" onClick={() => open("history", artifact.id)}>
-						published revision {short(artifact.revision)}
-					</button>
-					. Retention proves which source is under review, not that it is correct.
-				</p>
-			)}
+			</header>
+			<div className={decision ? "review-layout" : "review-layout single"}>
+				{decision && (
+					<aside className="review-side" aria-label="Decision">
+						{p.state === "open" && <ReviewChecklist view={view} p={p} execute={execute} busy={busy} />}
+						{["promoting", "promoted"].includes(p.state) && recovery && (
+							<section className="review-panel">
+								<h2>Promotion</h2>
+								<p>
+									{p.state === "promoted"
+										? "Canonical was updated. Finish recording the completed promotion."
+										: "The promotion was interrupted. Check its exact remote outcome before anything else is promoted."}
+								</p>
+								<div className="promote-bar">
+									<button
+										type="button"
+										className="primary"
+										disabled={busy || !recovery.ready}
+										onClick={() => {
+											setError("");
+											void execute(recovery.command).catch((e) => setError((e as Error).message));
+										}}
+									>
+										{p.state === "promoted" ? "Finish promotion" : "Reconcile promotion"}
+									</button>
+								</div>
+								{error && <p role="alert">{error}</p>}
+							</section>
+						)}
+					</aside>
+				)}
+				<div className="review-main">
+					<Section title="Files changed">
+						<ChangeDiff base={p.base} revision={p.revision} execute={execute} />
+					</Section>
+					<Section title="Evidence and reviews">
+						<ul className="timeline">
+							{verifications.map((v) => (
+								<li key={v.id}>
+									<strong>
+										{v.kind} {v.outcome}
+									</strong>{" "}
+									· {v.trust === "reported" ? `reported by ${actorLabel(v.actor)}` : `confirmed by ${actorLabel(v.actor)}`}
+									{v.revision !== p.revision && " · earlier revision"}
+									<p>{v.summary}</p>
+								</li>
+							))}
+							{reports.map((a) => (
+								<li key={a.id}>
+									<button type="button" className="text-button" onClick={() => open("history", a.id)}>
+										{a.title}
+									</button>{" "}
+									· stored evidence from {actorLabel(a.actor)}
+								</li>
+							))}
+							{p.reviews.map((r) => (
+								<li key={r.id}>
+									<strong>{r.outcome === "approve" ? "Approved" : r.outcome === "concern" ? "Concern" : "Disagreed"}</strong> ·{" "}
+									{actorLabel(r.actor)}
+									{r.revision !== p.revision && " · earlier revision"}
+									<p>
+										{r.reason}
+										{r.resolution && ` — resolved by ${actorLabel(r.resolution.actor)}: ${r.resolution.reason}`}
+									</p>
+								</li>
+							))}
+							{!verifications.length && !reports.length && !p.reviews.length && <li className="muted">No evidence or reviews yet.</li>}
+						</ul>
+						{artifact && (
+							<p className="panel-note">
+								The exact source is retained as{" "}
+								<button type="button" className="text-button" onClick={() => open("history", artifact.id)}>
+									published revision {short(artifact.revision)}
+								</button>
+								. Retention proves which source is under review, not that it is correct.
+							</p>
+						)}
+					</Section>
+				</div>
+			</div>
 		</article>
 	);
 }

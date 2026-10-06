@@ -1,19 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import type { Artifact, RepositorySnapshot } from "../shared/platform.ts";
 import { Form, short, time, value } from "./controls.tsx";
+import { Icon } from "./design.tsx";
 import type { Execute } from "./inspect.tsx";
 import { actorLabel } from "./status.ts";
 
 export function RetainedRecordRow({ record: a, open }: { record: Artifact; open: (id: string) => void }) {
 	return (
 		<button type="button" className="retained-row" onClick={() => open(a.id)}>
-			<strong>{a.title}</strong>
-			<span>
-				{a.kind === "source" ? "Published revision" : "Evidence"} · <code>{short(a.revision)}</code>
+			<span className="row-main">
+				<strong>{a.title}</strong>
+				<small className="row-meta">
+					<code>{short(a.revision)}</code>
+					<span>{actorLabel(a.actor)}</span>
+					<span>{a.trust === "reported" ? "reported" : "confirmed by a person"}</span>
+				</small>
 			</span>
-			<small>
-				{actorLabel(a.actor)} · {a.trust === "reported" ? "reported" : "confirmed by a person"}
-			</small>
+			<Icon name="arrow" className="row-arrow" />
 		</button>
 	);
 }
@@ -106,42 +109,52 @@ export function RetainedRecordDetail({
 
 	if (!a) return <p className="empty">Retained record unavailable.</p>;
 	return (
-		<section>
-			<p className="eyebrow">
-				{a.kind === "source" ? "Published revision" : "Evidence"} · {a.trust === "reported" ? "reported" : "confirmed by a person"}
-			</p>
-			<h2 className="detail-title">{a.title}</h2>
-			<p className="muted">
+		<section className="record-detail">
+			<header className="page-header">
+				<div className="page-title">
+					<p className="kicker">
+						<span>{a.kind === "source" ? "Published revision" : "Evidence"}</span>
+						<span>{a.trust === "reported" ? "reported" : "confirmed by a person"}</span>
+					</p>
+					<h1>{a.title}</h1>
+					<p className="change-meta">
+						<span>Produced by {actorLabel(a.actor)}</span>
+						<span>{time(a.at)}</span>
+					</p>
+				</div>
+			</header>
+			<p className="page-lead">
 				{a.kind === "source"
 					? "Publication preserves this exact source for review; approval and acceptance are separate decisions."
 					: "Evidence about this exact revision. Reported evidence is a participant's claim; Cruce does not run checks."}
 			</p>
-			<p>
-				Produced by {actorLabel(a.actor)} · {time(a.at)}
-			</p>
-			<dl>
-				<dt>Revision</dt>
-				<dd>
-					<code>{a.revision}</code>
-				</dd>
-				<dt>Workspace</dt>
-				<dd>
-					<button type="button" className="text-button" onClick={() => open("workspaces", a.workspaceId)}>
-						{view.workspaces.find((s) => s.id === a.workspaceId)?.title ?? "View workspace"}
-					</button>
-				</dd>
+			<dl className="fact-grid">
+				<div>
+					<dt>Revision</dt>
+					<dd>
+						<code>{a.revision}</code>
+					</dd>
+				</div>
+				<div>
+					<dt>Workspace</dt>
+					<dd>
+						<button type="button" className="text-button" onClick={() => open("workspaces", a.workspaceId)}>
+							{view.workspaces.find((s) => s.id === a.workspaceId)?.title ?? "View workspace"}
+						</button>
+					</dd>
+				</div>
 				{a.baseRevision && (
-					<>
+					<div>
 						<dt>Review base</dt>
 						<dd>
 							<code>{a.baseRevision}</code>
 						</dd>
-					</>
+					</div>
 				)}
 			</dl>
-			<details>
+			<details className="group">
 				<summary>Storage details</summary>
-				<dl>
+				<dl className="facts">
 					<dt>Storage</dt>
 					<dd>{a.storage.repository}</dd>
 					<dt>Content hash</dt>
