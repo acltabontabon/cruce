@@ -4,6 +4,10 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Changed
+
+- Redesign the public homepage to lead with context: three generations of software development (written, assisted, agentic) and where Cruce sits in the third. An animated Git graph then shows how it works: workspaces from an immutable baseline, advisory overlap, exact-revision human approval, sequential non-forced promotion and explicit reconciliation, with tools as annotations. Three plates cover durable workspaces, exact revisions and composability with plain Git. The page is shorter, keeps the paper-and-ink identity, and supports reduced motion, keyboard stage controls, 320px screens and 200% zoom.
+
 ## [0.1.0-alpha.2] - 2026-10-06
 
 ### Added
