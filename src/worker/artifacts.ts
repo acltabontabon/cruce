@@ -1,5 +1,6 @@
 import { DomainError } from "../core/errors.ts";
 import type { ResourceStorage } from "../shared/platform.ts";
+import { ProviderIdentity, ProviderIdentityError } from "./provider-identity.ts";
 import type { Store } from "./store.ts";
 
 /** Resource calls use the explicitly configured installation storage. */
@@ -66,16 +67,19 @@ export class ArtifactsRestHost implements RepositoryHost {
 		readonly namespace: string,
 		private readonly token: string,
 		private readonly send: Send = fetch,
+		readonly identities?: ProviderIdentity,
 	) {}
 	private path(suffix = "") {
 		return `/accounts/${this.accountId}/artifacts/namespaces/${this.namespace}${suffix}`;
 	}
 	async info(name: string) {
-		return cloudflare<{ name: string; description?: string | null; remote: string; id: string }>(
+		const info = await cloudflare<{ name: string; description?: string | null; remote: string; id: string }>(
 			this.send,
 			this.token,
 			this.path(`/repos/${name}`),
 		);
+		this.identities?.check(name, info.id);
+		return info;
 	}
 	private async namespaceReady() {
 		try {
@@ -95,6 +99,7 @@ export class ArtifactsRestHost implements RepositoryHost {
 		}
 	}
 	private async revokeOutstanding(name: string) {
+		if (this.identities) await this.info(name);
 		for (let page = 0; page < 20; page++) {
 			const tokens = await cloudflare<{ id: string }[]>(
 				this.send,
@@ -111,11 +116,14 @@ export class ArtifactsRestHost implements RepositoryHost {
 		try {
 			const info = await this.info(name);
 			if (info.description !== description) throw new DomainError(409, "Artifacts repository ownership mismatch");
+			this.identities?.require(name);
+			this.identities?.record(name, info.id);
 			await this.revokeOutstanding(name);
 			return { name: info.name, id: info.id, remote: info.remote, created: false };
 		} catch (error) {
 			if ((error as DomainError).status !== 404) throw error;
 		}
+		if (this.identities?.expected(name)) throw new ProviderIdentityError("Recorded Artifacts repository is missing");
 		const created = await cloudflare<{ id: string; name: string; remote: string; token: string }>(
 			this.send,
 			this.token,
@@ -125,25 +133,34 @@ export class ArtifactsRestHost implements RepositoryHost {
 				body: JSON.stringify({ name, description, default_branch: defaultBranch }),
 			},
 		);
+		this.identities?.record(name, created.id);
 		// The creation token is long-lived; Cruce never keeps it.
 		await this.revokeOutstanding(name);
 		return { name: created.name, id: created.id, remote: created.remote, created: true };
 	}
 	async fork(source: string, target: string, description: string): Promise<RepoRef> {
+		if (this.identities) {
+			this.identities.require(source);
+			await this.info(source);
+		}
 		try {
 			const old = await this.info(target);
 			if (old.description !== description) throw new DomainError(409, "Fork ownership mismatch");
+			this.identities?.require(target);
+			this.identities?.record(target, old.id);
 			await this.revokeOutstanding(target);
 			return { ...old, created: false };
 		} catch (error) {
 			if ((error as DomainError).status !== 404) throw error;
 		}
+		if (this.identities?.expected(target)) throw new ProviderIdentityError("Recorded Artifacts repository is missing");
 		const created = await cloudflare<{ id: string; name: string; remote: string }>(
 			this.send,
 			this.token,
 			this.path(`/repos/${source}/fork`),
 			{ method: "POST", body: JSON.stringify({ name: target, description, default_branch_only: true, read_only: false }) },
 		);
+		this.identities?.record(target, created.id);
 		await this.revokeOutstanding(target);
 		return { ...created, created: true };
 	}
@@ -152,7 +169,7 @@ export class ArtifactsRestHost implements RepositoryHost {
 	async remove(name: string, expectedId?: string): Promise<boolean> {
 		try {
 			const info = await this.info(name);
-			if (expectedId && info.id !== expectedId) throw new DomainError(409, "Artifacts repository identity changed");
+			if (expectedId && info.id !== expectedId) throw new ProviderIdentityError("Artifacts repository identity changed");
 			await cloudflare(this.send, this.token, this.path(`/repos/${name}`), { method: "DELETE" });
 			return false;
 		} catch (error) {
@@ -165,6 +182,10 @@ export class ArtifactsRestHost implements RepositoryHost {
 	}
 
 	async withToken<T>(name: string, scope: "read" | "write", fn: (token: string) => Promise<T>) {
+		if (this.identities) {
+			this.identities.require(name);
+			await this.info(name);
+		}
 		const t = await cloudflare<{ id: string; plaintext: string }>(this.send, this.token, this.path("/tokens"), {
 			method: "POST",
 			body: JSON.stringify({ repo: name, scope, ttl: 60 }),
@@ -193,7 +214,7 @@ async function forwardGit(
 	expectedId?: string,
 ): Promise<Response> {
 	const info = await host.info(name);
-	if (expectedId && info.id !== expectedId) throw new DomainError(409, "Artifacts repository identity changed");
+	if (expectedId && info.id !== expectedId) throw new ProviderIdentityError("Artifacts repository identity changed");
 	const remote = new URL(info.remote);
 	if (
 		remote.protocol !== "https:" ||
@@ -260,6 +281,7 @@ export class ResourceBoundary {
 		readonly env: StorageEnv,
 		readonly resources: NamespaceResources,
 		readonly send: Send = fetch,
+		readonly identities = new ProviderIdentity(store),
 	) {}
 	storage(): ResourceStorage {
 		if (this.store.get("resource-account"))
@@ -285,7 +307,7 @@ export class ResourceBoundary {
 	}
 	binding(): StorageBinding {
 		const storage = this.storage();
-		if (!storage.ready) throw new DomainError(409, storage.reason);
+		if (!storage.ready) throw new ProviderIdentityError(storage.reason);
 		return { accountId: this.env.CRUCE_STORAGE_ACCOUNT_ID!, namespace: this.env.CRUCE_ARTIFACTS_NAMESPACE! };
 	}
 	/** Called only by explicit resource mutations after the namespace policy gate. */
@@ -295,7 +317,14 @@ export class ResourceBoundary {
 	}
 	async host(): Promise<RepositoryHost> {
 		const binding = this.binding();
-		return new ArtifactsBindingHost(this.env.ARTIFACTS!, binding.accountId, binding.namespace, this.resources.namespace, this.send);
+		return new ArtifactsBindingHost(
+			this.env.ARTIFACTS!,
+			binding.accountId,
+			binding.namespace,
+			this.resources.namespace,
+			this.identities,
+			this.send,
+		);
 	}
 }
 
@@ -310,6 +339,7 @@ export class ArtifactsBindingHost implements RepositoryHost {
 		readonly accountId: string,
 		readonly storageNamespace: string,
 		readonly namespaceId: string,
+		readonly identities: ProviderIdentity,
 		private readonly send: Send = fetch,
 	) {}
 	private physical(name: string) {
@@ -328,12 +358,16 @@ export class ArtifactsBindingHost implements RepositoryHost {
 			throw new DomainError(code === "RATE_LIMITED" ? 429 : 502, "Artifacts operation unavailable; retry the same operation identity");
 		}
 	}
-	private async repository<T>(name: string, run: (repo: ArtifactsRepo) => Promise<T>) {
+	private async repository<T>(name: string, run: (repo: ArtifactsRepo, info: ArtifactsRepoInfo) => Promise<T>) {
 		using repo = await this.provider(() => this.artifacts.get(this.physical(name)));
-		return await run(repo);
+		const info = await this.provider(() => repo.info());
+		this.validate(name, info);
+		return await run(repo, info);
 	}
 	async info(name: string) {
-		const info = await this.repository(name, (repo) => this.provider(() => repo.info()));
+		return this.repository(name, async (_repo, info) => ({ ...info, name }));
+	}
+	private validate(name: string, info: Pick<ArtifactsRepoInfo, "id" | "name" | "remote">) {
 		const remote = new URL(info.remote);
 		if (
 			remote.protocol !== "https:" ||
@@ -344,9 +378,10 @@ export class ArtifactsBindingHost implements RepositoryHost {
 			remote.hash ||
 			remote.pathname !== `/git/${this.storageNamespace}/${this.physical(name)}.git`
 		)
-			throw new DomainError(409, "Installation storage account mismatch");
-		if (info.name !== this.physical(name)) throw new DomainError(409, "Artifacts repository address mismatch");
-		return { ...info, name };
+			throw new ProviderIdentityError("Installation storage account mismatch");
+		if (info.name !== this.physical(name)) throw new ProviderIdentityError("Artifacts repository address mismatch");
+		if (!info.id) throw new ProviderIdentityError("Provider repository identity unavailable");
+		this.identities.check(name, info.id);
 	}
 	private async revokeOutstanding(name: string) {
 		await this.repository(name, async (repo) => {
@@ -366,47 +401,59 @@ export class ArtifactsBindingHost implements RepositoryHost {
 			await this.info(name);
 		} catch (error) {
 			if (!(error instanceof DomainError) || error.status !== 404) throw error;
+			if (this.identities.expected(name)) throw new ProviderIdentityError("Recorded Artifacts repository is missing");
 			try {
 				const initial = await this.provider(() =>
 					this.artifacts.create(this.physical(name), { description, setDefaultBranch: defaultBranch }),
 				);
+				this.validate(name, initial);
+				this.identities.record(name, initial.id);
 				await this.repository(name, (repo) => this.provider(() => repo.revokeToken(initial.token)));
 				created = true;
 			} catch (error) {
-				if (!(error instanceof DomainError) || error.status !== 409) throw error;
+				if (!(error instanceof DomainError) || error instanceof ProviderIdentityError || error.status !== 409) throw error;
 			}
 		}
 		const info = await this.info(name);
 		if (info.description !== description) throw new DomainError(409, "Artifacts repository ownership mismatch");
+		this.identities.require(name);
+		this.identities.record(name, info.id);
 		await this.revokeOutstanding(name);
 		return { name, id: info.id, remote: info.remote, created };
 	}
 	async fork(source: string, target: string, description: string): Promise<RepoRef> {
+		this.identities.require(source);
+		await this.info(source);
 		let created = false;
 		try {
 			await this.info(target);
 		} catch (error) {
 			if (!(error instanceof DomainError) || error.status !== 404) throw error;
+			if (this.identities.expected(target)) throw new ProviderIdentityError("Recorded Artifacts repository is missing");
 			try {
 				const initial = await this.repository(source, (repo) =>
 					this.provider(() => repo.fork(this.physical(target), { description, defaultBranchOnly: true, readOnly: false })),
 				);
+				this.validate(target, initial);
+				this.identities.record(target, initial.id);
 				await this.repository(target, (repo) => this.provider(() => repo.revokeToken(initial.token)));
 				created = true;
 			} catch (error) {
-				if (!(error instanceof DomainError) || error.status !== 409) throw error;
+				if (!(error instanceof DomainError) || error instanceof ProviderIdentityError || error.status !== 409) throw error;
 			}
 		}
 		const info = await this.info(target);
 		if (info.description !== description || info.source !== `artifacts:${this.storageNamespace}/${this.physical(source)}`)
 			throw new DomainError(409, "Fork ownership or parent mismatch");
+		this.identities.require(target);
+		this.identities.record(target, info.id);
 		await this.revokeOutstanding(target);
 		return { name: target, id: info.id, remote: info.remote, created };
 	}
 	async remove(name: string, expectedId?: string) {
 		try {
 			const info = await this.info(name);
-			if (!expectedId || info.id !== expectedId) throw new DomainError(409, "Artifacts repository identity changed");
+			if (!expectedId || info.id !== expectedId) throw new ProviderIdentityError("Artifacts repository identity changed");
 			await this.provider(() => this.artifacts.delete(this.physical(name)));
 			return false;
 		} catch (error) {
@@ -415,6 +462,7 @@ export class ArtifactsBindingHost implements RepositoryHost {
 		}
 	}
 	async withToken<T>(name: string, scope: "read" | "write", fn: (token: string) => Promise<T>) {
+		this.identities.require(name);
 		return this.repository(name, async (repo) => {
 			const token = await this.provider(() => repo.createToken(scope, 60));
 			try {

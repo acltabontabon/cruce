@@ -174,7 +174,7 @@ export interface Artifact {
 	title: string;
 	contentHash: string;
 	trust: "reported" | "human_attested";
-	storage: { repository: string; revision: string; ref?: string; path?: string };
+	storage: { repository: string; providerId: string; revision: string; ref?: string; path?: string };
 	at: number;
 }
 export interface Review {

@@ -639,7 +639,7 @@ describe("exact approved-base promotion", () => {
 		);
 		f.push.mockRestore();
 		const remote = await gitServer(f.git, f.base, [middle, candidate]);
-		vi.mocked(f.host.info).mockResolvedValue({ name: repo.storageName!, id: repo.storageName!, remote: remote.url });
+		vi.mocked(f.host.info).mockImplementation(async (name) => ({ name, id: name, remote: remote.url }));
 		const cmd: Command = {
 			tool: "promote_proposal",
 			namespaceId: repo.namespaceId,
@@ -857,6 +857,37 @@ describe("exact approved-base promotion", () => {
 			await expect(f.run()).rejects.toThrow("identity changed");
 			expect(f.remote.updates).toBe(0);
 			expect(f.runtime.state().sourceHead).toBe(f.base);
+		} finally {
+			await f.remote.close();
+		}
+	});
+	it.each(["canonical", "retention"])("preserves an attempted promotion through %s identity mismatch and restoration", async (kind) => {
+		const f = await prepared();
+		try {
+			f.remote.afterUpdate = () => {
+				throw new Error("lost response");
+			};
+			await expect(f.run()).rejects.toThrow();
+			const pending = structuredClone(f.runtime.state().promotions[0]);
+			const reservationIds = f.w.state.reservations.map((r) => r.id);
+			const target = kind === "canonical" ? repo.storageName! : "repo-repo-artifacts";
+			vi.mocked(f.host.info).mockImplementation(async (name) => ({
+				name,
+				id: name === target ? "replacement" : name,
+				remote: f.remote.url,
+			}));
+			const token = vi.spyOn(f.host, "withToken");
+			await expect(f.run(f.restart())).rejects.toThrow("identity changed");
+			expect(token).not.toHaveBeenCalled();
+			expect(f.runtime.state().promotions[0]).toEqual(pending);
+			expect(f.runtime.state().proposals[0].state).toBe("promoting");
+			expect(f.runtime.state().sourceHead).toBe(f.base);
+			expect(f.remote.updates).toBe(1);
+			vi.mocked(f.host.info).mockImplementation(async (name) => ({ name, id: name, remote: f.remote.url }));
+			expect(await f.run(f.restart())).toMatchObject({ state: "complete", from: f.base, to: f.candidate });
+			expect(f.remote.updates).toBe(1);
+			expect(f.w.state.reservations.map((r) => r.id)).toEqual(reservationIds);
+			expect(f.runtime.state().activity.filter((e) => e.kind === "source_promoted")).toHaveLength(1);
 		} finally {
 			await f.remote.close();
 		}

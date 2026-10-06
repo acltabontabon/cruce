@@ -124,7 +124,7 @@ Cruce repository ── canonical Git in Cloudflare Artifacts (authoritative ins
 
 - Canonical is the authoritative repository inside Cruce. Workspace forks start from it, and promotions advance it.
 - A forge may stay the public or organizational source. Today, creating a Cruce repository starts a new canonical history. Explicit import from a forge, divergence inspection and publication of approved revisions back to it are [roadmap](../ROADMAP.md) items. There is never silent bidirectional sync and never two canonical authorities.
-- Remote URL matching never proves repository identity. Stable Cruce and provider IDs do.
+- Remote URL matching never proves repository identity. Stable Cruce and provider IDs do. Canonical, fork and retention provider IDs remain bound to the repository across interruptions and cleanup; a recreated name cannot inherit them. Published source and evidence storage name their provider repository ID. Unknown creation outcomes or retained storage without a recorded ID require administrator reconciliation before resource access.
 
 ## Local execution model
 

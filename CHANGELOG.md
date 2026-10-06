@@ -4,6 +4,10 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Fixed
+
+- Pin provider repository IDs before token cleanup or Git access and validate canonical, fork and source/evidence retention identities on resource operations and retries. Recreated names fail closed. Storage restoration preserves interrupted promotion recovery and existing reservations. Published storage records now include the provider ID; unrecorded existing storage requires administrator reconciliation.
+
 ### Changed
 
 - Redesign the repository pages in the same paper-and-ink system. The repository header carries a scope line and mono canonical revision, the attention bar uses status dots, and the four tabs are mono and ink-ruled. Changes shows what waits for review beside canonical and live workspaces; History puts the canonical timeline and activity beside published revisions and evidence; Settings uses the two-column sections of namespace settings. A change opens with its diff (added and removed lines coloured) beside a sticky review checklist that ends in Promote. Workspace and record pages lead with their own title over a fact grid, and the repository header steps back while they are open.

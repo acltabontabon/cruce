@@ -13,13 +13,13 @@ Canonical lifecycle, the namespace/repository/workspace model, fork lifecycle, e
 | ID | Item | Priority | Status |
 | --- | --- | --- | --- |
 | F1 | Promotion against the exact approved base | Now | **Done**, locally verified ([evidence](docs/local-verification.md#exact-base-promotion-verification)); hosted validation in D2 |
-| F2 | Durable provider ownership and identity | Now | Open |
+| F2 | Durable provider ownership and identity | Now | **Done**, locally verified ([evidence](docs/local-verification.md#durable-provider-identity-verification-f2)); hosted validation in D2 |
 | F3 | Pure coordination reads | Now | Open |
 | F4 | Bounded source inspection and recoverable cache | Next | Open |
 | F5 | Diagnosable operations and safe errors | Next | **Safe errors done** 2026-10-06; structured correlation open |
 | F6 | Bounded state, transfers and explicit retention operations | Later | Open |
 
-**F2 — Durable provider ownership and identity.** Deployment-managed storage now pins the account and physical namespace on first resource use and rejects changed configuration or legacy connected-account state. Publication and retention still do not consistently compare recorded provider repository IDs. *Target:* validate stable provider IDs on every resource operation. *Acceptance:* recreate canonical, fork or retention names with different IDs and retry an interrupted operation; reject each mismatch before source access. Restoring the original installation binding preserves provenance and reservations.
+**F2 — Durable provider ownership and identity.** *Done locally:* deployment storage pins its account and physical namespace; the Repository DO journals canonical, fork, source-retention and evidence-retention provider IDs before token cleanup or Git access. Resource operations validate recorded IDs and addresses, including fork parents, publication checkpoints and promotion recovery. Recreated or missing recorded repositories fail closed; names and descriptions cannot establish an unrecorded identity. Restoring the original installation binding and repository identities reuses provenance, operations and reservations. Fault tests cover recreation after interruption, unknown creation responses and restoration. Hosted binding acceptance remains in D2; publication receipt/settlement recovery is R3.
 
 **F3 — Pure coordination reads.** HTTP/MCP routing calls `Directory.login` and repository initialization on reads, and both persist metadata. *Target:* established coordination reads cause no domain or storage mutation and no provider call. Initialization becomes an explicit step.
 

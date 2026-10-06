@@ -26,6 +26,8 @@ The physical Artifacts namespace is installation infrastructure, distinct from a
 
 First resource use durably records the installation account ID and physical namespace. Changing either later fails closed before provider access. Restoring the recorded configuration restores access. Existing connected-account records also block resource access; this change does not migrate, delete or silently redirect retained source. An administrator must plan an explicit transition for an existing deployment. Test deployments must preserve their retained canonical/source storage and reconcile charged uncertainty before any cleanup.
 
+Repository resource operations also validate durable provider repository IDs. Canonical, workspace forks and source/evidence retention IDs are recorded before token cleanup or Git access, and remain recorded after cleanup. Recreating a physical name with a different ID blocks access even if its description and URL match. Missing recorded repositories are not automatically recreated. A lost creation response before its ID was saved, or existing retention with no recorded ID, requires administrator reconciliation; Cruce does not adopt the current name as proof. Restoring the recorded binding and original repository identities permits the original operation to retry with its charged reservation and provenance intact. No automatic storage transition or repair tool is provided.
+
 Cloudflare usage is billed to the installation account. Namespace operation budgets are application policy limits, not dollar estimates. The operator manages account-wide cost and capacity; no per-customer billing or automatic cleanup is introduced. Uncertain operations remain charged until reconciled with their original identity.
 
 ## Control plane

@@ -321,7 +321,7 @@ describe("actor-neutral workspaces", () => {
 			title: "Source",
 			contentHash: "hash",
 			trust: "reported",
-			storage: { repository: "store", revision: head },
+			storage: { repository: "store", providerId: "store", revision: head },
 			at: 100,
 		});
 		c.command(cmd("end_workspace", { workspaceId: s.id }), authority(agent));
@@ -352,7 +352,7 @@ describe("revision-bound review", () => {
 			title: "Reconciled",
 			contentHash: "hash",
 			trust: "reported",
-			storage: { repository: "fork", revision: "c".repeat(40) },
+			storage: { repository: "fork", providerId: "fork", revision: "c".repeat(40) },
 			at: 100,
 		});
 		s.integratedRevision = "d".repeat(40);
@@ -374,7 +374,7 @@ describe("revision-bound review", () => {
 			title: "Source",
 			contentHash: "hash",
 			trust: "reported",
-			storage: { repository: "source", revision: head },
+			storage: { repository: "source", providerId: "source", revision: head },
 			at: 100,
 		});
 		const p = c.command(cmd("create_proposal", { artifactId: "source" }), authority(agent)) as { id: string };

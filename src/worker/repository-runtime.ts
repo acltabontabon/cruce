@@ -7,6 +7,7 @@ import { authorizeMachine, HUMAN_TOOLS, toolByName } from "../shared/tools.ts";
 import { boundedBody, type RepositoryHost, ResourceBoundary, type StorageEnv } from "./artifacts.ts";
 import { GitUpdateRejected, type GitWorkspace } from "./git/workspace.ts";
 import type { ConnectionGrant, NamespaceRuntime } from "./namespace-runtime.ts";
+import { ProviderIdentity, ProviderIdentityError } from "./provider-identity.ts";
 import { hash, Serial, type Store } from "./store.ts";
 
 type NamespacePort = {
@@ -49,7 +50,7 @@ export class RepositoryRuntime {
 				throw new Error("Storage identity is owned by the namespace");
 			},
 		};
-		return new ResourceBoundary(local, this.env, { namespace: config.namespace });
+		return new ResourceBoundary(local, this.env, { namespace: config.namespace }, fetch, new ProviderIdentity(this.store));
 	}
 	private async gate(grant: ConnectionGrant, cmd: Command, action: ResourceAction, run: (host: RepositoryHost) => Promise<unknown>) {
 		const r = await this.namespace.reserve(
@@ -345,8 +346,13 @@ export class RepositoryRuntime {
 					if (cmd.tool === "publish_revision") {
 						const fork = requireValue(s.fork, "Attach a hosted fork first");
 						if (fork.state !== "ready") throw new DomainError(409, "Fork unavailable");
+						const forkInfo = await host.info(fork.name);
+						if (forkInfo.id !== fork.id) throw new DomainError(409, "Fork identity changed; publication refused");
+						const storageName = `repo-${repo.id}-artifacts`;
+						const retainedId = new ProviderIdentity(this.store).expected(storageName);
+						if (retainedId && (await host.info(storageName)).id !== retainedId)
+							throw new ProviderIdentityError("Retained source provider identity changed; publication refused");
 						if (this.store.get<string>(`publication-revision:${op}`) !== revision) {
-							const forkInfo = await host.info(fork.name);
 							const { result: pushed } = await host.withToken(fork.name, "read", (token) =>
 								this.git.fetch({
 									url: forkInfo.remote,
@@ -387,14 +393,13 @@ export class RepositoryRuntime {
 							throw new DomainError(403, "Protected paths require a repository maintainer");
 						this.store.put(`publication-base:${op}`, baseRevision);
 						this.store.put(`publication-revision:${op}`, revision);
-						const storageName = `repo-${repo.id}-artifacts`;
 						const info = await host.ensure(storageName, `Cruce source artifacts ${repo.id}`, repo.defaultBranch);
 						const ref = `refs/heads/artifact-${artifactId}`;
 						await this.git.setRef(ref, revision);
 						await host.withToken(storageName, "write", (token) =>
 							this.git.push({ url: info.remote, token, localRef: ref, remoteRef: ref }),
 						);
-						storage = { repository: storageName, revision, ref };
+						storage = { repository: storageName, providerId: info.id, revision, ref };
 						contentHash = Array.from(
 							new Uint8Array(await crypto.subtle.digest("SHA-256", Uint8Array.from(await this.git.exportPack(revision)))),
 							(b) => b.toString(16).padStart(2, "0"),
@@ -438,7 +443,7 @@ export class RepositoryRuntime {
 								remoteRef: `refs/heads/artifact-${artifactId}`,
 							}),
 						);
-						storage = { repository: name, path, revision: oid, ref: `refs/heads/artifact-${artifactId}` };
+						storage = { repository: name, providerId: info.id, path, revision: oid, ref: `refs/heads/artifact-${artifactId}` };
 						contentHash = await hash(content);
 					}
 					return c.addArtifact({
@@ -514,15 +519,18 @@ export class RepositoryRuntime {
 			const artifact = c.artifact(p.artifactId);
 			if (artifact.kind !== "source" || artifact.revision !== p.revision || artifact.baseRevision !== p.base)
 				throw new DomainError(409, "Exact reviewed source unavailable");
+			const host = await (await this.resources()).host();
+			const retained = await host.info(artifact.storage.repository);
+			if (!artifact.storage.providerId || retained.id !== artifact.storage.providerId)
+				throw new ProviderIdentityError("Retained source provider identity changed; promotion refused");
 			// Validate full retained source, even on retries; local refs cannot prove success.
 			await this.git.exportPack(p.revision);
 			if ((await this.git.mergeBase(p.base, p.revision)) !== p.base || p.base === p.revision)
 				throw new DomainError(409, "Promotion requires a non-forced forward update");
-			const host = await (await this.resources()).host();
 			const name = requireValue(repo.storageName, "Source repository unavailable"),
 				info = await host.info(name);
 			if (!state.canonical || info.id !== state.canonical.id)
-				throw new DomainError(409, "Canonical provider identity changed; promotion refused");
+				throw new ProviderIdentityError("Canonical provider identity changed; promotion refused");
 			const remoteRef = `refs/heads/${repo.defaultBranch}`;
 			const remoteHead = async () =>
 				(
@@ -579,7 +587,9 @@ export class RepositoryRuntime {
 			const pending = durable.promotions.find((item) => item.id === promotion!.id);
 			if (pending && pending.state !== "complete") {
 				pending.state =
-					unexpectedMovement || error instanceof GitUpdateRejected || (error instanceof DomainError && error.status === 409)
+					unexpectedMovement ||
+					error instanceof GitUpdateRejected ||
+					(error instanceof DomainError && !(error instanceof ProviderIdentityError) && error.status === 409)
 						? "failed"
 						: "uncertain";
 				if (pending.state === "failed") durable.proposals.find((item) => item.id === p.id)!.state = "rejected";

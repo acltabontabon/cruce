@@ -82,7 +82,7 @@ export async function fixture() {
 		title: "Bounded retry policy",
 		contentHash: "fixture-content-hash",
 		trust: "reported",
-		storage: { repository: "fixture-source", revision: head },
+		storage: { repository: "fixture-source", providerId: "fixture-source", revision: head },
 		at: FIXED_TIME,
 	});
 	// The runtime records the published revision and its review base when it retains source.
@@ -100,7 +100,7 @@ export async function fixture() {
 		title: "Retry policy test report",
 		contentHash: "fixture-evidence-hash",
 		trust: "reported",
-		storage: { repository: "fixture-evidence", revision: head, path: "tests.txt" },
+		storage: { repository: "fixture-evidence", providerId: "fixture-evidence", revision: head, path: "tests.txt" },
 		at: FIXED_TIME,
 	});
 	const runtimes = new Map([[repository.id, c]]),
