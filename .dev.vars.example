@@ -2,6 +2,8 @@
 # Issuer/audience also configure cloudflare.config.ts via environment variables.
 CRUCE_ACCESS_ISSUER=https://YOUR_TEAM.cloudflareaccess.com
 CRUCE_ACCESS_AUD=YOUR_APPLICATION_AUDIENCE
+# Optional label for the sign-in button, matching the Access identity provider (for example GitHub).
+CRUCE_SIGN_IN_PROVIDER=
 # Server-only identity credential encryption. Installation storage uses the Worker binding.
 CRUCE_SECRET=change-me-to-a-long-random-string
 

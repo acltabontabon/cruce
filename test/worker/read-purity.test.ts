@@ -14,7 +14,7 @@ import { type PlatformEnv, platformRoute } from "../../src/worker/platform-route
 import { RepositoryRuntime } from "../../src/worker/repository-runtime.ts";
 import { sqlStore } from "../../src/worker/store.ts";
 
-const identity = vi.hoisted(() => ({ tenantId: "issuer", developerId: "owner", email: "current@example.test", accessJwt: "fixture" }));
+const identity = vi.hoisted(() => ({ tenantId: "issuer", developerId: "owner", email: "current@example.test" }));
 vi.mock("cloudflare:workers", () => ({
 	DurableObject: class {
 		constructor(
@@ -26,7 +26,7 @@ vi.mock("cloudflare:workers", () => ({
 }));
 vi.mock("../../src/worker/auth.ts", () => ({
 	consoleIdentity: async () => identity,
-	validateIdentity: async (v: unknown) => v,
+	connectionIdentity: (v: unknown) => v,
 }));
 
 // Execute the adapters' actual SQL. Every statement that could change schema or rows

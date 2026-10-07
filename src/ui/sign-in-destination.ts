@@ -6,6 +6,16 @@ function privateDestination(url: URL) {
 	);
 }
 
+export type SignInReason = "requested" | "repository" | "invitation" | "expired";
+
+/** Signed-out visitors see the sign-in page when they asked for it or opened a private link; everyone else sees the homepage. */
+export function signInReason(): SignInReason | undefined {
+	const url = new URL(location.href);
+	if (url.pathname === "/sign-in") return "requested";
+	if (!privateDestination(url)) return;
+	return url.pathname.startsWith("/invite/") ? "invitation" : "repository";
+}
+
 // Keep the existing /auth/login link and redirect. Store only same-origin console navigation,
 // including fragment-only detail/invitation state that cannot travel in a Referer header.
 export function rememberSignInDestination() {

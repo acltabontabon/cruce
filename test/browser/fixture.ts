@@ -121,7 +121,36 @@ export async function fixture() {
 	});
 	const runtimes = new Map([[repository.id, c]]),
 		calls: unknown[] = [];
+	const day = 86_400_000;
+	let connections = [
+		{
+			id: "grant-codex",
+			client: "Codex",
+			connectionId: "connection-codex",
+			repositories: [{ id: "payments", label: "fernloop/payment-service" }],
+			scopes: ["cruce:read", "workspace:write", "revision:publish", "change:write"],
+			createdAt: FIXED_TIME - 2 * day,
+			expiresAt: FIXED_TIME + 28 * day,
+		},
+		{
+			id: "grant-script",
+			client: "release-check script",
+			connectionId: "connection-script",
+			repositories: [],
+			scopes: ["cruce:read"],
+			createdAt: FIXED_TIME - 5 * day,
+			expiresAt: FIXED_TIME + 25 * day,
+		},
+		{
+			id: "grant-older",
+			client: "Claude Code",
+			scopes: ["cruce:read"],
+			createdAt: FIXED_TIME - 9 * day,
+			expiresAt: FIXED_TIME + 21 * day,
+		},
+	];
 	let authenticated = true,
+		signInProvider: string | undefined = "GitHub",
 		sessionFailure = false,
 		sessionDelay = 0;
 	const json = (res: ServerResponse, data: unknown, status = 200) => {
@@ -149,12 +178,13 @@ export async function fixture() {
 			}
 			if (url.pathname === "/__fixture/session" && req.method === "POST") {
 				if (typeof body.authenticated === "boolean") authenticated = body.authenticated;
+				if ("provider" in body) signInProvider = body.provider ?? undefined;
 				sessionFailure = body.failure ?? false;
 				sessionDelay = body.delay ?? 0;
 				return json(res, { configured: true });
 			}
 			if (url.pathname === "/auth/session") {
-				const state = { authenticated },
+				const state = { authenticated, provider: signInProvider },
 					failure = sessionFailure;
 				if (sessionDelay) await new Promise((resolve) => setTimeout(resolve, sessionDelay));
 				res.setHeader("cache-control", "no-store");
@@ -172,6 +202,12 @@ export async function fixture() {
 				return json(res, { updated: true });
 			}
 			if (url.pathname === "/api/me") return json(res, { user, namespaces: directory.state.namespaces });
+			if (url.pathname === "/api/connections" && req.method === "GET") return json(res, connections);
+			if (parts[1] === "connections" && parts[2] && req.method === "DELETE") {
+				calls.push({ revoke: parts[2] });
+				connections = connections.filter((connection) => connection.id !== parts[2]);
+				return json(res, { revoked: true });
+			}
 			if (url.pathname === "/api/namespaces" && req.method === "POST") {
 				const w = directory.create(user, body, body.idempotencyKey);
 				namespaces.set(w.id, new NamespaceController(initialNamespace(w), FIXED_TIME));

@@ -7,7 +7,7 @@ import { boundedMap, type PlatformEnv, platformRoute } from "../../src/worker/pl
 
 vi.mock("../../src/worker/auth.ts", () => ({
 	consoleIdentity: async () => ({ tenantId: "issuer", developerId: "subject", email: "owner@example.com" }),
-	validateIdentity: async (v: unknown) => v,
+	connectionIdentity: (v: unknown) => v,
 }));
 vi.mock("../../src/worker/mcp.ts", () => ({ remoteMcp: () => () => new Response("MCP") }));
 function fixture() {
@@ -76,7 +76,7 @@ function fixture() {
 			["cruce:read", "workspace:write"],
 			bridge,
 		);
-	return { call, path, repo, directory, controller, command, user, namespace, getDirectory, retired, port };
+	return { call, path, repo, directory, controller, command, user, namespace, getDirectory, retired, port, env };
 }
 describe("namespace repository contracts", () => {
 	it("returns available summaries when one repository fails, without exposing internal errors", async () => {
@@ -203,7 +203,7 @@ describe("namespace repository contracts", () => {
 	it("human bridge credentials cannot invoke human source promotion", async () => {
 		const f = fixture();
 		const bridge = {
-			identity: { accessJwt: "fixture", tenantId: "issuer", developerId: "subject", email: "owner@example.com" },
+			identity: { tenantId: "issuer", developerId: "subject", email: "owner@example.com" },
 			namespaceId: f.repo.namespaceId,
 			repositoryId: f.repo.id,
 			connectionId: "terminal",
@@ -218,5 +218,51 @@ describe("namespace repository contracts", () => {
 			),
 		).rejects.toThrow("scope denied");
 		expect(f.command).not.toHaveBeenCalled();
+	});
+});
+describe("agent connection routes", () => {
+	function connections() {
+		const f = fixture();
+		const oauth = {
+			listUserGrants: vi.fn(async () => ({
+				items: [{ id: "grant", clientId: "c", scope: ["cruce:read"], metadata: { clientName: "Codex" }, createdAt: 1 }],
+			})),
+			lookupClient: vi.fn(),
+			revokeGrant: vi.fn(async () => {}),
+		};
+		const env = { ...f.env, OAUTH_PROVIDER: oauth } as unknown as PlatformEnv;
+		const send = (path: string, method = "GET", props?: Record<string, unknown>, bridge?: Parameters<typeof platformRoute>[5]) =>
+			platformRoute(
+				new Request(`https://test.example${path}`, { method }),
+				env,
+				{} as ExecutionContext,
+				props as never,
+				["cruce:read"],
+				bridge,
+			);
+		return { ...f, oauth, send };
+	}
+	it("lists and revokes only the signed-in person's own connections", async () => {
+		const c = connections();
+		const listed = await (await c.send("/api/connections"))!.json();
+		expect(listed).toEqual([{ id: "grant", client: "Codex", scopes: ["cruce:read"], createdAt: 1000 }]);
+		expect(c.oauth.listUserGrants).toHaveBeenCalledWith("subject", { limit: 100, cursor: undefined });
+		expect(await (await c.send("/api/connections/grant", "DELETE"))!.json()).toEqual({ revoked: true });
+		expect(c.oauth.revokeGrant).toHaveBeenCalledWith("grant", "subject");
+		await expect(c.send("/api/connections/grant", "POST")).rejects.toMatchObject({ status: 404 });
+	});
+	it("agents and paired terminals cannot see or revoke connections", async () => {
+		const c = connections();
+		const props = { tenantId: "issuer", developerId: "subject", email: "owner@example.com", connectionId: "agent" };
+		const bridge = { identity: props, namespaceId: c.repo.namespaceId, repositoryId: c.repo.id, connectionId: "terminal", tokenKey: "t" };
+		for (const [path, method] of [
+			["/api/connections", "GET"],
+			["/api/connections/grant", "DELETE"],
+		]) {
+			await expect(c.send(path, method, props)).rejects.toMatchObject({ status: 403 });
+			await expect(c.send(path, method, undefined, bridge)).rejects.toMatchObject({ status: 403 });
+		}
+		expect(c.oauth.listUserGrants).not.toHaveBeenCalled();
+		expect(c.oauth.revokeGrant).not.toHaveBeenCalled();
 	});
 });

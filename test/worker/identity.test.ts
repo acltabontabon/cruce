@@ -1,7 +1,9 @@
 import { AuthorizationError } from "@cloudflare/workers-oauth-provider";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DirectoryController } from "../../src/core/ownership.ts";
-import { type AuthEnv, accessIdentity, authRoute, oauthProvider, seal, unseal } from "../../src/worker/auth.ts";
+import { type AuthEnv, accessIdentity, authRoute, connectionIdentity, oauthProvider, seal, unseal } from "../../src/worker/auth.ts";
+import { bridgeRoute } from "../../src/worker/bridge-auth.ts";
+import type { PlatformEnv } from "../../src/worker/platform-router.ts";
 
 vi.mock("cloudflare:workers", () => ({
 	WorkerEntrypoint: class {},
@@ -254,6 +256,125 @@ describe("public Cruce session boundary", () => {
 		await expect(authRoute(request(valid), { ...f.env, CRUCE_ACCESS_AUD: undefined })).rejects.toMatchObject({ status: 503 });
 		await expect(authRoute(request(valid), { ...f.env, CRUCE_PUBLIC_ORIGIN: "https://another.example.test" })).rejects.toMatchObject({
 			status: 403,
+		});
+	});
+});
+describe("agent and terminal connections", () => {
+	afterEach(() => vi.unstubAllGlobals());
+	const live = () => Math.floor(Date.now() / 1000) + 600;
+	it("approving an agent stores the identity, never the browser's Access token", async () => {
+		const f = await identityFixture();
+		vi.stubGlobal("fetch", f.send);
+		const namespace = { id: "namespace", handle: "test", ownerId: "owner" };
+		const completeAuthorization = vi.fn(async () => ({ redirectTo: "http://127.0.0.1:12345/callback?code=fixture" }));
+		const original = { clientId: "client", scope: ["cruce:read"], redirectUri: "http://127.0.0.1:12345/callback" };
+		const env = {
+			...f.env,
+			DIRECTORY: {
+				getByName: () => ({
+					login: async () => ({ id: "owner", name: "Owner", personalNamespaceId: namespace.id }),
+					namespace: async () => namespace,
+					namespaces: async () => [namespace],
+				}),
+			},
+			NAMESPACE: {
+				getByName: () => ({ initialize: async () => {}, snapshot: async () => ({ repositories: [{ id: "repo", name: "gateway" }] }) }),
+			},
+			OAUTH_PROVIDER: {
+				approveConsent: async () => ({ request: original, headers: new Headers() }),
+				completeAuthorization,
+				describeConsent: async () => ({ clientName: "Codex" }),
+			},
+		} as unknown as AuthEnv;
+		const response = (await authRoute(
+			new Request("https://cruce.example.test/authorize", {
+				method: "POST",
+				body: new URLSearchParams([
+					["handle", "consent-handle"],
+					["scope", "cruce:write"],
+					["repository", "repo"],
+					["repository", "not-offered"],
+				]),
+				headers: { "cf-access-jwt-assertion": await f.token({ exp: live() }) },
+			}),
+			env,
+		))!;
+		expect(response.status).toBe(302);
+		const [{ props, metadata }] = completeAuthorization.mock.calls[0] as unknown as [
+			{ props: Record<string, unknown>; metadata: Record<string, unknown> },
+		];
+		// Plain metadata lets the person list and revoke the connection; it holds no credential.
+		expect(metadata).toEqual({
+			connectionId: props.connectionId,
+			clientName: "Codex",
+			repositories: [{ id: "repo", label: "test/gateway" }],
+		});
+		expect(props).toEqual({
+			developerId: "person",
+			tenantId: f.env.CRUCE_ACCESS_ISSUER,
+			email: "person@example.test",
+			connectionId: expect.any(String),
+			repositoryIds: ["repo"],
+			clientName: "Codex",
+		});
+	});
+	it("connections outlive the Access session that approved them but stay bound to the installation issuer", async () => {
+		const f = await identityFixture();
+		const send = vi.fn();
+		vi.stubGlobal("fetch", send);
+		const props = {
+			developerId: "person",
+			tenantId: f.env.CRUCE_ACCESS_ISSUER!,
+			email: "person@example.test",
+			connectionId: "connection",
+			repositoryIds: ["repo"],
+			clientName: "Claude Code",
+		};
+		// Grants approved before this change still carry an Access token; it is ignored rather than re-verified.
+		const legacy = { ...props, accessJwt: await f.token({ exp: 1 }) };
+		expect(connectionIdentity(legacy, f.env)).toEqual(props);
+		expect(send).not.toHaveBeenCalled();
+		expect(() => connectionIdentity({ ...props, tenantId: "https://other.cloudflareaccess.com" }, f.env)).toThrow("Reconnect this agent");
+		expect(() => connectionIdentity({ ...props, developerId: "" }, f.env)).toThrow("Reconnect this agent");
+		expect(() => connectionIdentity(props, { ...f.env, CRUCE_ACCESS_ISSUER: undefined })).toThrow(expect.objectContaining({ status: 503 }));
+	});
+	it("terminal authorization keeps the identity without the browser's Access token", async () => {
+		const f = await identityFixture();
+		vi.stubGlobal("fetch", f.send);
+		const kv = new Map<string, string>();
+		const env = {
+			...f.env,
+			OAUTH_KV: {
+				get: async (key: string, type?: string) => {
+					const value = kv.get(key);
+					return value && type === "json" ? JSON.parse(value) : (value ?? null);
+				},
+				put: async (key: string, value: string) => void kv.set(key, value),
+			},
+			DIRECTORY: { getByName: () => ({ resolve: async () => ({ id: "owner", name: "Owner" }) }) },
+			NAMESPACE: { getByName: () => ({ repository: async () => ({ id: "repo", name: "gateway" }) }) },
+		} as unknown as PlatformEnv;
+		const ctx = {} as ExecutionContext;
+		const origin = "https://cruce.example.test";
+		const started = (await (await bridgeRoute(
+			new Request(`${origin}/bridge/start`, { method: "POST", body: JSON.stringify({ namespaceId: "namespace", repositoryId: "repo" }) }),
+			env,
+			ctx,
+		))!.json()) as { code: string };
+		const approved = (await bridgeRoute(
+			new Request(`${origin}/bridge/approve?code=${started.code}`, {
+				method: "POST",
+				headers: { origin, "cf-access-jwt-assertion": await f.token({ exp: live() }) },
+			}),
+			env,
+			ctx,
+		))!;
+		expect(approved.status).toBe(200);
+		const stored = [...kv.entries()].find(([key]) => key.startsWith("bridge:"))!;
+		expect(JSON.parse(stored[1]).identity).toEqual({
+			developerId: "person",
+			tenantId: f.env.CRUCE_ACCESS_ISSUER,
+			email: "person@example.test",
 		});
 	});
 });

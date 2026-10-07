@@ -255,7 +255,7 @@ test("public homepage leads with context, then shows how it works, without reque
 	assert.equal(await page.getByRole("link", { name: /GitHub|Docs/ }).count(), 0);
 	const signIn = page.getByRole("link", { name: "Sign in", exact: true });
 	assert.equal(await signIn.count(), 1);
-	assert.equal(await signIn.getAttribute("href"), "/auth/login");
+	assert.equal(await signIn.getAttribute("href"), "/sign-in");
 	assert.equal(await page.getByRole("link", { name: /Sign up|Get started/ }).count(), 0);
 	await page.getByText("Cruce is in early development.", { exact: true }).waitFor();
 	assert.equal(await page.locator("main > section").count(), 3);
@@ -343,6 +343,7 @@ test("sign-out hands off to Access, and returning home keeps the Cruce console s
 	// to verify the console navigation without simulating revocation as evidence.
 	await openHomepage();
 	await page.getByRole("link", { name: "Sign in", exact: true }).first().click();
+	await page.getByRole("link", { name: "Continue with GitHub", exact: true }).click();
 	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
 	await page.getByRole("button", { name: "Your account", exact: true }).click();
 	await page.getByRole("link", { name: "Sign out", exact: true }).click();
@@ -357,18 +358,93 @@ test("sign-out hands off to Access, and returning home keeps the Cruce console s
 test("sign-in preserves a saved repository revision and invitation fragment without changing the login URL", async () => {
 	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false } });
 	await page.goto(`${server.origin}/?namespace=fernloop&repository=payments#/code/source`);
-	await page.getByRole("heading", { name: "Code is written in parallel now. The decision is still yours.", level: 1 }).waitFor();
-	await page.getByRole("link", { name: "Sign in", exact: true }).first().click();
+	await page.getByRole("heading", { name: "Sign in to Cruce", level: 1 }).waitFor();
+	await page.getByText("Sign in to open this repository.", { exact: true }).waitFor();
+	await page.getByRole("link", { name: "Continue with GitHub", exact: true }).click();
 	await page.getByRole("heading", { name: "Bounded retry policy", exact: true }).waitFor();
 	assert.equal(new URL(page.url()).hash, "#/code/source");
 	assert.equal(new URL(page.url()).search, "?namespace=fernloop&repository=payments");
 	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false } });
 	await page.goto(`${server.origin}/invite/fernloop#fixture-invitation`);
-	await page.getByRole("heading", { name: "Code is written in parallel now. The decision is still yours.", level: 1 }).waitFor();
-	await page.getByRole("link", { name: "Sign in", exact: true }).first().click();
+	await page.getByText("Sign in to accept this namespace invitation.", { exact: true }).waitFor();
+	await page.getByRole("link", { name: "Continue with GitHub", exact: true }).click();
 	await page.getByRole("heading", { name: "Join namespace", exact: true }).waitFor();
 	assert.equal(new URL(page.url()).pathname, "/invite/fernloop");
 	assert.equal(new URL(page.url()).hash, "#fixture-invitation");
+});
+test("the sign-in page names the configured provider and hands off to the unchanged login route", async () => {
+	await openHomepage();
+	await page.getByRole("link", { name: "Sign in", exact: true }).click();
+	await page.getByRole("heading", { name: "Sign in to Cruce", level: 1 }).waitFor();
+	assert.equal(new URL(page.url()).pathname, "/sign-in");
+	assert.equal(await page.title(), "Sign in · Cruce");
+	assert.equal(await page.getByRole("link", { name: "Continue with GitHub", exact: true }).getAttribute("href"), "/auth/login");
+	assert.equal(await page.getByRole("link", { name: "Cruce home", exact: true }).getAttribute("href"), "/");
+	assert.equal(await page.locator(".sign-in-continue").evaluate((e) => getComputedStyle(e).height), "32px");
+	await page.goBack();
+	await page.getByRole("heading", { name: "Code is written in parallel now. The decision is still yours.", level: 1 }).waitFor();
+	// Without a configured provider the button stays neutral.
+	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false, provider: null } });
+	await page.goto(`${server.origin}/sign-in`);
+	await page.getByRole("link", { name: "Sign in", exact: true }).waitFor();
+	assert.equal(await page.getByRole("link", { name: /Continue with/ }).count(), 0);
+	await page.request.post(`${server.origin}/__fixture/session`, { data: { provider: "GitHub" } });
+	// A signed-in visitor never sees the sign-in page.
+	await page.getByRole("link", { name: "Sign in", exact: true }).click();
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
+	await page.goto(`${server.origin}/sign-in`);
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
+	assert.equal(new URL(page.url()).pathname, "/");
+	for (const width of [1440, 320]) {
+		await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false } });
+		await page.setViewportSize({ width, height: 800 });
+		await page.goto(`${server.origin}/sign-in`);
+		await page.getByRole("heading", { name: "Sign in to Cruce", level: 1 }).waitFor();
+		assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+	}
+	await page.setViewportSize({ width: 1440, height: 1000 });
+});
+test("agent connections list what each agent may do and revoke one after confirmation", async () => {
+	await page.goto(server.origin);
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
+	await page.getByRole("button", { name: "Your account", exact: true }).click();
+	await page.getByRole("link", { name: "Agent connections", exact: true }).click();
+	await page.getByRole("heading", { name: "Agent connections", level: 1 }).waitFor();
+	assert.equal(new URL(page.url()).search, "?page=connections");
+	assert.equal(await page.title(), "Agent connections · Cruce");
+	assert.match(await page.locator(".kicker").textContent(), /3 connected/);
+	const rows = page.locator(".connection-row");
+	assert.deepEqual(await rows.locator("strong").allTextContents(), ["Codex", "release-check script", "Claude Code"]);
+	// Known reported names get their mark; anything else falls back to initials.
+	assert.deepEqual(await rows.locator(".agent-mark").evaluateAll((marks) => marks.map((m) => m.dataset.agent ?? m.textContent)), [
+		"codex",
+		"RC",
+		"claude",
+	]);
+	const codex = rows.filter({ hasText: "Codex" });
+	assert.equal(await codex.locator("code").textContent(), "fernloop/payment-service");
+	assert.deepEqual(await codex.locator(".connection-abilities li").allTextContents(), ["Workspaces", "Publish revisions", "Changes"]);
+	assert.equal(await rows.filter({ hasText: "Claude Code" }).getByText("Repositories not recorded").count(), 1);
+	assert.equal(await codex.getByRole("button", { name: "Revoke Codex" }).evaluate((e) => getComputedStyle(e).height), "32px");
+	await codex.getByRole("button", { name: "Revoke Codex" }).click();
+	const dialog = page.getByRole("dialog", { name: "Revoke Codex?" });
+	await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+	assert.equal(await rows.count(), 3);
+	await codex.getByRole("button", { name: "Revoke Codex" }).click();
+	await dialog.getByRole("button", { name: "Revoke connection", exact: true }).click();
+	await page.getByRole("status").filter({ hasText: "Codex was revoked." }).waitFor();
+	assert.deepEqual(await rows.locator("strong").allTextContents(), ["release-check script", "Claude Code"]);
+	assert.deepEqual(
+		(await (await page.request.get(`${server.origin}/__fixture/calls`)).json()).filter((call) => call.revoke),
+		[{ revoke: "grant-codex" }],
+	);
+	await page.goBack();
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
+	await page.goto(`${server.origin}/?page=connections`);
+	await page.getByRole("heading", { name: "Agent connections", level: 1 }).waitFor();
+	await page.setViewportSize({ width: 320, height: 800 });
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+	await page.setViewportSize({ width: 1440, height: 1000 });
 });
 test("session failures retain a retry state and stale confirmation cannot remount an expired console", async () => {
 	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: true, failure: true } });
@@ -381,7 +457,7 @@ test("session failures retain a retry state and stale confirmation cannot remoun
 	await page.goto(server.origin);
 	await page.getByRole("status").waitFor();
 	await page.evaluate(() => window.dispatchEvent(new Event("cruce:session-expired")));
-	await page.getByRole("heading", { name: "Code is written in parallel now. The decision is still yours.", level: 1 }).waitFor();
+	await page.getByRole("heading", { name: "Your session ended", level: 1 }).waitFor();
 	await page.waitForTimeout(650);
 	assert.equal(await page.getByRole("heading", { name: "Your repositories", exact: true }).count(), 0);
 });
@@ -397,7 +473,7 @@ test("expired console requests clear private views and public anchors do not rew
 			await request("/api/me");
 		} catch {}
 	});
-	await page.getByRole("heading", { name: "Code is written in parallel now. The decision is still yours.", level: 1 }).waitFor();
+	await page.getByRole("heading", { name: "Your session ended", level: 1 }).waitFor();
 	assert.equal(await page.locator(".shell").count(), 0);
 	assert.equal(new URL(page.url()).search, "?namespace=fernloop&repository=payments");
 	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: true } });
@@ -726,7 +802,7 @@ test("avatar menu preserves repository context and keyboard focus; saved account
 	assert.equal(await menu.getByRole("link", { name: "Sign out", exact: true }).getAttribute("href"), "/auth/logout");
 	assert.deepEqual(
 		(await menu.getByRole("link").allTextContents()).map((text) => text.trim()),
-		["Sign out"],
+		["Agent connections", "Sign out"],
 	);
 	assert.equal(page.url(), current);
 	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
@@ -755,8 +831,13 @@ test("avatar menu fits a narrow screen and tabbing out dismisses it without trap
 	assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 320);
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
 	await page.screenshot({ path: "dist/ui-checks/account-narrow.png", fullPage: true });
-	// Focus starts on the selected appearance; Tab reaches Sign out, and the next Tab leaves and dismisses the menu.
+	// Focus starts on the selected appearance; Tab reaches Agent connections then Sign out, and the next Tab leaves and dismisses the menu.
 	assert.equal(await menu.getByRole("radio", { name: "System", exact: true }).evaluate((e) => e === document.activeElement), true);
+	await page.keyboard.press("Tab");
+	assert.equal(
+		await menu.getByRole("link", { name: "Agent connections", exact: true }).evaluate((e) => e === document.activeElement),
+		true,
+	);
 	await page.keyboard.press("Tab");
 	assert.equal(await menu.getByRole("link", { name: "Sign out", exact: true }).evaluate((e) => e === document.activeElement), true);
 	await page.keyboard.press("Tab");

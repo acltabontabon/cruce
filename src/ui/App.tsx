@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Command, Namespace, Repository, RepositorySnapshot, User } from "../shared/platform.ts";
 import { BRAND } from "./brand.tsx";
+import { AgentConnections } from "./connections.tsx";
 import { Empty, Form, PrefixedInput, value } from "./controls.tsx";
 import { Dialog } from "./design.tsx";
 import { NamespaceHome } from "./home.tsx";
@@ -20,11 +21,16 @@ const legacyTabs: Record<string, string> = { overview: "changes", code: "history
 function readRoute() {
 	const query = new URLSearchParams(location.search),
 		[tab, id] = location.hash.replace(/^#\/?/, "").split("/");
+	const page = query.get("page");
 	const screen =
-		query.get("page") === "account" || query.get("page") === "namespaces" || !query.has("namespace") ? "namespaces" : "namespace";
+		page === "connections"
+			? "connections"
+			: page === "account" || page === "namespaces" || !query.has("namespace")
+				? "namespaces"
+				: "namespace";
 	return {
 		screen,
-		accountRequested: query.get("page") === "account",
+		accountRequested: page === "account",
 		namespaceId: screen === "namespace" ? (query.get("namespace") ?? "") : "",
 		repositoryId: screen === "namespace" ? (query.get("repository") ?? "") : "",
 		tab:
@@ -94,13 +100,15 @@ export function App() {
 		setRoute(readRoute());
 		setOverlay(undefined);
 	}, []);
-	const navigateHome = useCallback(() => {
+	/** Home, or another unscoped page of the signed-in person such as their agent connections. */
+	const navigateHome = useCallback((page?: "connections") => {
 		navigationVersion.current++;
 		pendingActions.current = 0;
 		const url = new URL(location.href);
 		url.pathname = "/";
 		url.search = "";
 		url.hash = "";
+		if (page) url.searchParams.set("page", page);
 		history.pushState(null, "", url);
 		generation.current++;
 		setView(undefined);
@@ -148,7 +156,9 @@ export function App() {
 				? route.tab === "settings"
 					? ["Settings", namespace.namespace.name]
 					: [namespace.namespace.name]
-				: ["Your repositories"];
+				: route.screen === "connections"
+					? ["Agent connections"]
+					: ["Your repositories"];
 		document.title = [...parts, BRAND.name].join(" · ");
 	}, [route, view, namespace]);
 
@@ -357,7 +367,8 @@ export function App() {
 					repositories={namespace?.namespace.id === route.namespaceId ? namespace.repositories : []}
 					routeKey={`${route.screen}/${route.namespaceId}/${route.repositoryId}/${route.tab}/${route.id}`}
 					open={navigate}
-					home={navigateHome}
+					home={() => navigateHome()}
+					connections={() => navigateHome("connections")}
 					accountRequested={route.accountRequested}
 					create={() => setOverlay("create-namespace")}
 				/>
@@ -391,7 +402,9 @@ export function App() {
 						</button>
 					</p>
 				)}
-				{route.screen === "namespaces" ? (
+				{route.screen === "connections" ? (
+					<AgentConnections />
+				) : route.screen === "namespaces" ? (
 					<NamespaceHome me={me} refresh={refresh} open={navigate} create={() => setOverlay("create-namespace")} />
 				) : route.repositoryId ? (
 					view ? (

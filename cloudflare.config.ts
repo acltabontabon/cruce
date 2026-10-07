@@ -47,6 +47,7 @@ export default defineConfig(({ mode }) => {
 				CRUCE_PUBLIC_ORIGIN: bindings.text(config.origin),
 				CRUCE_ACCESS_ISSUER: bindings.text(env.CRUCE_ACCESS_ISSUER ?? ""),
 				CRUCE_ACCESS_AUD: bindings.text(env.CRUCE_ACCESS_AUD ?? ""),
+				CRUCE_SIGN_IN_PROVIDER: bindings.text(env.CRUCE_SIGN_IN_PROVIDER ?? ""),
 				CRUCE_SECRET: bindings.secret(),
 			},
 			triggers: offline

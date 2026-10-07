@@ -12,7 +12,8 @@ export async function startFixtureServer() {
 				name: "cruce-fixture",
 				configureServer(server) {
 					server.middlewares.use((req, res, next) => {
-						if (req.url === "/" || req.url?.startsWith("/?") || req.url?.startsWith("/invite/")) req.url = "/test/browser/index.html";
+						if (req.url === "/" || req.url?.startsWith("/?") || req.url?.startsWith("/invite/") || /^\/sign-in(\?|$)/.test(req.url ?? ""))
+							req.url = "/test/browser/index.html";
 						return handle ? handle(req, res, next) : next();
 					});
 				},

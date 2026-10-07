@@ -12,9 +12,12 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 - Add a dark console theme, Midnight, alongside the light Daylight theme. The console matches the system by default, and the avatar menu offers System, Dark or Light.
 - Lead Home with **Needs you**: every open change waiting on a person across repositories, with its status, a one-line reason and its action (Review, Promote or Open), followed by advisory heads-ups.
 - Add a lane map to Workspaces that draws canonical promotions and each live workspace from its fixed baseline through head, published revision and change. Unplaced baselines and quiet checkouts are drawn dashed, and shared paths are marked as advisory.
+- Add **Agent connections** to the avatar menu: every agent you approved, with its mark, approved repositories, permissions, approval and expiry, and a confirmed **Revoke**. Names and marks are what each agent reports about itself. New approvals record the client name and approved repositories with the grant so they can be listed; older grants show "Repositories not recorded".
+- Add a Cruce sign-in page at `/sign-in`. The homepage's **Sign in** opens it, and signed-out repository links, invitations and expired sessions show it in place with what signing in will open. Its button still hands off to Cloudflare Access; an optional `CRUCE_SIGN_IN_PROVIDER` label (for example GitHub) names the Access identity provider on the button.
 
 ### Changed
 
+- Give the console a quiet branded backdrop: a faint accent glow, a fading dot grid and the Cruce crossing in hairlines, in both themes.
 - Redesign the console on one token-based visual system with Geist and JetBrains Mono, open lists between hairline rules, and frames only around the lane map, diffs and source.
 - Show each workspace's lane colour on its rows, its workspace page and its change's review checklist. Turn the repository attention bar into a strip of counts that each open where they are handled.
 - Add the open changes behind the counts, and the state of live workspaces, to repository summaries so Home can name each decision.
@@ -27,6 +30,7 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 - Complete an interrupted promotion whose update already reached canonical, even if evidence or policy changed afterwards. Record evidence only for open changes.
 - Limit terminal bridge discovery to its approved namespace and repository.
+- Keep agent OAuth connections and paired terminals working after the browser's Access session that approved them expires. Connections now last for their own grant or terminal authorization, and current membership, grants, approved repositories and scopes are still checked on every request. Existing connections need no reconnection.
 - Return actionable errors for malformed or oversized Git packs, and for evidence reads after cache loss. Never leave a partial pack after a failed cache recovery.
 
 ## [0.1.0-alpha.3] - 2026-10-07

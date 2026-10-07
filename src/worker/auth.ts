@@ -1,6 +1,7 @@
 import { type ApprovedConsent, AuthorizationError, type OAuthHelpers, OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { DEFAULT_AGENT_SCOPES, SCOPE_LABELS, SCOPES, type Scope } from "../core/capabilities.ts";
 import { DomainError as CoordinationError, domainStatus } from "../core/errors.ts";
+import type { ConnectionMetadata } from "./connections.ts";
 import type { Directory } from "./directory.ts";
 import { namespaceDirectory } from "./directory-access.ts";
 import type { NamespaceRuntime } from "./namespace-runtime.ts";
@@ -16,15 +17,25 @@ export interface AuthEnv {
 	CRUCE_PUBLIC_ORIGIN?: string;
 	CRUCE_ACCESS_ISSUER?: string;
 	CRUCE_ACCESS_AUD?: string;
+	CRUCE_SIGN_IN_PROVIDER?: string;
 }
-export interface AuthProps {
-	connectionId?: string;
-	repositoryIds?: string[];
-	clientName?: string;
+export interface Identity {
 	developerId: string;
 	tenantId: string;
 	email: string;
+}
+/** A console session: the Access identity bound to the Access token it was signed in with. */
+export interface SessionIdentity extends Identity {
 	accessJwt: string;
+}
+/**
+ * An agent OAuth connection or paired terminal. It carries no Access token, so its lifetime is the connection's own
+ * (OAuth grant or terminal authorization), not the browser session that approved it. Authority is rechecked per request.
+ */
+export interface AuthProps extends Identity {
+	connectionId?: string;
+	repositoryIds?: string[];
+	clientName?: string;
 }
 function cookie(request: Request, name: string) {
 	return request.headers
@@ -35,11 +46,15 @@ function cookie(request: Request, name: string) {
 		?.slice(name.length + 1);
 }
 const keys = new Map<string, { at: number; keys: (JsonWebKey & { kid?: string })[] }>();
-/** Signature, issuer, audience and expiry are verified; proxy identity headers alone never grant access. */
-export async function accessIdentity(env: AuthEnv, jwt: string, send: typeof fetch = fetch, now = Date.now()): Promise<AuthProps> {
+function configuredIssuer(env: AuthEnv) {
 	if (!env.CRUCE_ACCESS_ISSUER || !env.CRUCE_ACCESS_AUD) throw new CoordinationError(503, "Configure Cloudflare Access identity for Cruce");
 	const issuer = new URL(env.CRUCE_ACCESS_ISSUER).origin;
 	if (!/^https:\/\/[-\w]+\.cloudflareaccess\.com$/.test(issuer)) throw new CoordinationError(503, "Invalid Access issuer");
+	return { issuer, audience: env.CRUCE_ACCESS_AUD };
+}
+/** Signature, issuer, audience and expiry are verified; proxy identity headers alone never grant access. */
+export async function accessIdentity(env: AuthEnv, jwt: string, send: typeof fetch = fetch, now = Date.now()): Promise<SessionIdentity> {
+	const { issuer, audience } = configuredIssuer(env);
 	try {
 		const [h, b, signature, ...rest] = jwt.split(".");
 		if (rest.length || !signature) throw new Error();
@@ -57,7 +72,7 @@ export async function accessIdentity(env: AuthEnv, jwt: string, send: typeof fet
 			header.alg !== "RS256" ||
 			claims.iss !== issuer ||
 			!Array.isArray(claims.aud) ||
-			!claims.aud.includes(env.CRUCE_ACCESS_AUD) ||
+			!claims.aud.includes(audience) ||
 			!Number.isFinite(claims.exp) ||
 			claims.exp * 1000 <= now ||
 			(claims.nbf ?? 0) * 1000 > now ||
@@ -95,17 +110,42 @@ export async function requestIdentity(request: Request, env: AuthEnv) {
 	if (!jwt) throw new CoordinationError(401, "Sign in through Cloudflare Access");
 	return accessIdentity(env, jwt);
 }
-export async function validateIdentity(props: AuthProps, env: AuthEnv) {
-	const current = await accessIdentity(env, props.accessJwt);
-	if (current.developerId !== props.developerId || current.tenantId !== props.tenantId)
+/** A console session stays valid only while its Access token does, and only for the subject it was issued to. */
+async function validateSession(session: SessionIdentity, env: AuthEnv): Promise<SessionIdentity> {
+	const current = await accessIdentity(env, session.accessJwt);
+	if (current.developerId !== session.developerId || current.tenantId !== session.tenantId)
 		throw new CoordinationError(403, "Identity changed");
-	return { ...current, connectionId: props.connectionId, repositoryIds: props.repositoryIds, clientName: props.clientName };
+	return current;
 }
-export async function consoleIdentity(request: Request, env: AuthEnv) {
+/**
+ * Connection props are sealed server-side when the human approves the connection, so they are trusted as issued. The
+ * connection must still belong to this installation's identity issuer; the caller resolves the user, and membership,
+ * grants, approved repositories and scopes are rechecked downstream on every request.
+ */
+export function connectionIdentity(props: AuthProps, env: AuthEnv): AuthProps {
+	const { issuer } = configuredIssuer(env);
+	if (props.tenantId !== issuer || !props.developerId) throw new CoordinationError(401, "Reconnect this agent");
+	return {
+		developerId: props.developerId,
+		tenantId: props.tenantId,
+		email: props.email,
+		connectionId: props.connectionId,
+		repositoryIds: props.repositoryIds,
+		clientName: props.clientName,
+	};
+}
+/** Only the identity is handed to connections; the Access token stays with the browser session. */
+export const identityOf = ({ developerId, tenantId, email }: Identity): Identity => ({ developerId, tenantId, email });
+export async function consoleIdentity(request: Request, env: AuthEnv): Promise<SessionIdentity> {
 	if (!["GET", "HEAD"].includes(request.method) && request.headers.get("origin") !== new URL(request.url).origin)
 		throw new CoordinationError(403, "Same-origin request required");
 	const raw = cookie(request, "__Host-cruce");
-	return raw ? validateIdentity(await unseal<AuthProps>(env, raw), env) : requestIdentity(request, env);
+	return raw ? validateSession(await unseal<SessionIdentity>(env, raw), env) : requestIdentity(request, env);
+}
+/** The Access identity provider's display name for Cruce's sign-in button. A label only: Access decides how people sign in. */
+export function signInProvider(env: AuthEnv): { provider?: string } {
+	const name = env.CRUCE_SIGN_IN_PROVIDER?.trim();
+	return name && /^[\p{L}\p{N}][\p{L}\p{N} .&'-]{0,39}$/u.test(name) ? { provider: name } : {};
 }
 const escapeHtml = (s: string) => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
 export async function authRoute(request: Request, env: AuthEnv): Promise<Response | undefined> {
@@ -117,10 +157,10 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 		const headers = { "cache-control": "no-store" };
 		if (request.method !== "GET") return Response.json({ error: "GET required" }, { status: 405, headers: { ...headers, allow: "GET" } });
 		const raw = cookie(request, "__Host-cruce");
-		if (!raw) return Response.json({ authenticated: false }, { headers });
+		if (!raw) return Response.json({ authenticated: false, ...signInProvider(env) }, { headers });
 		if (!env.CRUCE_SECRET) throw new CoordinationError(503, "Identity encryption not configured");
 		try {
-			const identity = await unseal<AuthProps>(env, raw);
+			const identity = await unseal<SessionIdentity>(env, raw);
 			if (
 				!identity ||
 				typeof identity.accessJwt !== "string" ||
@@ -128,11 +168,11 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 				typeof identity.tenantId !== "string"
 			)
 				throw new CoordinationError(401, "Session invalid");
-			await validateIdentity(identity, env);
-			return Response.json({ authenticated: true }, { headers });
+			await validateSession(identity, env);
+			return Response.json({ authenticated: true, ...signInProvider(env) }, { headers });
 		} catch (error) {
 			if (![401, 403].includes(domainStatus(error) ?? 500)) throw error;
-			return Response.json({ authenticated: false }, { headers });
+			return Response.json({ authenticated: false, ...signInProvider(env) }, { headers });
 		}
 	}
 	if (url.pathname === "/auth/logout")
@@ -200,20 +240,17 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 	}
 	const chosen = form.getAll("scope").map(String),
 		scope = SCOPES.filter((s) => s === "cruce:read" || chosen.includes(s)),
+		requested = new Set(form.getAll("repository").map(String)),
+		repositories = choices.filter((r) => requested.has(r.id)),
+		connectionId = crypto.randomUUID(),
+		clientName = (await oauth.describeConsent(approved.request)).clientName ?? "Agent",
+		metadata: ConnectionMetadata = { connectionId, clientName, repositories },
 		result = await oauth.completeAuthorization({
 			request: approved.request,
 			userId: identity.developerId,
-			metadata: {},
+			metadata,
 			scope,
-			props: {
-				...identity,
-				connectionId: crypto.randomUUID(),
-				repositoryIds: form
-					.getAll("repository")
-					.map(String)
-					.filter((id) => choices.some((r) => r.id === id)),
-				clientName: (await oauth.describeConsent(approved.request)).clientName ?? "Agent",
-			},
+			props: { ...identityOf(identity), connectionId, repositoryIds: repositories.map((r) => r.id), clientName },
 		});
 	approved.headers.set("location", result.redirectTo);
 	return new Response(null, { status: 302, headers: approved.headers });

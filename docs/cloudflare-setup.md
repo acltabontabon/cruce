@@ -36,6 +36,14 @@ Access protects browser sign-in, consent, pairing approval, invitations and name
 
 Sign out expires the Cruce cookie and redirects to `/cdn-cgi/access/logout`, ending Access sessions across applications in the same team. It does not revoke Cruce OAuth connections or alter namespace membership.
 
+Agent OAuth connections and paired terminals do not depend on the browser's Access session. They last for their own grant or terminal authorization, and every request still rechecks membership, repository grants, approved repositories and scopes. Removing someone from the Access policy stops their browser sign-in only; to cut off their agents, remove their namespace membership, or have them revoke the connections under **Agent connections** in the avatar menu.
+
+### Cruce sign-in page
+
+Cruce's own sign-in page (`/sign-in`) sits in front of Access and links to `/auth/login`. It is public under the reviewed homepage configuration, which bypasses Access for every path outside the protected application. To skip Cloudflare's login screen entirely, give the Access application exactly one identity provider (for example GitHub, added under **Zero Trust → Settings → Authentication**) and enable **Instant Auth** on the application. The sign-in button then goes straight to that provider. With the one-time PIN or several providers, Access still shows its own page after the button.
+
+Set the optional `CRUCE_SIGN_IN_PROVIDER` to that provider's display name (for example `GitHub`) to label the button **Continue with GitHub**. It is a label only; Access decides how people sign in. Left empty, the button reads **Sign in**.
+
 ### Access login branding
 
 The existing Access email-and-one-time-code screen can use Cruce's identity without changing authentication. In **Zero Trust → Reusable components → Custom pages → Access login page → Manage**, set the organization name to **Cruce**, use the publicly accessible `/brand/symbol-ink.svg` at your installation's HTTPS origin as the logo, and use the paper background (`#F5F5EF`) and forest text (`#17251F`). Set the header to **Sign in to Cruce** and the footer to **Use your email to receive a one-time sign-in code.** The [reviewable payload](../tools/access-login-branding.json) contains the hosted installation's values; replace its logo origin for your own installation.

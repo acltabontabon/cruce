@@ -6,7 +6,8 @@ import { parseGitRoute } from "../shared/git-access.ts";
 import { TRANSFER_LIMITS } from "../shared/limits.ts";
 import { type Actor, branch, CommandInput, id, name, path, RESOURCE_ACTIONS, type Repository } from "../shared/platform.ts";
 import { boundedBody } from "./artifacts.ts";
-import { type AuthEnv, type AuthProps, consoleIdentity, validateIdentity } from "./auth.ts";
+import { type AuthEnv, type AuthProps, connectionIdentity, consoleIdentity, type Identity } from "./auth.ts";
+import { listConnections, revokeConnection } from "./connections.ts";
 import { cleanupTokenGrant } from "./continuation.ts";
 import type { ControlTower } from "./control-tower.ts";
 import { namespaceDirectory } from "./directory-access.ts";
@@ -81,7 +82,7 @@ export async function platformRoute(
 	ctx: ExecutionContext,
 	props?: AuthProps,
 	scopes?: string[],
-	bridge?: { identity: AuthProps; repositoryId: string; namespaceId: string; connectionId: string; tokenKey: string; workspaceId?: string },
+	bridge?: { identity: Identity; repositoryId: string; namespaceId: string; connectionId: string; tokenKey: string; workspaceId?: string },
 ): Promise<Response | undefined> {
 	const url = new URL(request.url),
 		parts = url.pathname.split("/").filter(Boolean);
@@ -92,11 +93,11 @@ export async function platformRoute(
 		url.pathname !== "/bridge/command"
 	)
 		return;
-	const identity = await (props
-		? validateIdentity(props, env)
+	const identity = props
+		? connectionIdentity(props, env)
 		: bridge
-			? validateIdentity(bridge.identity, env)
-			: consoleIdentity(request, env));
+			? connectionIdentity(bridge.identity, env)
+			: await consoleIdentity(request, env);
 	const directory = namespaceDirectory(env),
 		user = await directory.resolve(identity);
 	const actor: Actor = {
@@ -176,6 +177,17 @@ export async function platformRoute(
 	}
 	if (props || bridge) throw new DomainError(403, "Console access required");
 	if (url.pathname === "/api/me" && request.method === "GET") return json({ user, namespaces: await namespaces() });
+	if (parts[1] === "connections") {
+		// Agents and terminals never reach here: only the signed-in person can see or revoke their own connections.
+		const oauth = env.OAUTH_PROVIDER;
+		if (!oauth) throw new DomainError(503, "OAuth unavailable");
+		if (parts.length === 2 && request.method === "GET") return json(await listConnections(oauth, identity.developerId));
+		if (parts.length === 3 && request.method === "DELETE") {
+			await revokeConnection(oauth, identity.developerId, parts[2]);
+			return json({ revoked: true });
+		}
+		throw new DomainError(404, "Not found");
+	}
 	if (url.pathname === "/api/namespaces") {
 		if (request.method === "GET") return json(await namespaces());
 		if (request.method === "POST") {

@@ -1,5 +1,5 @@
 import { DomainError } from "../core/errors.ts";
-import { type AuthProps, consoleIdentity } from "./auth.ts";
+import { consoleIdentity, type Identity, identityOf } from "./auth.ts";
 import { namespaceDirectory } from "./directory-access.ts";
 import { input, json, type PlatformEnv, platformRoute } from "./platform-router.ts";
 import { hash } from "./store.ts";
@@ -9,7 +9,6 @@ interface Pair {
 	namespaceId: string;
 	repositoryId: string;
 	proof: string;
-	identity?: AuthProps;
 	token?: string;
 	expiresAt: number;
 }
@@ -81,7 +80,8 @@ export async function bridgeRoute(request: Request, env: PlatformEnv, ctx: Execu
 		await env.OAUTH_KV.put(
 			key,
 			JSON.stringify({
-				identity,
+				// The terminal keeps the identity, never the browser's Access token; its 30-minute authorization is its lifetime.
+				identity: identityOf(identity),
 				namespaceId: pair.namespaceId,
 				repositoryId: pair.repositoryId,
 				connectionId,
@@ -105,7 +105,7 @@ export async function bridgeRoute(request: Request, env: PlatformEnv, ctx: Execu
 		const token = request.headers.get("authorization")?.replace(/^Bearer /, "");
 		if (!token || token.length > 200) throw new DomainError(401, "Terminal authorization required");
 		const bridge = await env.OAUTH_KV.get<{
-			identity: AuthProps;
+			identity: Identity;
 			repositoryId: string;
 			namespaceId: string;
 			connectionId: string;

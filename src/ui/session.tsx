@@ -2,7 +2,8 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { BRAND } from "./brand.tsx";
 import { Landing } from "./landing.tsx";
 import { request } from "./request.ts";
-import { rememberSignInDestination, restoreSignInDestination } from "./sign-in-destination.ts";
+import { SignIn } from "./sign-in.tsx";
+import { rememberSignInDestination, restoreSignInDestination, signInReason } from "./sign-in-destination.ts";
 
 const Console = lazy(() => import("./App.tsx").then((module) => ({ default: module.App })));
 
@@ -29,7 +30,8 @@ function SessionStatus({ error, retry }: { error?: string; retry?: () => void })
 }
 
 export function SessionBoundary() {
-	const [state, setState] = useState<"loading" | "public" | "console" | "error">("loading"),
+	const [state, setState] = useState<"loading" | "public" | "expired" | "console" | "error">("loading"),
+		[provider, setProvider] = useState<string>(),
 		[error, setError] = useState(""),
 		[attempt, setAttempt] = useState(0);
 	useEffect(() => {
@@ -38,14 +40,14 @@ export function SessionBoundary() {
 		setState("loading");
 		const expire = () => {
 			controller.abort();
-			setState("public");
+			setState("expired");
 		};
 		const restored = (event: PageTransitionEvent) => {
 			if (event.persisted) setAttempt((value) => value + 1);
 		};
 		window.addEventListener("cruce:session-expired", expire);
 		window.addEventListener("pageshow", restored);
-		void request<{ authenticated: boolean }>(
+		void request<{ authenticated: boolean; provider?: string }>(
 			"/auth/session",
 			undefined,
 			"GET",
@@ -53,7 +55,11 @@ export function SessionBoundary() {
 		)
 			.then((result) => {
 				if (!controller.signal.aborted) {
-					if (result.authenticated) restoreSignInDestination();
+					setProvider(result.provider);
+					if (result.authenticated) {
+						if (location.pathname === "/sign-in") history.replaceState(null, "", "/");
+						restoreSignInDestination();
+					}
 					setState(result.authenticated ? "console" : "public");
 				}
 			})
@@ -69,7 +75,10 @@ export function SessionBoundary() {
 			window.removeEventListener("pageshow", restored);
 		};
 	}, [attempt]);
-	if (state === "public") return <Landing />;
+	if (state === "public" || state === "expired") {
+		const reason = state === "expired" ? "expired" : signInReason();
+		return reason ? <SignIn reason={reason} provider={provider} /> : <Landing />;
+	}
 	if (state === "console")
 		return (
 			<Suspense fallback={<SessionStatus />}>

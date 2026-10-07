@@ -11,7 +11,6 @@ import {
 	rev,
 	sharedPath,
 } from "./landing-example.ts";
-import { rememberSignInDestination } from "./sign-in-destination.ts";
 import "./landing.css";
 
 const base = rev(exampleBaseline);
@@ -715,13 +714,7 @@ export function Landing() {
 		document.title = `${BRAND.name} · Git coordination for parallel agentic development`;
 	}, []);
 	return (
-		<div
-			className="landing"
-			onClickCapture={(event) => {
-				if (event.target instanceof Element && event.target.closest("a")?.getAttribute("href") === "/auth/login")
-					rememberSignInDestination();
-			}}
-		>
+		<div className="landing">
 			<a className="landing-skip" href="#landing-content">
 				Skip to content
 			</a>
@@ -732,7 +725,7 @@ export function Landing() {
 				<nav aria-label="Homepage navigation">
 					{BRAND.docsUrl && <a href={BRAND.docsUrl}>Docs</a>}
 					{BRAND.sourceUrl && <a href={BRAND.sourceUrl}>GitHub</a>}
-					<a className="landing-signin" href="/auth/login">
+					<a className="landing-signin" href="/sign-in">
 						Sign in
 					</a>
 				</nav>

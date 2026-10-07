@@ -52,6 +52,9 @@
 	--lane-5: #876800;
 	--lane-6: #2470b6;
 	--grid-dot: rgb(21 25 37 / 0.08);
+	--glow: 10%;
+	--crossing: 0.1;
+	--backdrop-dot: rgb(21 25 37 / 0.1);
 	--shadow-pop: 0 14px 34px rgb(21 25 37 / 0.12), 0 2px 6px rgb(21 25 37 / 0.07);
 	--backdrop: rgb(21 25 37 / 0.35);
 }
@@ -92,6 +95,9 @@
 		--lane-5: #e0c35a;
 		--lane-6: #7ccbff;
 		--grid-dot: rgb(220 225 245 / 0.055);
+		--glow: 15%;
+		--crossing: 0.12;
+		--backdrop-dot: rgb(220 225 245 / 0.085);
 		--shadow-pop: 0 18px 44px rgb(0 0 0 / 0.55), 0 2px 8px rgb(0 0 0 / 0.4);
 		--backdrop: rgb(4 5 10 / 0.6);
 	}
@@ -132,6 +138,9 @@
 	--lane-5: #e0c35a;
 	--lane-6: #7ccbff;
 	--grid-dot: rgb(220 225 245 / 0.055);
+	--glow: 15%;
+	--crossing: 0.12;
+	--backdrop-dot: rgb(220 225 245 / 0.085);
 	--shadow-pop: 0 18px 44px rgb(0 0 0 / 0.55), 0 2px 8px rgb(0 0 0 / 0.4);
 	--backdrop: rgb(4 5 10 / 0.6);
 }
@@ -472,6 +481,31 @@ body {
 	display: flex;
 	flex-direction: column;
 	min-height: 100dvh;
+	/* Its own stacking context keeps the backdrop above the page background and below every page element. */
+	isolation: isolate;
+}
+/* A quiet backdrop behind every console page; content and surfaces paint over it. */
+.shell-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: -1;
+	overflow: hidden;
+	pointer-events: none;
+	background:
+		radial-gradient(85% 60% at 50% 0%, color-mix(in oklab, var(--accent) var(--glow), transparent), transparent 75%),
+		radial-gradient(circle, var(--backdrop-dot) 1px, transparent 1.5px) 0 0 / 22px 22px;
+	mask-image: linear-gradient(to bottom, #000 0, #000 30%, rgb(0 0 0 / 0.35) 70%, rgb(0 0 0 / 0.2) 100%);
+}
+.backdrop-crossing {
+	position: absolute;
+	top: -140px;
+	right: -180px;
+	width: min(78vw, 920px);
+	height: auto;
+	color: var(--accent);
+	opacity: var(--crossing);
+	stroke-width: 1.25px;
+	mask-image: radial-gradient(75% 75% at 70% 25%, #000 35%, transparent 80%);
 }
 .skip {
 	position: fixed;
@@ -899,7 +933,7 @@ body {
 	padding: 6px;
 	border-top: 1px solid var(--border-subtle);
 }
-:where(.shell) .account-sign-out {
+:where(.shell) .account-link {
 	display: flex;
 	align-items: center;
 	gap: 10px;
@@ -910,15 +944,15 @@ body {
 	font-size: 13px;
 	text-decoration: none;
 }
-.account-sign-out span {
+.account-link span {
 	flex: 1;
 }
-.account-sign-out .icon {
+.account-link .icon {
 	width: 16px;
 	height: 16px;
 	color: var(--text-faint);
 }
-.account-sign-out:hover {
+.account-link:hover {
 	background: var(--surface-2);
 }
 .console-footer {
@@ -3349,6 +3383,222 @@ main[data-screen="settings"] > form {
 	}
 	.change-meta > span:not(.pill, .lane-bullet) {
 		flex-basis: 100%;
+	}
+}
+/* ---------- sign-in ---------- */
+.sign-in {
+	display: grid;
+	grid-template-rows: auto 1fr;
+	min-height: 100dvh;
+	padding: 6px 32px;
+	background: var(--bg);
+	color: var(--text);
+}
+.sign-in > header {
+	display: flex;
+	align-items: center;
+	min-height: var(--head-h);
+}
+.sign-in .brand-name {
+	display: inline;
+}
+.sign-in-panel {
+	align-self: center;
+	justify-self: center;
+	width: min(100%, 360px);
+	padding: 24px 0 18vh;
+}
+.sign-in h1 {
+	margin: 0 0 8px;
+	font-size: 24px;
+	font-weight: 600;
+	letter-spacing: -0.015em;
+	line-height: 1.25;
+}
+.sign-in-lead {
+	margin: 0 0 24px;
+	color: var(--text-muted);
+	font-size: 14px;
+	line-height: 1.5;
+}
+.sign-in-continue {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 32px;
+	padding: 5px 12px;
+	border: 1px solid var(--accent);
+	border-radius: var(--r-md);
+	background: var(--accent);
+	color: var(--on-accent);
+	font-size: 13px;
+	font-weight: 550;
+	line-height: 1.4;
+	text-decoration: none;
+	transition:
+		background-color var(--fast) var(--ease),
+		border-color var(--fast) var(--ease);
+}
+.sign-in-continue:hover {
+	border-color: var(--accent-hover);
+	background: var(--accent-hover);
+}
+.sign-in a:focus-visible {
+	outline: 2px solid var(--focus);
+	outline-offset: 2px;
+}
+.sign-in-note {
+	margin: 20px 0 0;
+	padding-top: 16px;
+	border-top: 1px solid var(--border-subtle);
+	color: var(--text-faint);
+	font-size: 12px;
+	line-height: 1.5;
+}
+@media (max-width: 600px) {
+	.sign-in {
+		padding: 6px 16px;
+	}
+}
+/* ---------- agent connections ---------- */
+.connection-list {
+	display: grid;
+	margin: 28px 0 0;
+	padding: 0;
+	list-style: none;
+}
+.connection-list > li + li {
+	border-top: 1px solid var(--border-subtle);
+}
+.connection-row {
+	display: grid;
+	grid-template-columns: 44px minmax(0, 1fr) auto auto;
+	align-items: center;
+	gap: 8px 20px;
+	padding: 18px 0;
+}
+.agent-mark,
+.initials.agent-mark {
+	display: grid;
+	place-items: center;
+	width: 44px;
+	height: 44px;
+	border: 1px solid var(--border);
+	border-radius: var(--r-lg);
+	background: var(--surface);
+	color: var(--text);
+}
+.agent-mark svg {
+	width: 22px;
+	height: 22px;
+}
+.initials.agent-mark {
+	font-size: 14px;
+}
+.connection-main {
+	display: grid;
+	gap: 6px;
+	min-width: 0;
+}
+.connection-main strong {
+	font-size: 15px;
+	font-weight: 600;
+	letter-spacing: -0.01em;
+}
+:where(.shell) .connection-repositories {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px 8px;
+	margin: 0;
+	color: var(--text-muted);
+	font-size: 12.5px;
+}
+.connection-repositories .icon {
+	width: 14px;
+	height: 14px;
+	color: var(--text-faint);
+}
+:where(.shell) .connection-repositories code {
+	max-width: calc(100% - 22px);
+	overflow-wrap: anywhere;
+	padding: 0;
+	background: none;
+	color: var(--text);
+	font-size: 12px;
+}
+.connection-abilities {
+	display: flex;
+	flex-wrap: wrap;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	color: var(--text-faint);
+	font-size: 12px;
+}
+.connection-abilities li + li::before {
+	content: "·";
+	margin: 0 7px;
+	color: var(--border-strong);
+}
+:where(.shell) .connection-dates {
+	display: grid;
+	grid-template-columns: auto;
+	gap: 4px;
+	margin: 0;
+	font-size: 12.5px;
+}
+.connection-dates div {
+	display: flex;
+	justify-content: flex-end;
+	gap: 6px;
+}
+:where(.shell) .connection-dates dt {
+	color: var(--text-faint);
+}
+:where(.shell) .connection-dates dd {
+	margin: 0;
+	color: var(--text-muted);
+}
+:where(.shell) .connection-revoke:hover {
+	border-color: var(--tone-danger);
+	color: var(--tone-danger);
+}
+.connection-empty {
+	display: grid;
+	justify-items: center;
+	gap: 6px;
+	margin-top: 28px;
+	padding: 48px 16px;
+	border: 1px dashed var(--border);
+	border-radius: var(--r-lg);
+	color: var(--text-muted);
+	text-align: center;
+}
+.connection-empty .icon {
+	width: 22px;
+	height: 22px;
+	margin-bottom: 4px;
+	color: var(--text-faint);
+}
+:where(.shell) .connection-empty p {
+	margin: 0;
+	font-size: 13px;
+}
+@container console (max-width: 640px) {
+	.connection-row {
+		grid-template-columns: 44px minmax(0, 1fr) auto;
+		align-items: start;
+	}
+	.connection-revoke {
+		grid-row: 1;
+		grid-column: 3;
+	}
+	:where(.shell) .connection-dates {
+		grid-column: 2 / -1;
+		grid-auto-flow: column;
+		justify-content: start;
+		gap: 14px;
 	}
 }
 .theme-switching *,
