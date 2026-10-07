@@ -118,17 +118,17 @@ describe("lane map model", () => {
 });
 
 describe("repository summary for Home", () => {
-	it("names the open changes behind the counts and the live lanes, newest first", () => {
+	it("names the attention items behind the counts in group order, and the live lanes", () => {
 		const summary = repositorySummary(
 			view({
 				sourceHead: first,
 				workspaces: [workspace("w1", 1), workspace("w2", 2, { state: "disconnected" }), workspace("w3", 3, { state: "completed" })],
 				proposals: [proposal("p", 1, "w1"), proposal("q", 2, "w2")],
-				readiness: { p: readiness(), q: readiness({}, true) },
+				readiness: { p: readiness(), q: readiness({ approved: true }, true) },
 			}),
 		);
-		expect(summary.changes.map((c) => [c.number, c.status])).toEqual([
-			[2, "ready"],
+		expect(summary.items.map((item) => [item.number, item.group])).toEqual([
+			[2, "promote"],
 			[1, "review"],
 		]);
 		expect(summary.lanes).toEqual([

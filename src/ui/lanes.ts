@@ -14,6 +14,8 @@ export interface TrunkNode {
 export interface Lane {
 	id: string;
 	title: string;
+	/** Accountable user; the map shows their name, never a tool label, as the lane's person. */
+	ownerId: string;
 	worked: string;
 	lane: number;
 	/** Index of the baseline on the trunk; undefined when the baseline is not a recorded canonical revision. */
@@ -70,6 +72,7 @@ function toLane(view: RepositorySnapshot, w: Workspace, lane: number, nodes: Tru
 	return {
 		id: w.id,
 		title: w.title,
+		ownerId: w.ownerId,
 		worked: workedBy(w),
 		lane,
 		baseline: at === -1 ? undefined : at,

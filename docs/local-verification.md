@@ -164,6 +164,23 @@ The two new browser journeys disclose the retention inspection's cloud/budget co
 
 **Remaining hosted acceptance:** in the configured test environment, submit cleanup through authenticated console and OAuth connections, interrupt the caller and restart/wake the DO, independently confirm every retained ref and exact provider ID, and retrieve retained source/evidence after deletion. Verify grant, scope, membership and policy changes during recovery, including KV propagation; induce provider pending deletion and lost confirmation/settlement; confirm alarm redelivery/backoff and batching without duplicate completion or new reservations. Measure Worker memory/CPU at state, advertisement and 32 MiB request/response boundaries. At-least-once wakeups do not establish exactly-once provider delivery, and external provider writers can still race name-addressed metadata/ref checks. General publication receipt/settlement parity remains R3.
 
+## Attention, ownership and continuation verification
+
+On **2026-10-08** the attention projection (P0 and the low-cost P1 items of the tiny-team proposal) passed:
+
+- typecheck;
+- Biome on all changed source, tests and docs (the full `pnpm lint` still reports only the pre-existing formatting of the untracked `tools/verification/participation.ts`; two pre-existing decorative-SVG findings in `agent-marks.tsx` and `shell.tsx` were fixed by marking the SVGs `aria-hidden`);
+- **328 unit/integration tests**, including new [attention controller tests](../test/core/attention.test.ts);
+- **77 browser journeys**, of which 5 are new and 13 were updated for the new wording and grouping;
+- `pnpm verify:scenario`;
+- the offline cf build, which keeps its unavailable-Docker notice.
+
+The controller tests cover: missing evidence as the owner's preparation and reported evidence as a maintainer's attestation; Maintain authority never yielding another user's owner actions; agents, write-only developers and read-only viewers receiving no console decisions; failing evidence and concerns kept in precedence order; stale change bases as reconciliation with the exact base and canonical; diverged and missing-ancestry workspaces surfaced while contained published work and unknown ancestry are not (unknown is counted separately); an unsettled promotion as recovery only for its promoting maintainer, with other changes listing the pending promotion last; and the projection leaving controller state unchanged.
+
+The new journeys use an opt-in fixture scenario (`/__fixture/scenario`, `team`) in which a second user owns ten proposed workspaces through her own agent connection. They cover: Home separating three decisions the viewer can make from eight items waiting on others, naming owners, exact revisions and primary blockers, and saying "Showing 5 of 8" with a link to the full list; the Changes **Needs you** filter surviving reload and Back; another owner's change showing "published through Codex, Maya Reyes's connection" and reported evidence becoming attested; Workspaces owner and **Mine** filters with Back, owner-labelled lanes, and a non-owner seeing that only the owner can attach and no continuation commands; History naming approver, promoter, workspace owner, previous canonical and attested evidence; and unknown ancestry shown as a heads-up rather than as nothing waiting. Updated journeys check reconciliation counts and filtered workspace links after canonical moves, owner-first workspace facts and the continuation guide with its Git-access caveat. Home, Changes and workspace pages were also inspected at 390px (no horizontal overflow) and in the dark theme.
+
+**Not verified:** these are fixture checks. No Worker was deployed; hosted attention summaries, real multi-user namespaces, physical cross-machine continuation and pilot measurements of coordination effort remain unverified.
+
 ## Sign-in page and connection lifetime verification
 
 On **2026-10-08**, the Cruce sign-in page and the separation of agent/terminal connections from the browser's Access session passed typecheck, **316 unit/integration tests**, **71 browser journeys**, deterministic scenario replay and the offline cf build. Lint passed for every tracked file; the pre-existing untracked `tools/verification/participation.ts` still has formatting differences and is not part of this change. The offline build retains the unavailable-Docker notice.

@@ -146,9 +146,9 @@ test("review remains usable after approval and after a failed evidence result", 
 	await page.getByRole("button", { name: "Record failure", exact: true }).click();
 	await page.getByLabel("Record failure note", { exact: true }).fill("Check needs another run");
 	await page.locator(".note-action").getByRole("button", { name: "Record failure", exact: true }).click();
-	await page.getByText("Tests failing", { exact: false }).waitFor();
+	await page.locator(".checklist").getByText("Tests failing", { exact: false }).waitFor();
 	await page.getByRole("button", { name: "Record updated tests pass", exact: true }).click();
-	await page.getByText("Tests confirmed", { exact: false }).waitFor();
+	await page.locator(".checklist").getByText("Tests attested", { exact: false }).waitFor();
 	assert.equal(await page.getByRole("button", { name: "Promote to main", exact: true }).isEnabled(), true);
 	await page.screenshot({ path: "dist/ui-checks/review-completed-checks.png", fullPage: true });
 });
@@ -171,7 +171,7 @@ test("historical approvals require a fresh decision and Developers cannot approv
 	await openChange();
 	assert.equal(await page.getByRole("button", { name: "Approve", exact: true }).count(), 0);
 	assert.equal(await page.getByRole("button", { name: "Raise concern", exact: true }).isVisible(), true);
-	await page.getByText("A repository maintainer confirms checks and promotes.", { exact: true }).waitFor();
+	await page.getByText("A human repository maintainer attests evidence, approves and promotes.", { exact: true }).waitFor();
 });
 test("copy failures provide a manual-copy alternative", async () => {
 	await openRepo();
@@ -686,7 +686,8 @@ test("home lists repositories by what needs attention and keeps its filter while
 	await page.goto(server.origin);
 	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
 	const row = page.locator(".repo-row").filter({ hasText: "payment-service" });
-	await row.getByText("1 to review", { exact: true }).waitFor();
+	await row.getByText("1 for you", { exact: true }).waitFor();
+	await row.getByText("1 to prepare", { exact: true }).waitFor();
 	await page.screenshot({ path: "dist/ui-checks/namespaces.png", fullPage: true });
 	await page.getByLabel("Filter namespaces").fill("payment-service");
 	assert.equal(await page.locator(".namespace-row").count(), 1);
@@ -748,7 +749,7 @@ test("a new repository opens on Changes with a way to connect an agent", async (
 	await page.getByRole("button", { name: "Add repository", exact: true }).click();
 	await page.getByRole("heading", { name: "local-tools", exact: true }).waitFor();
 	await page.getByRole("heading", { name: "No changes yet", exact: true }).waitFor();
-	await page.getByText("Nothing needs you right now.", { exact: true }).waitFor();
+	await page.getByText("Nothing needs attention right now.", { exact: true }).waitFor();
 	await page.locator(".changes-screen").getByText("Use Connect an agent above to start.", { exact: false }).waitFor();
 	assert.equal(await page.getByRole("button", { name: "Connect an agent", exact: true }).count(), 1);
 	await page.getByRole("button", { name: "Connect an agent", exact: true }).click();
@@ -906,7 +907,12 @@ test("the lane map draws each live workspace from its baseline and highlights it
 test("home names each decision waiting across repositories and opens it", async () => {
 	await page.goto(server.origin);
 	const decision = page.locator(".decision-row").filter({ hasText: "Bounded retry policy" });
-	await decision.getByText("Needs review", { exact: true }).waitFor();
+	await decision.getByText("Needs preparation", { exact: true }).waitFor();
+	// The decision names its accountable owner, exact revision and blocker, and the viewer's own next action.
+	await decision.getByText(/Owner: Alex Morgan \(you\)/).waitFor();
+	await decision.getByText("Required tests evidence missing · 1 more blocker", { exact: true }).waitFor();
+	assert.equal(await decision.locator(".decision-action").innerText(), "Prepare revision");
+	assert.equal(await page.locator(".waiting").count(), 0);
 	await decision.click();
 	await page.getByRole("heading", { name: /Bounded retry policy/, level: 1 }).waitFor();
 });
@@ -1185,8 +1191,8 @@ test("repository pages lead with what needs attention and retired routes resolve
 		(await repoNav().getByRole("button").allTextContents()).map((text) => text.replace(/\d+$/, "").trim()),
 		["Changes", "Workspaces", "History", "Settings"],
 	);
-	await page.getByRole("button", { name: "1 change needs your review", exact: true }).waitFor();
-	await page.getByRole("button", { name: "1 file changed in more than one workspace", exact: true }).click();
+	await page.getByRole("button", { name: "1 change needs preparation", exact: true }).waitFor();
+	await page.getByRole("button", { name: "1 path reported by more than one workspace", exact: true }).click();
 	assert.ok(page.url().endsWith("#/workspaces"));
 	await page.screenshot({ path: "dist/ui-checks/repository.png", fullPage: true });
 	await page.goto(`${root()}#/overview`);
@@ -1234,29 +1240,51 @@ test("header search accepts typing directly and supports keyboard selection and 
 test("workspace detail explains who works on it, its baseline and overlap, and the owner can release its checkout", async () => {
 	await openWorkspace("Implement retry policy");
 	const facts = page.locator(".facts");
-	await facts.getByText("Started from", { exact: true }).waitFor();
+	await facts.getByText("Baseline", { exact: true }).waitFor();
 	await facts.getByText(/is also changed in Inspect payment timeout/).waitFor();
-	await page.locator(".change-meta").getByText("Codex", { exact: true }).waitFor();
+	// The accountable person leads; the tool is provenance.
+	await page.locator(".change-meta").getByText("Owner: Alex Morgan (you)", { exact: true }).waitFor();
+	await page.locator(".change-meta").getByText("Started through Codex", { exact: true }).waitFor();
+	await facts.getByText(/^Worktree attached through Codex · since/).waitFor();
 	await page.getByText(/Attached to a worktree through Codex/).waitFor();
-	const start = await facts.locator("dd").first().textContent();
+	const continuation = page.locator(".continuation");
+	await continuation.getByText(/Only pushed commits travel/).waitFor();
+	await continuation.getByText(/cruce\.mjs resume --server .* --workspace /).waitFor();
+	await continuation.getByText(/does not revoke the previous connection's Git access/).waitFor();
+	const start = await facts.locator("dd").nth(2).textContent();
 	await page.getByRole("button", { name: "Release checkout", exact: true }).click();
-	await page.getByText(/Not attached to a checkout\. Continue it anywhere with cruce resume --workspace/).waitFor();
+	await page
+		.getByText("Not attached to a checkout. Its owner can continue it from another checkout or machine.", { exact: true })
+		.waitFor();
 	assert.equal(await page.getByRole("button", { name: "Release checkout", exact: true }).count(), 0);
 	await page.locator(".change-header").getByText("Detached", { exact: true }).waitFor();
-	assert.equal(await facts.locator("dd").first().textContent(), start);
+	await facts.getByText("No checkout attached", { exact: true }).waitFor();
+	assert.equal(await facts.locator("dd").nth(2).textContent(), start);
 });
 test("workspaces behind canonical say so and show canonical changes without moving their baseline", async () => {
 	await page.request.post(`${server.origin}/__fixture/upstream`);
 	await openRepo();
-	await page.getByRole("button", { name: "1 workspace behind canonical", exact: true }).click();
+	// The stale change and the workspace behind canonical are both reconciliation work, counted separately.
+	await page.getByRole("button", { name: "1 change needs reconciliation", exact: true }).waitFor();
+	await page.getByRole("button", { name: "1 workspace needs reconciliation", exact: true }).click();
+	assert.equal(new URL(page.url()).searchParams.get("filter"), "reconcile");
+	await page.getByRole("heading", { name: "Matching workspaces", exact: true }).waitFor();
+	assert.equal(await page.locator(".workspace-row").count(), 1);
 	const row = workspaceRow("Inspect payment timeout");
 	await row.getByText("Behind canonical", { exact: true }).waitFor();
+	await row.getByText(/^Canonical moved to \w{8} since this baseline · Reconcile with Git$/).waitFor();
 	await row.click();
-	const start = await page.locator(".facts dd").first().textContent();
-	await page.getByText(/Canonical moved to/).waitFor();
+	const start = await page.locator(".facts dd").nth(2).textContent();
+	await page
+		.getByText(/Canonical moved to/)
+		.first()
+		.waitFor();
 	await page.getByRole("button", { name: "See what changed on canonical", exact: true }).click();
 	await page.getByText("also changed in this workspace", { exact: false }).waitFor();
-	assert.equal(await page.locator(".facts dd").first().textContent(), start);
+	assert.equal(await page.locator(".facts dd").nth(2).textContent(), start);
+	// Back restores the filtered list.
+	await page.goBack();
+	await page.getByRole("heading", { name: "Matching workspaces", exact: true }).waitFor();
 });
 test("review is a checklist: confirm checks, approve the exact revision, then promote to main", async () => {
 	await openChange();
@@ -1265,33 +1293,37 @@ test("review is a checklist: confirm checks, approve the exact revision, then pr
 	await page.getByText("Finish the steps above to promote.", { exact: true }).waitFor();
 	await page.locator(".patch").waitFor();
 	await page.screenshot({ path: "dist/ui-checks/review.png", fullPage: true });
-	await page.getByRole("button", { name: "Confirm tests pass", exact: true }).click();
-	await page.getByText("Tests confirmed", { exact: false }).waitFor();
+	await page.getByRole("button", { name: "Record checked tests pass", exact: true }).click();
+	await page.locator(".checklist").getByText("Tests attested", { exact: false }).waitFor();
 	await page.getByRole("button", { name: "Approve", exact: true }).click();
 	await page.locator(".change-header").getByText("Ready to promote", { exact: true }).waitFor();
 	assert.equal(await promote.isEnabled(), true);
 	await promote.click();
 	await page.locator(".change-header").getByText("Promoted", { exact: true }).waitFor();
 	await page.locator(".canonical-line").getByText(/main/).waitFor();
-	await page.getByRole("button", { name: "1 workspace behind canonical", exact: true }).waitFor();
+	await page.getByRole("button", { name: "1 workspace needs reconciliation", exact: true }).waitFor();
 });
 test("concerns and failures ask for a reason and block promotion until resolved", async () => {
 	await openChange();
 	await page.getByRole("button", { name: "Raise concern", exact: true }).click();
 	await page.getByLabel("Raise concern note", { exact: true }).fill("Retry bound needs a jitter test");
 	await page.locator(".note-action").getByRole("button", { name: "Raise concern", exact: true }).click();
-	await page.locator(".change-header").getByText("Has concerns", { exact: true }).waitFor();
+	await page
+		.locator(".review-blockers")
+		.getByText(/1 unresolved concern/)
+		.waitFor();
 	await page.getByText("Retry bound needs a jitter test", { exact: false }).first().waitFor();
 	await page.getByRole("button", { name: "Resolve concern", exact: true }).click();
 	await page.getByLabel("Resolve concern note", { exact: true }).fill("Covered by the existing bound test");
 	await page.locator(".note-action").getByRole("button", { name: "Resolve concern", exact: true }).click();
-	await page.locator(".change-header").getByText("Needs review", { exact: true }).waitFor();
+	await page.locator(".review-blockers").filter({ hasNotText: "unresolved concern" }).waitFor();
+	await page.locator(".change-header").getByText("Needs preparation", { exact: true }).waitFor();
 });
 test("failed promotion preserves canonical source and reuses retry identity", async () => {
 	await openChange();
 	const before = await page.locator(".canonical-line").innerText();
-	await page.getByRole("button", { name: "Confirm tests pass", exact: true }).click();
-	await page.getByText("Tests confirmed", { exact: false }).waitFor();
+	await page.getByRole("button", { name: "Record checked tests pass", exact: true }).click();
+	await page.locator(".checklist").getByText("Tests attested", { exact: false }).waitFor();
 	await page.getByRole("button", { name: "Approve", exact: true }).click();
 	await page.locator(".change-header").getByText("Ready to promote", { exact: true }).waitFor();
 	const keys = [];
@@ -1638,7 +1670,7 @@ test("namespace failures remain unavailable on Home and retry restores attention
 	assert.equal(await page.locator(".repo-row").count(), 0);
 	fail = false;
 	await page.getByRole("button", { name: "Retry", exact: true }).click();
-	await page.locator(".repo-row").getByText("1 to review", { exact: true }).waitFor();
+	await page.locator(".repo-row").getByText("1 to prepare", { exact: true }).waitFor();
 });
 test("screen families remain readable across desktop, tablet, mobile and 200 percent zoom", async () => {
 	const data = await (await page.request.get(`${server.origin}/api/namespaces/fernloop/repositories/payments`)).json();
@@ -1744,7 +1776,7 @@ test("many workspaces, long paths and read-only authority stay usable on a phone
 	await page.locator(".change-row").filter({ hasText: "Bounded retry policy" }).click();
 	assert.equal(await page.getByRole("button", { name: "Approve", exact: true }).count(), 0);
 	assert.equal(await page.getByRole("button", { name: "Promote to main", exact: true }).count(), 0);
-	await page.getByText("A repository maintainer confirms checks and promotes.", { exact: true }).waitFor();
+	await page.getByText("A human repository maintainer attests evidence, approves and promotes.", { exact: true }).waitFor();
 });
 
 test("retention inspection discloses cloud cost and shows exact unpublished refs without deleting", async () => {
@@ -1810,4 +1842,103 @@ test("observation opt-in discloses recurring cost and is absent for read-only vi
 	await page.reload();
 	await page.getByText(/Estimated idle checks:/).waitFor();
 	assert.equal(await page.getByRole("button", { name: "Enable observation", exact: true }).count(), 0);
+});
+test("Home separates decisions you can make from work waiting on others and says when a list is capped", async () => {
+	await page.request.post(`${server.origin}/__fixture/scenario`, { data: { name: "team" } });
+	await page.goto(server.origin);
+	const needs = page.getByRole("region", { name: "Needs you", exact: true });
+	await needs.locator(".decision-row").first().waitFor();
+	// Maya's reported tests are a maintainer decision for Alex; Alex's own change needs his preparation.
+	assert.equal(await needs.locator(".decision-row").count(), 3);
+	const reported = needs.locator(".decision-row").filter({ hasText: "Session renewal 1" });
+	await reported.getByText(/Owner: Maya Reyes/).waitFor();
+	await reported.getByText("Tests reported passing; human attestation required · 1 more blocker", { exact: true }).waitFor();
+	assert.equal(await reported.locator(".decision-action").innerText(), "Attest evidence");
+	// Maya's missing evidence is hers to prepare: visible, but waiting on the owner, and capped with a total.
+	const waiting = page.locator("details.waiting");
+	await waiting.locator("summary").getByText("Waiting on others · 8", { exact: true }).click();
+	assert.equal(await waiting.locator(".decision-row").count(), 5);
+	await waiting.locator(".decision-row").first().getByText("Waiting on the owner", { exact: true }).waitFor();
+	await waiting.getByText("Showing 5 of 8 in payment-service.", { exact: false }).waitFor();
+	await page.screenshot({ path: "dist/ui-checks/home-team.png", fullPage: true });
+	await waiting.getByRole("button", { name: "Open the full list", exact: true }).click();
+	await page.getByRole("heading", { name: "Needs preparation", exact: true }).waitFor();
+	assert.equal(await page.locator(".change-row").filter({ hasText: "Session renewal" }).count(), 10);
+	// The Needs you filter lives in the URL and Back restores the full list.
+	await page.getByRole("button", { name: "Needs you", exact: true }).click();
+	assert.equal(new URL(page.url()).searchParams.get("filter"), "mine");
+	await page.getByText("Showing 3 of 11 open changes.", { exact: true }).waitFor();
+	assert.equal(await page.locator(".change-row").count(), 3);
+	await page.reload();
+	await page.getByText("Showing 3 of 11 open changes.", { exact: true }).waitFor();
+	await page.goBack();
+	await page.getByRole("button", { name: "All open", exact: true, pressed: true }).waitFor();
+	assert.equal(await page.locator(".change-row").count(), 11);
+});
+test("another owner's change leads with its owner and connection, and evidence wording follows its trust", async () => {
+	await page.request.post(`${server.origin}/__fixture/scenario`, { data: { name: "team" } });
+	await page.goto(`${root()}&filter=review#/changes`);
+	await page.getByRole("heading", { name: "Needs human review", exact: true }).waitFor();
+	assert.equal(await page.getByRole("heading", { name: "Needs preparation", exact: true }).count(), 0);
+	await page.locator(".change-row").filter({ hasText: "Session renewal 1" }).click();
+	const meta = page.locator(".change-meta");
+	await meta.getByText("Owner: Maya Reyes", { exact: true }).waitFor();
+	await meta.getByText(/published through Codex, Maya Reyes's connection/).waitFor();
+	await page.getByText("Next: Inspect the reported evidence and attest what you checked", { exact: true }).waitFor();
+	await page.locator(".checklist").getByText("Tests reported passing; human attestation required", { exact: false }).waitFor();
+	await page.getByRole("button", { name: "Attest tests pass", exact: true }).click();
+	await page.locator(".checklist").getByText("Tests attested", { exact: false }).waitFor();
+	await page.getByText(`Next: Approve`, { exact: false }).waitFor();
+});
+test("workspaces filter by owner and Mine, lanes name owners, and only the owner is offered continuation", async () => {
+	await page.request.post(`${server.origin}/__fixture/scenario`, { data: { name: "team" } });
+	await page.goto(`${root()}#/workspaces`);
+	await page.locator(".lane-map").getByText("Owner: Alex Morgan (you)", { exact: false }).first().waitFor();
+	await page.locator(".owner-filter select").selectOption({ label: "Maya Reyes" });
+	assert.equal(new URL(page.url()).searchParams.get("filter"), "owner:maya");
+	await page.getByRole("heading", { name: "Matching workspaces", exact: true }).waitFor();
+	assert.equal(await page.locator(".workspace-row").count(), 10);
+	await page.getByRole("button", { name: "Mine", exact: true }).click();
+	assert.equal(await page.locator(".workspace-row").count(), 2);
+	await page.goBack();
+	assert.equal(await page.locator(".workspace-row").count(), 10);
+	const maya = workspaceRow("Session renewal 1");
+	await maya.getByText("Owner: Maya Reyes", { exact: true }).waitFor();
+	await maya.getByText("Worktree attached through Codex", { exact: true }).waitFor();
+	await maya.click();
+	await page
+		.locator(".continuation")
+		.getByText(/Only Maya Reyes can attach this workspace/)
+		.waitFor();
+	assert.equal(await page.getByRole("button", { name: "Release checkout", exact: true }).count(), 0);
+	assert.equal(await page.locator(".continuation .copy-command").count(), 0);
+});
+test("History connects each promotion to its approver, promoter, workspace owner and evidence", async () => {
+	await openChange();
+	await page.getByRole("button", { name: "Record checked tests pass", exact: true }).click();
+	await page.locator(".checklist").getByText("Tests attested", { exact: false }).waitFor();
+	await page.getByRole("button", { name: "Approve", exact: true }).click();
+	await page.getByRole("button", { name: "Promote to main", exact: true }).click();
+	await page.locator(".change-header").getByText("Promoted", { exact: true }).waitFor();
+	await repoNav()
+		.getByRole("button", { name: /^History/ })
+		.click();
+	const entry = page.locator(".canonical-timeline li").filter({ hasText: "Bounded retry policy #1" });
+	await entry.getByText(/promoted by Alex Morgan/).waitFor();
+	const facts = entry.locator(".promotion-facts");
+	await facts
+		.getByText(/^Approved by Alex Morgan · from Implement retry policy, owner Alex Morgan \(you\) · moved from \w{8} · tests attested$/)
+		.waitFor();
+});
+test("unknown ancestry is reported as missing knowledge, never as nothing waiting", async () => {
+	await page.route("**/api/namespaces/fernloop", async (route) => {
+		const data = await (await route.fetch()).json();
+		for (const summary of data.repositorySummaries) summary.attention.ancestryUnavailable = 2;
+		await route.fulfill({ json: data });
+	});
+	await page.goto(server.origin);
+	await page
+		.locator(".heads-row")
+		.getByText(/^Ancestry unavailable for 2 workspaces/)
+		.waitFor();
 });

@@ -1,8 +1,23 @@
 import { describe, expect, it } from "vitest";
+import { attentionView } from "../../src/core/attention.ts";
 import { initialRepository } from "../../src/core/platform.ts";
 import { repositorySummary } from "../../src/shared/coordination.ts";
 import type { Actor, Proposal, Readiness, Repository, RepositorySnapshot, Workspace } from "../../src/shared/platform.ts";
-import { actorLabel, ago, attention, canonicalRelation, changeGroups, changeStatus, overlapsFor, workedBy } from "../../src/ui/status.ts";
+import {
+	actorLabel,
+	ago,
+	attention,
+	blockerSummary,
+	canonicalRelation,
+	changeGroups,
+	changeStatus,
+	nextStep,
+	overlapsFor,
+	ownerName,
+	throughConnection,
+	waitingOn,
+	workedBy,
+} from "../../src/ui/status.ts";
 
 const base = "a".repeat(40),
 	moved = "b".repeat(40);
@@ -51,8 +66,8 @@ const readiness = (checks: Partial<Readiness["checks"]> = {}, ready = false): Re
 	reasons: [],
 	checks: { open: true, current: true, approved: false, reviewIds: [], concerns: 0, evidence: [], blockedByPromotion: false, ...checks },
 });
-function view(extra: Partial<RepositorySnapshot> = {}): RepositorySnapshot {
-	return {
+function view(extra: Partial<RepositorySnapshot> = {}, viewerId = "u"): RepositorySnapshot {
+	const snapshot: RepositorySnapshot = {
 		...initialRepository(repository),
 		overlaps: [],
 		workspaceUpdates: {},
@@ -65,6 +80,7 @@ function view(extra: Partial<RepositorySnapshot> = {}): RepositorySnapshot {
 		promotionRecovery: {},
 		...extra,
 	};
+	return { ...snapshot, attention: attentionView(snapshot, viewerId) };
 }
 
 describe("console status language", () => {
@@ -75,8 +91,8 @@ describe("console status language", () => {
 		const continued = workspace("a", {
 			execution: { id: "a", checkoutId: "c", machineId: "m", kind: "worktree", owned: true, attachedBy: codex, attachedAt: 0 },
 		});
-		expect(workedBy(continued)).toBe("Started in Claude Code · continued in Codex");
-		expect(workedBy(workspace("b"))).toBe("Claude Code");
+		expect(workedBy(continued)).toBe("Started through Claude Code · attached through Codex");
+		expect(workedBy(workspace("b"))).toBe("Started through Claude Code");
 	});
 	it("classifies changes by what a person should do", () => {
 		const v = view({
@@ -97,14 +113,20 @@ describe("console status language", () => {
 			},
 		});
 		expect(changeStatus(v, v.proposals[0])).toMatchObject({ key: "superseded", label: "Superseded by #3" });
-		expect(changeStatus(v, v.proposals[1])).toMatchObject({ key: "concerns" });
-		expect(changeStatus(v, v.proposals[2])).toMatchObject({ key: "stale", detail: expect.stringContaining("bbbbbbbb") });
+		expect(changeStatus(v, v.proposals[1])).toMatchObject({ key: "review", label: "Needs human review" });
+		expect(changeStatus(v, v.proposals[2])).toMatchObject({ key: "reconciliation", detail: expect.stringContaining("bbbbbbbb") });
 		// A later change from the same workspace supersedes; a promoted later change does too.
 		expect(changeStatus(v, v.proposals[3])).toMatchObject({ key: "superseded", label: "Superseded by #5" });
 		expect(changeStatus(v, v.proposals[4])).toMatchObject({ key: "promoted" });
 		const groups = changeGroups(v);
-		expect(groups.attention.map((p) => p.id)).toEqual(["newer"]);
-		expect(groups.inactive.map((p) => p.id)).toEqual(["ready", "stale", "old"]);
+		expect(Object.fromEntries(groups.attention.map(({ group, items }) => [group, items.map((item) => item.id)]))).toEqual({
+			recovery: [],
+			promote: [],
+			review: ["newer"],
+			preparation: [],
+			reconciliation: ["stale"],
+		});
+		expect(groups.inactive.map((p) => p.id)).toEqual(["ready", "old"]);
 		expect(groups.done.map((p) => p.id)).toEqual(["done"]);
 	});
 	it("summarizes attention, canonical relation and advisory overlaps", () => {
@@ -123,7 +145,7 @@ describe("console status language", () => {
 		expect(canonicalRelation(v, v.workspaces[0])).toMatchObject({ key: "unknown", label: "Canonical moved" });
 		expect(canonicalRelation(v, v.workspaces[1])).toMatchObject({ key: "current" });
 		expect(overlapsFor(v, v.workspaces[0])).toEqual([{ path: "README.md", others: ["Timeouts"], observedAt: 0 }]);
-		expect(attention(v)).toMatchObject({ review: 1, ready: 0, stale: 0, behind: 0, overlaps: 1 });
+		expect(attention(v)).toMatchObject({ review: 1, promote: 0, reconcileChanges: 0, reconcileWorkspaces: 0, overlaps: 1 });
 	});
 	it("describes elapsed time plainly", () => {
 		expect(ago(1000, 2000)).toBe("just now");
@@ -136,10 +158,19 @@ describe("console status language", () => {
 			workspaces: [workspace("w1"), workspace("w2")],
 			workspaceUpdates: { w1: { baselineRevision: base, revision: moved, status: "available", trust: "accepted" } },
 			proposals: [proposal("p", 1, "w1"), proposal("q", 2, "w2")],
-			readiness: { p: readiness(), q: readiness({}, true) },
+			readiness: { p: readiness(), q: readiness({ approved: true }, true) },
 		});
 		const summary = repositorySummary(v);
-		expect(summary.attention).toEqual({ review: 1, ready: 1, stale: 0, behind: 0 });
+		expect(summary.attention).toEqual({
+			recovery: 0,
+			promote: 1,
+			review: 1,
+			preparation: 0,
+			reconciliation: 0,
+			mine: 2,
+			total: 2,
+			ancestryUnavailable: 0,
+		});
 		// Superseded changes don't count as stale attention, even when canonical has moved past them.
 		const superseded = view({
 			sourceHead: moved,
@@ -147,7 +178,32 @@ describe("console status language", () => {
 			proposals: [proposal("old", 1, "w1"), proposal("new", 2, "w1", { state: "promoted" })],
 			readiness: { old: readiness({ current: false, canonical: moved }) },
 		});
-		expect(repositorySummary(superseded).attention.stale).toBe(0);
+		expect(repositorySummary(superseded).attention.reconciliation).toBe(0);
 		expect(JSON.stringify(summary)).not.toContain("storage");
+	});
+	it("words structured blockers, next steps and ownership without parsing prose", () => {
+		const v = view({
+			sourceHead: base,
+			workspaces: [workspace("w1"), workspace("w2", { ownerId: "maya" })],
+			proposals: [proposal("p", 1, "w1"), proposal("q", 2, "w2")],
+			readiness: {
+				p: readiness({ evidence: [{ kind: "tests", trusted: false, reported: true, failed: false, verificationIds: [] }] }),
+				q: readiness({ evidence: [{ kind: "tests", trusted: false, reported: false, failed: false, verificationIds: [] }] }),
+			},
+		});
+		const [p, q] = ["p", "q"].map((id) => v.attention!.items.find((item) => item.id === id)!);
+		expect(blockerSummary(p)).toBe("Tests reported passing; human attestation required · 1 more blocker");
+		expect(nextStep(p)).toBe("Inspect the reported evidence and attest what you checked");
+		// Missing evidence is the owner's preparation, never something a maintainer simply confirms.
+		expect(blockerSummary(q)).toBe("Required tests evidence missing · 1 more blocker");
+		expect(q.mine).toBe(false);
+		expect(waitingOn(q)).toBe("Waiting on the owner");
+		const who = { viewerId: "u", people: [{ id: "u", name: "Alex Morgan" }] };
+		expect(ownerName("u", who)).toBe("Alex Morgan (you)");
+		expect(ownerName("maya", who)).toBe("Owner name unavailable");
+		expect(throughConnection(codex, who)).toBe("through Codex, your connection");
+		expect(throughConnection({ ...codex, userId: "maya" }, { people: [{ id: "maya", name: "Maya" }] })).toBe(
+			"through Codex, Maya's connection",
+		);
 	});
 });

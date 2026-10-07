@@ -57,7 +57,12 @@ export function AgentMark({ client }: { client: string }) {
 	const icon: { d: string; color?: string; gradient?: string[] } = MARKS[mark];
 	return (
 		<span className="agent-mark" data-agent={mark} aria-hidden="true">
-			<svg viewBox="0 0 24 24" fill={icon.gradient ? `url(#${gradient})` : (icon.color ?? "currentColor")} fillRule="evenodd">
+			<svg
+				aria-hidden="true"
+				viewBox="0 0 24 24"
+				fill={icon.gradient ? `url(#${gradient})` : (icon.color ?? "currentColor")}
+				fillRule="evenodd"
+			>
 				{icon.gradient && (
 					<defs>
 						<linearGradient id={gradient} gradientUnits="userSpaceOnUse" x1="12" x2="12" y1="0" y2="24">

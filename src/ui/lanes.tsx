@@ -1,7 +1,7 @@
 import type { RepositorySummary } from "../shared/coordination.ts";
 import type { RepositorySnapshot, Workspace } from "../shared/platform.ts";
 import { type Lane, lanes as laneModel, trunk as trunkModel } from "./lanes.ts";
-import { short } from "./status.ts";
+import { ownerName, type People, short } from "./status.ts";
 
 /** A workspace's colour running down the left of its row, like a branch in `git log --graph`. Decorative: the row says everything in text. */
 export function LaneTrack({ lane, done, quiet }: { lane?: number; done?: boolean; quiet?: boolean }) {
@@ -19,13 +19,15 @@ const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0
 const VISIBLE_TRUNK = 5;
 const MAX_LANES = 12;
 const tone = (key: string) =>
-	["behind", "diverged", "stale"].includes(key)
+	["behind", "diverged", "reconciliation", "preparation"].includes(key)
 		? "var(--tone-warning)"
-		: ["current", "ahead", "ready", "promoted"].includes(key)
+		: ["current", "ahead", "promote", "promoted"].includes(key)
 			? "var(--tone-success)"
-			: key === "review" || key === "concerns"
+			: key === "review"
 				? "var(--tone-accent)"
-				: "var(--text-muted)";
+				: key === "recovery" || key === "promoting"
+					? "var(--tone-danger)"
+					: "var(--text-muted)";
 
 /**
  * Canonical drawn as a trunk of recorded promotions, each live workspace as a lane leaving it at its fixed baseline.
@@ -37,14 +39,17 @@ export function LaneMap({
 	focus,
 	setFocus,
 	open,
+	who,
 }: {
 	view: RepositorySnapshot;
 	focus?: string;
 	setFocus: (id?: string) => void;
 	open: (id: string) => void;
+	who?: People;
 }) {
 	const nodes = trunkModel(view),
-		all = laneModel(view);
+		// The lane's person is its accountable owner; tool provenance stays in the workspace rows and details.
+		all = laneModel(view).map((lane) => (who ? { ...lane, worked: `Owner: ${ownerName(lane.ownerId, who)}` } : lane));
 	if (!all.length) return null;
 	const hidden = Math.max(0, nodes.length - VISIBLE_TRUNK),
 		position = (index: number) => (hidden ? (index < hidden ? 0 : index - hidden + 1) : index),

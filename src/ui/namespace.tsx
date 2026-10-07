@@ -280,7 +280,7 @@ function Overview({
 					label={`${namespace.namespace.name} at a glance`}
 					items={[
 						{ label: "Repositories", value: namespace.repositories.length },
-						{ label: "Needs review", value: incomplete && !summaries.some(Boolean) ? "—" : sum.review, tone: sum.review ? "accent" : "" },
+						{ label: "Needs you", value: incomplete && !summaries.some(Boolean) ? "—" : sum.mine, tone: sum.mine ? "accent" : "" },
 						{
 							label: "Ready to promote",
 							value: incomplete && !summaries.some(Boolean) ? "—" : sum.ready,

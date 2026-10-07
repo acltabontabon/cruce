@@ -42,6 +42,8 @@ function readRoute() {
 					? tab
 					: "repositories",
 		id: id ?? "",
+		/** A list filter such as `mine` or an attention group; part of the URL so it survives reloads, deep links and Back. */
+		filter: screen === "namespace" && query.get("repository") ? (query.get("filter") ?? "") : "",
 	};
 }
 
@@ -76,7 +78,7 @@ export function App() {
 			navigationVersion.current++;
 		};
 	}, []);
-	const navigate = useCallback((namespaceId: string, repositoryId = "", tab = "", id = "") => {
+	const navigate = useCallback((namespaceId: string, repositoryId = "", tab = "", id = "", filter = "") => {
 		navigationVersion.current++;
 		pendingActions.current = 0;
 		tab ||= repositoryId ? "changes" : "repositories";
@@ -85,6 +87,7 @@ export function App() {
 		url.search = "";
 		url.searchParams.set("namespace", namespaceId);
 		if (repositoryId) url.searchParams.set("repository", repositoryId);
+		if (repositoryId && filter && !id) url.searchParams.set("filter", filter);
 		url.hash = `/${tab}${id ? `/${id}` : ""}`;
 		const previous = readRoute();
 		history.pushState(null, "", url);
@@ -413,9 +416,11 @@ export function App() {
 							namespace={namespace?.namespace.id === route.namespaceId ? namespace : undefined}
 							tab={route.tab === "work" ? "changes" : route.tab}
 							id={route.tab === "work" ? "" : route.id}
+							filter={route.filter}
+							viewerId={me.user.id}
 							execute={execute}
 							busy={busy}
-							open={(tab, id) => navigate(route.namespaceId, route.repositoryId, tab, id)}
+							open={(tab, id, filter) => navigate(route.namespaceId, route.repositoryId, tab, id, filter)}
 							mutate={mutate}
 							base={base}
 							onError={(error) => {

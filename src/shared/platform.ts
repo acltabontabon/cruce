@@ -350,8 +350,69 @@ export interface Readiness {
 		blockedByPromotion: boolean;
 	};
 }
+/** Presentation groups for what a change or workspace needs next; they guide attention and never sequence or gate work. */
+export type AttentionGroup = "recovery" | "promote" | "review" | "preparation" | "reconciliation";
+/** One structured reason a change or workspace cannot simply be promoted; the console words it, never parses it. */
+export type AttentionBlocker =
+	| { kind: "promotion_unsettled" }
+	| { kind: "promotion_unrecorded" }
+	| { kind: "base_stale"; base: string; canonical?: string }
+	| { kind: "canonical_relation"; relation: "behind" | "diverged" | "unrelated"; canonical?: string }
+	| { kind: "ancestry_missing"; count: number }
+	| { kind: "evidence_failed"; check: string }
+	| { kind: "evidence_missing"; check: string }
+	| { kind: "evidence_reported"; check: string }
+	| { kind: "concern"; count: number }
+	| { kind: "approval_required" }
+	| { kind: "canonical_discrepancy" }
+	| { kind: "promotion_pending" };
+/**
+ * What this viewer may do about an item under current authority. Console decisions (attest, resolve, approve, promote,
+ * reconcile_promotion) need a human maintainer; owner work (prepare, reconcile with Git) happens in the owner's own tools.
+ */
+export type AttentionAction =
+	| "reconcile_promotion"
+	| "promote"
+	| "attest_evidence"
+	| "resolve_concern"
+	| "approve"
+	| "prepare_revision"
+	| "reconcile_with_git"
+	| "inspect";
+export interface AttentionItem {
+	subject: "change" | "workspace";
+	/** The change or workspace ID. */
+	id: string;
+	number?: number;
+	title: string;
+	workspaceId: string;
+	/** Accountable user; resolve the display name through authorized identity data. */
+	ownerId: string;
+	/** The exact revision this item is about: a change's proposed revision, or a workspace's published revision or baseline. */
+	revision: string;
+	/** Comparison basis: the change's pinned review base, or the canonical revision a workspace was compared with. */
+	base?: string;
+	basis?: "published" | "baseline";
+	group: AttentionGroup;
+	/** Every blocker, primary first. Empty only when the change is ready to promote. */
+	blockers: AttentionBlocker[];
+	/** Eligible next actions for this viewer, most useful first; `inspect` alone when the decision belongs to someone else. */
+	actions: AttentionAction[];
+	/** True when the viewer has an eligible action beyond inspection. */
+	mine: boolean;
+	at: number;
+}
+/** Read-only projection of current state and viewer authority; never persisted, never a task or workflow state. */
+export interface AttentionView {
+	asOf: number;
+	viewerId: string;
+	items: AttentionItem[];
+	/** Live workspaces whose canonical relation is unknown: missing knowledge, not confirmed current work. */
+	ancestryUnavailable: number;
+}
 export interface RepositorySnapshot extends Omit<RepositoryState, "receipts"> {
 	reconciliation?: ReconciliationView;
+	attention?: AttentionView;
 	asOf?: number;
 	overlaps: Overlap[];
 	workspaceUpdates: Record<string, WorkspaceUpdates>;

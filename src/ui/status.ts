@@ -1,4 +1,15 @@
-import type { ActivityEvent, Actor, Proposal, RepositorySnapshot, Workspace } from "../shared/platform.ts";
+import { ATTENTION_ORDER } from "../core/attention.ts";
+import type {
+	ActivityEvent,
+	Actor,
+	AttentionAction,
+	AttentionBlocker,
+	AttentionGroup,
+	AttentionItem,
+	Proposal,
+	RepositorySnapshot,
+	Workspace,
+} from "../shared/platform.ts";
 
 /** Plain-language presentation of controller-derived state. These helpers decide wording, never authority. */
 export type Tone = "accent" | "success" | "warning" | "danger" | "neutral";
@@ -31,10 +42,31 @@ export function actorLabel(actor?: Pick<Actor, "name" | "kind">) {
 	const tool = bridge[1].toLowerCase();
 	return tool === "claude" ? "Claude Code" : tool === "codex" ? "Codex" : tool === "cursor" ? "Cursor" : bridge[1];
 }
+/** Recorded provenance of how the workspace was started and attached; never a claim about what is executing now. */
 export function workedBy(w: Workspace) {
 	const started = actorLabel(w.createdBy),
 		now = actorLabel(workingActor(w));
-	return started === now ? started : `Started in ${started} · continued in ${now}`;
+	return started === now ? `Started through ${started}` : `Started through ${started} · attached through ${now}`;
+}
+
+/** Identity data the console may show: people of the namespace and the viewer's stable user ID. */
+export interface People {
+	viewerId?: string;
+	people?: { id: string; name: string }[];
+}
+/** The accountable human, from authorized identity data keyed by stable user ID. Never a tool or connection name. */
+export function ownerName(ownerId: string, who: People) {
+	const person = who.people?.find((p) => p.id === ownerId);
+	if (ownerId === who.viewerId) return person ? `${person.name} (you)` : "You";
+	return person?.name ?? "Owner name unavailable";
+}
+
+/** Separates the responsible human from the producing connection: "through Codex, Maya's connection". */
+export function throughConnection(actor: Actor, who: People) {
+	const tool = actorLabel(actor);
+	if (actor.kind === "human" && !actor.connectionId) return `by ${tool}`;
+	const person = who.people?.find((p) => p.id === actor.userId)?.name;
+	return `through ${tool}, ${actor.userId === who.viewerId ? "your" : person ? `${person}'s` : "the owner's"} connection`;
 }
 
 export const ended = (w: Workspace) => w.state === "completed" || w.state === "cancelled";
@@ -67,11 +99,23 @@ export function canonicalRelation(view: RepositorySnapshot, w: Workspace): Statu
 			diverged: "Diverged from canonical",
 			unrelated: "Unrelated to canonical",
 		};
+		// A published revision behind canonical is contained in it; only a baseline behind, or diverged work, needs merging.
+		const contained = relation.relation === "behind" && relation.basis === "published";
+		const reconcile = relation.relation === "diverged" || (relation.relation === "behind" && !contained);
 		return {
 			key: relation.relation,
 			label: labels[relation.relation],
-			tone: ["behind", "diverged"].includes(relation.relation) ? "warning" : relation.relation === "unknown" ? "neutral" : "success",
-			detail: `${relation.basis === "published" ? "Published revision" : "Baseline"} ${short(relation.revision)} compared with canonical ${short(relation.canonicalRevision)}.${["behind", "diverged"].includes(relation.relation) ? ` Canonical moved to ${short(relation.canonicalRevision)}; reconcile with Git and publish for fresh review.` : ""}`,
+			tone:
+				reconcile || relation.relation === "unrelated" ? "warning" : relation.relation === "unknown" || contained ? "neutral" : "success",
+			detail: `${relation.basis === "published" ? "Published revision" : "Baseline"} ${short(relation.revision)} compared with canonical ${short(relation.canonicalRevision)}.${
+				reconcile
+					? ` Canonical moved to ${short(relation.canonicalRevision)}; reconcile with Git and publish for fresh review.`
+					: contained
+						? " Canonical already contains the published revision."
+						: relation.relation === "unknown"
+							? " Ancestry is unavailable, so whether reconciliation is needed is unknown."
+							: ""
+			}`,
 		};
 	}
 	const updates = view.workspaceUpdates[w.id];
@@ -98,6 +142,103 @@ export function overlapsFor(view: RepositorySnapshot, w: Workspace) {
 		}));
 }
 
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+export const GROUP_LABELS: Record<AttentionGroup, Status> = {
+	recovery: { key: "recovery", label: "Operation needs attention", tone: "danger" },
+	promote: { key: "promote", label: "Ready to promote", tone: "success" },
+	review: { key: "review", label: "Needs human review", tone: "accent" },
+	preparation: { key: "preparation", label: "Needs preparation", tone: "warning" },
+	reconciliation: { key: "reconciliation", label: "Needs reconciliation", tone: "warning" },
+};
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** Plain wording for one structured blocker; exact revisions stay inspectable through `title` attributes in the views. */
+export function blockerText(b: AttentionBlocker) {
+	switch (b.kind) {
+		case "promotion_unsettled":
+			return "Promotion not settled; check its exact remote outcome";
+		case "promotion_unrecorded":
+			return "Canonical updated; the promotion record is unfinished";
+		case "base_stale":
+			return `Change based on ${short(b.base)}; accepted canonical is ${short(b.canonical)}`;
+		case "canonical_relation":
+			return b.relation === "behind"
+				? `Canonical moved to ${short(b.canonical)} since this baseline`
+				: b.relation === "diverged"
+					? `Diverged from canonical ${short(b.canonical)}`
+					: "Unrelated to canonical history";
+		case "ancestry_missing":
+			return `${plural(b.count, "accepted revision")} missing from published ancestry`;
+		case "evidence_failed":
+			return `${cap(b.check)} failing for this revision`;
+		case "evidence_missing":
+			return `Required ${b.check} evidence missing`;
+		case "evidence_reported":
+			return `${cap(b.check)} reported passing; human attestation required`;
+		case "concern":
+			return `${plural(b.count, "unresolved concern")}`;
+		case "approval_required":
+			return "Human approval required for this revision";
+		case "canonical_discrepancy":
+			return "Observed canonical differs from accepted history";
+		case "promotion_pending":
+			return "Another promotion must be reconciled first";
+	}
+}
+/** One primary reason, then how many more blockers remain; the checklist keeps every blocker visible. */
+export function blockerSummary(item: Pick<AttentionItem, "blockers" | "group" | "revision">) {
+	const [primary, ...rest] = item.blockers;
+	const reason = primary ? blockerText(primary) : `Every check passed for ${short(item.revision)}`;
+	return rest.length ? `${reason} · ${plural(rest.length, "more blocker")}` : reason;
+}
+export const ACTION_LABELS: Record<AttentionAction, string> = {
+	reconcile_promotion: "Reconcile promotion",
+	promote: "Promote",
+	attest_evidence: "Attest evidence",
+	resolve_concern: "Resolve concern",
+	approve: "Approve",
+	prepare_revision: "Prepare revision",
+	reconcile_with_git: "Reconcile with Git",
+	inspect: "Inspect",
+};
+/** Who an item is waiting on when the viewer has no eligible action: an authority class, never an assigned person. */
+export function waitingOn(item: AttentionItem) {
+	if (item.blockers[0]?.kind === "promotion_unsettled" || item.blockers[0]?.kind === "promotion_unrecorded")
+		return "Waiting on the maintainer who promoted it";
+	if (item.blockers[0]?.kind === "canonical_discrepancy" || item.blockers[0]?.kind === "promotion_pending")
+		return "Waiting on canonical reconciliation";
+	return item.group === "preparation" || item.group === "reconciliation" ? "Waiting on the owner" : "Waiting on a maintainer";
+}
+/** The sentence that says what happens next for this viewer, from the item's eligible actions. */
+export function nextStep(item: AttentionItem) {
+	switch (item.actions[0]) {
+		case "reconcile_promotion":
+			return "Reconcile the interrupted promotion before anything else is promoted";
+		case "promote":
+			return `Promote ${short(item.revision)}; canonical moves to exactly this revision`;
+		case "attest_evidence":
+			return "Inspect the reported evidence and attest what you checked";
+		case "resolve_concern":
+			return "Resolve the review concerns with a reason";
+		case "approve":
+			return `Approve ${short(item.revision)} if it should be promoted`;
+		case "prepare_revision":
+			return item.blockers.some((b) => b.kind === "evidence_failed")
+				? "Fix the failure in your tools, publish a repaired revision and propose it"
+				: "Record the required evidence through your tools, or publish a repaired revision";
+		case "reconcile_with_git":
+			return item.subject === "change"
+				? `Merge canonical ${short(item.blockers.flatMap((b) => (b.kind === "base_stale" ? [b.canonical] : []))[0])} with Git, publish and propose the new revision`
+				: "Merge canonical with Git, then publish for fresh review";
+		default:
+			return waitingOn(item);
+	}
+}
+export function attentionItem(view: RepositorySnapshot, subjectId: string) {
+	return view.attention?.items.find((item) => item.id === subjectId);
+}
+
+/** Lifecycle status of a change; open, current changes take their label from the attention projection. */
 export function changeStatus(view: RepositorySnapshot, p: Proposal): Status & { detail: string } {
 	if (p.state === "promoted") {
 		const promotion = view.promotions.find((x) => x.proposalId === p.id && x.state === "complete");
@@ -105,7 +246,12 @@ export function changeStatus(view: RepositorySnapshot, p: Proposal): Status & { 
 	}
 	if (p.state === "rejected") return { key: "rejected", label: "Closed", tone: "neutral", detail: "Closed without promotion." };
 	if (p.state === "promoting")
-		return { key: "promoting", label: "Promotion in progress", tone: "warning", detail: "Canonical is being updated." };
+		return {
+			key: "promoting",
+			label: "Promotion not settled",
+			tone: "danger",
+			detail: "Canonical may be updating; check the exact outcome.",
+		};
 	const later = view.proposals.filter((other) => other.workspaceId === p.workspaceId && other.number > p.number);
 	if (later.length) {
 		const newest = later.reduce((a, b) => (a.number > b.number ? a : b));
@@ -113,43 +259,46 @@ export function changeStatus(view: RepositorySnapshot, p: Proposal): Status & { 
 			key: "superseded",
 			label: `Superseded by #${newest.number}`,
 			tone: "neutral",
-			detail: "Its workspace published a newer revision.",
+			detail: "Its workspace proposed a newer revision.",
 		};
 	}
-	const readiness = view.readiness[p.id];
-	if (readiness && !readiness.checks.current)
-		return {
-			key: "stale",
-			label: "Stale",
-			tone: "warning",
-			detail: `Canonical moved to ${short(readiness.checks.canonical)}. The workspace must merge it and publish a new revision.`,
-		};
-	if (readiness?.checks.concerns)
-		return { key: "concerns", label: "Has concerns", tone: "danger", detail: "A reviewer raised a concern that needs a resolution." };
-	if (readiness?.ready) return { key: "ready", label: "Ready to promote", tone: "success", detail: "Every check passed." };
-	return { key: "review", label: "Needs review", tone: "accent", detail: "Waiting for your review." };
+	const item = attentionItem(view, p.id);
+	if (!item)
+		return { key: "unavailable", label: "Status unavailable", tone: "neutral", detail: "Readiness for this change is unavailable." };
+	return { ...GROUP_LABELS[item.group], detail: blockerSummary(item) };
 }
 
-/** Changes grouped by what a person should do: act now, ignore unless curious, or done. */
+/** Current changes grouped by next action, then superseded and finished changes kept discoverable below. */
 export function changeGroups(view: RepositorySnapshot) {
-	const groups = { attention: [] as Proposal[], inactive: [] as Proposal[], done: [] as Proposal[] };
+	const items = (view.attention?.items ?? []).filter((item) => item.subject === "change");
+	const groups = {
+		attention: ATTENTION_ORDER.map((group) => ({ group, items: items.filter((item) => item.group === group) })),
+		inactive: [] as Proposal[],
+		done: [] as Proposal[],
+	};
 	for (const p of [...view.proposals].sort((a, b) => b.number - a.number)) {
 		const key = changeStatus(view, p).key;
 		if (key === "promoted" || key === "rejected") groups.done.push(p);
-		else if (key === "stale" || key === "superseded") groups.inactive.push(p);
-		else groups.attention.push(p);
+		else if (key === "superseded") groups.inactive.push(p);
 	}
 	return groups;
 }
 
+/** Repository-level counts from the attention projection; knowledge gaps are counted apart from confirmed work. */
 export function attention(view: RepositorySnapshot) {
-	const statuses = view.proposals.map((p) => changeStatus(view, p).key);
+	const items = view.attention?.items ?? [];
 	const live = view.workspaces.filter((w) => !ended(w));
+	const count = (group: AttentionGroup, subject: AttentionItem["subject"] = "change") =>
+		items.filter((item) => item.group === group && item.subject === subject).length;
 	return {
-		review: statuses.filter((k) => k === "review" || k === "concerns").length,
-		ready: statuses.filter((k) => k === "ready").length,
-		stale: statuses.filter((k) => k === "stale").length,
-		behind: live.filter((w) => canonicalRelation(view, w).key === "behind").length,
+		recovery: count("recovery"),
+		promote: count("promote"),
+		review: count("review"),
+		preparation: count("preparation"),
+		reconcileChanges: count("reconciliation"),
+		reconcileWorkspaces: count("reconciliation", "workspace"),
+		mine: items.filter((item) => item.mine).length,
+		ancestryUnavailable: view.attention?.ancestryUnavailable ?? 0,
 		overlaps: view.overlaps.length,
 		quiet: live.filter((w) => w.state === "disconnected").length,
 	};

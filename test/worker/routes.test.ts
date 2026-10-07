@@ -127,7 +127,16 @@ describe("namespace repository contracts", () => {
 		const f = fixture();
 		const url = `/api/namespaces/${f.repo.namespaceId}`;
 		const result = (await (await f.call(url))!.json()) as { repositorySummaries: { attention: unknown }[] };
-		expect(result.repositorySummaries[0].attention).toEqual({ review: 0, ready: 0, stale: 0, behind: 0 });
+		expect(result.repositorySummaries[0].attention).toEqual({
+			recovery: 0,
+			promote: 0,
+			review: 0,
+			preparation: 0,
+			reconciliation: 0,
+			mine: 0,
+			total: 0,
+			ancestryUnavailable: 0,
+		});
 		expect(f.command).toHaveBeenCalledTimes(1);
 		expect(f.command.mock.calls[0][1].tool).toBe("get_repository");
 		delete f.namespace.state.members[f.user.id];

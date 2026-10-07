@@ -8,14 +8,22 @@ import { laneIndex } from "./lanes.ts";
 import { LaneBullet, LaneMap, LaneStrip, LaneTrack } from "./lanes.tsx";
 import type { Execute } from "./source.tsx";
 import {
+	ACTION_LABELS,
 	activityText,
 	actorLabel,
 	ago,
+	attentionItem,
+	blockerSummary,
+	blockerText,
 	canonicalRelation,
 	changeStatus,
 	ended,
+	nextStep,
 	overlapsFor,
+	ownerName,
+	type People,
 	short,
+	waitingOn,
 	workedBy,
 	workspaceStatus,
 } from "./status.ts";
@@ -31,24 +39,40 @@ function ReportAge({ at, now }: { at?: number; now: number }) {
 	);
 }
 
-type Open = (tab: string, id?: string) => void;
+type Open = (tab: string, id?: string, filter?: string) => void;
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+const CRUCE = "/path/to/cruce";
+
+/** Recorded attachment provenance; it names how the checkout was attached, not what is executing now. */
+function attachmentText(w: Workspace) {
+	if (w.execution) {
+		const by = w.execution.attachedBy;
+		return `${cap(w.execution.kind)} attached ${by.kind === "human" && !by.connectionId ? "by" : "through"} ${actorLabel(by)}`;
+	}
+	if (w.state === "detached") return "No checkout attached";
+	if (ended(w)) return workedBy(w);
+	return "Waiting for a checkout to attach";
+}
 
 function WorkspaceRow({
 	view,
 	w,
 	open,
+	who,
 	focused,
 	setFocus,
 }: {
 	view: RepositorySnapshot;
 	w: Workspace;
 	open: Open;
+	who: People;
 	focused?: boolean;
 	setFocus?: (id?: string) => void;
 }) {
 	const status = workspaceStatus(w),
 		relation = canonicalRelation(view, w),
 		overlaps = overlapsFor(view, w),
+		item = attentionItem(view, w.id),
 		change = view.proposals.filter((p) => p.workspaceId === w.id).sort((a, b) => b.number - a.number)[0];
 	const changeLabel = change && changeStatus(view, change);
 	return (
@@ -65,14 +89,20 @@ function WorkspaceRow({
 			<span className="row-main">
 				<strong>{w.title}</strong>
 				<small className="row-meta">
-					<span>{workedBy(w)}</span>
+					<span className="owner">Owner: {ownerName(w.ownerId, who)}</span>
+					<span>{w.state === "disconnected" ? "Not reporting; checkout remains attached" : attachmentText(w)}</span>
 					<span>
 						<ReportAge at={w.lastReportAt} now={view.asOf ?? Date.now()} />
 					</span>
 				</small>
+				{item && (
+					<small className="row-blocker">
+						{blockerSummary(item)} · {item.mine ? ACTION_LABELS[item.actions[0]] : waitingOn(item)}
+					</small>
+				)}
 				{overlaps.length > 0 && (
 					<small className="overlap-note">
-						Shares {overlaps.map((o) => o.path).join(", ")} with {[...new Set(overlaps.flatMap((o) => o.others))].join(", ")}
+						Shares reported paths {overlaps.map((o) => o.path).join(", ")} with {[...new Set(overlaps.flatMap((o) => o.others))].join(", ")}
 					</small>
 				)}
 			</span>
@@ -84,6 +114,13 @@ function WorkspaceRow({
 			<Icon name="arrow" className="row-arrow" />
 		</button>
 	);
+}
+
+/** Every blocker for a change, worded from the structured attention projection rather than reason strings. */
+function changeBlockers(view: RepositorySnapshot, proposalId: string) {
+	const item = attentionItem(view, proposalId);
+	if (!item) return "Readiness unavailable";
+	return item.blockers.length ? item.blockers.map(blockerText).join(" · ") : "Ready for human promotion";
 }
 
 function Reconciliation({ view, open }: { view: RepositorySnapshot; open: Open }) {
@@ -159,7 +196,7 @@ function Reconciliation({ view, open }: { view: RepositorySnapshot; open: Open }
 											#{proposal.number} {proposal.title}
 											{row.stale ? " · stale" : ""}
 										</strong>
-										<small>{row.readiness.reasons.join(" · ") || "Ready for human promotion"}</small>
+										<small>{changeBlockers(view, row.proposalId)}</small>
 									</span>
 								</button>
 							);
@@ -170,28 +207,72 @@ function Reconciliation({ view, open }: { view: RepositorySnapshot; open: Open }
 	);
 }
 
-export function WorkspaceList({ view, open }: { view: RepositorySnapshot; open: Open }) {
+/** Owner and canonical-relation filters, kept in the URL so links and Back restore them. */
+function matches(view: RepositorySnapshot, w: Workspace, filter: string, viewerId?: string) {
+	if (filter === "mine") return w.ownerId === viewerId;
+	if (filter === "reconcile") return attentionItem(view, w.id)?.group === "reconciliation";
+	if (filter.startsWith("owner:")) return w.ownerId === filter.slice(6);
+	return true;
+}
+
+export function WorkspaceList({ view, open, who, filter = "" }: { view: RepositorySnapshot; open: Open; who: People; filter?: string }) {
 	const [focus, setFocus] = useState<string>();
-	const sorted = [...view.workspaces].sort((a, b) => b.lastActivity - a.lastActivity || a.id.localeCompare(b.id));
+	const owners = [...new Set(view.workspaces.map((w) => w.ownerId))];
+	const active =
+		filter === "mine" || filter === "reconcile" || (filter.startsWith("owner:") && owners.includes(filter.slice(6))) ? filter : "";
+	const sorted = [...view.workspaces]
+		.filter((w) => matches(view, w, active, who.viewerId))
+		.sort((a, b) => b.lastActivity - a.lastActivity || a.id.localeCompare(b.id));
 	const live = sorted.filter((w) => !ended(w)),
 		done = sorted.filter(ended);
 	return (
 		<>
-			<LaneMap view={view} focus={focus} setFocus={setFocus} open={(id) => open("workspaces", id)} />
+			<LaneMap view={view} focus={focus} setFocus={setFocus} open={(id) => open("workspaces", id)} who={who} />
 			<section className="panel workspaces-screen">
 				<div className="panel-head">
-					<h2>Active workspaces</h2>
+					<h2>{active ? "Matching workspaces" : "Active workspaces"}</h2>
 					<span className="panel-count">{live.length}</span>
+				</div>
+				<div className="list-filters">
+					<nav className="segmented filters" aria-label="Filter workspaces">
+						<button type="button" aria-pressed={!active} onClick={() => open("workspaces")}>
+							All
+						</button>
+						<button type="button" aria-pressed={active === "mine"} onClick={() => open("workspaces", undefined, "mine")}>
+							Mine
+						</button>
+						<button type="button" aria-pressed={active === "reconcile"} onClick={() => open("workspaces", undefined, "reconcile")}>
+							Needs reconciliation
+						</button>
+					</nav>
+					{owners.length > 1 && (
+						<label className="owner-filter">
+							Owner
+							<select
+								value={active.startsWith("owner:") ? active : ""}
+								onChange={(e) => open("workspaces", undefined, e.target.value || undefined)}
+							>
+								<option value="">Everyone</option>
+								{owners.map((id) => (
+									<option key={id} value={`owner:${id}`}>
+										{ownerName(id, who)}
+									</option>
+								))}
+							</select>
+						</label>
+					)}
 				</div>
 				{live.length ? (
 					<div className="rows">
 						{live.map((w) => (
-							<WorkspaceRow key={w.id} view={view} w={w} open={open} focused={focus === w.id} setFocus={setFocus} />
+							<WorkspaceRow key={w.id} view={view} w={w} open={open} who={who} focused={focus === w.id} setFocus={setFocus} />
 						))}
 					</div>
 				) : (
 					<p className="panel-note">
-						No active workspaces. One appears when you or an agent starts work through Cruce. Use Connect an agent to begin.
+						{active
+							? "No active workspaces match this filter."
+							: "No active workspaces. One appears when you or an agent starts work through Cruce. Use Connect an agent to begin."}
 					</p>
 				)}
 				{done.length > 0 && (
@@ -201,7 +282,7 @@ export function WorkspaceList({ view, open }: { view: RepositorySnapshot; open: 
 						</summary>
 						<div className="rows">
 							{done.map((w) => (
-								<WorkspaceRow key={w.id} view={view} w={w} open={open} />
+								<WorkspaceRow key={w.id} view={view} w={w} open={open} who={who} />
 							))}
 						</div>
 					</details>
@@ -212,13 +293,83 @@ export function WorkspaceList({ view, open }: { view: RepositorySnapshot; open: 
 	);
 }
 
-export function WorkspaceDetail({ view, id, execute, open }: { view: RepositorySnapshot; id: string; execute: Execute; open: Open }) {
+/**
+ * How this workspace continues through another connection or machine of the same owner, using the existing detach and
+ * resume operations. Only pushed commits travel; Cruce cannot see or move unpushed local work.
+ */
+function ContinuationGuide({ view, w, who }: { view: RepositorySnapshot; w: Workspace; who: People }) {
+	const observed = view.reconciliation?.observation.workspaces[w.id];
+	if (w.ownerId !== who.viewerId)
+		return (
+			<Section title="Continue this workspace">
+				<p className="side-body continuation">
+					Only {ownerName(w.ownerId, who)} can attach this workspace, through any of their authorized connections. Others can inspect it and
+					review its changes; transferring ownership is not supported.
+				</p>
+			</Section>
+		);
+	return (
+		<Section title="Continue this workspace">
+			<div className="side-body continuation">
+				<p>
+					Continuing keeps this workspace's ID, baseline <code title={w.baseRevision}>{short(w.baseRevision)}</code>, fork and history. Only
+					pushed commits travel: reported head <code title={w.headRevision}>{short(w.headRevision)}</code>
+					{observed && !observed.deleted ? (
+						<>
+							{observed.revision === w.headRevision ? " matches" : " differs from"} the fork branch observed at{" "}
+							<code title={observed.revision}>{short(observed.revision)}</code>
+						</>
+					) : (
+						"; the fork branch has not been observed"
+					)}
+					{w.publishedRevision ? (
+						<>
+							; last published <code title={w.publishedRevision}>{short(w.publishedRevision)}</code>.
+						</>
+					) : (
+						"; no published revision."
+					)}
+				</p>
+				<ol className="steps compact">
+					{w.execution && (
+						<li>
+							On the attached checkout, commit and push what should travel, then release it with <code>cruce detach</code> or Release
+							checkout below. If that machine is unavailable, its unpushed work cannot be recovered from here.
+						</li>
+					)}
+					<li>
+						On the destination, authorize your connection to this repository, then attach a replacement checkout from the fork head:
+						<CopyCommand text={`node ${CRUCE}/runner/cruce.mjs resume --server ${location.origin} --workspace ${w.id}`} />
+					</li>
+					<li>Reports from the previous checkout are rejected once the replacement is attached.</li>
+				</ol>
+				<p className="muted">Detaching does not revoke the previous connection's Git access; it can still push if its credentials allow.</p>
+			</div>
+		</Section>
+	);
+}
+
+export function WorkspaceDetail({
+	view,
+	id,
+	execute,
+	open,
+	who,
+}: {
+	view: RepositorySnapshot;
+	id: string;
+	execute: Execute;
+	open: Open;
+	who: People;
+}) {
 	const w = view.workspaces.find((s) => s.id === id);
 	const [error, setError] = useState("");
 	if (!w) return <p className="empty">This workspace is unavailable.</p>;
 	const status = workspaceStatus(w),
 		relation = canonicalRelation(view, w),
 		overlaps = overlapsFor(view, w),
+		latest = view.proposals.filter((p) => p.workspaceId === w.id).sort((a, b) => b.number - a.number)[0],
+		item = attentionItem(view, w.id) ?? (latest && attentionItem(view, latest.id)),
 		release = view.executionRelease[w.id],
 		cleanup = view.forkCleanup[w.id],
 		changes = view.proposals.filter((p) => p.workspaceId === w.id).sort((a, b) => b.number - a.number),
@@ -245,6 +396,7 @@ export function WorkspaceDetail({ view, id, execute, open }: { view: RepositoryS
 						<LaneBullet lane={laneIndex(view).get(w.id)} />
 						<Pill tone={status.tone}>{status.label}</Pill>
 						{!ended(w) && <Pill tone={relation.tone}>{relation.label}</Pill>}
+						<span className="owner">Owner: {ownerName(w.ownerId, who)}</span>
 						<span>{workedBy(w)}</span>
 					</p>
 					{w.description && <p className="page-lead">{w.description}</p>}
@@ -253,10 +405,52 @@ export function WorkspaceDetail({ view, id, execute, open }: { view: RepositoryS
 			<LaneStrip view={view} workspace={w} lane={laneIndex(view).get(w.id) ?? 1} />
 			<dl className="facts fact-grid">
 				<div>
-					<dt>Started from</dt>
+					<dt>Owner</dt>
 					<dd>
-						<code title={w.baseRevision}>{short(w.baseRevision)}</code> · {ago(w.startedAt)} · fixed for the life of the workspace
+						{ownerName(w.ownerId, who)} · accountable for this work · workspace ID <code>{w.id}</code>
 					</dd>
+					<dt>Current attachment</dt>
+					<dd>
+						{w.execution ? (
+							<>
+								{attachmentText(w)} · since {ago(w.execution.attachedAt)} · machine <code>{w.execution.machineId}</code>, checkout{" "}
+								<code>{w.execution.checkoutId}</code>
+							</>
+						) : (
+							attachmentText(w)
+						)}
+						{w.state === "disconnected" && " · not reporting; checkout remains attached"}
+					</dd>
+				</div>
+				<div>
+					<dt>Baseline</dt>
+					<dd>
+						<code title={w.baseRevision}>{short(w.baseRevision)}</code> · {ago(w.startedAt)} · fixed starting revision
+					</dd>
+					<dt>Published</dt>
+					<dd>
+						{w.publishedRevision ? (
+							<>
+								<code title={w.publishedRevision}>{short(w.publishedRevision)}</code>
+								{w.integratedRevision && (
+									<>
+										{" "}
+										against review base <code title={w.integratedRevision}>{short(w.integratedRevision)}</code>
+									</>
+								)}
+							</>
+						) : (
+							"No published revision"
+						)}
+					</dd>
+					{item && (
+						<>
+							<dt>Decision state</dt>
+							<dd>
+								{blockerSummary(item)}. {nextStep(item)}.
+							</dd>
+						</>
+					)}
 				</div>
 				<div>
 					<dt>Observed pushed ref</dt>
@@ -283,6 +477,10 @@ export function WorkspaceDetail({ view, id, execute, open }: { view: RepositoryS
 					<dd>
 						<code title={w.headRevision}>{short(w.headRevision)}</code> · {w.commits.length} {w.commits.length === 1 ? "commit" : "commits"}
 						, {w.changes.length} {w.changes.length === 1 ? "file" : "files"} reported
+						{view.reconciliation?.observation.workspaces[w.id] &&
+							!view.reconciliation.observation.workspaces[w.id].deleted &&
+							view.reconciliation.observation.workspaces[w.id].revision !== w.headRevision &&
+							" · differs from the observed pushed ref"}
 					</dd>
 				</div>
 				<div>
@@ -308,7 +506,7 @@ export function WorkspaceDetail({ view, id, execute, open }: { view: RepositoryS
 					</div>
 				)}
 			</dl>
-			{!ended(w) && relation.key === "behind" && <WorkspaceUpdateInspection id={w.id} execute={execute} />}
+			{!ended(w) && (relation.key === "behind" || relation.key === "diverged") && <WorkspaceUpdateInspection id={w.id} execute={execute} />}
 			<div className="overview">
 				<div className="overview-main">
 					<Section title="Changes" count={changes.length}>
@@ -376,13 +574,14 @@ export function WorkspaceDetail({ view, id, execute, open }: { view: RepositoryS
 					)}
 				</div>
 				<aside className="overview-side" aria-label="Checkout and storage">
+					{!ended(w) && <ContinuationGuide view={view} w={w} who={who} />}
 					<Section title="Checkout and storage">
 						<div className="side-body">
 							<p>
 								{w.execution
 									? `Attached to a ${w.execution.kind} through ${actorLabel(w.execution.attachedBy)} since ${ago(w.execution.attachedAt)}.`
 									: w.state === "detached"
-										? `Not attached to a checkout. Continue it anywhere with cruce resume --workspace ${w.id}.`
+										? "Not attached to a checkout. Its owner can continue it from another checkout or machine."
 										: ended(w)
 											? "Ended. Its commits, published revisions and history are kept."
 											: "Waiting for a checkout to attach."}

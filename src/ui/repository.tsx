@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { gitRemotePath } from "../shared/git-access.ts";
-import type { Proposal, RepositorySnapshot } from "../shared/platform.ts";
+import type { AttentionGroup, Promotion, Proposal, RepositorySnapshot } from "../shared/platform.ts";
 import { ChangeDetail } from "./change.tsx";
 import { Form, value } from "./controls.tsx";
 import { BackLink, CopyCommand, Dialog, Icon, Initials, PageHeader, Pill, Section, SettingRow } from "./design.tsx";
@@ -9,22 +9,28 @@ import { LaneBullet, LaneTrack } from "./lanes.tsx";
 import { RetainedActivity, RetainedRecordDetail, RetainedRecordRow } from "./records.tsx";
 import { type Execute, RevisionBrowser } from "./source.tsx";
 import {
+	ACTION_LABELS,
 	activityText,
 	actorLabel,
 	ago,
 	attention,
+	attentionItem,
+	blockerSummary,
 	canonicalRelation,
 	changeGroups,
 	changeStatus,
 	ended,
+	GROUP_LABELS,
 	lastPromotion,
+	ownerName,
+	type People,
 	short,
-	workedBy,
+	waitingOn,
 } from "./status.ts";
 import type { NamespaceView } from "./types.ts";
 import { WorkspaceDetail, WorkspaceList } from "./work.tsx";
 
-type Open = (tab: string, id?: string) => void;
+type Open = (tab: string, id?: string, filter?: string) => void;
 export type Mutate = <T>(url: string, body: Record<string, unknown>, method?: string) => Promise<T>;
 export const repositoryTabs = ["changes", "workspaces", "history", "settings"] as const;
 const CRUCE = "/path/to/cruce";
@@ -73,20 +79,23 @@ function CanonicalSetup({ view, execute }: { view: RepositorySnapshot; execute: 
 	);
 }
 
-/** One item per thing that needs a person; the count leads so the strip reads at a glance, the words say what it is. */
+/** One item per thing that needs a person; each count opens the filtered list behind it. Missing knowledge stays separate. */
 function AttentionBar({ view, open }: { view: RepositorySnapshot; open: Open }) {
 	const a = attention(view);
-	const items: { count?: number; label: string; tab: string; tone: string }[] = [];
-	const counted = (count: number, one: string, many: string, tab: string, tone: string) => {
-		if (count) items.push({ count, label: count === 1 ? one : many, tab, tone });
+	const items: { count?: number; label: string; tab: string; filter?: string; tone: string }[] = [];
+	const counted = (count: number, one: string, many: string, tab: string, tone: string, filter?: string) => {
+		if (count) items.push({ count, label: count === 1 ? one : many, tab, tone, filter });
 	};
-	counted(a.review, "change needs your review", "changes need your review", "changes", "accent");
-	counted(a.ready, "change ready to promote", "changes ready to promote", "changes", "success");
-	counted(a.stale, "stale change", "stale changes", "changes", "warning");
-	counted(a.behind, "workspace behind canonical", "workspaces behind canonical", "workspaces", "warning");
-	counted(a.overlaps, "file changed in more than one workspace", "files changed in more than one workspace", "workspaces", "warning");
+	counted(a.recovery, "operation needs attention", "operations need attention", "changes", "danger", "recovery");
+	counted(a.promote, "change ready to promote", "changes ready to promote", "changes", "success", "promote");
+	counted(a.review, "change needs human review", "changes need human review", "changes", "accent", "review");
+	counted(a.preparation, "change needs preparation", "changes need preparation", "changes", "warning", "preparation");
+	counted(a.reconcileChanges, "change needs reconciliation", "changes need reconciliation", "changes", "warning", "reconciliation");
+	counted(a.reconcileWorkspaces, "workspace needs reconciliation", "workspaces need reconciliation", "workspaces", "warning", "reconcile");
+	counted(a.overlaps, "path reported by more than one workspace", "paths reported by more than one workspace", "workspaces", "warning");
 	if (view.reconciliation?.observation.state === "degraded")
 		items.push({ label: "Observation degraded", tab: "workspaces", tone: "warning" });
+	counted(a.ancestryUnavailable, "workspace with ancestry unavailable", "workspaces with ancestry unavailable", "workspaces", "neutral");
 	if (
 		view.reconciliation &&
 		(view.reconciliation.workspaces.length || view.reconciliation.proposals.length) &&
@@ -98,21 +107,27 @@ function AttentionBar({ view, open }: { view: RepositorySnapshot; open: Open }) 
 		<section className="attention" aria-label="Needs attention">
 			{items.length ? (
 				items.map((item) => (
-					<button type="button" key={item.label} className={`attention-item ${item.tone}`} onClick={() => open(item.tab)}>
+					<button
+						type="button"
+						key={item.label}
+						className={`attention-item ${item.tone}`}
+						onClick={() => open(item.tab, undefined, item.filter)}
+					>
 						{item.count !== undefined && <b>{item.count}</b>} {item.label}
 					</button>
 				))
 			) : (
-				<p className="attention-clear">Nothing needs you right now.</p>
+				<p className="attention-clear">Nothing needs attention right now.</p>
 			)}
 		</section>
 	);
 }
 
-function ChangeRow({ view, p, open }: { view: RepositorySnapshot; p: Proposal; open: Open }) {
+/** A change row leads with the accountable owner, the exact revision and what blocks it. */
+function ChangeRow({ view, p, open, who }: { view: RepositorySnapshot; p: Proposal; open: Open; who: People }) {
 	const s = changeStatus(view, p),
-		workspace = view.workspaces.find((w) => w.id === p.workspaceId),
-		artifact = view.artifacts.find((a) => a.id === p.artifactId);
+		item = attentionItem(view, p.id),
+		workspace = view.workspaces.find((w) => w.id === p.workspaceId);
 	return (
 		<button type="button" className="change-row" onClick={() => open("changes", p.id)}>
 			<LaneTrack lane={laneIndex(view).get(p.workspaceId)} done={s.key === "promoted"} />
@@ -120,12 +135,19 @@ function ChangeRow({ view, p, open }: { view: RepositorySnapshot; p: Proposal; o
 			<span className="row-main">
 				<strong>{p.title}</strong>
 				<small className="row-meta">
+					{workspace && <span className="owner">Owner: {ownerName(workspace.ownerId, who)}</span>}
 					<span>
-						<code>{short(p.revision)}</code> on <code>{short(p.base)}</code>
+						<code title={p.revision}>{short(p.revision)}</code> on review base <code title={p.base}>{short(p.base)}</code>
 					</span>
 					{workspace && <span>{workspace.title}</span>}
-					{artifact && <span>{`${actorLabel(artifact.actor)} · ${ago(p.at)}`}</span>}
 				</small>
+				{item && (
+					<small className="row-blocker">
+						{blockerSummary(item)}
+						{" · "}
+						<span className={item.mine ? "next-mine" : undefined}>{item.mine ? ACTION_LABELS[item.actions[0]] : waitingOn(item)}</span>
+					</small>
+				)}
 			</span>
 			<Pill tone={s.tone}>{s.label}</Pill>
 			<Icon name="arrow" className="row-arrow" />
@@ -209,7 +231,7 @@ function CanonicalPanel({ view, open }: { view: RepositorySnapshot; open: Open }
 	);
 }
 
-function LiveWorkspaces({ view, open }: { view: RepositorySnapshot; open: Open }) {
+function LiveWorkspaces({ view, open, who }: { view: RepositorySnapshot; open: Open; who: People }) {
 	const live = view.workspaces.filter((w) => !ended(w)).sort((a, b) => b.lastActivity - a.lastActivity),
 		colours = laneIndex(view);
 	return (
@@ -233,7 +255,7 @@ function LiveWorkspaces({ view, open }: { view: RepositorySnapshot; open: Open }
 								<LaneBullet lane={colours.get(w.id)} />
 								<span className="row-main">
 									<strong>{w.title}</strong>
-									<small>{workedBy(w)}</small>
+									<small>Owner: {ownerName(w.ownerId, who)}</small>
 								</span>
 								<span className={`dot ${relation.tone}`} title={relation.label} />
 							</button>
@@ -247,20 +269,64 @@ function LiveWorkspaces({ view, open }: { view: RepositorySnapshot; open: Open }
 	);
 }
 
-function ChangesScreen({ view, open, execute }: { view: RepositorySnapshot; open: Open; execute: Execute }) {
+const changeFilters = ["mine", "recovery", "promote", "review", "preparation", "reconciliation"] as const;
+function ChangesScreen({
+	view,
+	open,
+	execute,
+	who,
+	filter,
+}: {
+	view: RepositorySnapshot;
+	open: Open;
+	execute: Execute;
+	who: People;
+	filter: string;
+}) {
 	const groups = changeGroups(view);
+	const active = (changeFilters as readonly string[]).includes(filter) ? filter : "";
+	const proposal = (id: string) => view.proposals.find((p) => p.id === id);
+	const shown = groups.attention
+		.filter(({ group }) => !active || active === "mine" || active === group)
+		.map(({ group, items }) => ({ group, items: items.filter((item) => active !== "mine" || item.mine) }));
+	const open_ = shown.reduce((n, { items }) => n + items.length, 0),
+		all = groups.attention.reduce((n, { items }) => n + items.length, 0);
 	return (
 		<div className="overview changes-screen">
 			<div className="overview-main">
-				<Section title="Waiting for review" count={groups.attention.length}>
-					{groups.attention.length ? (
-						<div className="rows">
-							{groups.attention.map((p) => (
-								<ChangeRow key={p.id} view={view} p={p} open={open} />
-							))}
-						</div>
-					) : view.proposals.length ? (
-						<p className="panel-note">Nothing is waiting for review.</p>
+				<nav className="segmented filters" aria-label="Filter changes">
+					<button type="button" aria-pressed={!active} onClick={() => open("changes")}>
+						All open
+					</button>
+					<button type="button" aria-pressed={active === "mine"} onClick={() => open("changes", undefined, "mine")}>
+						Needs you
+					</button>
+					{active && active !== "mine" && (
+						<button type="button" aria-pressed="true" onClick={() => open("changes")}>
+							{GROUP_LABELS[active as AttentionGroup].label} · show all
+						</button>
+					)}
+				</nav>
+				{active && (
+					<p className="panel-note" role="status">
+						Showing {open_} of {all} open {all === 1 ? "change" : "changes"}.
+					</p>
+				)}
+				{shown
+					.filter(({ items }) => items.length)
+					.map(({ group, items }) => (
+						<Section key={group} title={GROUP_LABELS[group].label} count={items.length}>
+							<div className="rows">
+								{items.map((item) => {
+									const p = proposal(item.id);
+									return p ? <ChangeRow key={p.id} view={view} p={p} open={open} who={who} /> : null;
+								})}
+							</div>
+						</Section>
+					))}
+				{!open_ &&
+					(view.proposals.length ? (
+						<p className="panel-note">{active === "mine" ? "Nothing here needs you right now." : "No open changes match."}</p>
 					) : (
 						<div className="empty-state">
 							<h3>No changes yet</h3>
@@ -269,15 +335,14 @@ function ChangesScreen({ view, open, execute }: { view: RepositorySnapshot; open
 								an agent above to start.
 							</p>
 						</div>
-					)}
-				</Section>
+					))}
 				{groups.inactive.length > 0 && (
 					<details className="group">
-						<summary>{plural(groups.inactive.length, "stale or superseded change")}</summary>
+						<summary>{plural(groups.inactive.length, "superseded change")}</summary>
 						<CloseSuperseded view={view} execute={execute} />
 						<div className="rows">
 							{groups.inactive.map((p) => (
-								<ChangeRow key={p.id} view={view} p={p} open={open} />
+								<ChangeRow key={p.id} view={view} p={p} open={open} who={who} />
 							))}
 						</div>
 					</details>
@@ -287,7 +352,7 @@ function ChangesScreen({ view, open, execute }: { view: RepositorySnapshot; open
 						<summary>{plural(groups.done.length, "promoted or closed change")}</summary>
 						<div className="rows">
 							{groups.done.map((p) => (
-								<ChangeRow key={p.id} view={view} p={p} open={open} />
+								<ChangeRow key={p.id} view={view} p={p} open={open} who={who} />
 							))}
 						</div>
 					</details>
@@ -295,13 +360,70 @@ function ChangesScreen({ view, open, execute }: { view: RepositorySnapshot; open
 			</div>
 			<aside className="overview-side" aria-label="Repository state">
 				<CanonicalPanel view={view} open={open} />
-				<LiveWorkspaces view={view} open={open} />
+				<LiveWorkspaces view={view} open={open} who={who} />
 			</aside>
 		</div>
 	);
 }
 
-function HistoryScreen({ view, id, execute, open }: { view: RepositorySnapshot; id: string; execute: Execute; open: Open }) {
+/** One readable promotion record: the exact revision, who approved it, who promoted it, its workspace owner and evidence. */
+function PromotionEntry({ view, promotion, open, who }: { view: RepositorySnapshot; promotion: Promotion; open: Open; who: People }) {
+	const change = view.proposals.find((p) => p.id === promotion.proposalId);
+	const workspace = change && view.workspaces.find((w) => w.id === change.workspaceId);
+	const approval = change?.reviews
+		.filter((r) => r.revision === promotion.to && r.outcome === "approve" && r.approvalAuthority === "human-maintainer")
+		.at(-1);
+	const evidence = change
+		? view.verifications.filter((v) => v.proposalId === change.id && v.revision === promotion.to && v.outcome === "pass")
+		: [];
+	const lane = change && laneIndex(view).get(change.workspaceId);
+	return (
+		<li className={lane ? `lane-${lane}` : undefined}>
+			<code title={promotion.to}>{short(promotion.to)}</code>
+			<span>
+				{change ? (
+					<button type="button" className="text-button" onClick={() => open("changes", change.id)}>
+						{change.title} #{change.number}
+					</button>
+				) : (
+					"Promotion"
+				)}{" "}
+				· promoted by {actorLabel(promotion.actor)} · {ago(promotion.at)}
+				<small className="promotion-facts">
+					{approval ? `Approved by ${actorLabel(approval.actor)}` : "Approval record unavailable"}
+					{workspace && (
+						<>
+							{" · from "}
+							<button type="button" className="text-button" onClick={() => open("workspaces", workspace.id)}>
+								{workspace.title}
+							</button>
+							{`, owner ${ownerName(workspace.ownerId, who)}`}
+						</>
+					)}
+					{" · moved from "}
+					<code title={promotion.from}>{short(promotion.from)}</code>
+					{evidence.length
+						? ` · ${[...new Set(evidence.map((v) => `${v.kind} ${v.trust === "reported" ? "reported" : "attested"}`))].join(", ")}`
+						: " · no passing evidence recorded"}
+				</small>
+			</span>
+		</li>
+	);
+}
+
+function HistoryScreen({
+	view,
+	id,
+	execute,
+	open,
+	who,
+}: {
+	view: RepositorySnapshot;
+	id: string;
+	execute: Execute;
+	open: Open;
+	who: People;
+}) {
 	// "canonical" browses the current canonical revision; it is checked first so record IDs can't shadow it.
 	const record = id === "canonical" ? undefined : view.artifacts.find((a) => a.id === id);
 	if (record)
@@ -343,25 +465,9 @@ function HistoryScreen({ view, id, execute, open }: { view: RepositorySnapshot; 
 					}
 				>
 					<ol className="canonical-timeline">
-						{promotions.map((promotion) => {
-							const change = view.proposals.find((p) => p.id === promotion.proposalId);
-							const lane = change && laneIndex(view).get(change.workspaceId);
-							return (
-								<li key={promotion.id} className={lane ? `lane-${lane}` : undefined}>
-									<code>{short(promotion.to)}</code>
-									<span>
-										{change ? (
-											<button type="button" className="text-button" onClick={() => open("changes", change.id)}>
-												{change.title} #{change.number}
-											</button>
-										) : (
-											"Promotion"
-										)}{" "}
-										· promoted by {actorLabel(promotion.actor)} · {ago(promotion.at)}
-									</span>
-								</li>
-							);
-						})}
+						{promotions.map((promotion) => (
+							<PromotionEntry key={promotion.id} view={view} promotion={promotion} open={open} who={who} />
+						))}
 						{created && (
 							<li>
 								<code>{short(created.ids[1])}</code>
@@ -776,6 +882,8 @@ export function RepositoryPage({
 	namespace,
 	tab,
 	id,
+	filter = "",
+	viewerId,
 	execute,
 	busy,
 	open,
@@ -787,6 +895,8 @@ export function RepositoryPage({
 	namespace?: NamespaceView;
 	tab: string;
 	id: string;
+	filter?: string;
+	viewerId?: string;
 	execute: Execute;
 	busy: boolean;
 	open: Open;
@@ -798,7 +908,8 @@ export function RepositoryPage({
 	const last = lastPromotion(view),
 		a = attention(view),
 		live = view.workspaces.filter((w) => !ended(w)).length;
-	const counts: Record<string, number> = { changes: a.review + a.ready, workspaces: live };
+	const who: People = { viewerId: viewerId ?? view.attention?.viewerId, people: namespace?.people };
+	const counts: Record<string, number> = { changes: a.recovery + a.promote + a.review, workspaces: live };
 	return (
 		<>
 			<header className={`page-header repo-header${id ? " compact" : ""}`}>
@@ -861,13 +972,17 @@ export function RepositoryPage({
 			</nav>
 			{tab === "changes" &&
 				(id ? (
-					<ChangeDetail key={id} view={view} id={id} execute={execute} busy={busy} open={open} />
+					<ChangeDetail key={id} view={view} id={id} execute={execute} busy={busy} open={open} who={who} />
 				) : (
-					<ChangesScreen view={view} open={open} execute={execute} />
+					<ChangesScreen view={view} open={open} execute={execute} who={who} filter={filter} />
 				))}
 			{tab === "workspaces" &&
-				(id ? <WorkspaceDetail key={id} view={view} id={id} execute={execute} open={open} /> : <WorkspaceList view={view} open={open} />)}
-			{tab === "history" && <HistoryScreen key={id} view={view} id={id} execute={execute} open={open} />}
+				(id ? (
+					<WorkspaceDetail key={id} view={view} id={id} execute={execute} open={open} who={who} />
+				) : (
+					<WorkspaceList view={view} open={open} who={who} filter={filter} />
+				))}
+			{tab === "history" && <HistoryScreen key={id} view={view} id={id} execute={execute} open={open} who={who} />}
 			{tab === "settings" && (
 				<RepositorySettings
 					execute={execute}

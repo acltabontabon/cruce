@@ -1,3 +1,4 @@
+import { attentionView } from "../core/attention.ts";
 import { humanMaintain, writeAccess } from "../core/capabilities.ts";
 import { DomainError, requireValue, stable } from "../core/errors.ts";
 import { initialRepository, RepositoryController } from "../core/platform.ts";
@@ -648,6 +649,8 @@ export class RepositoryRuntime {
 			if (cmd.tool === "get_repository") {
 				const snapshot = result as import("../shared/platform.ts").RepositorySnapshot;
 				snapshot.reconciliation = await readReconciliation(c, this.observation().status(state), this.git);
+				// Reconciliation adds published ancestry, so attention is derived again from the completed snapshot.
+				snapshot.attention = attentionView(snapshot, a.actor.userId);
 				const setup = this.store.get<Command>("provision-command");
 				if (
 					setup?.idempotencyKey &&

@@ -4,7 +4,18 @@ import { BackLink, Pill, Section } from "./design.tsx";
 import { laneIndex } from "./lanes.ts";
 import { LaneBullet } from "./lanes.tsx";
 import { ChangeDiff, type Execute } from "./source.tsx";
-import { actorLabel, ago, changeStatus, short } from "./status.ts";
+import {
+	actorLabel,
+	ago,
+	attentionItem,
+	blockerText,
+	changeStatus,
+	nextStep,
+	ownerName,
+	type People,
+	short,
+	throughConnection,
+} from "./status.ts";
 
 type Open = (tab: string, id?: string) => void;
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -115,17 +126,8 @@ function ReviewChecklist({ view, p, execute, busy }: { view: RepositorySnapshot;
 	const approval = p.reviews
 		.toReversed()
 		.find((r) => checks.reviewIds.includes(r.id) && r.outcome === "approve" && r.approvalAuthority === "human-maintainer");
-	const next = !checks.current
-		? "Merge canonical and publish a new revision"
-		: checks.blockedByPromotion
-			? "Reconcile the pending promotion"
-			: checks.evidence.some((e) => !e.trusted || e.failed)
-				? "Confirm the required evidence"
-				: checks.concerns
-					? "Resolve the review concerns"
-					: !checks.approved
-						? "Obtain maintainer approval for this revision"
-						: "Promote this revision";
+	const item = attentionItem(view, p.id);
+	const next = item ? nextStep(item) : "Readiness for this change is unavailable";
 	return (
 		<section
 			className="review-panel"
@@ -136,8 +138,13 @@ function ReviewChecklist({ view, p, execute, busy }: { view: RepositorySnapshot;
 			<p className="next-action" role="status">
 				Next: {next}
 			</p>
+			{item && item.blockers.length > 0 && (
+				<p className="review-blockers">
+					{item.blockers.length === 1 ? "1 blocker" : `${item.blockers.length} blockers`}: {item.blockers.map(blockerText).join(" · ")}
+				</p>
+			)}
 			<p className="review-revision">
-				Revision <code>{short(p.revision)}</code> against <code>{short(p.base)}</code>
+				Revision <code title={p.revision}>{short(p.revision)}</code> against review base <code title={p.base}>{short(p.base)}</code>
 			</p>
 			<ol className="checklist">
 				<Check
@@ -167,24 +174,34 @@ function ReviewChecklist({ view, p, execute, busy }: { view: RepositorySnapshot;
 							key={e.kind}
 							done={e.trusted && !e.failed}
 							warn={e.failed}
-							title={e.failed ? `${cap(e.kind)} failing` : e.trusted ? `${cap(e.kind)} confirmed` : `Confirm ${e.kind}`}
+							title={
+								e.failed
+									? `${cap(e.kind)} failing`
+									: e.trusted
+										? `${cap(e.kind)} attested`
+										: reported
+											? `${cap(e.kind)} reported passing; human attestation required`
+											: `Required ${e.kind} evidence missing`
+							}
 						>
 							<p>
 								{e.failed
 									? "A failing result is recorded for this exact revision. Its author can record an updated result after checking again, or the workspace can publish a fix."
 									: e.trusted
-										? `Confirmed by ${actorLabel(confirmed?.actor)} for this exact revision.`
+										? `Attested by ${actorLabel(confirmed?.actor)} for this exact revision.`
 										: reported
-											? `${actorLabel(reported.actor)} reported a pass: “${reported.summary}”. Repository policy needs a maintainer to confirm it.`
-											: `Repository policy needs confirmed ${e.kind} for this exact revision.`}
+											? `${actorLabel(reported.actor)} reported a pass: “${reported.summary}”. Inspect the evidence; repository policy needs a human maintainer to attest it.`
+											: `No ${e.kind} result is recorded for this exact revision. The owner's tools can report one, or a maintainer can record a result they checked.`}
 							</p>
 							{view.permissions.approve && checks.open && (
 								<div className="check-actions">
 									<NoteAction
-										label={e.failed ? `Record updated ${e.kind} pass` : `Confirm ${e.kind} pass`}
+										label={
+											e.failed ? `Record updated ${e.kind} pass` : reported ? `Attest ${e.kind} pass` : `Record checked ${e.kind} pass`
+										}
 										immediate
 										placeholder="What did you check? (optional)"
-										fallback={`Confirmed ${e.kind} in the console`}
+										fallback={`Attested ${e.kind} in the console`}
 										run={(note) =>
 											execute({
 												tool: "record_verification",
@@ -297,7 +314,7 @@ function ReviewChecklist({ view, p, execute, busy }: { view: RepositorySnapshot;
 				</div>
 			)}
 			{!(view.permissions.maintain && view.permissions.human) && (
-				<p className="muted">A repository maintainer confirms checks and promotes.</p>
+				<p className="muted">A human repository maintainer attests evidence, approves and promotes.</p>
 			)}
 			{error && <p role="alert">{error}</p>}
 		</section>
@@ -310,12 +327,14 @@ export function ChangeDetail({
 	execute,
 	busy,
 	open,
+	who,
 }: {
 	view: RepositorySnapshot;
 	id: string;
 	execute: Execute;
 	busy: boolean;
 	open: Open;
+	who: People;
 }) {
 	const p = view.proposals.find((p) => p.id === id);
 	const [error, setError] = useState("");
@@ -345,8 +364,9 @@ export function ChangeDetail({
 					<p className="change-meta">
 						<LaneBullet lane={laneIndex(view).get(p.workspaceId)} />
 						<Pill tone={status.tone}>{status.label}</Pill>
+						{workspace && <span className="owner">Owner: {ownerName(workspace.ownerId, who)}</span>}
 						<span>
-							Revision <code title={p.revision}>{short(p.revision)}</code> on <code title={p.base}>{short(p.base)}</code>
+							Revision <code title={p.revision}>{short(p.revision)}</code> on review base <code title={p.base}>{short(p.base)}</code>
 						</span>
 						{workspace && (
 							<span>
@@ -356,7 +376,7 @@ export function ChangeDetail({
 								</button>
 							</span>
 						)}
-						{artifact && <span>{`published by ${actorLabel(artifact.actor)} ${ago(artifact.at)}`}</span>}
+						{artifact && <span>{`published ${throughConnection(artifact.actor, who)} · ${ago(artifact.at)}`}</span>}
 					</p>
 					{["stale", "superseded", "promoted", "rejected"].includes(status.key) && <p className="status-detail">{status.detail}</p>}
 				</div>
@@ -402,7 +422,7 @@ export function ChangeDetail({
 									<strong>
 										{v.kind} {v.outcome}
 									</strong>{" "}
-									· {v.trust === "reported" ? `reported by ${actorLabel(v.actor)}` : `confirmed by ${actorLabel(v.actor)}`}
+									· {v.trust === "reported" ? `reported by ${actorLabel(v.actor)}` : `attested by ${actorLabel(v.actor)}`}
 									{v.revision !== p.revision && " · earlier revision"}
 									<p>{v.summary}</p>
 								</li>

@@ -10,18 +10,28 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 - Add a repository reconciliation view and `get_reconciliation` MCP read based on exact published Git ancestry, with proposal blockers and explicit unknown results.
 - Show report freshness independently of presence throughout workspace and reconciliation views.
 - Add a dark console theme, Midnight, alongside the light Daylight theme. The console matches the system by default, and the avatar menu offers System, Dark or Light.
-- Lead Home with **Needs you**: every open change waiting on a person across repositories, with its status, a one-line reason and its action (Review, Promote or Open), followed by advisory heads-ups.
+- Lead Home with **Needs you** across repositories, followed by advisory heads-ups.
 - Add a lane map to Workspaces that draws canonical promotions and each live workspace from its fixed baseline through head, published revision and change. Unplaced baselines and quiet checkouts are drawn dashed, and shared paths are marked as advisory.
 - Add **Agent connections** to the avatar menu: every agent you approved, with its mark, approved repositories, permissions, approval and expiry, and a confirmed **Revoke**. Names and marks are what each agent reports about itself. New approvals record the client name and approved repositories with the grant so they can be listed; older grants show "Repositories not recorded".
+- Add a read-only attention projection to repository snapshots (and the `get_repository` MCP read). Each current change, and each live workspace that needs reconciliation, carries its responsible owner, exact revision and comparison basis, one group (Operation needs attention, Ready to promote, Needs human review, Needs preparation or Needs reconciliation), every structured blocker in order, and the next actions available to the viewer under current authority. It writes nothing, reads no source and assigns nothing.
+- Filter repository Changes by **Needs you** or by attention group, and Workspaces by **Mine**, **Needs reconciliation** or owner. Filters live in the URL, so links, reloads and Back keep them.
+- Add **Continue this workspace** to workspace pages: what travels (only pushed commits), the reported head against the observed fork branch and last publication, and the existing detach and `cruce resume` steps. Other users are told that only the owner can attach it and that ownership transfer is unsupported.
 - Add a Cruce sign-in page at `/sign-in`. The homepage's **Sign in** opens it, and signed-out repository links, invitations and expired sessions show it in place with what signing in will open. Its button still hands off to Cloudflare Access; an optional `CRUCE_SIGN_IN_PROVIDER` label (for example GitHub) names the Access identity provider on the button.
 
 ### Changed
 
+- Make Home's **Needs you** viewer-specific: it lists only decisions you can make now, each with its owner, exact revision, primary blocker, the number of further blockers and your action. Visible work whose next step belongs to its owner or a maintainer moves to **Waiting on others**. Capped repository summaries say "Showing 8 of 17" and link to the full filtered list.
+- Lead change and workspace rows with the accountable owner, resolved from namespace identity with an explicit fallback; tool labels move to provenance ("Worktree attached through Codex", "published through Codex, Maya's connection"). The lane map labels each lane with its owner.
+- Group repository Changes by next action instead of one review list, and count recovery, promotion, review, preparation and reconciliation separately in the attention bar, where each count opens its filtered list. Stale changes are now reconciliation work rather than hidden with superseded ones.
+- Count diverged work, unpublished baselines behind canonical and published ancestry missing accepted revisions as needing reconciliation. A published revision already contained in canonical no longer counts as behind, and workspaces with unavailable ancestry are counted separately as missing knowledge. Canonical comparison is offered for diverged as well as behind workspaces.
+- Word evidence by its trust: "Required tests evidence missing", "Tests reported passing; human attestation required", "Tests failing" and "Tests attested". The maintainer action reads **Attest tests pass** for reported results and **Record checked tests pass** when nothing was reported.
+- Show on each History promotion the approving human, the promoting human, the source workspace and its owner, the previous canonical revision and the passing evidence for the promoted revision.
+- Replace the namespace overview's **Needs review** count with the viewer-specific **Needs you** count.
 - Give the console a quiet branded backdrop: a faint accent glow, a fading dot grid and the Cruce crossing in hairlines, in both themes.
 - Highlight rows on hover or keyboard focus with a soft accent spotlight that follows the pointer, a faint accent wash and an accent edge drawn in from the left.
 - Redesign the console on one token-based visual system with Geist and JetBrains Mono, open lists between hairline rules, and frames only around the lane map, diffs and source.
 - Show each workspace's lane colour on its rows, its workspace page and its change's review checklist. Turn the repository attention bar into a strip of counts that each open where they are handled.
-- Add the open changes behind the counts, and the state of live workspaces, to repository summaries so Home can name each decision.
+- Add the attention items behind the counts, and the state of live workspaces, to repository summaries so Home can name each decision. Summaries carry the viewer's actionable items first, capped at eight, with exact totals.
 
 ### Removed
 

@@ -13,6 +13,7 @@ import type {
 	Workspace,
 	WorkspaceUpdates,
 } from "../shared/platform.ts";
+import { attentionView } from "./attention.ts";
 import { humanMaintain, writeAccess } from "./capabilities.ts";
 import { DomainError, requireValue, stable } from "./errors.ts";
 export const WORKSPACE_TTL = 90_000;
@@ -190,7 +191,7 @@ export class RepositoryController {
 			cleanup: s.cleanup ? { ...s.cleanup, command: s.cleanup.actorId === a.actor.id ? s.cleanup.command : undefined } : undefined,
 			state: s.state === "active" && !this.live(s) ? "disconnected" : s.state,
 		}));
-		return {
+		const snapshot: RepositorySnapshot = {
 			...state,
 			asOf: this.now,
 			overlaps: this.overlaps(),
@@ -230,6 +231,8 @@ export class RepositoryController {
 					]),
 			),
 		};
+		snapshot.attention = attentionView(snapshot, a.actor.userId);
+		return snapshot;
 	}
 	trace(subject: string) {
 		const ids = new Set([subject]);

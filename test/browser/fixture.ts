@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { attentionView } from "../../src/core/attention.ts";
 import { stable } from "../../src/core/errors.ts";
 import { DirectoryController, initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
 import { initialRepository, RepositoryController } from "../../src/core/platform.ts";
@@ -35,10 +36,10 @@ export async function fixture() {
 		workspaces: {},
 		estimatedDailyOperations: 96 * (1 + runtime.state.workspaces.filter((w) => w.fork?.state === "ready").length),
 	});
-	const snapshotsFor = async (runtime: RepositoryController, authority: Parameters<RepositoryController["snapshot"]>[0]) => ({
-		...runtime.snapshot(authority),
-		reconciliation: await readReconciliation(runtime, observation(runtime), git),
-	});
+	const snapshotsFor = async (runtime: RepositoryController, authority: Parameters<RepositoryController["snapshot"]>[0]) => {
+		const snapshot = { ...runtime.snapshot(authority), reconciliation: await readReconciliation(runtime, observation(runtime), git) };
+		return { ...snapshot, attention: attentionView(snapshot, authority.actor.userId) };
+	};
 
 	let counter = 0;
 	const next = () => `fixture-${++counter}`;
@@ -121,6 +122,59 @@ export async function fixture() {
 	});
 	const runtimes = new Map([[repository.id, c]]),
 		calls: unknown[] = [];
+	const people: { id: string; name: string; email: string }[] = [user];
+	/**
+	 * Opt-in mixed-owner state: Maya owns ten proposed workspaces through her own agent connection. Two carry reported
+	 * tests (a maintainer decision for Alex); eight lack evidence (Maya's preparation); one shares a reported path.
+	 */
+	const seedTeam = () => {
+		people.push({ id: "maya", name: "Maya Reyes", email: "maya@example.com" });
+		const maya: Actor = { id: "maya-codex", userId: "maya", name: "Cruce codex bridge", kind: "agent", connectionId: "oauth-maya" };
+		const authority = {
+			actor: maya,
+			namespaceId: shared.id,
+			repositoryId: repository.id,
+			role: "developer" as const,
+			repositoryRole: "write" as const,
+		};
+		const as = (tool: string, fields: Partial<Command> = {}) =>
+			c.command({ tool, namespaceId: shared.id, repositoryId: repository.id, ...fields }, authority);
+		for (let i = 1; i <= 10; i++) {
+			const s = as("start_workspace", { title: `Session renewal ${i}`, baseRevision: base }) as { id: string };
+			if (i === 1) {
+				const execution = { id: s.id, checkoutId: s.id, machineId: "maya-laptop", kind: "worktree" as const, owned: true };
+				as("attach_workspace", { workspaceId: s.id, execution });
+				as("report_change", { workspaceId: s.id, execution, revision: head, changes: [{ path: "src/retry.ts", status: "modified" }] });
+			}
+			c.addArtifact({
+				id: `maya-source-${i}`,
+				namespaceId: shared.id,
+				repositoryId: repository.id,
+				workspaceId: s.id,
+				actor: maya,
+				revision: head,
+				baseRevision: base,
+				kind: "source",
+				title: `Session renewal ${i}`,
+				contentHash: `maya-hash-${i}`,
+				trust: "reported",
+				storage: { repository: "fixture-source", providerId: "fixture-source", revision: head },
+				at: FIXED_TIME,
+			});
+			const workspace = c.workspace(s.id);
+			workspace.publishedRevision = head;
+			workspace.integratedRevision = base;
+			const p = as("create_proposal", { artifactId: `maya-source-${i}` }) as { id: string };
+			if (i <= 2)
+				as("record_verification", {
+					proposalId: p.id,
+					revision: head,
+					kind: "tests",
+					outcome: "pass",
+					reason: "Reported tests: 12 passed",
+				});
+		}
+	};
 	const day = 86_400_000;
 	let connections = [
 		{
@@ -197,6 +251,10 @@ export async function fixture() {
 			}
 			if (url.pathname.startsWith("/api/") && !authenticated) return json(res, { error: "Session expired" }, 401);
 			if (url.pathname === "/__fixture/calls") return json(res, calls);
+			if (url.pathname === "/__fixture/scenario" && req.method === "POST") {
+				if (body.name === "team") seedTeam();
+				return json(res, { seeded: body.name });
+			}
 			if (url.pathname === "/__fixture/upstream" && req.method === "POST") {
 				c.state.sourceHead = head;
 				return json(res, { updated: true });
@@ -235,7 +293,7 @@ export async function fixture() {
 					repositorySummaries,
 					activity,
 					role: a.role,
-					people: [user],
+					people,
 					permissions: { maintain: true, owner: true },
 					storage: { mode: "deployment", ready: true },
 				});

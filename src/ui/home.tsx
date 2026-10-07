@@ -1,25 +1,28 @@
 import { useEffect, useState } from "react";
-import type { Namespace, Repository, User } from "../shared/platform.ts";
+import { ATTENTION_ORDER } from "../core/attention.ts";
+import type { AttentionItem, Namespace, Repository, User } from "../shared/platform.ts";
 import { Empty } from "./controls.tsx";
 import { Icon, Initials, PageHeader, Pill, Section } from "./design.tsx";
 import { MiniLanes } from "./lanes.tsx";
 import { request } from "./request.ts";
-import { actorLabel, short } from "./status.ts";
+import { ACTION_LABELS, blockerSummary, GROUP_LABELS, ownerName, type People, short, waitingOn } from "./status.ts";
 import type { NamespaceView } from "./types.ts";
 
 export type Summary = NonNullable<NamespaceView["repositorySummaries"]>[number];
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-type Open = (namespaceId: string, repositoryId?: string, tab?: string, id?: string) => void;
+type Open = (namespaceId: string, repositoryId?: string, tab?: string, id?: string, filter?: string) => void;
 
 /** The short attention list for a repository row; quiet when nothing needs a person. */
 export function AttentionPills({ summary }: { summary?: Summary }) {
 	if (!summary) return <span className="row-quiet">Status unavailable</span>;
-	const { review, ready, stale, behind } = summary.attention;
+	const { recovery, promote, review, preparation, reconciliation, mine } = summary.attention;
 	const pills = [
+		mine ? <Pill key="mine" tone="accent">{`${mine} for you`}</Pill> : null,
+		recovery ? <Pill key="recovery" tone="danger">{`${plural(recovery, "operation")} to recover`}</Pill> : null,
+		promote ? <Pill key="promote" tone="success">{`${promote} ready to promote`}</Pill> : null,
 		review ? <Pill key="review" tone="accent">{`${review} to review`}</Pill> : null,
-		ready ? <Pill key="ready" tone="success">{`${ready} ready to promote`}</Pill> : null,
-		stale ? <Pill key="stale" tone="warning">{`${stale} stale`}</Pill> : null,
-		behind ? <Pill key="behind" tone="warning">{`${behind} behind canonical`}</Pill> : null,
+		preparation ? <Pill key="preparation" tone="warning">{`${preparation} to prepare`}</Pill> : null,
+		reconciliation ? <Pill key="reconciliation" tone="warning">{`${reconciliation} to reconcile`}</Pill> : null,
 	].filter(Boolean);
 	return <span className="row-pills">{pills.length ? pills : <span className="row-quiet">Nothing waiting</span>}</span>;
 }
@@ -56,11 +59,12 @@ export function RepositoryRow({
 export function totals(summaries: (Summary | undefined)[]) {
 	return summaries.reduce(
 		(sum, s) => ({
+			mine: sum.mine + (s?.attention.mine ?? 0),
 			review: sum.review + (s?.attention.review ?? 0),
-			ready: sum.ready + (s?.attention.ready ?? 0),
+			ready: sum.ready + (s?.attention.promote ?? 0),
 			active: sum.active + (s?.active ?? 0),
 		}),
-		{ review: 0, ready: 0, active: 0 },
+		{ mine: 0, review: 0, ready: 0, active: 0 },
 	);
 }
 
@@ -78,81 +82,137 @@ export function SkeletonRows({ label }: { label: string }) {
 	);
 }
 
-type Row = { namespace: Namespace; repository: Repository; summary?: Summary };
-const decisionKinds = {
-	review: { label: "Needs review", tone: "accent", action: "Review", primary: true, order: 0 },
-	ready: { label: "Ready to promote", tone: "success", action: "Promote", primary: true, order: 1 },
-	stale: { label: "Stale", tone: "warning", action: "Open", primary: false, order: 2 },
-} as const;
+type Row = { namespace: Namespace; repository: Repository; summary?: Summary; who: People };
 
-/** Every change waiting on a person, across repositories, each with the one action that moves it forward. */
-function Decisions({ rows, open, partial }: { rows: Row[]; open: Open; partial: boolean }) {
-	const decisions = rows
-		.flatMap((row) => (row.summary?.changes ?? []).map((change) => ({ ...row, change })))
-		.sort((a, b) => decisionKinds[a.change.status].order - decisionKinds[b.change.status].order || b.change.number - a.change.number);
+/** One attention item: where, what, who owns it, the exact revision, the primary blocker, and this viewer's next step. */
+function AttentionRow({ row, item, open }: { row: Row; item: AttentionItem; open: Open }) {
+	const kind = GROUP_LABELS[item.group];
+	const action = item.mine ? ACTION_LABELS[item.actions[0]] : waitingOn(item);
 	return (
-		<Section title="Needs you" count={decisions.length}>
-			{decisions.length ? (
-				<div className="rows">
-					{decisions.map(({ namespace, repository, change }) => {
-						const kind = decisionKinds[change.status];
-						const why =
-							change.status === "review"
-								? `${change.actor ? `${actorLabel({ name: change.actor, kind: "agent" })} published` : "Published"} ${short(change.revision)}. Confirm its checks, then approve this exact revision.`
-								: change.status === "ready"
-									? `Every check passed for ${short(change.revision)}. Promoting moves canonical to exactly this revision.`
-									: "Canonical moved past its base. Its workspace merges canonical with Git and publishes again.";
-						return (
-							<button
-								type="button"
-								key={`${repository.id}/${change.id}`}
-								className={`decision-row ${kind.tone}`}
-								onClick={() => open(namespace.id, repository.id, "changes", change.id)}
-							>
-								<span className="decision-edge" aria-hidden="true" />
-								<span className="row-main">
-									<span className="decision-where">
-										{namespace.handle}/{repository.name}
-									</span>
-									<span className="decision-title">
-										<span className="row-number">#{change.number}</span>
-										{change.title}
-										<Pill tone={kind.tone}>{kind.label}</Pill>
-									</span>
-									<span className="decision-why">{why}</span>
-								</span>
-								<span className={`decision-action${kind.primary ? " primary" : ""}`} aria-hidden="true">
-									{kind.action}
-								</span>
-							</button>
-						);
-					})}
-				</div>
-			) : (
-				<p className="calm">{partial ? "Nothing waiting in the repositories that loaded." : "Nothing needs you right now."}</p>
-			)}
-		</Section>
+		<button
+			type="button"
+			className={`decision-row ${kind.tone}`}
+			onClick={() => open(row.namespace.id, row.repository.id, item.subject === "change" ? "changes" : "workspaces", item.id)}
+		>
+			<span className="decision-edge" aria-hidden="true" />
+			<span className="row-main">
+				<span className="decision-where">
+					{row.namespace.handle}/{row.repository.name}
+				</span>
+				<span className="decision-title">
+					{item.number !== undefined && <span className="row-number">#{item.number}</span>}
+					{item.title}
+					<Pill tone={kind.tone}>{kind.label}</Pill>
+				</span>
+				<span className="decision-owner">
+					Owner: {ownerName(item.ownerId, row.who)} · <code title={item.revision}>{short(item.revision)}</code>
+					{item.base && (
+						<>
+							{item.subject === "change" ? " on review base " : " compared with canonical "}
+							<code title={item.base}>{short(item.base)}</code>
+						</>
+					)}
+				</span>
+				<span className="decision-why">{blockerSummary(item)}</span>
+			</span>
+			<span className={`decision-action${item.mine ? " primary" : " waiting-on"}`} aria-hidden="true">
+				{action}
+			</span>
+		</button>
 	);
 }
 
-/** Facts worth knowing that need no decision yet: work behind canonical, quiet checkouts, shared paths. */
+/** Says when a capped summary omits items, with the route to the full filtered list. */
+function Truncated({ rows, mine, open }: { rows: Row[]; mine: boolean; open: Open }) {
+	const capped = rows.flatMap((row) => {
+		if (!row.summary) return [];
+		const shown = row.summary.items.filter((item) => item.mine === mine).length,
+			total = mine ? row.summary.attention.mine : row.summary.attention.total - row.summary.attention.mine;
+		return shown < total ? [{ row, shown, total }] : [];
+	});
+	if (!capped.length) return null;
+	return (
+		<ul className="truncated">
+			{capped.map(({ row, shown, total }) => (
+				<li key={row.repository.id}>
+					Showing {shown} of {total} in {row.repository.name}.{" "}
+					<button
+						type="button"
+						className="text-button"
+						onClick={() => open(row.namespace.id, row.repository.id, "changes", "", mine ? "mine" : "")}
+					>
+						Open the full list
+					</button>
+				</li>
+			))}
+		</ul>
+	);
+}
+
+function order(a: AttentionItem, b: AttentionItem) {
+	return ATTENTION_ORDER.indexOf(a.group) - ATTENTION_ORDER.indexOf(b.group) || b.at - a.at || (b.number ?? 0) - (a.number ?? 0);
+}
+
+/** Decisions this viewer can make now across repositories, then visible work waiting on its owner or a maintainer. */
+function Decisions({ rows, open, partial }: { rows: Row[]; open: Open; partial: boolean }) {
+	const all = rows.flatMap((row) => (row.summary?.items ?? []).map((item) => ({ row, item })));
+	const mine = all.filter(({ item }) => item.mine).sort((a, b) => order(a.item, b.item)),
+		others = all.filter(({ item }) => !item.mine).sort((a, b) => order(a.item, b.item));
+	const mineTotal = rows.reduce((n, row) => n + (row.summary?.attention.mine ?? 0), 0),
+		othersTotal = rows.reduce((n, row) => n + (row.summary ? row.summary.attention.total - row.summary.attention.mine : 0), 0);
+	return (
+		<>
+			<Section title="Needs you" count={mineTotal}>
+				{mine.length ? (
+					<div className="rows">
+						{mine.map(({ row, item }) => (
+							<AttentionRow key={`${row.repository.id}/${item.id}`} row={row} item={item} open={open} />
+						))}
+					</div>
+				) : (
+					<p className="calm">{partial ? "Nothing needs you in the repositories that loaded." : "Nothing needs you right now."}</p>
+				)}
+				<Truncated rows={rows} mine open={open} />
+			</Section>
+			{othersTotal > 0 && (
+				<details className="group waiting">
+					<summary>{`Waiting on others · ${othersTotal}`}</summary>
+					<p className="panel-note">Visible work whose next step belongs to its owner or a maintainer. You can still inspect it.</p>
+					<div className="rows">
+						{others.map(({ row, item }) => (
+							<AttentionRow key={`${row.repository.id}/${item.id}`} row={row} item={item} open={open} />
+						))}
+					</div>
+					<Truncated rows={rows} mine={false} open={open} />
+				</details>
+			)}
+		</>
+	);
+}
+
+/** Facts worth knowing that need no decision: quiet checkouts, shared reported paths, and unknown ancestry. */
 function HeadsUp({ rows, open }: { rows: Row[]; open: Open }) {
 	const items = rows.flatMap(({ namespace, repository, summary }) => {
 		if (!summary) return [];
 		const quiet = (summary.lanes ?? []).filter((lane) => lane.quiet).length;
 		return [
-			summary.attention.behind && {
-				key: "behind",
-				label: "Behind",
-				tone: "warning",
-				text: `${plural(summary.attention.behind, "workspace")} behind canonical`,
+			quiet && {
+				key: "quiet",
+				label: "Quiet",
+				tone: "neutral",
+				text: `${plural(quiet, "workspace")} not reporting; checkouts remain attached`,
 			},
-			quiet && { key: "quiet", label: "Quiet", tone: "neutral", text: `${plural(quiet, "workspace")} stopped reporting` },
 			summary.overlaps && {
 				key: "shared",
 				label: "Shared",
 				tone: "warning",
-				text: `${plural(summary.overlaps, "file")} changed in more than one workspace`,
+				text: `${plural(summary.overlaps, "path")} reported by more than one workspace`,
+			},
+			summary.attention.ancestryUnavailable && {
+				key: "unknown",
+				label: "Unknown",
+				tone: "neutral",
+				text: `Ancestry unavailable for ${plural(summary.attention.ancestryUnavailable, "workspace")}`,
 			},
 		]
 			.filter((item): item is { key: string; label: string; tone: string; text: string } => !!item)
@@ -255,11 +315,20 @@ export function NamespaceHome({
 				namespace: w,
 				repository,
 				summary: spaces[w.id]?.repositorySummaries?.find((s) => s.id === repository.id),
+				who: { viewerId: me.user.id, people: spaces[w.id]?.people },
 			})),
 		)
 		.filter((row) => `${row.repository.name} ${row.namespace.name} ${row.namespace.handle}`.toLowerCase().includes(needle))
 		.sort((a, b) => {
-			const score = (s?: Summary) => (s ? s.attention.review * 4 + s.attention.ready * 3 + s.attention.stale + s.attention.behind : 0);
+			const score = (s?: Summary) =>
+				s
+					? s.attention.recovery * 5 +
+						s.attention.mine * 4 +
+						s.attention.promote * 3 +
+						s.attention.review * 2 +
+						s.attention.preparation +
+						s.attention.reconciliation
+					: 0;
 			return score(b.summary) - score(a.summary) || a.repository.name.localeCompare(b.repository.name);
 		});
 	const namespaces = me.namespaces.filter((w) =>

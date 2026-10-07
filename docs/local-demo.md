@@ -19,13 +19,13 @@ Open the loopback URL the server prints. Set `PORT` to choose a fixed port. Rest
 
 ## 1. See what needs you
 
-**Home** lists your repositories across namespaces, most urgent first. The sample **payment-service** in the shared **Fernloop** namespace shows **1 to review**. Below are your namespaces: your personal **Alex Morgan** namespace has no Cloudflare account connected, and Home says so. Type in **Find repository** in the header, or press Cmd/Ctrl K, to jump anywhere.
+**Home** lists your repositories across namespaces, most urgent first. The sample **payment-service** in the shared **Fernloop** namespace shows **1 for you** and **1 to prepare**: its one change lacks required tests evidence, and you own it. **Needs you** names that change with its owner (you), exact revision, review base and primary blocker. Below are your namespaces: your personal **Alex Morgan** namespace has no Cloudflare account connected, and Home says so. Type in **Find repository** in the header, or press Cmd/Ctrl K, to jump anywhere.
 
 ![Home listing payment-service with one change to review, and the two namespaces](images/local-demo/home.jpg)
 
 ## 2. Open the repository
 
-Click **payment-service**. The header shows canonical `main` and its exact revision. Below it, the attention bar says in plain words what needs someone: **1 change needs your review** and **1 file changed in more than one workspace**. Each item links to where it's handled. The **Changes** tab lists the change that needs attention, **Bounded retry policy #1**, with its exact revision, pinned base, workspace and the tool that published it.
+Click **payment-service**. The header shows canonical `main` and its exact revision. Below it, the attention bar says in plain words what needs someone: **1 change needs preparation** and **1 path reported by more than one workspace**. Each item opens its filtered list. The **Changes** tab groups changes by next action; **Bounded retry policy #1** sits under **Needs preparation** with its owner, exact revision on its review base, workspace and "Required tests evidence missing · 1 more blocker".
 
 ![Repository Changes tab with the attention bar and one change marked Needs review](images/local-demo/changes.jpg)
 
@@ -34,12 +34,12 @@ Click **payment-service**. The header shows canonical `main` and its exact revis
 Open **Bounded retry policy #1**. The review is a checklist for this exact revision:
 
 1. **Built on the current canonical revision**: already checked.
-2. **Confirm tests**: repository policy needs a maintainer to confirm the tests. Click **Confirm tests pass**; the note is optional.
+2. **Required tests evidence missing**: Codex stored a test report, but no tests result was recorded for this revision. Normally the owner's tools report one and a maintainer attests it; here, as a maintainer who checked the tests, click **Record checked tests pass**. The note is optional.
 3. **Approve this exact revision**: click **Approve**. Approval covers `9461bc8e` only; a new revision needs a new review.
 
 When every item is checked, the change shows **Ready to promote** and **Promote to main** explains exactly what it does: move canonical `main` from `4906343f` to `9461bc8e` with a non-forced Git update. Raising a concern, recording a failure or closing the change asks for a reason. The files changed and the evidence (including Codex's stored test report) are below the checklist.
 
-Promote it. The change becomes **Promoted**, the header shows the new canonical revision, and the attention bar now reports workspaces **behind canonical**: the other concurrent work has something to merge.
+Promote it. The change becomes **Promoted**, the header shows the new canonical revision, and the attention bar now reports **1 workspace needs reconciliation**: the other concurrent workspace started from the old baseline and has canonical changes to merge with Git before it publishes.
 
 ![Review checklist with Promote to main, the diff and evidence](images/local-demo/review.jpg)
 

@@ -47,7 +47,10 @@ export const CRUCE_TOOLS: Tool[] = [
 		"get_reconciliation",
 		"Read repository reconciliation, exact published ancestry, proposal blockers and observation health. Never fetches or writes.",
 	),
-	read("get_repository", "Repository state, current workspaces, changes, artifacts and observation freshness."),
+	read(
+		"get_repository",
+		"Repository state, current workspaces, changes, artifacts, observation freshness and a read-only attention projection: each item's owner, exact revision, structured blockers and the caller's eligible actions. Attention assigns nothing.",
+	),
 	read("get_workspace", "Inspect a workspace: owner, baseline, fork, current execution attachment and revisions.", ["workspaceId"]),
 	read(
 		"get_workspace_updates",
