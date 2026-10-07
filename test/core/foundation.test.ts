@@ -156,12 +156,9 @@ describe("namespace ownership", () => {
 		c.state.namespace.kind = "personal";
 		expect(() => c.member(authority(), "next", "developer")).toThrow("one owner");
 	});
-	it("does not silently bypass budgets for humans or a new resource policy on retry", () => {
+	it("does not silently bypass a new resource policy on retry", () => {
 		const c = namespace();
 		c.repository(authority(), repo);
-		c.state.policy.dailyLimit = 0;
-		expect(() => c.reserve(authority(), "human", "inputs", "repository.create")).toThrow("budget");
-		c.state.policy.dailyLimit = 1;
 		c.reserve(authority(agent), "retry", "inputs", "workspace.fork", "workspace");
 		c.state.policy.rules["workspace.fork"] = "deny";
 		expect(() => c.reserve(authority(agent), "retry", "inputs", "workspace.fork", "workspace")).toThrow("policy denies");
@@ -175,16 +172,16 @@ describe("namespace ownership", () => {
 		const w = namespace();
 		expect(() => w.repository(authority(), { ...repo, namespaceId: "other" })).toThrow();
 	});
-	it("shares reservations across repositories and counts uncertain retries once", () => {
+	it("shares reservations across repositories and reuses uncertain retries", () => {
 		const c = namespace(),
 			a = authority(agent);
 		c.repository(authority(), repo);
 		c.repository(authority(), { ...repo, id: "second", name: "second" });
-		c.state.policy.dailyLimit = 1;
 		const reservation = c.reserve(a, "operation", "exact inputs", "workspace.fork", "workspace");
 		reservation.state = "uncertain";
 		expect(c.reserve(a, "operation", "exact inputs", "workspace.fork", "workspace")).toBe(reservation);
-		expect(() => c.reserve({ ...a, repositoryId: "second" }, "other", "inputs", "workspace.fork", "workspace")).toThrow("budget");
+		expect(c.reserve({ ...a, repositoryId: "second" }, "other", "inputs", "workspace.fork", "workspace")).not.toBe(reservation);
+		expect(c.state.reservations).toHaveLength(2);
 		expect(() => c.reserve(a, "operation", "different", "workspace.fork", "workspace")).toThrow("reused");
 		c.state.repositories[0].policy.resourceRules["workspace.fork"] = "approval";
 		expect(() => c.reserve(a, "operation", "exact inputs", "workspace.fork", "workspace")).toThrow("Human");
@@ -197,7 +194,7 @@ describe("namespace ownership", () => {
 		const reader = { ...authority(agent), repositoryRole: "read" as const };
 		const r = c.reserve(reader, "inspect", "exact revision", "source.read");
 		expect(c.reserve(reader, "inspect", "exact revision", "source.read")).toBe(r);
-		expect(c.budget().used).toBe(1);
+		expect(c.state.reservations).toHaveLength(1);
 		expect(() => c.reserve(reader, "publish", "revision", "revision.publish")).toThrow("write permission");
 		c.state.repositories[0].policy.resourceRules["source.read"] = "approval";
 		expect(() => c.reserve(reader, "inspect", "exact revision", "source.read")).toThrow("Human");

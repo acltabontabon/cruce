@@ -1282,6 +1282,9 @@ body {
 	padding-left: 32px;
 	border-left: 1px solid var(--border-subtle);
 }
+.overview.single {
+	grid-template-columns: minmax(0, 1fr);
+}
 .overview > [role="status"] {
 	grid-column: 1 / -1;
 }
@@ -2949,53 +2952,6 @@ div.team-row {
 	border-radius: 50%;
 	font-size: 9px;
 }
-.usage {
-	display: grid;
-	gap: 12px;
-	padding-top: 16px;
-}
-.usage .panel-note {
-	margin: 0;
-}
-.usage-figure {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: baseline;
-	gap: 4px 10px;
-	margin: 0;
-	color: var(--text-muted);
-	font-size: 13px;
-}
-.usage-figure strong {
-	color: var(--text);
-	font-family: var(--font-mono);
-	font-size: 22px;
-	font-weight: 650;
-	letter-spacing: -0.04em;
-	line-height: 1;
-	font-variant-numeric: tabular-nums;
-}
-.usage.wide {
-	max-width: 520px;
-	padding: 0;
-}
-.meter {
-	height: 6px;
-	overflow: hidden;
-	border-radius: 999px;
-	background: var(--surface-3);
-}
-.meter span {
-	display: block;
-	min-width: 2px;
-	height: 100%;
-	border-radius: inherit;
-	background: var(--accent);
-	transition: width 300ms var(--ease);
-}
-.meter.high span {
-	background: var(--tone-warning);
-}
 .settings {
 	border-top: 1px solid var(--border);
 }
@@ -3036,9 +2992,6 @@ div.team-row {
 }
 :where(.shell) .setting-form label {
 	margin-top: 0;
-}
-.limit-field {
-	max-width: 220px;
 }
 .rules {
 	border-top: 1px solid var(--border-subtle);

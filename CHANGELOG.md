@@ -6,7 +6,7 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Added
 
-- Add opt-in pushed-ref observation with namespace-budgeted subscriptions, idempotent Queue ingestion, bounded gap recovery and visible degraded state. Observations never publish or approve source.
+- Add opt-in pushed-ref observation with policy-gated subscriptions, idempotent Queue ingestion, bounded gap recovery and visible degraded state. Observations never publish or approve source.
 - Add a repository reconciliation view and `get_reconciliation` MCP read based on exact published Git ancestry, with proposal blockers and explicit unknown results.
 - Show report freshness independently of presence throughout workspace and reconciliation views.
 - Add a dark console theme, Midnight, alongside the light Daylight theme. The console matches the system by default, and the avatar menu offers System, Dark or Light.
@@ -18,6 +18,10 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 - Redesign the console on one token-based visual system with Geist and JetBrains Mono, open lists between hairline rules, and frames only around the lane map, diffs and source.
 - Show each workspace's lane colour on its rows, its workspace page and its change's review checklist. Turn the repository attention bar into a strip of counts that each open where they are handled.
 - Add the open changes behind the counts, and the state of live workspaces, to repository summaries so Home can name each decision.
+
+### Removed
+
+- Remove the namespace daily operation budget ([ADR 0008](docs/decisions/0008-remove-daily-operation-budget.md)). Resource operations, including source reads, no longer count against a daily limit, and nothing stops at midnight UTC. Namespace settings keep per-operation resource policy under **Storage operations**, and the namespace overview no longer shows today's usage. Retries still reuse their original reservation.
 
 ### Fixed
 

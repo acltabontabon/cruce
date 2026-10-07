@@ -366,7 +366,7 @@ export class Observation {
 				saved.attempts++;
 				saved.reason =
 					error instanceof DomainError && [401, 403].includes(error.status)
-						? "Observation needs current maintainer authority, resource policy and budget"
+						? "Observation needs current maintainer authority and resource policy"
 						: error instanceof DomainError && [409, 413].includes(error.status)
 							? "Observation needs complete refs and matching installation, subscription and provider identities"
 							: "Observation service unavailable; retry is pending";

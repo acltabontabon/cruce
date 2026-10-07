@@ -179,7 +179,7 @@ describe("bounded indexed coordination storage", () => {
 		expect(() => assertStateBytes({ text: "x".repeat(STATE_LIMITS.stateBytes) })).toThrow("Coordination state exceeds its byte limit");
 		expect(() => assertStateBytes({ text: "x".repeat(STATE_LIMITS.stateBytes - 16) })).not.toThrow();
 	});
-	it("keeps namespace charges atomic across concurrent reservations, UTC days and restarts", async () => {
+	it("keeps reservations atomic across concurrent retries, UTC days and restarts", async () => {
 		const f = database(),
 			now = vi.spyOn(Date, "now").mockReturnValue(1000);
 		const env = { CRUCE_STORAGE_ACCOUNT_ID: "a".repeat(32), CRUCE_ARTIFACTS_NAMESPACE: "cruce", ARTIFACTS: {} };
@@ -197,20 +197,17 @@ describe("bounded indexed coordination storage", () => {
 			grants: [],
 			policy: { protectedPaths: [], requiredEvidence: [], resourceRules: {} },
 		});
-		namespace.policy(grant, { ...namespace.snapshot(grant).policy, dailyLimit: 1 });
-		const results = await Promise.allSettled([
+		const [first, retry] = await Promise.all([
 			namespace.reserve(grant, "repo", "one", "input", "workspace.fork"),
-			namespace.reserve(grant, "repo", "two", "input", "workspace.fork"),
+			namespace.reserve(grant, "repo", "one", "input", "workspace.fork"),
 		]);
-		expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
-		const operationId = ["one", "two"][results.findIndex((result) => result.status === "fulfilled")];
-		expect(namespace.snapshot(grant).budget.used).toBe(1);
+		expect(retry.id).toBe(first.id);
+		expect(namespace.reservations(grant).items).toHaveLength(1);
 		now.mockReturnValue(86400000 + 1000);
 		namespace = new NamespaceRuntime(f.ctx, env as never);
-		const replay = await namespace.reserve(grant, "repo", operationId, "input", "workspace.fork");
+		const replay = await namespace.reserve(grant, "repo", "one", "input", "workspace.fork");
 		expect(replay.at).toBe(1000);
-		expect(namespace.snapshot(grant).budget.used).toBe(0);
-		await expect(namespace.reserve(grant, "repo", operationId, "changed", "workspace.fork")).rejects.toThrow("identity reused");
+		await expect(namespace.reserve(grant, "repo", "one", "changed", "workspace.fork")).rejects.toThrow("identity reused");
 		namespace.settle(replay.id, "uncertain");
 		expect(() => namespace.settle(replay.id, "released")).toThrow("cannot be released");
 		expect(f.store.get<{ reservations: unknown[] }>("namespace")!.reservations).toEqual([]);
@@ -361,7 +358,6 @@ describe("existing resource operation retention", () => {
 		const replay = await namespace.reserve(grant, "repo", "operation", "original-input", "workspace.cleanup", "workspace");
 		expect(replay.id).toBe(previous.id);
 		expect(replay.at).toBe(previous.at);
-		expect(namespace.snapshot(grant).budget.used).toBe(1);
 		expect(f.store.get<{ reservations: unknown[] }>("namespace")?.reservations).toEqual([]);
 		expect(namespace.reservations(grant).items).toHaveLength(1);
 	});

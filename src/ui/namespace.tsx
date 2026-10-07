@@ -14,6 +14,7 @@ const actionLabels: Record<string, { label: string; detail: string }> = {
 	"artifact.publish": { label: "Store evidence", detail: "Test reports and other evidence files." },
 	"workspace.cleanup": { label: "Delete workspace forks", detail: "Only after every ref is retained." },
 	"source.read": { label: "Inspect and recover stored source", detail: "Explicit cloud reads and local Git cache recovery." },
+	"observation.read": { label: "Observe pushed refs", detail: "Push subscriptions and missed-event checks." },
 };
 const ruleLabels: Record<string, string> = { allow: "Allowed", approval: "Maintainers only", deny: "Not allowed" };
 const roleLabels: Record<NamespaceRole, string> = { owner: "Owner", maintainer: "Maintainer", developer: "Developer", viewer: "Viewer" };
@@ -21,7 +22,6 @@ const roleLabels: Record<NamespaceRole, string> = { owner: "Owner", maintainer: 
 /** Namespace routes: one overview and its settings. Retired Members and Teams links open the overview's People section. */
 export const namespaceViews = ["repositories", "members", "teams", "settings"];
 
-/** When the daily count resets; "at midnight UTC" once the reset is due. */
 /** Opening an inline form moves focus to its first field, as opening a dialog does. */
 function InlinePanel({ children }: { children: ReactNode }) {
 	const ref = useRef<HTMLDivElement>(null);
@@ -29,25 +29,6 @@ function InlinePanel({ children }: { children: ReactNode }) {
 	return (
 		<div className="inline-panel" ref={ref}>
 			{children}
-		</div>
-	);
-}
-
-const resetsIn = (at: number) =>
-	at > Date.now() ? `in ${Math.max(1, Math.round((at - Date.now()) / 3_600_000))} h (midnight UTC)` : "at midnight UTC";
-
-function Meter({ used, limit }: { used: number; limit: number }) {
-	const share = Math.min(1, used / Math.max(1, limit));
-	return (
-		<div
-			className={`meter${share >= 0.9 ? " high" : ""}`}
-			role="progressbar"
-			aria-label="Operations used today"
-			aria-valuemin={0}
-			aria-valuemax={limit}
-			aria-valuenow={Math.min(used, limit)}
-		>
-			<span style={{ width: `${share * 100}%` }} />
 		</div>
 	);
 }
@@ -277,33 +258,6 @@ function Teams({ namespace, base, mutate }: { namespace: NamespaceView; base: st
 	);
 }
 
-function Usage({ namespace, settings }: { namespace: NamespaceView; settings: () => void }) {
-	const budget = namespace.budget;
-	return (
-		<Section
-			title="Today"
-			action={
-				<button type="button" className="ghost" onClick={settings}>
-					Limits
-				</button>
-			}
-		>
-			{budget ? (
-				<div className="usage">
-					<p className="usage-figure">
-						<strong>{budget.used}</strong>
-						<span>/ {budget.limit} operations</span>
-					</p>
-					<Meter used={budget.used} limit={budget.limit} />
-					<p className="panel-note">Resets {resetsIn(budget.resetsAt)}.</p>
-				</div>
-			) : (
-				<p className="panel-note">Usage is unavailable right now.</p>
-			)}
-		</Section>
-	);
-}
-
 function Overview({
 	namespace,
 	base,
@@ -336,7 +290,7 @@ function Overview({
 					]}
 				/>
 			)}
-			<div className="overview">
+			<div className={shared ? "overview" : "overview single"}>
 				{incomplete && <p role="status">Some repository status is unavailable. Counts cover available repositories.</p>}
 				<div className="overview-main">
 					<Section title="Repositories" count={namespace.repositories.length}>
@@ -390,11 +344,12 @@ function Overview({
 						</Section>
 					) : null}
 				</div>
-				<aside className="overview-side" aria-label={`About ${namespace.namespace.name}`}>
-					{shared && <People namespace={namespace} base={base} mutate={mutate} />}
-					{shared && <Teams namespace={namespace} base={base} mutate={mutate} />}
-					<Usage namespace={namespace} settings={() => open("", "settings")} />
-				</aside>
+				{shared && (
+					<aside className="overview-side" aria-label={`About ${namespace.namespace.name}`}>
+						<People namespace={namespace} base={base} mutate={mutate} />
+						<Teams namespace={namespace} base={base} mutate={mutate} />
+					</aside>
+				)}
 			</div>
 		</>
 	);
@@ -412,7 +367,6 @@ function Settings({
 	renamed: (namespace: Namespace) => void;
 }) {
 	const ns = namespace.namespace,
-		budget = namespace.budget,
 		maintain = namespace.permissions.maintain;
 	return (
 		<div className="settings">
@@ -447,36 +401,20 @@ function Settings({
 				)}
 			</SettingRow>
 			<SettingRow
-				title="Daily operations"
-				detail="Each repository, workspace fork, push, publication and fork deletion uses one operation in this Cruce installation. Retries of the same operation don't count twice."
+				title="Storage operations"
+				detail="Who may run each operation that uses Cloudflare Artifacts storage. Retries of the same operation reuse it instead of repeating it."
 			>
-				{budget && (
-					<div className="usage wide">
-						<p className="usage-figure">
-							<strong>{budget.used}</strong>
-							<span>
-								of {budget.limit} used today · resets {resetsIn(budget.resetsAt)}
-							</span>
-						</p>
-						<Meter used={budget.used} limit={budget.limit} />
-					</div>
-				)}
 				{maintain ? (
 					<Form
-						label="Save limits"
+						label="Save operations"
 						primary
 						className="setting-form"
 						submit={(d) =>
 							mutate(`${base}/policy`, {
-								dailyLimit: Number(value(d, "dailyLimit")),
 								rules: Object.fromEntries(Object.keys(namespace.policy.rules).map((key) => [key, value(d, key)])),
 							})
 						}
 					>
-						<label className="limit-field">
-							Operations per day
-							<input name="dailyLimit" type="number" min="0" max="10000" defaultValue={namespace.policy.dailyLimit} />
-						</label>
 						<div className="rules">
 							{Object.entries(namespace.policy.rules).map(([key, rule]) => (
 								<div key={key} className="rule" role="radiogroup" aria-labelledby={`rule-${key}`}>
@@ -510,10 +448,7 @@ function Settings({
 					</dl>
 				)}
 			</SettingRow>
-			<SettingRow
-				title="Git storage"
-				detail="Cloudflare Artifacts usage is billed to the installation's account. Namespace budgets apply across its repositories."
-			>
+			<SettingRow title="Git storage" detail="Cloudflare Artifacts usage is billed to the installation's account.">
 				<p className={`storage-state ${namespace.storage.ready ? "ready" : "unavailable"}`}>
 					<span className="dot" aria-hidden="true" />
 					{namespace.storage.ready

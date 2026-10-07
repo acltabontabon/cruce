@@ -202,7 +202,6 @@ export async function fixture() {
 					people: [user],
 					permissions: { maintain: true, owner: true },
 					storage: { mode: "deployment", ready: true },
-					budget: w.budget(),
 				});
 			}
 			if (parts[3] === "teams") {

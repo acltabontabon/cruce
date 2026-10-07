@@ -172,18 +172,6 @@ export class NamespaceController {
 		this.state.policy = policy;
 		this.state.version++;
 	}
-	/** Today's charged operations (UTC day), the same count the reservation gate enforces. */
-	budget() {
-		const day = Math.floor(this.now / 86400000);
-		return {
-			used:
-				this.state.reservationUsage?.day === day
-					? this.state.reservationUsage.used
-					: this.state.reservations.filter((r) => r.state !== "released" && Math.floor(r.at / 86400000) === day).length,
-			limit: this.state.policy.dailyLimit,
-			resetsAt: (day + 1) * 86400000,
-		};
-	}
 	reserve(a: Authority, id: string, fingerprint: string, action: ResourceAction, workspaceId?: string) {
 		const repo = this.state.repositories.find((r) => r.id === a.repositoryId);
 		if (!repo || !a.repositoryRole || (a.repositoryRole === "read" && action !== "source.read"))
@@ -200,8 +188,6 @@ export class NamespaceController {
 			if (previous.state === "released") throw new DomainError(409, "Resource reservation was released; use a new operation identity");
 			return previous;
 		}
-		if (this.budget().used >= this.state.policy.dailyLimit)
-			throw new DomainError(403, "Namespace daily resource budget reached; update the namespace limit explicitly");
 		const reservation = {
 			id: key,
 			fingerprint: full,
@@ -213,7 +199,6 @@ export class NamespaceController {
 			state: "reserved" as const,
 		};
 		this.state.reservations.push(reservation);
-		if (this.state.reservationUsage?.day === Math.floor(this.now / 86400000)) this.state.reservationUsage.used++;
 		return reservation;
 	}
 }

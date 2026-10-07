@@ -12,7 +12,7 @@ Focused records of consequential decisions whose rationale is larger than its ow
 | [0004 — Bounded source inspection and recoverable cache](0004-bounded-source-inspection-and-cache.md) | Accepted 2026-10-06 | Explicit budgeted provider inspection and exact retained-source recovery; coordination reads remain pure and the Git cache becomes evictable |
 | [0005 — Bounded state and authorized cleanup recovery](0005-bounded-state-and-authorized-cleanup-recovery.md) | Accepted 2026-10-06 | Indexed retained coordination records, explicit capacity limits, inspectable retention blockers and bounded alarms for submitted fork deletion |
 | [0006 — Qualified approval and durable publication recovery](0006-qualified-approval-and-publication-recovery.md) | Accepted 2026-10-07 | Server-stamped human-maintainer approvals, fresh approval for unmarked open changes, exact publication journals and result-before-settlement ordering |
-
 | [0007 — Observed refs and repository reconciliation](0007-observed-refs-and-reconciliation.md) | Accepted 2026-10-07 | Opt-in event observation, bounded recovery and pure published-ancestry projections; observations never establish acceptance |
+| [0008 — Remove the namespace daily operation budget](0008-remove-daily-operation-budget.md) | Accepted 2026-10-08 | Drop the daily operation count and limit; keep reservations for retry identity and per-action resource policy. Supersedes the budget parts of 0003 and 0004 |
 
 Add a record only for a decision that changes the product boundary, the domain model, authority or a core dependency. Number records sequentially, and never rewrite an accepted record's decision. Supersede it with a new one.

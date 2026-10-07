@@ -82,7 +82,6 @@ export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 		"Invitation invalid or expired",
 		"Invitation not permitted",
 		"Namespace access denied",
-		"Namespace daily resource budget reached; update the namespace limit explicitly",
 		"Namespace mismatch",
 		"Namespace ownership cannot be changed through membership",
 		"Only owners appoint maintainers",

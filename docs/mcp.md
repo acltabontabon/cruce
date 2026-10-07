@@ -27,7 +27,7 @@ The bridge supplies namespace, repository, workspace and execution identities, p
 | Discover | `list_namespaces`, `list_repositories`, `get_repository` | `cruce:read`; recorded state only |
 | Inspect workspaces and concurrency | `get_workspace`, `list_active_workspaces`, `get_workspace_updates`, `get_reconciliation`, `inspect_overlap` | `cruce:read`; overlap is advisory; divergence uses available objects only |
 | Inspect cached source and provenance | `get_git_access`, `get_source`, `get_history`, `get_diff`, `read_artifact`, `get_lineage` | `cruce:read`; source requires locally available objects; never fetches |
-| Inspect or recover stored source explicitly | `inspect_source`, `recover_source` | Read grant / `cruce:read`; `source.read` resource policy, daily budget and idempotency key |
+| Inspect or recover stored source explicitly | `inspect_source`, `recover_source` | Read grant / `cruce:read`; `source.read` resource policy and idempotency key |
 | Workspace lifecycle | `start_workspace`, `detach_workspace`, `end_workspace` | `workspace:write`; owner only for existing workspaces |
 | Execution reports | `heartbeat`, `report_change` | `workspace:write`; must name the attached execution |
 | Attach or clean up a fork | `attach_workspace`, `cleanup_workspace` | `workspace:write`; Artifacts resource operations |

@@ -83,7 +83,6 @@ const PUBLIC_FIELDS = new Set([
 	"requiredEvidence",
 	"resourceRules",
 	"rules",
-	"dailyLimit",
 	"repository.create",
 	"workspace.fork",
 	"workspace.cleanup",

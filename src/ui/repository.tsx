@@ -48,7 +48,7 @@ function CanonicalSetup({ view, execute }: { view: RepositorySnapshot; execute: 
 						<strong>Canonical storage was not created.</strong> Repository creation stopped before Cruce could set up this repository's
 						canonical Git storage in this Cruce installation, so cloning and workspaces are unavailable.{" "}
 						{view.canonicalSetup.retry
-							? "Retrying reuses the original setup operation and its budget reservation."
+							? "Retrying reuses the original setup operation and its reservation."
 							: "A repository maintainer can retry setup."}
 					</>
 				)}
@@ -563,14 +563,14 @@ function RepositorySettings({
 		<div className="settings">
 			<SettingRow
 				title="Push observation"
-				detail="Observe pushed refs without publishing or approving them. Missed events are checked every 15 minutes when policy and budget permit."
+				detail="Observe pushed refs without publishing or approving them. Missed events are checked every 15 minutes when policy permits."
 			>
 				<p>
 					Observation {view.reconciliation?.observation.state ?? "disabled"}. {view.reconciliation?.observation.reason}
 				</p>
 				<p>
-					Estimated idle checks: {view.reconciliation?.observation.estimatedDailyOperations ?? 96} namespace operations/day, plus push
-					checks and subscription setup. Enabling does not raise the namespace budget. Adjust its limit explicitly in namespace settings.
+					Estimated idle checks: {view.reconciliation?.observation.estimatedDailyOperations ?? 96} storage operations/day, plus push checks
+					and subscription setup.
 				</p>
 				{view.permissions.approve && (
 					<Form

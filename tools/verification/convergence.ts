@@ -76,7 +76,6 @@ export function convergenceRuntime(namespace: string) {
 		}),
 		CONVERGENCE_TIME,
 	);
-	controller.state.policy.dailyLimit = CONVERGENCE_BUDGET;
 	const repository: Repository = {
 		id: "repository",
 		namespaceId: namespace,

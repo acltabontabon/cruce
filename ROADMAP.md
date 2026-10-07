@@ -91,12 +91,15 @@ Namespace permissions, workspace ownership, reviewer roles, team visibility and 
 | M2 | Workspace hand-off between developers | Later | Open |
 | M3 | Review requests and reviewer roles | Later | Evidence-gated |
 | M4 | Namespace-wide view of concurrent work | Later | Evidence-gated |
+| M5 | Caps on live namespace resources | Later | Evidence-gated |
 
 **M1 — Authority changes.** Verify and define behavior for membership, grant and scope revocation between steps and during an in-flight provider operation.
 
 **M2 — Hand-off.** Transfer workspace ownership to another developer with an explicit, recorded, authorized transfer. ADR 0002 deliberately excludes this for now.
 
 **M3, M4.** Request review from specific humans. See concurrent work across a namespace's repositories. Add these only when shared-namespace use shows the need.
+
+**M5 — Live resource caps.** [ADR 0008](docs/decisions/0008-remove-daily-operation-budget.md) removed the daily operation budget. If unbounded growth becomes a real problem, cap live repositories or workspace forks per namespace instead of daily activity. Add this only when real use shows the need.
 
 ## Ecosystem
 

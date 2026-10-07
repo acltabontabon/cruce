@@ -53,7 +53,6 @@ function fixture(count = 1) {
 		now,
 	);
 	ns.state.repositories.push(state.repository);
-	ns.state.policy.dailyLimit = 1000;
 	const store = memoryStore();
 	const routes = new Map<string, ObservationRoute>();
 	const git = new GitWorkspace(new MemoryFs() as never);
@@ -233,11 +232,10 @@ describe("durable observation", () => {
 		expect(f.ns.state.reservations).toHaveLength(1);
 		expect(f.observer.status(f.state).state).toBe("healthy");
 	});
-	it("does no provider work after budget, policy or authority denial", async () => {
-		for (const kind of ["budget", "policy", "authority"] as const) {
+	it("does no provider work after policy or authority denial", async () => {
+		for (const kind of ["policy", "authority"] as const) {
 			const f = fixture();
 			await f.enable();
-			if (kind === "budget") f.ns.state.policy.dailyLimit = 0;
 			if (kind === "policy") f.ns.state.policy.rules["observation.read"] = "deny";
 			if (kind === "authority") f.deny();
 			await f.recover();

@@ -11,7 +11,7 @@ export type MachineCommand = Command;
 
 /**
  * Cruce MCP. Tools express Cruce's development lifecycle; resource-consuming tools say so in their
- * description and are governed by scopes, policy and budgets. A connection only sees tools its
+ * description and are governed by scopes and resource policy. A connection only sees tools its
  * scopes allow. Generic Cloudflare administration belongs to Cloudflare's own MCP servers.
  */
 export function cruceServer(execute: (command: MachineCommand) => Promise<unknown>, scopes?: readonly Scope[]) {

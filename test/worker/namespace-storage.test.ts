@@ -65,14 +65,16 @@ describe("namespace storage gate", () => {
 		expect(f.data.has("resource-account")).toBe(false);
 		expect(f.get).not.toHaveBeenCalled();
 	});
-	it("checks current authority and namespace budgets before pinning storage", async () => {
+	it("checks current authority and resource policy before pinning storage", async () => {
 		const f = fixture();
 		await expect(
 			f.runtime.reserve({ actor: { ...owner, id: "outsider", userId: "outsider" } }, "repo", "denied", "input", "repository.create"),
 		).rejects.toThrow();
 		const policy = f.runtime.snapshot({ actor: owner }).policy;
-		f.runtime.policy({ actor: owner }, { ...policy, dailyLimit: 0 });
-		await expect(f.runtime.reserve({ actor: owner }, "repo", "budget", "input", "repository.create")).rejects.toThrow();
+		f.runtime.policy({ actor: owner }, { ...policy, rules: { ...policy.rules, "repository.create": "deny" } });
+		await expect(f.runtime.reserve({ actor: owner }, "repo", "denied-by-policy", "input", "repository.create")).rejects.toThrow(
+			"policy denies",
+		);
 		expect(f.runtime.resourceConfiguration().binding).toBeUndefined();
 		expect(f.runtime.snapshot({ actor: owner }).reservations).toHaveLength(0);
 		expect(f.get).not.toHaveBeenCalled();

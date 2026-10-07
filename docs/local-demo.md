@@ -57,7 +57,7 @@ The **History** tab shows canonical promotions as a timeline, published revision
 
 ## 6. Connect an agent
 
-**Connect an agent** (in the repository header and in Settings) is a three-step guide with copyable commands: clone canonical, connect Claude Code, Codex or Cursor, and the sentence to give your tool. Cruce doesn't run agents; each tool runs on your machine and works in its own Cruce workspace. Each workspace creates a fork in the installation's Cloudflare storage and counts toward the namespace's daily operations. Namespace **Settings** shows inherited Git storage and the operation budget; users do not connect Cloudflare accounts.
+**Connect an agent** (in the repository header and in Settings) is a three-step guide with copyable commands: clone canonical, connect Claude Code, Codex or Cursor, and the sentence to give your tool. Cruce doesn't run agents; each tool runs on your machine and works in its own Cruce workspace. Each workspace creates a fork in the installation's Cloudflare storage and counts toward the namespace's daily operations. Namespace **Settings** shows inherited Git storage and who may run each storage operation; users do not connect Cloudflare accounts.
 
 ![Connect an agent guide with copyable clone, connect and start commands](images/local-demo/connect.jpg)
 

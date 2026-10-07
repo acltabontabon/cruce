@@ -55,15 +55,15 @@ test("namespace access denial clears settings and controls, and successful retry
 		denied ? route.fulfill({ status: 403, json: { error: "Namespace access denied" } }) : route.continue(),
 	);
 	await page.goto(`${server.origin}/?namespace=fernloop#/settings`);
-	await page.getByRole("heading", { name: "Daily operations", exact: true }).waitFor();
+	await page.getByRole("heading", { name: "Storage operations", exact: true }).waitFor();
 	denied = true;
 	await page.clock.fastForward(15000);
 	await page.getByRole("alert").filter({ hasText: "Namespace access denied" }).waitFor();
-	assert.equal(await page.getByRole("heading", { name: "Daily operations", exact: true }).count(), 0);
+	assert.equal(await page.getByRole("heading", { name: "Storage operations", exact: true }).count(), 0);
 	assert.equal(await page.getByRole("button", { name: "Save namespace", exact: true }).count(), 0);
 	denied = false;
 	await page.getByRole("button", { name: "Retry", exact: true }).click();
-	await page.getByRole("heading", { name: "Daily operations", exact: true }).waitFor();
+	await page.getByRole("heading", { name: "Storage operations", exact: true }).waitFor();
 });
 test("slow polling does not overlap, and a forced refresh rejects the earlier response", async () => {
 	await page.clock.install();
@@ -627,7 +627,7 @@ test("home lists repositories by what needs attention and keeps its filter while
 	await page.screenshot({ path: "dist/ui-checks/namespace.png", fullPage: true });
 	await page.getByRole("button", { name: "Settings", exact: true }).click();
 	await page.reload();
-	await page.getByRole("heading", { name: "Daily operations", exact: true }).waitFor();
+	await page.getByRole("heading", { name: "Storage operations", exact: true }).waitFor();
 	await page.getByRole("button", { name: "Fernloop", exact: true }).click();
 	await page.getByRole("heading", { name: "Fernloop", exact: true, level: 1 }).waitFor();
 	await page.goBack();
@@ -848,8 +848,9 @@ test("namespace dropdown switches scope with keyboard selection and restores foc
 	await page.getByRole("heading", { name: "Alex Morgan", exact: true, level: 1 }).waitFor();
 	await trigger.filter({ hasText: "Alex Morgan" }).waitFor();
 	assert.equal(await page.getByRole("button", { name: "Switch repository", exact: true }).count(), 0);
-	// Personal namespaces have one owner: no People or Teams, just repositories, usage and settings.
-	await page.getByRole("heading", { name: "Today", exact: true }).waitFor();
+	// Personal namespaces have one owner: no People or Teams, just repositories and settings.
+	await page.getByRole("heading", { name: "Repositories", exact: true }).waitFor();
+	assert.equal(await page.getByRole("heading", { name: "Today", exact: true }).count(), 0);
 	assert.equal(await page.getByRole("heading", { name: "People", exact: true }).count(), 0);
 	assert.equal(await page.getByRole("heading", { name: "Teams", exact: true }).count(), 0);
 	await page.goBack();
@@ -1113,7 +1114,7 @@ test("repository pages lead with what needs attention and retired routes resolve
 	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
 	assert.equal(await page.getByRole("heading", { name: "Deployments", exact: true }).count(), 0);
 	await page.goto(`${server.origin}/?namespace=fernloop#settings`);
-	await page.getByRole("heading", { name: "Daily operations", exact: true }).waitFor();
+	await page.getByRole("heading", { name: "Storage operations", exact: true }).waitFor();
 	assert.equal(await page.getByLabel("Previews per workspace").count(), 0);
 });
 test("header search accepts typing directly and supports keyboard selection and Back navigation", async () => {
@@ -1459,11 +1460,11 @@ test("teams and invitation links are functional", async () => {
 	await page.getByRole("status").filter({ hasText: "/invite/fernloop" }).waitFor();
 	await page.screenshot({ path: "dist/ui-checks/namespace-people.png", fullPage: true });
 });
-test("namespace settings inherit installation storage and show today's operation budget", async () => {
+test("namespace settings inherit installation storage and set storage operation policy", async () => {
 	await page.goto(`${server.origin}/?namespace=fernloop#/settings`);
 	await page.getByRole("heading", { name: "Git storage", exact: true }).waitFor();
 	await page.getByText("Managed by this Cruce installation.", { exact: false }).waitFor();
-	await page.getByText(/of 100/).waitFor();
+	assert.equal(await page.getByRole("progressbar").count(), 0);
 	await page.getByText("Create workspace forks", { exact: false }).waitFor();
 	assert.equal(await page.getByLabel("API token", { exact: false }).count(), 0);
 	assert.equal(await page.getByRole("button", { name: "Connect account", exact: true }).count(), 0);
@@ -1572,7 +1573,7 @@ test("screen families remain readable across desktop, tablet, mobile and 200 per
 		["repository-settings", `${root()}#/settings`, "Review policy"],
 		["members", `${server.origin}/?namespace=fernloop#/members`, "Fernloop"],
 		["teams", `${server.origin}/?namespace=fernloop#/teams`, "Fernloop"],
-		["namespace-settings", `${server.origin}/?namespace=fernloop#/settings`, "Daily operations"],
+		["namespace-settings", `${server.origin}/?namespace=fernloop#/settings`, "Storage operations"],
 		["account", `${server.origin}/?page=account`, "Your repositories"],
 	];
 	for (const width of [1440, 1024, 390]) {

@@ -34,7 +34,6 @@ export const DEFAULT_RESOURCE_POLICY: ResourcePolicy = {
 		"source.read": "allow",
 		"observation.read": "approval",
 	},
-	dailyLimit: 100,
 };
 export function writeAccess(a: Authority) {
 	if (a.repositoryRole !== "write" && a.repositoryRole !== "maintain") throw new DomainError(403, "Repository write permission required");

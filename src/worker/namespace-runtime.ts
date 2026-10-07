@@ -35,12 +35,7 @@ export class NamespaceRuntime extends DurableObject<StorageEnv> {
 		state.reservations = state.reservations.map(
 			(reservation) => this.store.get<ResourceReservation>(this.reservationKey(reservation.id)) ?? reservation,
 		);
-		const now = Date.now(),
-			day = Math.floor(now / 86400000);
-		const recorded = this.store.get<number>(`budget:${day}`);
-		if (recorded !== undefined) state.reservationUsage = { day, used: recorded };
-		else if (!state.reservations.length) state.reservationUsage = { day, used: 0 };
-		return new NamespaceController(state, now);
+		return new NamespaceController(state, Date.now());
 	}
 	initialize(namespace: Namespace) {
 		const old = this.store.get<NamespaceState>("namespace");
@@ -59,9 +54,7 @@ export class NamespaceRuntime extends DurableObject<StorageEnv> {
 			key: this.reservationKey(reservation.id),
 			value: reservation,
 		}));
-		const day = Math.floor(c.now / 86400000);
-		entries.push({ key: `budget:${day}`, value: c.budget().used });
-		this.store.batch([...entries, { key: "namespace", value: { ...c.state, reservations: [], reservationUsage: undefined } }]);
+		this.store.batch([...entries, { key: "namespace", value: { ...c.state, reservations: [] } }]);
 	}
 	private reservationKey(id: string) {
 		return `reservation:${id}`;
@@ -107,7 +100,6 @@ export class NamespaceRuntime extends DurableObject<StorageEnv> {
 			storage: new ResourceBoundary(this.store, this.env, { namespace: c.state.namespace.id }).storage(),
 			reservations: maintain ? this.reservations(grant).items : [],
 			capacity: { ...this.store.usage(), limits: STATE_LIMITS },
-			budget: c.budget(),
 			permissions: { maintain, owner: maintain && a.role === "owner" },
 		};
 	}
@@ -178,19 +170,10 @@ export class NamespaceRuntime extends DurableObject<StorageEnv> {
 		const c = this.controller();
 		const r = this.store.get<ResourceReservation>(this.reservationKey(id)) ?? c.state.reservations.find((r) => r.id === id);
 		if (!r) throw new DomainError(404, "Resource reservation unavailable");
-		const day = Math.floor(r.at / 86400000);
-		if (state === "released" && r.state !== "released") {
-			if (["reserved", "uncertain"].includes(r.state)) throw new DomainError(409, "Uncertain resource reservations cannot be released");
-			const used = this.store.get<number>(`budget:${day}`) ?? c.budget().used;
-			r.state = state;
-			this.store.batch([
-				{ key: this.reservationKey(id), value: r },
-				{ key: `budget:${day}`, value: Math.max(0, used - 1) },
-			]);
-		} else {
-			r.state = state;
-			this.store.put(this.reservationKey(id), r);
-		}
+		if (state === "released" && ["reserved", "uncertain"].includes(r.state))
+			throw new DomainError(409, "Uncertain resource reservations cannot be released");
+		r.state = state;
+		this.store.put(this.reservationKey(id), r);
 	}
 	/** Internal DO RPC only: pinned storage identity, never credentials. */
 	resourceConfiguration() {

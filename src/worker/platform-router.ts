@@ -268,7 +268,6 @@ export async function platformRoute(
 		const body = z
 			.object({
 				rules: z.record(z.enum(RESOURCE_ACTIONS), z.enum(["allow", "approval", "deny"])),
-				dailyLimit: z.number().int().min(0).max(10000),
 			})
 			.parse(await input(request));
 		await namespace.policy(grant, body);

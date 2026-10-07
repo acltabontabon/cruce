@@ -71,7 +71,6 @@ export type ResourceRule = "allow" | "approval" | "deny";
 export type CostClass = "none" | "artifacts";
 export interface ResourcePolicy {
 	rules: Record<ResourceAction, ResourceRule>;
-	dailyLimit: number;
 }
 export interface ResourceReservation {
 	id: string;
@@ -93,8 +92,6 @@ export interface NamespaceState {
 	policy: ResourcePolicy;
 	reservations: ResourceReservation[];
 	version: number;
-	/** Adapter-projected daily charge counter; historical reservations are stored separately. */
-	reservationUsage?: { day: number; used: number };
 }
 /** Local materialization and ownership metadata; the Workspace remains the durable work identity. */
 export interface ExecutionContext {

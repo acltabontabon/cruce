@@ -20,6 +20,5 @@ export type NamespaceView = {
 	teams: Team[];
 	policy: ResourcePolicy;
 	storage: ResourceStorage;
-	budget?: { used: number; limit: number; resetsAt: number };
 	permissions: { maintain: boolean; owner: boolean };
 };

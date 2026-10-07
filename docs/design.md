@@ -63,9 +63,9 @@ The avatar opens a compact profile card with name, email, the Appearance control
 - **History** shows canonical promotions as a timeline, published revisions, stored evidence and activity written as sentences. Records open with provenance, lineage, storage details and a read-only file and history browser at that exact revision; Browse files opens the current canonical revision.
 - **Settings** holds the Connect an agent guide, the review policy (required checks, protected paths), access grants, rename, and the repository's IDs.
 
-**Connect an agent** is a three-step guide with copyable commands: clone canonical, connect your tool (Claude Code, Codex or Cursor), and the sentence to give the tool. It states that Cruce does not run agents and that each workspace consumes a fork and budget operations.
+**Connect an agent** is a three-step guide with copyable commands: clone canonical, connect your tool (Claude Code, Codex or Cursor), and the sentence to give the tool. It states that Cruce does not run agents and that each workspace consumes a fork and storage operations.
 
-**Namespace settings** show the Cloudflare account as a status card (Connected, label, account ID) with **Check connection**, which re-verifies the sealed token, and **Replace token**. The daily operation budget shows today's usage against the limit and when it resets, and policy rules use readable names.
+**Namespace settings** show the Cloudflare account as a status card (Connected, label, account ID) with **Check connection**, which re-verifies the sealed token, and **Replace token**. Storage operations lists who may run each resource operation, with readable names.
 
 Retired routes (`overview`, `code`, `work`, `artifacts`) resolve to Changes, Workspaces or History with history replacement, so saved links keep working. Deep links, Back, retries and late-response protection are preserved.
 
