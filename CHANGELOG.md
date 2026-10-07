@@ -4,32 +4,22 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ## [Unreleased]
 
-### Fixed
-
-- Require authenticated human Maintain authority for promotion approval. Preserve historical reviews while requiring fresh qualified approval for still-open changes with unmarked approvals; keep agent reviews informational.
-- Include executable-bit changes, symlink conversions and submodule changes in review and protected-path enforcement.
-- Journal exact source/evidence publication and save results before resource settlement. Recover confirmed retention after workspace completion or cache loss without regressing newer work; repair setup and attachment settlement without repeating provider writes.
-- Keep change-report freshness separate from heartbeats. Prevent overlapping or late console polls, clear scoped data after access denial, retry identity loading, and retain available repository summaries when another repository fails.
-- Preserve local mutation identities through interrupted attachment and local state completion. Write private state atomically, serialize updates, recover worktree creation from exact ownership intent, preserve existing-checkout remotes and hold writer ownership through cleanup.
-
-- Recover explicitly authorized fork deletion after interruption using its original operation and namespace reservation. Persist deletion confirmation before settlement; recheck current authority, policy and provider identity. Expiry never starts cleanup.
-
-- Allowlist public HTTP and MCP error text, including field validation and serialized Durable Object errors. Correlate resource operations and promotion phases through retries with redacted identifiers; omit provider paths, raw errors, credentials, OAuth payloads and source from application diagnostics.
-- Recover exact retained source after Git-cache loss, including merge parents and interrupted promotion retries, without requiring a workspace fork or repeating an attempted canonical push. Bound and evict local cache generations while preserving remote source, evidence and coordination records.
-- Keep HTTP, MCP and terminal coordination reads free of metadata, schema and Git-cache writes or Artifacts calls, including after restart. Initialize identity during explicit sign-in/authorization and repository state during canonical setup or setup retry. Interrupted repository registration stays inspectable, and reads use current permissions and policy without saving a copy. Persist only the exact bytes of Git-cache buffer views.
-- Pin provider repository IDs before token cleanup or Git access and validate canonical, fork and source/evidence retention identities on resource operations and retries. Recreated names fail closed. Storage restoration preserves interrupted promotion recovery and existing reservations. Published storage records now include the provider ID; unrecorded existing storage requires administrator reconciliation.
+## [0.1.0-alpha.3] - 2026-10-07
 
 ### Changed
 
-- Unify Clone, Attach local checkout and Connect an agent setup. Clone includes credential-helper steps; existing-checkout setup discloses fork cost and preserves files, branches and existing remotes.
-- Lead review with its next blocker, collapse completed checklist details, show effective review/evidence attribution, and keep concern and updated-evidence controls available after earlier decisions. Explain clipboard failures and partial or stale console data.
+- Simplify the homepage and namespace/repository console, with clearer status, focused diffs and a review checklist that leads with the next blocker.
+- Unify Clone, Attach local checkout and agent setup, including Git credentials, fork-cost disclosure and manual copy options.
+- Add explicit, budgeted inspection and recovery of stored source, evidence and history. Bound coordination state, cloud inputs and local caches while preserving retained source and provenance.
 
-- Bound current coordination state, indexed retained records and gateway inputs. Keep receipts, activity and resource history outside hot snapshots, with bounded history pages and inspectable capacity. Add explicit cloud retention inspection showing exact unpublished refs and incomplete inventories; preserve retained source and provenance at every capacity limit.
+### Fixed
 
-- Add explicit, budgeted stored-source inspection and recovery in the console and MCP. File listings, selected content, evidence and labelled first-parent history use native Artifacts APIs; binary and oversized files stay unavailable inline. Existing coordination reads remain cache-only and never trigger cloud access.
-- Redesign the repository pages in the same paper-and-ink system. The repository header carries a scope line and mono canonical revision, the attention bar uses status dots, and the four tabs are mono and ink-ruled. Changes shows what waits for review beside canonical and live workspaces; History puts the canonical timeline and activity beside published revisions and evidence; Settings uses the two-column sections of namespace settings. A change opens with its diff (added and removed lines coloured) beside a sticky review checklist that ends in Promote. Workspace and record pages lead with their own title over a fact grid, and the repository header steps back while they are open.
-- Redesign the namespace console to match the homepage. A namespace is now one overview without tabs: a count strip (repositories, needs review, ready to promote, active workspaces), repositories and recent activity, with People, Teams and today's operations alongside. Invitations, role changes and teams are edited in place; an invitation link stays on screen with a copy button. Settings is its own page with segmented resource rules and a usage meter. Home uses the same layout, and the create dialogs show the handle prefix, derive a namespace handle from its name and offer Cancel. Saving no longer blanks the namespace while it refreshes. Old `#/members` and `#/teams` links open the overview.
-- Redesign the public homepage to lead with context: three generations of software development (written, assisted, agentic) and where Cruce sits in the third. An animated Git graph then shows how it works: workspaces from an immutable baseline, advisory overlap, exact-revision human approval, sequential non-forced promotion and explicit reconciliation, with tools as annotations. Three plates cover durable workspaces, exact revisions and composability with plain Git. The page is shorter, keeps the paper-and-ink identity, and supports reduced motion, keyboard stage controls, 320px screens and 200% zoom.
+- Require authenticated human Maintain authority for promotion approval; older unqualified approvals need a fresh decision. Include executable bits, symlinks and submodules in review and protected-path checks.
+- Recover interrupted publication, setup, attachment, promotion and explicitly requested fork deletion with the original operation and reservation, preserving newer work and confirmed results.
+- Pin provider repository identity and refuse recreated storage names; existing storage without recorded IDs requires administrator reconciliation. Coordination reads remain free of writes and cloud calls, including after restart.
+- Preserve local writer ownership, mutation identity and existing-checkout remotes through interrupted attachment and cleanup; save private state atomically.
+- Prevent overlapping or late console updates, clear data after access denial and support retries and partial results. Keep report freshness separate from heartbeats.
+- Return safe HTTP/MCP errors and redact credentials, source and provider details from retry diagnostics.
 
 ## [0.1.0-alpha.2] - 2026-10-06
 
@@ -72,6 +62,7 @@ First alpha release.
 - Project console with Access sign-in, MCP OAuth and an offline demo.
 - Checked release-tag deployments; package and MCP versions aligned at `0.1.0-alpha.1`.
 
-[Unreleased]: https://github.com/acltabontabon/cruce/compare/v0.1.0-alpha.2...HEAD
+[Unreleased]: https://github.com/acltabontabon/cruce/compare/v0.1.0-alpha.3...HEAD
+[0.1.0-alpha.3]: https://github.com/acltabontabon/cruce/compare/v0.1.0-alpha.2...v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/acltabontabon/cruce/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/acltabontabon/cruce/releases/tag/v0.1.0-alpha.1

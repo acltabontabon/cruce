@@ -43,7 +43,7 @@ Open the printed loopback URL. The fixed-clock fixture uses the real console and
 
 ## Status
 
-Cruce is early, experimental software, and its name is provisional. Backward compatibility is not a goal yet. Local controller, Git, bridge and browser evidence exists. A real-Artifacts two-writer convergence scenario passed with fixture authority, and deployed checks covered owner setup, canonical provisioning and one OAuth writer. Multi-tool, multi-session deployed participation remains unverified ([roadmap D2](ROADMAP.md#developer-workflow)). The [architecture audit](docs/architecture.md#implementation-audit) lists the remaining provider-identity, read-purity and recovery gaps, and [verification](docs/local-verification.md) records the exact evidence.
+Cruce is early, experimental software, and its name is provisional. The current alpha is **0.1.0-alpha.3**; interfaces may change. Local checks cover controllers, native Git, bridge recovery and console journeys. Earlier deployed checks demonstrated two coding tools, cross-connection continuation and human-approved promotion on one machine. The current storage binding and recovery changes still require hosted acceptance. See [verification](docs/local-verification.md), the [architecture audit](docs/architecture.md#implementation-audit) and [releases](docs/releases.md) for evidence and limits.
 
 ## Documentation map
 

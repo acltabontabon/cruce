@@ -2,17 +2,17 @@
 
 [Documentation map](../README.md#documentation-map) · [Changelog](../CHANGELOG.md) · [Verification](local-verification.md)
 
-Cruce's second alpha, **[0.1.0-alpha.2](https://github.com/acltabontabon/cruce/releases/tag/v0.1.0-alpha.2)**, was released on 2026-10-06. Its [checked tag deployment](https://github.com/acltabontabon/cruce/actions/runs/37390389317) passed; [test environment](test-environment.md) records the deployed revision and verification limits. Releases are deployed by pushing a checked release tag. This is experimental software; alpha interfaces may change.
+Cruce's current release version is **0.1.0-alpha.3**. Pushing its checked tag deploys the Worker; [test environment](test-environment.md) records confirmed deployments and [verification](local-verification.md) records acceptance limits. This is experimental software; alpha interfaces may change.
 
 ## Versioning and changelog
 
 - `package.json` is the version source for Cruce and its MCP interfaces.
-- Use SemVer: `0.1.0-alpha.1`, `0.1.0-alpha.2`, then beta/rc versions as needed and `0.1.0` for the stable release.
+- Use SemVer: `0.1.0-alpha.1`, `0.1.0-alpha.2`, `0.1.0-alpha.3`, then beta/rc versions as needed and `0.1.0` for the stable release.
 - During `0.x`, increment the minor version for breaking changes and the patch for compatible fixes. From `1.0.0`, use major/minor/patch for breaking changes/features/fixes.
 - Follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): group brief user-facing changes under `[Unreleased]` using applicable `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed` or `Security` headings; omit empty categories and maintain release/comparison links. Before release, move them into a heading matching the package version. Summarize user-facing changes; Git history and review descriptions retain implementation details. Keep current local/live verification evidence in [verification](local-verification.md).
 - Release tags are `v` plus the exact package version. Never move or reuse a published tag; fix a release with a new version.
 
-`pnpm release:check` checks the version and changelog. `pnpm release:check v0.1.0-alpha.2` also checks the tag. A matching entry with release notes is required.
+`pnpm release:check` checks the version and changelog. `pnpm release:check v0.1.0-alpha.3` also checks the tag. A matching entry with release notes is required.
 
 ## One-time GitHub setup
 
@@ -58,7 +58,7 @@ To restore older code, prepare a new version on `main` with a concise rollback c
 
 Access branding is account-level configuration, applied separately from Worker deployment. The [branding payload](../tools/access-login-branding.json) and [setup instructions](cloudflare-setup.md#access-login-branding) keep it reviewable. A release tag does not apply or reset Access branding or policies.
 
-Alpha.2 includes the deployment-managed storage change: existing connected-account namespaces fail closed for resource operations. A release does not migrate retained source or authorize deleting or rebinding it. Plan that transition explicitly before using those namespaces with the new storage model.
+Since alpha.2, storage is deployment-managed: existing connected-account namespaces fail closed for resource operations. A release does not migrate retained source or authorize deleting or rebinding it. Plan that transition explicitly before using those namespaces with the new storage model. Alpha.3 also requires fresh human-maintainer approval for open changes with unqualified historical approvals; see [ADR 0006](decisions/0006-qualified-approval-and-publication-recovery.md).
 
 ## Direct test deployment without a release
 
