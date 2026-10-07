@@ -330,8 +330,8 @@ function ChangesScreen({
 						<div className="empty-state">
 							<h3>No changes yet</h3>
 							<p>
-								When an agent or developer publishes a revision and proposes it, it shows up here for review against canonical. Use Connect
-								an agent above to start.
+								When an agent or developer publishes a revision and proposes it, it shows up here for review against canonical. Use Set up
+								locally above to start.
 							</p>
 						</div>
 					))}
@@ -534,11 +534,6 @@ function HistoryScreen({
 }
 
 type SetupMethod = "clone" | "attach" | "connect";
-const setupTitles: Record<SetupMethod, string> = {
-	clone: "Clone repository",
-	attach: "Attach local checkout",
-	connect: "Connect an agent",
-};
 function ConnectGuide({ view, initial = "connect" }: { view: RepositorySnapshot; initial?: SetupMethod }) {
 	const [method, setMethod] = useState<SetupMethod>(initial);
 	const [tool, setTool] = useState<"claude" | "codex" | "cursor">("claude");
@@ -549,11 +544,20 @@ function ConnectGuide({ view, initial = "connect" }: { view: RepositorySnapshot;
 		<div className="connect-guide">
 			<nav className="segmented" aria-label="Setup method">
 				{(["clone", "attach", "connect"] as const).map((mode) => (
-					<button type="button" key={mode} aria-pressed={method === mode} onClick={() => setMethod(mode)}>
-						{mode === "clone" ? "Clone" : mode === "attach" ? "Attach local checkout" : "Connect an agent"}
+					<button
+						type="button"
+						key={mode}
+						aria-pressed={method === mode}
+						disabled={mode !== "connect" && !view.sourceHead}
+						onClick={() => setMethod(mode)}
+					>
+						{mode === "clone" ? "Clone" : mode === "attach" ? "Existing checkout" : "Connect an agent"}
 					</button>
 				))}
 			</nav>
+			{!view.sourceHead && (
+				<p className="cost">Canonical Git is not ready. A maintainer must finish repository setup before local work can start.</p>
+			)}
 			<p className="muted">Use Git and Node.js 22.18 or later. Install the Cruce client once on this machine.</p>
 			<CopyCommand text={`npm install --global ${origin}/downloads/cruce-client.tgz`} />
 			{method === "clone" ? (
@@ -944,16 +948,9 @@ export function RepositoryPage({
 					</p>
 				</div>
 				<div className="actions">
-					<button type="button" className="ghost" onClick={() => setDialog("connect")}>
+					<button type="button" className="primary" onClick={() => setDialog(view.sourceHead ? "clone" : "connect")}>
 						<Icon name="local" />
-						Connect an agent
-					</button>
-					<button type="button" className="ghost" onClick={() => setDialog("attach")} disabled={!view.sourceHead}>
-						Attach local checkout
-					</button>
-					<button type="button" className="primary" onClick={() => setDialog("clone")} disabled={!view.sourceHead}>
-						<Icon name="branch" />
-						Clone
+						Set up locally
 					</button>
 				</div>
 			</header>
@@ -998,7 +995,7 @@ export function RepositoryPage({
 				/>
 			)}
 			{dialog && (
-				<Dialog title={setupTitles[dialog]} close={() => setDialog(undefined)} className={dialog === "connect" ? "connect-dialog" : ""}>
+				<Dialog title="Set up locally" close={() => setDialog(undefined)} className="connect-dialog">
 					<ConnectGuide key={dialog} view={view} initial={dialog} />
 				</Dialog>
 			)}

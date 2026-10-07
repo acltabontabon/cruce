@@ -27,6 +27,8 @@ export interface Lane {
 	change?: { id: string; number: number; status: Status };
 	relation: Status;
 	quiet: boolean;
+	detached: boolean;
+	presence: string;
 	shared: string[];
 }
 
@@ -82,7 +84,16 @@ function toLane(view: RepositorySnapshot, w: Workspace, lane: number, nodes: Tru
 		published: w.publishedRevision,
 		change: latest && { id: latest.id, number: latest.number, status: changeStatus(view, latest) },
 		relation: canonicalRelation(view, w),
-		quiet: w.state === "disconnected",
+		quiet: w.state !== "active" || !w.execution,
+		detached: w.state === "detached",
+		presence:
+			w.state === "detached"
+				? "detached"
+				: w.state === "preparing"
+					? "preparing"
+					: w.state === "active" && w.execution
+						? "connected"
+						: "quiet",
 		shared: overlapsFor(view, w).map((o) => o.path),
 	};
 }

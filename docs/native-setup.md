@@ -46,7 +46,9 @@ cruce start --title "Improve retries"
 
 The bridge creates a worktree at the exact starting commit and attaches one hosted fork to the workspace. A unique `cruce-WORKSPACE_ID` remote and branch-specific push destination keep other worktrees' destinations and existing `origin` unchanged. Attaching by repository ID is not an import: it never identifies a repository from a matching remote URL or silently uploads unrelated history.
 
-The MCP bridge renews presence and reports local changes while it runs. For standalone CLI participation, run this in a separate terminal using the returned worktree directory:
+For parallel work through one MCP connection, call `start_workspace` for each workstream. Keep each returned `id` and `directory`, and pass `workspaceId` to workspace operations such as `report_change`, `publish_revision`, `publish_artifact`, `get_workspace_updates` and `detach_workspace`, and to change operations such as `create_proposal` and `record_verification` (their artifact/proposal IDs still identify the reviewed record). Previous workspaces remain attached to their own worktrees. `attach_workspace` with a workspace ID creates or reuses that workspace's local execution without a CLI handoff. `cruce publish --workspace ID` can also select a locally registered workspace from the repository root. CLI and MCP reload the same workspace state, including pending retry identity.
+
+The MCP bridge renews presence and reports local changes for the workspaces it starts, attaches or uses locally while it runs. For standalone CLI participation, run this in a separate terminal using the returned worktree directory:
 
 ```sh
 cruce watch

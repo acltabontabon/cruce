@@ -2,7 +2,7 @@ import type { Scope } from "../core/capabilities.ts";
 import { DomainError } from "../core/errors.ts";
 import { type Authority, type Command, CommandInput, type CostClass, type ResourceAction } from "./platform.ts";
 export const CRUCE_INSTRUCTIONS =
-	"Cruce is the durable Git coordination plane for this repository: Namespace → Repository → Workspace. A workspace is a durable stream of Git work owned by a user, not by this session; it has an immutable baseline and its own fork, and may be continued later from another session, tool or machine. Start a workspace at an exact Git revision and work only in the dedicated directory the bridge returns. Use normal Git to commit and push to the workspace fork; publish_revision retains an exact pushed revision for review. Inspect list_active_workspaces, inspect_overlap and get_workspace_updates at the start and when scope changes: overlap is advisory, not a conflict verdict, and canonical movement means you must fetch, merge, verify and publish a reconciled revision. Propose exact revisions and record evidence for them; reported evidence is not verification. Canonical promotion is a human decision. Cruce does not run, schedule or message agents, and its responsibility ends at canonical Git; CI, release, deployment and runtime management are external. Never discard working changes to refresh a workspace.";
+	"Cruce is the durable Git coordination plane for this repository: Namespace → Repository → Workspace. A workspace is a durable stream of Git work owned by a user, not by this session; it has an immutable baseline and its own fork, and may be continued later from another session, tool or machine. Start a workspace at an exact Git revision and work only in the dedicated directory the bridge returns. For parallel work, keep each workspace attached in its own directory and pass workspaceId on workspace tools; one bridge can coordinate several workspaces. To continue existing work, call attach_workspace with its workspaceId through the bridge; it returns the local directory without requiring a CLI handoff or MCP restart. Omitted workspaceId uses the bridge's current workspace. Use normal Git to commit and push to the workspace fork; publish_revision retains an exact pushed revision for review. Inspect list_active_workspaces, inspect_overlap and get_workspace_updates at the start and when scope changes: overlap is advisory, not a conflict verdict, and canonical movement means you must fetch, merge, verify and publish a reconciled revision. Propose exact revisions and record evidence for them; reported evidence is not verification. Canonical promotion is a human decision. Cruce does not run, schedule or message agents, and its responsibility ends at canonical Git; CI, release, deployment and runtime management are external. Never discard working changes to refresh a workspace.";
 export interface Tool {
 	name: string;
 	description: string;
@@ -100,15 +100,14 @@ export const CRUCE_TOOLS: Tool[] = [
 		"cruce:read",
 		"source.read",
 	),
-	write("start_workspace", "Start a durable workspace at an exact baseline revision; use the local bridge for an isolated checkout.", [
-		"title",
-		"baseRevision",
-		"branch",
-		"description",
-	]),
+	write(
+		"start_workspace",
+		"Start a durable workspace at an exact baseline revision; the local bridge returns an isolated directory and keeps previously started workspaces attached.",
+		["title", "baseRevision", "branch", "description"],
+	),
 	write(
 		"attach_workspace",
-		"Attach this exclusive local execution to your workspace, provisioning its Cloudflare Artifacts fork of canonical once. Fails while another execution is attached.",
+		"Attach this exclusive local execution to your workspace, provisioning its Cloudflare Artifacts fork of canonical once. Fails while another execution is attached. Through the local bridge, pass workspaceId to create or reuse its local worktree and return the directory; other workspaces stay attached.",
 		["workspaceId", "execution"],
 		"workspace:write",
 		"workspace.fork",
@@ -156,15 +155,20 @@ export const CRUCE_TOOLS: Tool[] = [
 		"artifact:publish",
 		"artifact.publish",
 	),
-	write("create_proposal", "Propose an exact source artifact for review.", ["artifactId", "title"], "change:write"),
-	write("review_proposal", "Review an exact revision with a reason.", ["proposalId", "revision", "outcome", "reason"], "change:write"),
+	write("create_proposal", "Propose an exact source artifact for review.", ["workspaceId", "artifactId", "title"], "change:write"),
+	write(
+		"review_proposal",
+		"Review an exact revision with a reason.",
+		["workspaceId", "proposalId", "revision", "outcome", "reason"],
+		"change:write",
+	),
 	write(
 		"record_verification",
 		"Record reported evidence for an exact revision.",
-		["proposalId", "revision", "kind", "outcome", "reason", "artifactId"],
+		["workspaceId", "proposalId", "revision", "kind", "outcome", "reason", "artifactId"],
 		"change:write",
 	),
-	write("request_promotion", "Request human review and source promotion.", ["proposalId"], "promotion:request"),
+	write("request_promotion", "Request human review and source promotion.", ["workspaceId", "proposalId"], "promotion:request"),
 ];
 export const HUMAN_TOOLS = new Set([
 	"resolve_review",

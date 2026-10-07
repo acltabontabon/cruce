@@ -29,6 +29,10 @@ The console has four repository tabs: **Changes**, **Workspaces**, **History** a
 
 The header reflects the active scope. Home is global. Scoped namespace/repository names open anchored dropdowns. A namespace opens as one overview: repositories by attention and recent activity, with People and Teams (shared namespaces only) and today's operations beside them; settings are a separate page. The avatar menu shows identity and sign-out. Repository search is an inline header field across authorized namespaces, and Command/Ctrl K focuses it. Listing is read-only, tolerates partial failures, retries, and aborts dismissed requests so late responses cannot replace newer results.
 
+### Workspace map presentation
+
+The lane map derives connection presence from the snapshot's active execution attachment and observes changed head/publication values between snapshots for finite highlights. It performs no source or agent operations. Detached lanes and rows use explicit disclosures, disconnected work stays visible, and a bounded scroll canvas pages twelve lanes at a time. Motion has pause, visibility and reduced-motion controls. See [visual rules](design.md#workspace-map-motion-and-scale).
+
 ### Workspace durability
 
 ```text
@@ -122,7 +126,7 @@ Workspace authority belongs to the **owner** (`Workspace.ownerId`), not to the c
 
 `start_workspace` registers a workspace at an exact baseline (`preparing`). `attach_workspace` records the execution attachment. For the first attachment it checks known source and provisions a direct canonical fork through the namespace gate. Artifacts forks inherit refs at fork time and have no exact-commit selector, so Cruce pins the baseline in metadata and a `cruce-base` fork ref, and the local bridge creates the checkout at that exact commit. There is no extra baseline repository. See the [Artifacts fork API](https://developers.cloudflare.com/artifacts/api/rest-api/).
 
-Agent writers must attach a Cruce-owned worktree or isolated clone; humans may attach existing checkouts. A server reservation prevents another active workspace from claiming the same checkout, and the bridge holds a persistent local writer lock. `heartbeat` and `report_change` must name the attached execution context. The MCP bridge or `cruce watch` reports every 30 seconds. After 90 seconds without activity the workspace is *displayed* as disconnected while its attachment and reservation remain.
+Agent writers must attach a Cruce-owned worktree or isolated clone; humans may attach existing checkouts. A server reservation prevents another active workspace from claiming the same checkout, and the bridge holds a persistent local writer lock. `heartbeat` and `report_change` must name the attached execution context. The MCP bridge keeps workspace state independently addressable through a local registry in the common Git directory. Workspace tools retain `workspaceId` in their local schemas; each local operation resolves that ID and reloads its state under a persistent update lock. Starting another workspace preserves earlier attachments and retry journals. Local `attach_workspace` materializes or reuses the worktree and shares the same state with CLI continuation; local paths do not select credentials or grant authority. A bridge tracks presence and reports for the workspaces it starts, attaches or uses locally. The MCP bridge or `cruce watch` reports every 30 seconds. After 90 seconds without activity the workspace is *displayed* as disconnected while its attachment and reservation remain.
 
 ```text
 preparing ──attach──▶ active ──detach──▶ detached ──attach elsewhere──▶ active

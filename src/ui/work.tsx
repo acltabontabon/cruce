@@ -224,7 +224,9 @@ export function WorkspaceList({ view, open, who, filter = "" }: { view: Reposito
 		.filter((w) => matches(view, w, active, who.viewerId))
 		.sort((a, b) => b.lastActivity - a.lastActivity || a.id.localeCompare(b.id));
 	const live = sorted.filter((w) => !ended(w)),
-		done = sorted.filter(ended);
+		done = sorted.filter(ended),
+		detached = live.filter((w) => w.state === "detached"),
+		attached = live.filter((w) => w.state !== "detached");
 	return (
 		<>
 			<LaneMap view={view} focus={focus} setFocus={setFocus} open={(id) => open("workspaces", id)} who={who} />
@@ -264,7 +266,7 @@ export function WorkspaceList({ view, open, who, filter = "" }: { view: Reposito
 				</div>
 				{live.length ? (
 					<div className="rows">
-						{live.map((w) => (
+						{attached.map((w) => (
 							<WorkspaceRow key={w.id} view={view} w={w} open={open} who={who} focused={focus === w.id} setFocus={setFocus} />
 						))}
 					</div>
@@ -272,8 +274,21 @@ export function WorkspaceList({ view, open, who, filter = "" }: { view: Reposito
 					<p className="panel-note">
 						{active
 							? "No active workspaces match this filter."
-							: "No active workspaces. One appears when you or an agent starts work through Cruce. Use Connect an agent to begin."}
+							: "No active workspaces. One appears when you or an agent starts work through Cruce. Use Set up locally to begin."}
 					</p>
+				)}
+				{detached.length > 0 && (
+					<details className="group detached-workspaces" open={active ? true : undefined}>
+						<summary>
+							{detached.length} detached {detached.length === 1 ? "workspace" : "workspaces"}
+							<span className="muted"> · revisions and changes retained</span>
+						</summary>
+						<div className="rows">
+							{detached.map((w) => (
+								<WorkspaceRow key={w.id} view={view} w={w} open={open} who={who} focused={focus === w.id} setFocus={setFocus} />
+							))}
+						</div>
+					</details>
 				)}
 				{done.length > 0 && (
 					<details className="group">

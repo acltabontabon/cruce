@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type { RepositorySummary } from "../shared/coordination.ts";
 import type { RepositorySnapshot, Workspace } from "../shared/platform.ts";
 import { type Lane, lanes as laneModel, trunk as trunkModel } from "./lanes.ts";
@@ -47,6 +48,37 @@ export function LaneMap({
 	open: (id: string) => void;
 	who?: People;
 }) {
+	const [showDetached, setShowDetached] = useState(false);
+	const [page, setPage] = useState(0);
+	const [paused, setPaused] = useState(false);
+	const [visible, setVisible] = useState(false);
+	const [documentVisible, setDocumentVisible] = useState(!document.hidden);
+	const mapRef = useRef<HTMLElement>(null);
+	const previous = useRef(new Map<string, { head: string; published?: string }>());
+	const [updates, setUpdates] = useState(new Map<string, string>());
+	useEffect(() => {
+		const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting));
+		if (mapRef.current) observer.observe(mapRef.current);
+		const onVisibility = () => setDocumentVisible(!document.hidden);
+		document.addEventListener("visibilitychange", onVisibility);
+		return () => {
+			observer.disconnect();
+			document.removeEventListener("visibilitychange", onVisibility);
+		};
+	}, []);
+	useEffect(() => {
+		const changed = new Map<string, string>();
+		for (const w of view.workspaces) {
+			const old = previous.current.get(w.id);
+			if (old && old.head !== w.headRevision) changed.set(w.id, "head");
+			else if (old && old.published !== w.publishedRevision && w.publishedRevision) changed.set(w.id, "published");
+		}
+		previous.current = new Map(view.workspaces.map((w) => [w.id, { head: w.headRevision, published: w.publishedRevision }]));
+		if (!changed.size) return;
+		setUpdates(changed);
+		const timer = setTimeout(() => setUpdates(new Map()), 4200);
+		return () => clearTimeout(timer);
+	}, [view.workspaces]);
 	const nodes = trunkModel(view),
 		// The lane's person is its accountable owner; tool provenance stays in the workspace rows and details.
 		all = laneModel(view).map((lane) => (who ? { ...lane, worked: `Owner: ${ownerName(lane.ownerId, who)}` } : lane));
@@ -54,17 +86,25 @@ export function LaneMap({
 	const hidden = Math.max(0, nodes.length - VISIBLE_TRUNK),
 		position = (index: number) => (hidden ? (index < hidden ? 0 : index - hidden + 1) : index),
 		ticks = hidden ? [{ revision: "", earlier: hidden }, ...nodes.slice(hidden)] : nodes;
-	const shown = all
-		.toSorted((a, b) => (b.baseline === undefined ? -1 : position(b.baseline)) - (a.baseline === undefined ? -1 : position(a.baseline)))
-		.slice(0, MAX_LANES);
+	const detached = all.filter((lane) => lane.detached);
+	const eligible = all
+		.filter((lane) => showDetached || !lane.detached)
+		.toSorted(
+			(a, b) =>
+				Number(a.detached) - Number(b.detached) ||
+				(b.baseline === undefined ? -1 : position(b.baseline)) - (a.baseline === undefined ? -1 : position(a.baseline)),
+		);
+	const pages = Math.max(1, Math.ceil(eligible.length / MAX_LANES));
+	const currentPage = Math.min(page, pages - 1);
+	const shown = eligible.slice(currentPage * MAX_LANES, (currentPage + 1) * MAX_LANES);
 	const TY = 66,
 		tx = (i: number) => 80 + i * 104,
 		COL = { head: 560, pub: 680, chg: 800, rel: 870 },
 		top = 160,
-		gap = 82,
+		gap = shown.length > 5 ? 72 : 82,
 		overlaps = view.overlaps.slice(0, 4),
 		W = 1030 + overlaps.length * 14,
-		H = top + shown.length * gap - 14,
+		H = Math.max(180, top + shown.length * gap - 14),
 		R = 22;
 	const groups = new Map<number, Lane[]>();
 	for (const lane of shown)
@@ -92,7 +132,12 @@ export function LaneMap({
 			.join(", "),
 	].join(": ");
 	return (
-		<figure className="lane-map" data-focus={focus || undefined}>
+		<figure
+			ref={mapRef}
+			className="lane-map"
+			data-focus={focus || undefined}
+			data-motion={paused || !visible || !documentVisible ? "paused" : "playing"}
+		>
 			<div className="lane-map-head">
 				<h2>Lane map</h2>
 				<ul className="lane-legend" aria-hidden="true">
@@ -128,7 +173,31 @@ export function LaneMap({
 					</li>
 				</ul>
 			</div>
-			<div className="lane-canvas">
+			<div className="lane-map-controls">
+				<div className="lane-presence">
+					<span className={`connection-dot${all.some((lane) => !lane.quiet) ? "" : " quiet"}`} aria-hidden="true" />
+					{all.filter((lane) => !lane.quiet).length} connected <span className="muted">· pulse means presence, not a commit</span>
+				</div>
+				<div className="lane-map-actions">
+					{detached.length > 0 && (
+						<button
+							type="button"
+							aria-expanded={showDetached}
+							onClick={() => {
+								setShowDetached(!showDetached);
+								setPage(0);
+							}}
+						>
+							{showDetached ? "Hide" : "Show"} {detached.length} detached
+						</button>
+					)}
+					<button type="button" aria-pressed={paused} onClick={() => setPaused(!paused)}>
+						{paused ? "Resume motion" : "Pause motion"}
+					</button>
+				</div>
+			</div>
+			{/* biome-ignore lint/a11y/noNoninteractiveTabindex: the bounded scroll region must support keyboard scrolling. */}
+			<section className="lane-canvas" tabIndex={0} aria-label="Workspace lane map, scroll to inspect lanes">
 				<svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true" onMouseLeave={() => setFocus(undefined)}>
 					{(
 						[
@@ -156,10 +225,16 @@ export function LaneMap({
 					<text x={COL.rel} y={26} fontSize="10.5" fill="var(--text-faint)">
 						relation
 					</text>
+					{!shown.length && (
+						<text x="32" y="140" fontSize="13" fill="var(--text-muted)">
+							Detached workspaces are folded away. Show them to inspect their revisions.
+						</text>
+					)}
 					{shown.map((lane) => (
 						<LanePath
 							key={lane.id}
 							lane={lane}
+							update={updates.get(lane.id)}
 							y={rowY.get(lane.id) ?? top}
 							bx={departure(lane)}
 							TY={TY}
@@ -244,7 +319,20 @@ export function LaneMap({
 						);
 					})}
 				</svg>
-			</div>
+			</section>
+			{pages > 1 && (
+				<nav className="lane-pagination" aria-label="Lane map pages">
+					<button type="button" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>
+						Previous lanes
+					</button>
+					<span>
+						{currentPage * MAX_LANES + 1}–{Math.min((currentPage + 1) * MAX_LANES, eligible.length)} of {eligible.length}
+					</span>
+					<button type="button" disabled={currentPage === pages - 1} onClick={() => setPage(currentPage + 1)}>
+						Next lanes
+					</button>
+				</nav>
+			)}
 			<figcaption>
 				{caption}.
 				{view.overlaps.length > 0 &&
@@ -252,7 +340,9 @@ export function LaneMap({
 						.slice(0, 3)
 						.map((o) => o.surface)
 						.join(", ")}${view.overlaps.length > 3 ? " and more" : ""}. A heads-up, not a conflict.`}
-				{all.length > shown.length && ` ${all.length - shown.length} more are listed below.`}
+				{!showDetached &&
+					detached.length > 0 &&
+					` ${detached.length} detached ${detached.length === 1 ? "workspace is" : "workspaces are"} folded away.`}
 			</figcaption>
 		</figure>
 	);
@@ -260,6 +350,7 @@ export function LaneMap({
 
 function LanePath({
 	lane,
+	update,
 	y,
 	bx,
 	TY,
@@ -272,6 +363,7 @@ function LanePath({
 	open,
 }: {
 	lane: Lane;
+	update?: string;
 	y: number;
 	bx?: number;
 	TY: number;
@@ -292,7 +384,13 @@ function LanePath({
 		nameX = placed ? bx + R + 12 : startX + 22;
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: the drawing is aria-hidden; each lane's row below is the accessible control.
-		<g className={`lane${focused ? " is-focus" : ""}`} onMouseEnter={() => setFocus(lane.id)} onClick={() => open(lane.id)}>
+		<g
+			className={`lane${focused ? " is-focus" : ""}`}
+			data-workspace={lane.id}
+			data-presence={lane.presence}
+			onMouseEnter={() => setFocus(lane.id)}
+			onClick={() => open(lane.id)}
+		>
 			<title>{lane.title}</title>
 			<rect x={startX - 24} y={y - 46} width={W - startX} height={gap - 6} fill="transparent" />
 			<path d={d} fill="none" stroke="var(--surface)" strokeWidth="12" strokeLinecap="round" />
@@ -310,7 +408,7 @@ function LanePath({
 			</text>
 			<text className="lane-title" x={nameX + 28} y={y - 22} fontSize="13" fontWeight="600" fill="var(--text)">
 				{clip(lane.title, 34)}
-				<tspan fontWeight="400" fontStyle="italic" fill="var(--text-muted)" dx="8">
+				<tspan x={nameX + 28} dy="16" fontSize="10.5" fontWeight="400" fill="var(--text-muted)">
 					{clip(lane.worked, 30)}
 				</tspan>
 			</text>
@@ -328,6 +426,12 @@ function LanePath({
 			{lane.shared.length > 0 && (
 				<circle cx={COL.head} cy={y} r="15" fill="none" stroke="var(--tone-warning)" strokeWidth="2" strokeDasharray="3 3" />
 			)}
+			{!lane.quiet && <circle className="lane-presence-pulse" cx={COL.head} cy={y} r="17" fill="none" stroke={colour} strokeWidth="1.5" />}
+			{update === "head" && (
+				<circle key={lane.head} className="lane-revision-arrival" cx={COL.head} cy={y} r="5" fill={colour}>
+					<title>New reported revision</title>
+				</circle>
+			)}
 			<circle cx={COL.head} cy={y} r="9" fill={lane.quiet ? "var(--surface)" : colour} stroke={colour} strokeWidth="3" />
 			<text x={COL.head} y={y + 30} textAnchor="middle" fontSize="11" fill="var(--text)">
 				{short(lane.head)}
@@ -337,7 +441,16 @@ function LanePath({
 			</text>
 			{lane.published && (
 				<>
-					<circle cx={COL.pub} cy={y} r="8" fill="var(--surface)" stroke={colour} strokeWidth="4" />
+					<circle
+						key={lane.published}
+						className={update === "published" ? "lane-publication-flash" : undefined}
+						cx={COL.pub}
+						cy={y}
+						r="8"
+						fill="var(--surface)"
+						stroke={colour}
+						strokeWidth="4"
+					/>
 					<text x={COL.pub} y={y + 30} textAnchor="middle" fontSize="11" fill="var(--text)">
 						{short(lane.published)}
 					</text>
@@ -382,7 +495,7 @@ function LanePath({
 				strokeWidth="1.5"
 			/>
 			<text x={COL.rel + 13} y={y + 20} fontSize="10.5" fill="var(--text-muted)">
-				{lane.quiet ? "quiet" : "live"}
+				{lane.presence}
 			</text>
 		</g>
 	);

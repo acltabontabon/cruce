@@ -4,6 +4,22 @@
 
 Use separate evidence for pure decisions, local integration, real provider behavior and real participant behavior. Passing one layer does not establish another. **Proposed** means a candidate design; **implemented** means code exists; **locally verified** means named local checks passed; **provider-tested** identifies a real-provider check with its stated harness/authority; **deployed** requires evidence through the deployed Worker and authentication boundary. Describe a result as live verified only with its specific environment, revision and authority scope. Generated client configuration does not prove heterogeneous-agent interoperability. These capability claims are separate from artifact/evidence [trust labels](architecture.md#publication-review-and-retention).
 
+## Animated workspace map and consolidated setup
+
+On **2026-10-08**, connection-presence pulses, finite reported-head/publication highlights, detached disclosures, a bounded scroll canvas and twelve-lane pagination passed typecheck, lint, **342 unit/integration tests**, **85 browser journeys**, deterministic scenario verification, the offline cf build and the configured test deployment dry run. The repository header now opens one **Set up locally** guide, with Clone, Existing checkout and Connect an agent choices and one shared client-installation command. Missing canonical setup disables the checkout choices and explains why.
+
+Native lane-model tests distinguish active attachments from disconnected, detached and missing-execution state. Browser checks cover initial snapshots with no invented commit activity, changed reported heads, Pause/Resume, reduced motion, ten connected workspaces alongside two quiet and five detached workspaces, map pagination, retained detached rows, keyboard scrolling and mobile overflow. Screenshots were inspected in light, dark and mobile layouts; captures are in ignored `dist/ui-checks/lane-map-*.png`. Existing setup journeys cover cloning credentials, checkout preservation, client choice, clipboard fallback and canonical-setup readiness. Lint retains its Biome deprecation notice; the build retains its unavailable-Docker notice.
+
+These are isolated fixture checks. Hosted authenticated lane rendering, actual Claude parallel participation and hosted publication/promotion are not established by them. Deployment evidence is recorded in the [test environment](test-environment.md).
+
+## Parallel workspace bridge
+
+On **2026-10-08**, explicit workspace routing passed typecheck, lint, **341 unit/integration tests**, **83 browser journeys**, deterministic scenario verification and the offline cf build. Lint retains its Biome deprecation notice; the build retains its unavailable-Docker notice.
+
+[test/runner/parallel.test.ts](../test/runner/parallel.test.ts) runs an actual stdio bridge against an isolated simulated hosted MCP endpoint and native Git worktrees. It starts two workspaces without detaching either, checks the exposed workspace selector, publishes distinct local heads through concurrent calls, allows evidence and a proposal in one workspace while the other's publication is uncertain, and retries the publication through the worktree CLI with the same operation identity. It checks repository-root CLI publication and reattachment becoming visible to the running bridge, reuses the same owned directory, resolves an existing worktree's authoritative state when its registry entry is missing, and rejects repository-identity mismatches and invalid workspace IDs. Existing lifecycle and installed-client tests also pass.
+
+This is local bridge evidence. At that verification, no client installation or deployment was made. Hosted fork provisioning, publication/promotion and a real Claude parallel session with the updated bridge remain unverified.
+
 ## Local checks
 
 | Command | What it checks |

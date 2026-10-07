@@ -112,6 +112,32 @@ describe("lane map model", () => {
 		expect(orphan.baseline).toBeUndefined();
 		expect(orphan.quiet).toBe(true);
 	});
+	it("separates detached work and never implies connection without an active attachment", () => {
+		const [detached, quiet, missing, connected] = lanes(
+			view({
+				workspaces: [
+					workspace("detached", 1, { state: "detached", publishedRevision: second }),
+					workspace("quiet", 2, { state: "disconnected" }),
+					workspace("missing", 3),
+					workspace("connected", 4, {
+						execution: {
+							id: "exec",
+							checkoutId: "checkout",
+							machineId: "machine",
+							kind: "worktree",
+							owned: true,
+							attachedBy: codex,
+							attachedAt: 0,
+						},
+					}),
+				],
+			}),
+		);
+		expect(detached).toMatchObject({ detached: true, quiet: true, presence: "detached", published: second });
+		expect(quiet).toMatchObject({ detached: false, quiet: true, presence: "quiet" });
+		expect(missing.quiet).toBe(true);
+		expect(connected).toMatchObject({ quiet: false, presence: "connected" });
+	});
 	it("excludes ended workspaces from the map", () => {
 		expect(lanes(promoted).some((l) => l.id === "done")).toBe(false);
 	});

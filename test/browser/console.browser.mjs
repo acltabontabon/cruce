@@ -127,8 +127,8 @@ test("partial repository status stays unavailable rather than showing zero atten
 });
 test("setup gives Clone its credentials and offers a separate existing-checkout path", async () => {
 	await openRepo();
-	await page.getByRole("button", { name: "Clone", exact: true }).click();
-	const dialog = page.getByRole("dialog", { name: "Clone repository", exact: true });
+	await page.getByRole("button", { name: "Set up locally", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "Set up locally", exact: true });
 	await dialog.getByText(/npm install --global .*downloads\/cruce-client.tgz/).waitFor();
 	await dialog.getByText(/cruce auth --server/).waitFor();
 	assert.equal(await dialog.getByText(/path\/to\/cruce/).count(), 0);
@@ -138,12 +138,15 @@ test("setup gives Clone its credentials and offers a separate existing-checkout 
 	assert.deepEqual([...(await download.body()).subarray(0, 2)], [0x1f, 0x8b]);
 	await page.screenshot({ path: "dist/ui-checks/clone-client-install.png", fullPage: true });
 	await dialog.getByText(/git clone https?:/).waitFor();
-	await dialog.getByRole("button", { name: "Attach local checkout", exact: true }).click();
+	await dialog.getByRole("button", { name: "Existing checkout", exact: true }).click();
 	await dialog.getByText(/files, branch and existing remotes are preserved/).waitFor();
 	await dialog.getByText(/creates an isolated fork and uses namespace resource operations/).waitFor();
 	await page.keyboard.press("Escape");
-	await page.getByRole("button", { name: "Attach local checkout", exact: true }).click();
-	await page.getByRole("dialog", { name: "Attach local checkout", exact: true }).waitFor();
+	await page.getByRole("button", { name: "Set up locally", exact: true }).click();
+	await page
+		.getByRole("dialog", { name: "Set up locally", exact: true })
+		.getByRole("button", { name: "Existing checkout", exact: true })
+		.click();
 });
 test("review remains usable after approval and after a failed evidence result", async () => {
 	await openChange();
@@ -185,7 +188,7 @@ test("copy failures provide a manual-copy alternative", async () => {
 	await page.evaluate(() =>
 		Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.reject(new Error("denied")) } }),
 	);
-	await page.getByRole("button", { name: "Clone", exact: true }).click();
+	await page.getByRole("button", { name: "Set up locally", exact: true }).click();
 	await page.getByRole("dialog").getByRole("button", { name: "Copy", exact: true }).first().click();
 	await page.getByRole("alert").filter({ hasText: "Select and copy the command above." }).waitFor();
 });
@@ -759,10 +762,11 @@ test("a new repository opens on Changes with a way to connect an agent", async (
 	await page.getByRole("heading", { name: "local-tools", exact: true }).waitFor();
 	await page.getByRole("heading", { name: "No changes yet", exact: true }).waitFor();
 	await page.getByText("Nothing needs attention right now.", { exact: true }).waitFor();
-	await page.locator(".changes-screen").getByText("Use Connect an agent above to start.", { exact: false }).waitFor();
-	assert.equal(await page.getByRole("button", { name: "Connect an agent", exact: true }).count(), 1);
-	await page.getByRole("button", { name: "Connect an agent", exact: true }).click();
-	const dialog = page.getByRole("dialog", { name: "Connect an agent", exact: true });
+	await page.locator(".changes-screen").getByText("Use Set up locally above to start.", { exact: false }).waitFor();
+	assert.equal(await page.getByRole("button", { name: "Set up locally", exact: true }).count(), 1);
+	await page.getByRole("button", { name: "Set up locally", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "Set up locally", exact: true });
+	await dialog.getByRole("button", { name: "Connect an agent", exact: true }).click();
 	await dialog.getByRole("button", { name: "Codex", exact: true }).click();
 	await dialog.getByText(/--client codex/).waitFor();
 	assert.equal(await dialog.getByRole("button", { name: "Codex", exact: true }).getAttribute("aria-pressed"), "true");
@@ -1136,7 +1140,12 @@ test("a repository whose creation stopped before canonical setup offers a mainta
 	await openRepo();
 	const notice = page.locator(".canonical-setup");
 	await notice.getByText("Canonical storage was not created.").waitFor();
-	assert.equal(await page.getByRole("button", { name: "Clone", exact: true }).isDisabled(), true);
+	await page.getByRole("button", { name: "Set up locally", exact: true }).click();
+	assert.equal(
+		await page.getByRole("dialog", { name: "Set up locally" }).getByRole("button", { name: "Clone", exact: true }).isDisabled(),
+		true,
+	);
+	await page.keyboard.press("Escape");
 	await page.screenshot({ path: "dist/ui-checks/repository-setup-retry.png", fullPage: true });
 	await notice.getByRole("button", { name: "Retry setup", exact: true }).click();
 	await page.getByRole("status").filter({ hasText: "Saved." }).waitFor();
@@ -1630,9 +1639,9 @@ test("namespace home, account and creation remain usable on mobile", async () =>
 });
 test("repository clone uses normal Git and fork deletion waits until the workspace ends", async () => {
 	await openRepo();
-	await page.getByRole("button", { name: "Clone", exact: true }).click();
+	await page.getByRole("button", { name: "Set up locally", exact: true }).click();
 	await page
-		.getByRole("dialog", { name: "Clone repository" })
+		.getByRole("dialog", { name: "Set up locally" })
 		.getByText(/git clone https?:/)
 		.waitFor();
 	await page
@@ -1664,10 +1673,17 @@ test("unknown canonical, quiet and detached workspaces stay distinct from accept
 		.getByText(/Canonical revision unavailable/)
 		.waitFor();
 	await page.getByRole("button", { name: "1 workspace not reporting", exact: true }).click();
+	assert.equal(await page.locator(".detached-workspaces").evaluate((e) => e.open), false);
+	await page.locator(".detached-workspaces summary").click();
 	await workspaceRow("Paused elsewhere").getByText("Detached", { exact: true }).waitFor();
 	await page.locator(".workspace-row").getByText("Not reporting", { exact: true }).waitFor();
 	assert.equal(await page.locator(".workspace-row").count(), 3);
-	assert.equal(await page.getByRole("button", { name: "Clone", exact: true }).isDisabled(), true);
+	await page.getByRole("button", { name: "Set up locally", exact: true }).click();
+	assert.equal(
+		await page.getByRole("dialog", { name: "Set up locally" }).getByRole("button", { name: "Clone", exact: true }).isDisabled(),
+		true,
+	);
+	await page.keyboard.press("Escape");
 });
 test("namespace failures remain unavailable on Home and retry restores attention counts", async () => {
 	let fail = true;
@@ -2015,4 +2031,102 @@ test("tool consent stays legible on desktop and mobile and provides empty and ex
 	await page.goto(`${server.origin}/__fixture/consent?error`);
 	await page.getByRole("link", { name: "Start again" }).click();
 	await page.getByRole("heading", { name: "Connect to Cruce" }).waitFor();
+});
+
+test("lane motion follows reported revisions, pauses, and honors reduced motion", async () => {
+	await page.clock.install();
+	let changed = false;
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		const data = await (await route.fetch()).json();
+		const w = data.workspaces.find((workspace) => workspace.execution);
+		w.state = "active";
+		if (changed) w.headRevision = "f".repeat(40);
+		await route.fulfill({ json: data });
+	});
+	await openRepo();
+	await repoNav()
+		.getByRole("button", { name: /^Workspaces/ })
+		.click();
+	const map = page.locator(".lane-map");
+	await map.locator('.lane[data-presence="connected"]').first().waitFor();
+	await page.waitForFunction(() => document.querySelector(".lane-map")?.dataset.motion === "playing");
+	assert.equal(await map.locator(".lane-revision-arrival").count(), 0);
+	assert.equal(
+		await map
+			.locator(".lane-presence-pulse")
+			.first()
+			.evaluate((e) => getComputedStyle(e).animationPlayState),
+		"running",
+	);
+	await map.getByRole("button", { name: "Pause motion", exact: true }).click();
+	assert.equal(
+		await map
+			.locator(".lane-presence-pulse")
+			.first()
+			.evaluate((e) => getComputedStyle(e).animationPlayState),
+		"paused",
+	);
+	changed = true;
+	await page.clock.fastForward(15000);
+	await map.locator(".lane-revision-arrival").waitFor();
+	await page.screenshot({ path: "dist/ui-checks/lane-map-activity.png", fullPage: true });
+	await map.getByRole("button", { name: "Resume motion", exact: true }).click();
+	await page.emulateMedia({ reducedMotion: "reduce" });
+	assert.equal(
+		await map
+			.locator(".lane-presence-pulse")
+			.first()
+			.evaluate((e) => getComputedStyle(e).display),
+		"none",
+	);
+	assert.equal(
+		await map
+			.locator(".lane-revision-arrival")
+			.first()
+			.evaluate((e) => getComputedStyle(e).display),
+		"none",
+	);
+});
+
+test("lane maps bound parallel work, fold detached work, and keep every lane reachable", async () => {
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		const data = await (await route.fetch()).json();
+		const template = data.workspaces.find((w) => w.execution);
+		data.workspaces = Array.from({ length: 17 }, (_, i) => ({
+			...template,
+			id: `parallel-${i}`,
+			title: `Parallel workspace ${i + 1}`,
+			startedAt: template.startedAt + i,
+			state: i < 10 ? "active" : i < 12 ? "disconnected" : "detached",
+			execution: i < 12 ? { ...template.execution, id: `execution-${i}` } : undefined,
+		}));
+		await route.fulfill({ json: data });
+	});
+	await openRepo();
+	await repoNav()
+		.getByRole("button", { name: /^Workspaces/ })
+		.click();
+	const map = page.locator(".lane-map");
+	await map.getByText("10 connected", { exact: false }).waitFor();
+	assert.equal(await map.locator(".lane").count(), 12);
+	assert.equal(await map.locator(".lane-presence-pulse").count(), 10);
+	assert.equal(await page.locator(".detached-workspaces").evaluate((e) => e.open), false);
+	assert.equal(await map.locator(".lane-canvas").evaluate((e) => e.clientHeight <= 560 && e.scrollHeight > e.clientHeight), true);
+	await map.getByRole("button", { name: "Pause motion", exact: true }).click();
+	await page.screenshot({ path: "dist/ui-checks/lane-map-parallel.png", fullPage: true });
+	await page.emulateMedia({ colorScheme: "dark" });
+	await page.screenshot({ path: "dist/ui-checks/lane-map-parallel-dark.png", fullPage: true });
+	await map.getByRole("button", { name: "Show 5 detached", exact: true }).click();
+	await map.getByRole("button", { name: "Next lanes", exact: true }).click();
+	assert.equal(await map.locator('.lane[data-presence="detached"]').count(), 5);
+	assert.equal(await map.locator(".lane-presence-pulse").count(), 0);
+	await page.locator(".detached-workspaces summary").click();
+	assert.equal(await page.locator(".detached-workspaces .workspace-row").count(), 5);
+	await map.getByRole("button", { name: "Hide 5 detached", exact: true }).click();
+	assert.equal(await map.locator(".lane").count(), 12);
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.screenshot({ path: "dist/ui-checks/lane-map-parallel-mobile.png", fullPage: true });
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+	await map.locator(".lane-canvas").focus();
+	assert.equal(await map.locator(".lane-canvas").evaluate((e) => document.activeElement === e), true);
 });

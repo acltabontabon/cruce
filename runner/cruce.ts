@@ -25,6 +25,7 @@ import { configureFork, continueFromFork } from "./git-remotes.ts";
 import { git } from "./local-git.ts";
 import { Credentials, login } from "./oauth.ts";
 import { withStateLock, writeState } from "./state-file.ts";
+import { findWorkspaceState, registerWorkspaceState } from "./workspace-state.ts";
 
 interface Connection {
 	stateFile?: string;
@@ -86,7 +87,7 @@ async function main() {
 				repositoryId: option("repository") ?? "",
 			};
 		});
-	if (operation === "mcp" && !connection.owned) {
+	if (operation === "mcp" && !connection.workspaceId) {
 		// Every bridge process owns its workspace state. The repository connection remains shareable.
 		configFile = join(await stateDirectory(root), `agent-${randomUUID()}.json`);
 		delete connection.workspaceId;
@@ -106,8 +107,19 @@ async function main() {
 	if (url.username || url.password) throw new Error("Use a server URL without credentials");
 	if (url.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(url.hostname)) throw new Error("Use HTTPS");
 	if (!connection.namespaceId || !connection.repositoryId) throw new Error("Choose a namespace and repository ID from Cruce");
+	let defaultConfigFile = configFile;
+	const repositoryConnection = {
+		server: connection.server,
+		namespaceId: connection.namespaceId,
+		repositoryId: connection.repositoryId,
+		client: connection.client,
+		humanToken: connection.humanToken,
+	};
+	const tracked = new Set<string>();
+	if (connection.workspaceId) tracked.add(connection.workspaceId);
 	const save = async (copyDirectory = connection.directory) => {
 		await writeState(configFile, connection);
+		if (connection.workspaceId) await registerWorkspaceState(root, connection.workspaceId, configFile);
 		if (copyDirectory) {
 			const copy = join(await stateDirectory(copyDirectory), "connection.json");
 			if (copy !== configFile) await writeState(copy, connection);
@@ -210,22 +222,59 @@ async function main() {
 			if (continuing && connection.owned) await continueFromFork(directory, remote, workspace.id);
 		}
 		await save();
-		return directory;
+		return { directory, workspace: attached };
 	};
 	let queue: Promise<unknown> = Promise.resolve();
 	const execute = (raw: Partial<Command> & { tool: string }) => {
-		const next = queue.then(() =>
-			withStateLock(configFile, async () => {
+		const next = queue.then(async () => {
+			configFile = defaultConfigFile;
+			if (operation === "mcp" && raw.tool === "start_workspace") {
+				const current = (await readFile(defaultConfigFile, "utf8")
+					.then(JSON.parse)
+					.catch((error: NodeJS.ErrnoException) => {
+						if (error.code !== "ENOENT") throw error;
+						return undefined;
+					})) as Connection | undefined;
+				if (current?.pending?.command.tool !== "start_workspace") {
+					// Allocate before locking: every start and its attachment hold their own state lock.
+					configFile = join(await stateDirectory(root), `agent-${randomUUID()}.json`);
+					await writeState(configFile, repositoryConnection);
+					defaultConfigFile = configFile;
+				}
+			}
+			const requested = raw.workspaceId ?? option("workspace");
+			const localTools = ["heartbeat", "report_change", "publish_revision", "detach_workspace", "end_workspace", "attach_workspace"];
+			if (requested && (localTools.includes(raw.tool) || toolByName(raw.tool)?.mutation)) {
+				const current = (await readFile(defaultConfigFile, "utf8")
+					.then(JSON.parse)
+					.catch((error: NodeJS.ErrnoException) => {
+						if (error.code !== "ENOENT") throw error;
+						return undefined;
+					})) as Connection | undefined;
+				const selected =
+					(await findWorkspaceState(root, requested, repositoryConnection)) ??
+					(current?.workspaceId === requested ? defaultConfigFile : undefined);
+				if (selected) configFile = selected;
+				else if (raw.tool === "attach_workspace") {
+					configFile = join(await stateDirectory(root), `agent-${randomUUID()}.json`);
+					await writeState(configFile, repositoryConnection);
+				} else if (localTools.includes(raw.tool))
+					throw new Error("No local execution for this workspace. Call attach_workspace with workspaceId to continue it here.");
+			}
+			return withStateLock(configFile, async () => {
 				const fresh = (await readFile(configFile, "utf8")
 					.then(JSON.parse)
 					.catch((e: NodeJS.ErrnoException) => {
 						if (e.code !== "ENOENT") throw e;
 						return undefined;
 					})) as Connection | undefined;
-				if (fresh) {
-					for (const key of Object.keys(connection)) delete connection[key as keyof Connection];
-					Object.assign(connection, fresh);
-				}
+				for (const key of Object.keys(connection)) delete connection[key as keyof Connection];
+				Object.assign(connection, fresh ?? repositoryConnection);
+				// Local state selects Git work, never the caller's credential or authority.
+				connection.humanToken = repositoryConnection.humanToken;
+				connection.client = repositoryConnection.client;
+				connection.stateFile = configFile;
+				if (connection.workspaceId) tracked.add(connection.workspaceId);
 				const tool = toolByName(raw.tool);
 				if (!tool) throw new Error("Unknown Cruce tool");
 				const command: Command = {
@@ -233,13 +282,40 @@ async function main() {
 					repositoryId: connection.repositoryId,
 					workspaceId: connection.workspaceId,
 					...raw,
+					...(requested ? { workspaceId: requested } : {}),
 				};
 				if (raw.tool === "start_workspace") {
 					if (connection.workspaceId && connection.pending?.command.tool !== "start_workspace")
-						throw new Error("End the current workspace before starting another");
+						throw new Error("Detach or end the current workspace before starting another from this checkout");
 					command.baseRevision ??= await git(root, ["rev-parse", "HEAD"]);
 					command.title ??= option("title") ?? "Local work";
 					delete command.workspaceId;
+				}
+				if (raw.tool === "attach_workspace") {
+					if (connection.pending) throw new Error("Retry the pending mutation before changing the execution attachment");
+					const id = requested ?? connection.workspaceId;
+					if (!id) throw new Error("Choose workspaceId to attach an existing workspace, or start_workspace for new work");
+					const workspace = (await call({
+						namespaceId: connection.namespaceId,
+						repositoryId: connection.repositoryId,
+						tool: "get_workspace",
+						workspaceId: id,
+					})) as Workspace;
+					connection.workspaceId = workspace.id;
+					connection.baseRevision = workspace.baseRevision;
+					connection.publishedRevision = workspace.publishedRevision;
+					connection.integratedRevision = workspace.integratedRevision;
+					connection.stateFile = configFile;
+					await save();
+					const { directory, workspace: attached } = await attachHere(workspace, true);
+					tracked.add(workspace.id);
+					return {
+						...workspace,
+						...attached,
+						execution: connection.execution,
+						directory,
+						instruction: "Use this directory for workspace work; commit and push with normal Git.",
+					};
 				}
 				const directory = connection.directory ?? root;
 				if (["heartbeat", "report_change", "attach_workspace"].includes(raw.tool)) {
@@ -252,8 +328,8 @@ async function main() {
 				}
 				if (raw.tool === "publish_revision") {
 					if (!connection.baseRevision) throw new Error("Start a workspace first");
-					command.revision = await git(directory, ["rev-parse", "HEAD"]);
-					command.ref = await git(directory, ["symbolic-ref", "--short", "HEAD"]);
+					command.revision ??= await git(directory, ["rev-parse", "HEAD"]);
+					command.ref ??= await git(directory, ["symbolic-ref", "--short", "HEAD"]);
 				}
 
 				const fingerprint = JSON.stringify(command);
@@ -287,7 +363,8 @@ async function main() {
 					connection.workspaceId = workspace.id;
 					connection.baseRevision = workspace.baseRevision;
 					await save();
-					const directory = await attachHere(workspace);
+					const { directory } = await attachHere(workspace);
+					tracked.add(workspace.id);
 					delete connection.pending;
 					await save();
 					return {
@@ -309,6 +386,7 @@ async function main() {
 					const retained = connection.publishedRevision ?? connection.baseRevision!;
 					if (cleanup) await cleanupExecution(directory, workspaceId, retained);
 					else await releaseCheckout(directory, workspaceId);
+					tracked.delete(workspaceId);
 					delete connection.workspaceId;
 					delete connection.baseRevision;
 					delete connection.publishedRevision;
@@ -324,8 +402,8 @@ async function main() {
 					await save();
 				}
 				return result;
-			}),
-		);
+			});
+		});
 		queue = next.catch(() => {});
 		return next;
 	};
@@ -340,6 +418,8 @@ async function main() {
 			return;
 		}
 		if (operation === "resume") {
+			const requested = option("workspace");
+			if (requested) configFile = (await findWorkspaceState(root, requested, repositoryConnection)) ?? configFile;
 			await withStateLock(configFile, async () => {
 				const fresh = (await readFile(configFile, "utf8")
 					.then(JSON.parse)
@@ -351,6 +431,9 @@ async function main() {
 					for (const key of Object.keys(connection)) delete connection[key as keyof Connection];
 					Object.assign(connection, fresh);
 				}
+				connection.humanToken = repositoryConnection.humanToken;
+				connection.client = repositoryConnection.client;
+				connection.stateFile = configFile;
 				if (connection.pending && connection.pending.command.tool !== "start_workspace")
 					throw new Error("Retry the pending mutation before changing the execution attachment");
 				const requested = option("workspace");
@@ -372,7 +455,7 @@ async function main() {
 					await save();
 				}
 				if (!connection.workspaceId) throw new Error("Choose --workspace ID to continue, or start a workspace");
-				const directory = await attachHere({ id: connection.workspaceId, baseRevision: connection.baseRevision! }, true);
+				const { directory } = await attachHere({ id: connection.workspaceId, baseRevision: connection.baseRevision! }, true);
 				process.stdout.write(`Workspace attached at ${directory}\n`);
 				delete connection.pending;
 				await save();
@@ -380,9 +463,9 @@ async function main() {
 			return;
 		}
 		const heartbeat = () => {
-			if (connection.workspaceId)
-				void execute({ tool: "heartbeat" })
-					.then(() => execute({ tool: "report_change" }))
+			for (const workspaceId of tracked)
+				void execute({ tool: "heartbeat", workspaceId })
+					.then(() => execute({ tool: "report_change", workspaceId }))
 					.catch((e) => process.stderr.write(`${(e as Error).message}\n`));
 		};
 		if (operation === "mcp") {
@@ -390,22 +473,22 @@ async function main() {
 			const server = new McpServer({ name: "Cruce local bridge", version: CRUCE_VERSION }, { instructions: CRUCE_INSTRUCTIONS });
 			for (const tool of CRUCE_TOOLS) {
 				// The bridge supplies identities and the attached execution from local state.
-				const {
-					namespaceId: _,
-					repositoryId: __,
-					workspaceId: ___,
-					idempotencyKey: ____,
-					execution: _____,
-					...shape
-				} = toolInputShape(tool);
-				server.registerTool(tool.name, { description: tool.description, inputSchema: shape }, async (values) => {
-					try {
-						const result = await execute({ ...values, tool: tool.name });
-						return { content: [{ type: "text" as const, text: JSON.stringify(result) }], structuredContent: result };
-					} catch (e) {
-						return { isError: true, content: [{ type: "text" as const, text: (e as Error).message }] };
-					}
-				});
+				const { namespaceId: _, repositoryId: __, idempotencyKey: ____, execution: _____, ...shape } = toolInputShape(tool);
+				server.registerTool(
+					tool.name,
+					{
+						description: tool.description,
+						inputSchema: shape,
+					},
+					async (values) => {
+						try {
+							const result = await execute({ ...values, tool: tool.name });
+							return { content: [{ type: "text" as const, text: JSON.stringify(result) }], structuredContent: result };
+						} catch (e) {
+							return { isError: true, content: [{ type: "text" as const, text: (e as Error).message }] };
+						}
+					},
+				);
 			}
 			const timer = setInterval(heartbeat, 30000);
 			timer.unref();

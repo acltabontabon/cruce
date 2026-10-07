@@ -3775,3 +3775,130 @@ main[data-screen="settings"] > form {
 		scroll-behavior: auto !important;
 	}
 }
+
+/* Presence moves gently; source highlights only follow a changed snapshot revision. */
+.lane-map-controls,
+.lane-map-actions,
+.lane-pagination,
+.lane-presence {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+.lane-map-controls {
+	justify-content: space-between;
+	flex-wrap: wrap;
+	padding: 10px 16px;
+	border-bottom: 1px solid var(--border-subtle);
+	font-size: 12px;
+}
+.lane-map-actions {
+	flex-wrap: wrap;
+}
+.lane-map-actions button,
+.lane-pagination button {
+	padding: 5px 9px;
+	font-size: 12px;
+}
+.lane-presence {
+	flex-wrap: wrap;
+	gap: 6px;
+	color: var(--text-muted);
+}
+.connection-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--tone-success);
+}
+.lane-canvas {
+	max-height: 560px;
+	overflow: auto;
+	scrollbar-gutter: stable;
+}
+.lane-canvas:focus-visible {
+	outline: 2px solid var(--tone-accent);
+	outline-offset: -3px;
+}
+.lane-pagination {
+	justify-content: space-between;
+	padding: 10px 16px;
+	border-top: 1px solid var(--border-subtle);
+	font-family: var(--font-mono);
+	font-size: 11px;
+}
+.lane-presence-pulse {
+	transform-box: fill-box;
+	transform-origin: center;
+	animation: lane-presence 3.6s ease-out infinite;
+}
+.lane-revision-arrival {
+	animation: lane-arrival 2.8s ease-out both;
+}
+.lane-publication-flash {
+	animation: lane-publication 1.2s ease-out 2;
+}
+.lane-map[data-motion="paused"] .lane-presence-pulse,
+.lane-map[data-motion="paused"] .lane-revision-arrival,
+.lane-map[data-motion="paused"] .lane-publication-flash {
+	animation-play-state: paused;
+}
+@keyframes lane-presence {
+	0%,
+	100% {
+		opacity: 0;
+		transform: scale(0.7);
+	}
+	25% {
+		opacity: 0.45;
+	}
+	85% {
+		opacity: 0;
+		transform: scale(1.35);
+	}
+}
+@keyframes lane-arrival {
+	0% {
+		opacity: 0;
+		transform: translateX(-130px);
+	}
+	15% {
+		opacity: 1;
+	}
+	75% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0;
+		transform: translateX(0);
+	}
+}
+@keyframes lane-publication {
+	50% {
+		stroke-width: 8;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.lane-presence-pulse,
+	.lane-revision-arrival {
+		display: none;
+	}
+	.lane-map .lane {
+		transition: none;
+	}
+}
+@container console (max-width: 640px) {
+	.lane-presence .muted {
+		display: none;
+	}
+	.lane-map-controls {
+		padding: 10px 12px;
+	}
+	.lane-canvas {
+		display: block;
+		max-height: 460px;
+	}
+}
+.connection-dot.quiet {
+	background: var(--text-faint);
+}
