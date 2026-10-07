@@ -129,8 +129,15 @@ test("setup gives Clone its credentials and offers a separate existing-checkout 
 	await openRepo();
 	await page.getByRole("button", { name: "Clone", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "Clone repository", exact: true });
-	await dialog.getByText(/git-credential.mjs login/).waitFor();
-	await dialog.getByText(/credential.helper=.*clone/).waitFor();
+	await dialog.getByText(/npm install --global .*downloads\/cruce-client.tgz/).waitFor();
+	await dialog.getByText(/cruce auth --server/).waitFor();
+	assert.equal(await dialog.getByText(/path\/to\/cruce/).count(), 0);
+	const download = await page.request.get(`${server.origin}/downloads/cruce-client.tgz`);
+	assert.equal(download.status(), 200);
+	assert.equal(download.headers()["content-type"], "application/gzip");
+	assert.deepEqual([...(await download.body()).subarray(0, 2)], [0x1f, 0x8b]);
+	await page.screenshot({ path: "dist/ui-checks/clone-client-install.png", fullPage: true });
+	await dialog.getByText(/git clone https?:/).waitFor();
 	await dialog.getByRole("button", { name: "Attach local checkout", exact: true }).click();
 	await dialog.getByText(/files, branch and existing remotes are preserved/).waitFor();
 	await dialog.getByText(/creates an isolated fork and uses namespace resource operations/).waitFor();
@@ -1251,7 +1258,7 @@ test("workspace detail explains who works on it, its baseline and overlap, and t
 	await page.getByText(/Attached to a worktree through Codex/).waitFor();
 	const continuation = page.locator(".continuation");
 	await continuation.getByText(/Only pushed commits travel/).waitFor();
-	await continuation.getByText(/cruce\.mjs resume --server .* --workspace /).waitFor();
+	await continuation.getByText(/cruce resume --server .* --workspace /).waitFor();
 	await continuation.getByText(/does not revoke the previous connection's Git access/).waitFor();
 	const start = await facts.locator("dd").nth(2).textContent();
 	await page.getByRole("button", { name: "Release checkout", exact: true }).click();
@@ -1626,11 +1633,11 @@ test("repository clone uses normal Git and fork deletion waits until the workspa
 	await page.getByRole("button", { name: "Clone", exact: true }).click();
 	await page
 		.getByRole("dialog", { name: "Clone repository" })
-		.getByText(/credential.helper=.*clone/)
+		.getByText(/git clone https?:/)
 		.waitFor();
 	await page
 		.getByRole("dialog")
-		.getByText(/git-credential.mjs login/)
+		.getByText(/cruce auth --server/)
 		.waitFor();
 	await page.keyboard.press("Escape");
 	await repoNav()

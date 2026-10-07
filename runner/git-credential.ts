@@ -62,6 +62,6 @@ async function main() {
 	process.stdout.write(`username=cruce\npassword=${token}\n\n`);
 }
 main().catch(() => {
-	process.stderr.write("Cruce Git authentication failed. Sign in with git-credential.mjs login --server URL --client NAME.\n");
+	process.stderr.write("Cruce Git authentication failed. Run cruce auth --server URL --namespace ID --repository ID to authorize Git.\n");
 	process.exitCode = 1;
 });

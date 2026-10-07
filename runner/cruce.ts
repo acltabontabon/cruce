@@ -20,6 +20,7 @@ import {
 	reserveCheckout,
 	stateDirectory,
 } from "./execution.ts";
+import { configureCanonicalCredentials } from "./git-auth.ts";
 import { configureFork, continueFromFork } from "./git-remotes.ts";
 import { git } from "./local-git.ts";
 import { Credentials, login } from "./oauth.ts";
@@ -53,8 +54,24 @@ async function main() {
 	const operation = args[0] ?? "help";
 	if (operation === "help" || args.includes("--help")) {
 		process.stdout.write(
-			"Cruce — Git coordination for parallel agentic development\n\ncruce connect --namespace ID --repository ID --server URL [--client codex|claude|cursor]\ncruce human --namespace ID --repository ID --server URL\ncruce start --title TEXT\ncruce mcp [--client TOOL]\ncruce watch\ncruce publish [--title TEXT]\ncruce detach                   release this checkout; the workspace continues elsewhere\ncruce resume [--workspace ID]  reattach, or continue a workspace here from its pushed head\ncruce end [--cleanup]\n",
+			"Cruce — Git coordination for parallel agentic development\n\ncruce auth --server URL --namespace ID --repository ID   authorize Git\ncruce connect --namespace ID --repository ID --server URL [--client codex|claude|cursor]\ncruce human --namespace ID --repository ID --server URL\ncruce start --title TEXT\ncruce mcp [--client TOOL]\ncruce watch\ncruce publish [--title TEXT]\ncruce detach                   release this checkout; the workspace continues elsewhere\ncruce resume [--workspace ID]  reattach, or continue a workspace here from its pushed head\ncruce end [--cleanup]\n",
 		);
+		return;
+	}
+	if (operation === "auth") {
+		const server = option("server"),
+			namespaceId = option("namespace"),
+			repositoryId = option("repository");
+		if (!server || !namespaceId || !repositoryId) throw new Error("Choose --server URL, --namespace ID and --repository ID");
+		const origin = new URL(server);
+		if (origin.username || origin.password || (origin.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(origin.hostname)))
+			throw new Error("Use an HTTPS server URL without credentials");
+		if (![namespaceId, repositoryId].every((id) => /^[a-zA-Z0-9-]+$/.test(id))) throw new Error("Choose namespace and repository IDs");
+		const credentials = new Credentials(origin.origin, "git");
+		await credentials.load();
+		await login(origin.origin, credentials, DEFAULT_AGENT_SCOPES);
+		await configureCanonicalCredentials(origin.origin, namespaceId, repositoryId);
+		process.stdout.write("Git authorized. Clone with the command shown in Cruce.\n");
 		return;
 	}
 	const root = cwd;

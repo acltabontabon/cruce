@@ -46,6 +46,8 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Fixed
 
+- Supply an installable local client from the Cruce website before clone, checkout attachment or agent setup. Replace source-checkout path placeholders with installed `cruce` commands; `cruce auth` configures repository-scoped Git authentication so cloning uses ordinary `git clone`.
+
 - Complete an interrupted promotion whose update already reached canonical, even if evidence or policy changed afterwards. Record evidence only for open changes.
 - Limit terminal bridge discovery to its approved namespace and repository.
 - Keep agent OAuth connections and paired terminals working after the browser's Access session that approved them expires. Connections now last for their own grant or terminal authorization, and current membership, grants, approved repositories and scopes are still checked on every request. Existing connections need no reconnection.

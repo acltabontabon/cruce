@@ -32,7 +32,7 @@ Cloudflare usage is billed to the installation account. Namespaces have no opera
 
 ## Control plane
 
-Access protects browser sign-in, consent, pairing approval, invitations and namespace APIs. The public document/assets and cookie-verified `/auth/session` let the homepage render before sign-in. Native Git uses the narrow `/mcp/git/*` browser-challenge exception while Cruce authenticates each request. Review [public homepage paths](../tools/access-public-homepage.json) and [Git transport paths](../tools/access-agent-transport.json) for your own Access application. Deployment configuration does not provision Access policies automatically.
+Access protects browser sign-in, consent, pairing approval, invitations and namespace APIs. The public document/assets and cookie-verified `/auth/session` let the homepage render before sign-in. The static `/downloads/cruce-client.tgz` must also be downloadable without an Access browser challenge so npm can install it; the public base in the reviewed configuration already covers this path. Native Git uses the narrow `/mcp/git/*` browser-challenge exception while Cruce authenticates each request. Review [public homepage paths](../tools/access-public-homepage.json) and [Git transport paths](../tools/access-agent-transport.json) for your own Access application. Deployment configuration does not provision Access policies automatically.
 
 Sign out expires the Cruce cookie and redirects to `/cdn-cgi/access/logout`, ending Access sessions across applications in the same team. It does not revoke Cruce OAuth connections or alter namespace membership.
 

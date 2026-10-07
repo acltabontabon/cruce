@@ -12,7 +12,7 @@ The single executable catalog is [src/shared/tools.ts](../src/shared/tools.ts). 
 
 | Path | What it does | Client responsibilities |
 | --- | --- | --- |
-| Local stdio bridge: `node /absolute/path/to/cruce/runner/cruce.mjs mcp --cwd /absolute/path/to/checkout --client NAME` | Connects to hosted `/mcp` with OAuth. Creates isolated worktrees, attaches them and reports local Git state | Work in the returned directory |
+| Local stdio bridge: `cruce mcp --cwd /absolute/path/to/checkout --client NAME` | Connects to hosted `/mcp` with OAuth. Creates isolated worktrees, attaches them and reports local Git state | Work in the returned directory |
 | Direct hosted MCP: `https://YOUR_HOST/mcp` | Repository-scoped coordination through OAuth | Provide local isolation, locks, attachment, heartbeats and change reports yourself, naming the attached execution on every report |
 | Git smart HTTP | Normal clone/fetch/pull/push with the Cruce credential helper | Use Git, not MCP, to move source |
 

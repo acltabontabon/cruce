@@ -42,7 +42,6 @@ function ReportAge({ at, now }: { at?: number; now: number }) {
 
 type Open = (tab: string, id?: string, filter?: string) => void;
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-const CRUCE = "/path/to/cruce";
 
 /** Recorded attachment provenance; it names how the checkout was attached, not what is executing now. */
 function attachmentText(w: Workspace) {
@@ -340,7 +339,7 @@ function ContinuationGuide({ view, w, who }: { view: RepositorySnapshot; w: Work
 					)}
 					<li>
 						On the destination, authorize your connection to this repository, then attach a replacement checkout from the fork head:
-						<CopyCommand text={`node ${CRUCE}/runner/cruce.mjs resume --server ${location.origin} --workspace ${w.id}`} />
+						<CopyCommand text={`cruce resume --server ${location.origin} --workspace ${w.id}`} />
 					</li>
 					<li>Reports from the previous checkout are rejected once the replacement is attached.</li>
 				</ol>

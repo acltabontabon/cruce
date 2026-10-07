@@ -12,6 +12,12 @@ Cruce's current alpha is **[0.1.0-alpha.3](https://github.com/acltabontabon/cruc
 - Follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): group brief user-facing changes under `[Unreleased]` using applicable `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed` or `Security` headings; omit empty categories and maintain release/comparison links. Before release, move them into a heading matching the package version. Summarize user-facing changes; Git history and review descriptions retain implementation details. Keep current local/live verification evidence in [verification](local-verification.md).
 - Release tags are `v` plus the exact package version. Never move or reuse a published tag; fix a release with a new version.
 
+## Local client distribution
+
+Every console build emits `/downloads/cruce-client.tgz`, an installable npm package with `cruce` and `cruce-git-credential` executables. The package uses an explicit source allowlist and the exact installed versions of its runtime dependencies. It excludes Worker code, installation configuration and credentials. No npm registry publication is needed: users install directly from their Cruce site. npm fetches the declared dependencies from its configured registry.
+
+The Vite plugin generates this archive for both development and built console assets, including direct `cf build` and deployment builds. Local packaging tests run the extracted client outside the source checkout; hosted downloads and OAuth still require deployed acceptance.
+
 ## Interface compatibility
 
 The MCP tool catalog ([`src/shared/tools.ts`](../src/shared/tools.ts)), the console HTTP API and the bridge command route are versioned together with `package.json`. MCP clients read the version from the server's `serverInfo`.

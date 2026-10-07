@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 import react from "@vitejs/plugin-react";
 import { createServer } from "vite";
+import { clientDownloadPlugin } from "../../tools/client-package.ts";
 /** Explicitly local fixture. Never imported by the production Worker. */
 export async function startFixtureServer() {
 	let handle;
@@ -8,6 +9,7 @@ export async function startFixtureServer() {
 		configFile: false,
 		plugins: [
 			react(),
+			clientDownloadPlugin(),
 			{
 				name: "cruce-fixture",
 				configureServer(server) {

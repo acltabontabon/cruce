@@ -4,7 +4,7 @@
 
 This is the workflow supported by the current implementation. Real-provider convergence and some deployed setup/authentication boundaries have evidence, but authenticated deployed publication/promotion and multi-tool, multi-session participation remain pending; check [verification status](local-verification.md). The [architecture audit](architecture.md#architecture-contradictions-and-correctness-gaps) records the remaining gaps. For a no-cloud tour, use the [local fixture](../CONTRIBUTING.md#set-up-and-explore).
 
-Use Git, Node 22.18+ and installed Cruce dependencies. Once the administrator has configured installation storage, sign in through Access and create a repository. No developer Cloudflare account or API token is required. Cruce initializes its configured default branch. Repository creation and writer attachment consume Artifacts resources. CI, releases and deployments remain external.
+Use Git and Node 22.18+ (including npm). Install the local Cruce client from the same website you use for the console; no Cruce source checkout is needed. Once the administrator has configured installation storage, sign in through Access and create a repository. No developer Cloudflare account or API token is required. Cruce initializes its configured default branch. Repository creation and writer attachment consume Artifacts resources. CI, releases and deployments remain external.
 
 Explicit console sign-in or OAuth authorization initializes your Cruce identity and personal namespace. Coordination reads never create identity, repository metadata or source storage. If canonical setup was interrupted, inspect the registered repository and use its maintainer-only setup retry; reading it consumes no Artifacts operation. An unknown identity must sign in again. See the [read boundary](architecture.md#coordination-read-boundary).
 
@@ -16,17 +16,20 @@ The repository's Clone control shows the canonical remote with stable IDs:
 https://YOUR_HOST/mcp/git/NAMESPACE_ID/REPOSITORY_ID/canonical.git
 ```
 
-Replace the host, IDs and absolute Cruce installation path in these examples. Authorize a standard Git credential helper, then clone:
+Install the client once on each machine. The website serves an npm package containing the bridge and Git credential helper, matching its build. npm installs its declared runtime dependencies; this does not require a separately published npm registry package:
 
 ```sh
-node /absolute/path/to/cruce/runner/git-credential.mjs login --server https://YOUR_HOST --client git
-
-git -c credential.useHttpPath=true \
-  -c 'credential.helper=!node /absolute/path/to/cruce/runner/git-credential.mjs --server https://YOUR_HOST --client git' \
-  clone https://YOUR_HOST/mcp/git/NAMESPACE_ID/REPOSITORY_ID/canonical.git
+npm install --global https://YOUR_HOST/downloads/cruce-client.tgz
 ```
 
-Use the same `-c` options for subsequent canonical operations, or configure the helper yourself scoped to this host. Helper configuration contains paths/server addresses, never tokens. OAuth credentials are stored privately outside tracked source. Cloudflare repository tokens remain server-side. Never embed a password in a remote URL.
+Replace `YOUR_HOST` and the IDs below with the values shown by the repository's Clone control. Authorize Git, select this repository on the consent page, then clone:
+
+```sh
+cruce auth --server https://YOUR_HOST --namespace NAMESPACE_ID --repository REPOSITORY_ID
+git clone https://YOUR_HOST/mcp/git/NAMESPACE_ID/REPOSITORY_ID/canonical.git
+```
+
+`auth` signs in through OAuth and configures the installed credential helper in your global Git configuration, scoped to this repository's exact canonical URL. Clone and subsequent fetches use ordinary Git without extra credential options. Existing helpers for other destinations remain unchanged. Helper configuration contains installation paths/server addresses, never tokens. OAuth credentials are stored privately outside tracked source. Cloudflare repository tokens remain server-side. Never embed a password in a remote URL.
 
 Canonical is readable by authorized participants; its accepted branch advances through reviewed human promotion. Writers push to their own forks with normal Git. `get_git_access` returns canonical and fork paths relative to the Cruce server.
 
@@ -35,8 +38,8 @@ Canonical is readable by authorized participants; its accepted branch advances t
 From the cloned repository, or an existing checkout containing the known canonical base:
 
 ```sh
-node /absolute/path/to/cruce/runner/cruce.mjs connect --server https://YOUR_HOST --namespace NAMESPACE_ID --repository REPOSITORY_ID --client codex
-node /absolute/path/to/cruce/runner/cruce.mjs start --title "Improve retries"
+cruce connect --server https://YOUR_HOST --namespace NAMESPACE_ID --repository REPOSITORY_ID --client codex
+cruce start --title "Improve retries"
 ```
 
 `connect` authorizes the client, saves local connection state and, as a convenience for `codex`, `claude` or `cursor`, writes client MCP configuration and a participation block. Any MCP-capable tool can connect without it. Choose either the CLI `start` above or let a connected agent call `start_workspace` through MCP. Move the agent to the returned dedicated directory before editing; Cruce does not launch or relocate its process.
@@ -46,7 +49,7 @@ The bridge creates a worktree at the exact starting commit and attaches one host
 The MCP bridge renews presence and reports local changes while it runs. For standalone CLI participation, run this in a separate terminal using the returned worktree directory:
 
 ```sh
-node /absolute/path/to/cruce/runner/cruce.mjs watch
+cruce watch
 ```
 
 `start` alone is not a background monitor. Heartbeats run every 30 seconds; presence shows disconnected after 90 seconds without activity, but the attachment and checkout ownership remain. `resume` reattaches a prepared workspace after an interrupted first attachment. A display label is not an authority boundary; the workspace belongs to its owner, whichever tool connects.
@@ -60,47 +63,49 @@ git diff
 git add path/to/changed-file
 git commit -m "Improve retries"
 git push
-node /absolute/path/to/cruce/runner/cruce.mjs publish --title "Bound retries"
+cruce publish --title "Bound retries"
 ```
 
 Publication seals the exact pushed branch revision into retained source storage. It validates ancestry/protected paths and pins a review base; it neither commits nor pushes local files. Through MCP, create a proposal from the returned artifact, record exact-revision evidence and request human promotion. The console supports review and the human decision. See [MCP command families](mcp.md#command-families).
 
 When a maintainer enables observation, push events trigger bounded, identity-checked fork inspection. Reported local heads, observed fork refs, published revisions and accepted canonical source remain different facts. Observation health and published ancestry are available through `get_reconciliation`. Do not treat heartbeat presence as proof that change reports are current.
 
-When source advances, inspect `get_workspace_updates`, fetch canonical with Git and merge explicitly. Use the canonical helper options from above when fetching its URL; the worktree's automatic credential helper is scoped to its fork. Resolve conflicts, run relevant checks, then push/publish and propose the reconciled revision for fresh review. Published ancestry must remain reachable: rebasing away previously published commits will fail publication checks. The original workspace base and earlier artifacts never change.
+When source advances, inspect `get_workspace_updates`, fetch canonical with Git and merge explicitly. The configured canonical helper authenticates fetches; the worktree also has a helper scoped to its fork. Resolve conflicts, run relevant checks, then push/publish and propose the reconciled revision for fresh review. Published ancestry must remain reachable: rebasing away previously published commits will fail publication checks. The original workspace base and earlier artifacts never change.
 
 `git branch`, `git diff`, `git log`, `git fetch`, `git pull` and other normal Git operations keep their meaning. Cruce supplies no clone, checkout, fetch, pull, push or commit replacements. Git operations against existing non-Cruce remotes such as `origin` remain the developer's responsibility.
 
 ## Continue a workspace elsewhere
 
-A workspace is not tied to an agent session, a process or a machine. A new agent session pointed at the workspace's worktree (`cruce.mjs mcp --cwd WORKTREE`) continues the same workspace. To move it to another checkout or machine, first release the current execution attachment from the old checkout:
+A workspace is not tied to an agent session, a process or a machine. A new agent session pointed at the workspace's worktree (`cruce mcp --cwd WORKTREE`) continues the same workspace. To move it to another checkout or machine, first release the current execution attachment from the old checkout:
 
 ```sh
-node /absolute/path/to/cruce/runner/cruce.mjs detach
+cruce detach
 ```
 
 `detach` keeps the worktree, the fork and all history. It only releases the local writer lock and the server attachment. If the old machine is unavailable, the owner can release the attachment from the console. Then, in any clone of the repository on the new machine:
 
 ```sh
-node /absolute/path/to/cruce/runner/cruce.mjs connect --server https://YOUR_HOST --namespace NAMESPACE_ID --repository REPOSITORY_ID
-node /absolute/path/to/cruce/runner/cruce.mjs resume --workspace WORKSPACE_ID
+cruce connect --server https://YOUR_HOST --namespace NAMESPACE_ID --repository REPOSITORY_ID
+cruce resume --workspace WORKSPACE_ID
 ```
 
 `resume --workspace` creates a Cruce-owned worktree at the workspace baseline, configures the workspace fork remote and fast-forwards to the branch head you last pushed. Only pushed work travels; Git is the transport. Unpushed commits and uncommitted files stay where they were made. If the pushed history does not fast-forward from the baseline, `resume` stops and leaves the worktree for you to reconcile with Git.
 
 ## End and clean up deliberately
 
-`cruce.mjs end` completes participation without merging. `end --cleanup` also attempts to remove a Cruce-owned, clean local worktree whose head is published or still at its retained base. Stop a separate `watch` process when done. Human-owned checkouts are preserved.
+`cruce end` completes participation without merging. `end --cleanup` also attempts to remove a Cruce-owned, clean local worktree whose head is published or still at its retained base. Stop a separate `watch` process when done. Human-owned checkouts are preserved.
 
 Hosted fork cleanup is a separate `cleanup_workspace` operation or console action. End the workspace first. Every remote ref must be retained by canonical or an immutable artifact; unretained commits, annotated tags and other non-commit refs block removal. A response may be `deleting`; repeat the same operation until `deleted`. Workspace metadata, reviews and artifacts remain; hosted cleanup does not remove local files.
 
 ## Human terminals
 
-`cruce.mjs human --server URL --namespace ID --repository ID` requests browser-approved terminal participation. Then use `start` from the existing checkout. Human terminals can attach that checkout but cannot approve canonical source promotion.
+`cruce human --server URL --namespace ID --repository ID` requests browser-approved terminal participation. Then use `start` from the existing checkout. Human terminals can attach that checkout but cannot approve canonical source promotion.
 
 The credential helper can use `--human-file /absolute/path/to/git-metadata/cruce/connection.json` with `credential.useHttpPath=true`, scoped to that repository. Use the fork URL from `get_git_access` for explicit `git push FORK_URL HEAD:BRANCH`; existing remotes remain unchanged. Renew terminal authorization from its checkout when it expires. Agent MCP must use its own OAuth connection, never human terminal credentials.
 
 ## Troubleshooting boundaries
+
+If `cruce` is not found, check that npm’s global executable directory is on your `PATH`. If global installation is denied, use a user-owned npm prefix rather than installing with administrator privileges. Reinstall from the same site to update the client.
 
 | Symptom | Check |
 | --- | --- |

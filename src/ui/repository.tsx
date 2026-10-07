@@ -33,7 +33,6 @@ import { WorkspaceDetail, WorkspaceList } from "./work.tsx";
 type Open = (tab: string, id?: string, filter?: string) => void;
 export type Mutate = <T>(url: string, body: Record<string, unknown>, method?: string) => Promise<T>;
 export const repositoryTabs = ["changes", "workspaces", "history", "settings"] as const;
-const CRUCE = "/path/to/cruce";
 
 function plural(n: number, one: string, many = `${one}s`) {
 	return `${n} ${n === 1 ? one : many}`;
@@ -544,8 +543,7 @@ function ConnectGuide({ view, initial = "connect" }: { view: RepositorySnapshot;
 	const [method, setMethod] = useState<SetupMethod>(initial);
 	const [tool, setTool] = useState<"claude" | "codex" | "cursor">("claude");
 	const origin = location.origin,
-		url = `${origin}${gitRemotePath(view.repository.namespaceId, view.repository.id)}`,
-		helper = `node ${CRUCE}/runner/git-credential.mjs --server ${origin} --client git`;
+		url = `${origin}${gitRemotePath(view.repository.namespaceId, view.repository.id)}`;
 	const launch = tool === "claude" ? "claude" : tool === "codex" ? "codex" : "cursor-agent";
 	return (
 		<div className="connect-guide">
@@ -556,21 +554,20 @@ function ConnectGuide({ view, initial = "connect" }: { view: RepositorySnapshot;
 					</button>
 				))}
 			</nav>
-			<p className="muted">
-				Run these commands on your machine. Replace <code>{CRUCE}</code> with your Cruce checkout.
-			</p>
+			<p className="muted">Use Git and Node.js 22.18 or later. Install the Cruce client once on this machine.</p>
+			<CopyCommand text={`npm install --global ${origin}/downloads/cruce-client.tgz`} />
 			{method === "clone" ? (
 				<ol className="steps">
 					<li>
 						<h3>Authorize Git</h3>
-						<CopyCommand text={`node ${CRUCE}/runner/git-credential.mjs login --server ${origin} --client git`} />
+						<CopyCommand
+							text={`cruce auth --server ${origin} --namespace ${view.repository.namespaceId} --repository ${view.repository.id}`}
+						/>
 						<p>Select this repository on the consent page.</p>
 					</li>
 					<li>
 						<h3>Clone canonical</h3>
-						<CopyCommand
-							text={`git -c credential.useHttpPath=true -c 'credential.helper=!${helper}' clone ${url} ${view.repository.name}`}
-						/>
+						<CopyCommand text={`git clone ${url} ${view.repository.name}`} />
 						<p>Canonical is read-only. A workspace pushes to its own fork.</p>
 					</li>
 					<li>
@@ -589,7 +586,7 @@ function ConnectGuide({ view, initial = "connect" }: { view: RepositorySnapshot;
 						preserved. Cruce adds a separate workspace remote and a local writer lock; it does not upload history.
 					</p>
 					<CopyCommand
-						text={`node ${CRUCE}/runner/cruce.mjs human --server ${origin} --namespace ${view.repository.namespaceId} --repository ${view.repository.id}\nnode ${CRUCE}/runner/cruce.mjs start --title "Describe your work"`}
+						text={`cruce human --server ${origin} --namespace ${view.repository.namespaceId} --repository ${view.repository.id}\ncruce start --title "Describe your work"`}
 					/>
 					<p>
 						Use a branch that can be reviewed from canonical. Commit with Git, then push to the added{" "}
@@ -620,7 +617,7 @@ function ConnectGuide({ view, initial = "connect" }: { view: RepositorySnapshot;
 							))}
 						</fieldset>
 						<CopyCommand
-							text={`node ${CRUCE}/runner/cruce.mjs connect --server ${origin} --namespace ${view.repository.namespaceId} --repository ${view.repository.id} --client ${tool}`}
+							text={`cruce connect --server ${origin} --namespace ${view.repository.namespaceId} --repository ${view.repository.id} --client ${tool}`}
 						/>
 						<p className="muted">
 							Approve this repository on the consent page. This writes the tool's MCP settings and preserves existing remotes.

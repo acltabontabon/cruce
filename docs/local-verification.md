@@ -23,6 +23,14 @@ The scenario scripts fix commit timestamps and isolate signing/hooks for their d
 
 The [timeout fixture](../demo/convergence/README.md) uses injected delay capture without timers or network calls. A shared driver exercises ordinary Git against disposable bare repositories served over loopback HTTP and the real in-process Cruce runtime. Only the provider adapter is substituted; Git fetch/push, publication, retained source/evidence, readiness and non-forced promotion run normally. Fixture grants and human attestations do not establish actual authenticated participation. `pnpm verify:scenario` replays the driver twice and checks identical revisions and behavioral outcomes, then writes non-secret results to ignored `dist/scenario-verification/result.json`, including the tested Cruce commit and working-tree-dirty flag.
 
+## Installable local client and Git onboarding
+
+On **2026-10-08**, typecheck, lint, **340 unit/integration tests**, **81 browser journeys**, deterministic scenario verification, release metadata validation and the offline cf build passed. The build includes `/downloads/cruce-client.tgz`; the Docker-unavailable notice remains.
+
+Packaging tests extract the archive outside the source checkout, execute both entrypoints using the frozen dependency graph, check its source allowlist and runtime dependencies, and verify repository-scoped Git helper configuration preserves other helpers and stays idempotent. A separate clean `npm install --global` into a temporary prefix fetched the declared dependencies and both installed commands ran from `/private/tmp`, without a Cruce checkout dependency. npm's esbuild install-script notice did not prevent these checks. Browser coverage confirms the installation command, `cruce auth`, ordinary `git clone`, removal of source-path placeholders, and an anonymous gzip download from the isolated fixture. The clone modal screenshot is in ignored `dist/ui-checks/clone-client-install.png`.
+
+No deployment was made. The hosted download, a complete installed-client OAuth/clone flow against the deployed Access boundary, and hosted publication/promotion were not verified by these checks. The public Access base must cover the static download; [setup](cloudflare-setup.md) records that requirement.
+
 ## Capacity lifecycle, release browser checks and operations
 
 On **2026-10-08**, against [ADR 0009](decisions/0009-replaceable-observations-and-archived-finished-work.md):
