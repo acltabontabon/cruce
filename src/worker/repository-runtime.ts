@@ -382,8 +382,9 @@ export class RepositoryRuntime {
 		if (mutation && receipt && cmd.tool !== "inspect_source" && cmd.tool !== "recover_source" && cmd.tool !== "cleanup_workspace") {
 			if (receipt.fingerprint !== fingerprint && receipt.fingerprint !== rawFingerprint)
 				throw new DomainError(409, "Operation identity reused");
-			diagnose("operation_replayed");
 			const operation = this.store.get<ResourceOperation>(`resource-operation:${op}`);
+			if (operation) await correlate({ reservationId: operation.reservationId });
+			diagnose("operation_replayed");
 			if (operation) {
 				// Recheck policy even for settled replay; repair settlement without provider I/O.
 				await this.namespace.reserve(grant, repoId, cmd.idempotencyKey!, stable(cmd), operation.action, cmd.workspaceId);
@@ -538,6 +539,9 @@ export class RepositoryRuntime {
 			result = await this.git.reviewChanges(base, head, cmd.path);
 		} else if (cmd.tool === "read_artifact") {
 			const artifact = c.artifact(cmd.artifactId);
+			// Evidence commits are outside source ancestry; only their cached completeness is checked.
+			if (artifact.storage.path && !(await this.git.hasCompleteSource(artifact.storage.revision)))
+				throw new DomainError(404, "Artifact cache unavailable; inspect the retained artifact source");
 			result = {
 				artifact,
 				content: artifact.storage.path
@@ -872,7 +876,8 @@ export class RepositoryRuntime {
 		});
 	}
 	private async inspectRetention(c: RepositoryController, workspace: Workspace, host: RepositoryHost): Promise<RetentionInspection> {
-		const fork = requireValue(workspace.fork, "No retained fork");
+		const fork = workspace.fork;
+		if (!fork) throw new DomainError(409, "No retained fork");
 		if (fork.state !== "ready") throw new DomainError(409, "Fork unavailable");
 		const info = await host.info(fork.name);
 		if (info.id !== fork.id) throw new ProviderIdentityError("Fork identity changed; cleanup refused");

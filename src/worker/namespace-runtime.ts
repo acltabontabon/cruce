@@ -69,7 +69,8 @@ export class NamespaceRuntime extends DurableObject<StorageEnv> {
 	reservations(grant: ConnectionGrant, cursor?: string) {
 		const c = this.controller();
 		const a = c.authority(grant.actor);
-		if (a.actor.kind !== "human" || !["owner", "maintainer"].includes(a.role)) throw new DomainError(403, "Human maintainer required");
+		if (a.actor.kind !== "human" || !["owner", "maintainer"].includes(a.role))
+			throw new DomainError(403, "Human namespace maintainer required");
 		const after = cursor ? `reservation:${cursor}` : "reservation:";
 		const indexed = this.store.scan<ResourceReservation>("reservation:", after, STATE_LIMITS.pageSize + 1);
 		const legacy = c.state.reservations.map((value) => ({ key: this.reservationKey(value.id), value })).filter(({ key }) => key > after);

@@ -131,6 +131,54 @@ describe("bounded indexed coordination storage", () => {
 		expect(f.queries.filter((query) => query.includes("FROM records"))).toHaveLength(2);
 		expect(() => directory.resolve({ tenantId: "issuer", developerId: "unknown" })).toThrow("Sign in");
 	});
+	it("refuses Directory growth and lookups beyond their supported limits without partial writes", () => {
+		const f = database();
+		let directory = new Directory(f.ctx, {} as never);
+		const user = directory.login({ tenantId: "issuer", developerId: "owner", email: "same@local" });
+		const handle = directory.namespace(user.personalNamespaceId).handle;
+		expect(() => directory.users(Array.from({ length: 1001 }, (_, n) => `user-${n}`))).toThrow("Directory lookup exceeds its entry limit");
+		for (let n = 1; n < STATE_LIMITS.namespaceCandidates; n++) {
+			f.store.put(`namespace:shared-${n}`, {
+				id: `shared-${n}`,
+				ownerId: "other",
+				handle: `shared-${n}`,
+				name: "Shared",
+				kind: "shared",
+				createdAt: 1,
+			});
+			f.store.put(`access:${user.id}:shared-${n}`, `shared-${n}`);
+		}
+		f.store.put("namespace:extra", { id: "extra", ownerId: "other", handle: "extra", name: "Extra", kind: "shared", createdAt: 1 });
+		expect(() => directory.candidate(user.id, "extra")).toThrow("Namespace discovery capacity reached");
+		expect(f.store.get(`access:${user.id}:extra`)).toBeUndefined();
+		for (let n = 1; n <= STATE_LIMITS.namespaceCandidates; n++) f.store.put(`handle:${handle}-${n}`, `taken-${n}`);
+		expect(() => directory.login({ tenantId: "issuer", developerId: "second", email: "same@local" })).toThrow(
+			"Namespace handle allocation limit reached",
+		);
+		expect(() => directory.resolve({ tenantId: "issuer", developerId: "second" })).toThrow("Sign in");
+		const legacy = database();
+		legacy.store.put("directory", {
+			users: [],
+			namespaces: Array.from({ length: STATE_LIMITS.namespaceCandidates + 1 }, (_, n) => ({ id: `n${n}` })),
+		});
+		directory = new Directory(legacy.ctx, {} as never);
+		expect(() => directory.namespaces("owner")).toThrow("Directory layout exceeds the supported conversion limit");
+	});
+	it("refuses namespace and coordination state beyond the supported envelope", async () => {
+		const { assertNamespaceCapacity, assertStateBytes } = await import("../../src/core/state-limits.ts");
+		const namespace = { repositories: [], members: {}, teams: [], invitations: [] } as unknown as Parameters<
+			typeof assertNamespaceCapacity
+		>[0];
+		expect(() => assertNamespaceCapacity(namespace)).not.toThrow();
+		for (const field of ["repositories", "teams", "invitations"] as const) {
+			const limit = field === "repositories" ? STATE_LIMITS.repositories : field === "teams" ? 100 : 1000;
+			expect(() => assertNamespaceCapacity({ ...namespace, [field]: Array.from({ length: limit + 1 }, () => ({})) })).toThrow(
+				"Namespace record capacity reached",
+			);
+		}
+		expect(() => assertStateBytes({ text: "x".repeat(STATE_LIMITS.stateBytes) })).toThrow("Coordination state exceeds its byte limit");
+		expect(() => assertStateBytes({ text: "x".repeat(STATE_LIMITS.stateBytes - 16) })).not.toThrow();
+	});
 	it("keeps namespace charges atomic across concurrent reservations, UTC days and restarts", async () => {
 		const f = database(),
 			now = vi.spyOn(Date, "now").mockReturnValue(1000);

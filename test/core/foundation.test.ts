@@ -449,6 +449,9 @@ describe("revision-bound review", () => {
 		p.state = "open";
 		c.command(cmd("review_proposal", { proposalId: p.id, revision: head, outcome: "concern", reason: "Recheck" }), authority(agent));
 		p.state = "promoting";
+		// An update that may have reached canonical is only observed; readiness gates the unsent update.
+		expect(c.snapshot(authority()).promotionRecovery[p.id]).toEqual({ command, ready: true, reasons: [] });
+		promotion.operation!.phase = "prepared";
 		expect(c.snapshot(authority()).promotionRecovery[p.id].ready).toBe(false);
 		promotion.state = "failed";
 		expect(c.snapshot(authority()).promotionRecovery).toEqual({});

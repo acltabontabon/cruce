@@ -132,6 +132,51 @@ describe("provider identity through interrupted resource operations", () => {
 			}
 		},
 	);
+	it.each(["none", "canonical", "retained"])(
+		"promotes through the recorded binding identities and refuses a replaced repository (replaced: %s)",
+		async (replaced) => {
+			const f = await fixture();
+			await f.run(f.command("provision_repository"));
+			const { workspace, cmd: attach } = await f.attach();
+			await f.run(attach);
+			const base = f.runtime.state().sourceHead!;
+			const head = await f.git.commit({
+				ref: "refs/heads/work",
+				parent: base,
+				files: { "work.txt": "work" },
+				message: "Work",
+				author: { name: "Owner", email: "owner@local", timestamp: 2 },
+			});
+			f.fetch.mockResolvedValue(head);
+			const artifact = (await f.run(f.command("publish_revision", { workspaceId: workspace.id, revision: head, ref: "work" }))) as Artifact;
+			const proposal = (await f.run(f.command("create_proposal", { artifactId: artifact.id, title: "Work" }))) as { id: string };
+			await f.run(f.command("review_proposal", { proposalId: proposal.id, revision: head, outcome: "approve", reason: "Reviewed" }));
+			// Only the Git wire is simulated; repository lookup, identity checks and tokens use the binding host.
+			let canonical = base;
+			vi.spyOn(f.git, "remoteRefs").mockImplementation(async () => [{ ref: "refs/heads/main", oid: canonical }]);
+			f.push.mockImplementation(async (input) => {
+				await input.expected!.beforeUpdate();
+				canonical = input.expected!.next;
+				return { ok: true } as never;
+			});
+			const name = replaced === "canonical" ? repository.storageName! : artifact.storage.repository;
+			if (replaced !== "none") f.p.infos.get(`ns-team-${name}`)!.id = "replacement";
+			const pushes = f.push.mock.calls.length;
+			const promote = f.run(f.command("promote_proposal", { proposalId: proposal.id }));
+			if (replaced === "none") {
+				expect(await promote).toMatchObject({ state: "complete", from: base, to: head });
+				expect(f.runtime.state().sourceHead).toBe(head);
+				expect(f.push).toHaveBeenCalledTimes(pushes + 1);
+				expect(new ProviderIdentity(f.store).expected(repository.storageName!)).toBe(f.runtime.state().canonical!.id);
+			} else {
+				await expect(promote).rejects.toThrow("identity changed");
+				expect(f.push).toHaveBeenCalledTimes(pushes);
+				expect(canonical).toBe(base);
+				expect(f.runtime.state().sourceHead).toBe(base);
+				expect(f.runtime.state().promotions[0].state).toBe("uncertain");
+			}
+		},
+	);
 	it("rechecks a fork after a publication checkpoint and refuses to adopt identity-less retained source", async () => {
 		const f = await fixture();
 		await f.run(f.command("provision_repository"));

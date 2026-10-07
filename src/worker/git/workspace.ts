@@ -7,6 +7,7 @@ import type { ChangesResponse, GitEntry } from "../../shared/api.ts";
 import type { ChangedFile } from "../../shared/git.ts";
 import { TRANSFER_LIMITS } from "../../shared/limits.ts";
 import { MemoryFs } from "./memory-fs.ts";
+import { CACHE_LIMIT } from "./sql-fs.ts";
 
 /**
  * Real Git, inside the control plane. A bare Git workspace repository (no working tree) where Cruce
@@ -82,10 +83,10 @@ export class GitWorkspace {
 
 	/** Import an exact agent commit pack. No commit is rebuilt and no working tree is touched. */
 	async importPack(pack: Uint8Array) {
-		if (pack.byteLength < 32 || pack.byteLength > 32 * 1024 * 1024 || new TextDecoder().decode(pack.slice(0, 4)) !== "PACK")
-			throw new Error("Invalid or oversized Git pack");
+		if (pack.byteLength > TRANSFER_LIMITS.gitBytes) throw new DomainError(413, "Git transfer exceeds the 32 MiB gateway limit");
+		if (pack.byteLength < 32 || new TextDecoder().decode(pack.slice(0, 4)) !== "PACK") throw new DomainError(400, "Invalid Git pack");
 		const digest = new Uint8Array(await crypto.subtle.digest("SHA-1", pack.slice(0, -20)));
-		if (!digest.every((v, i) => v === pack[pack.length - 20 + i])) throw new Error("Git pack checksum mismatch");
+		if (!digest.every((v, i) => v === pack[pack.length - 20 + i])) throw new DomainError(400, "Git pack checksum mismatch");
 		const name = [...digest].map((v) => v.toString(16).padStart(2, "0")).join("");
 		await this.fs.promises.mkdir(`${this.gitdir}/objects/pack`, { recursive: true });
 		const filepath = `objects/pack/pack-${name}.pack`;
@@ -151,7 +152,8 @@ export class GitWorkspace {
 	async exportPack(head: string, stop?: string): Promise<Uint8Array> {
 		const oids = await this.sourceObjects(head, stop);
 		const result = await git.packObjects({ ...this.base, oids: [...oids] });
-		if (!result.packfile || result.packfile.length > 32 * 1024 * 1024) throw new Error("Source export exceeds the 32 MiB transfer limit");
+		if (!result.packfile) throw new Error("Source export produced no pack");
+		if (result.packfile.length > TRANSFER_LIMITS.gitBytes) throw new DomainError(413, "Git transfer exceeds the 32 MiB gateway limit");
 		return result.packfile;
 	}
 
@@ -510,10 +512,16 @@ export class GitWorkspace {
 		try {
 			await this.importPack(pack);
 		} catch (error) {
-			if (!(error instanceof DomainError) || error.status !== 413 || !this.fs.removeTree) throw error;
+			if (!(error instanceof DomainError) || error.message !== CACHE_LIMIT || !this.fs.removeTree) throw error;
 			this.resetCache();
 			await this.ensureInit();
-			await this.importPack(pack);
+			try {
+				await this.importPack(pack);
+			} catch (retry) {
+				// Never leave a pack without its index behind a failed retry.
+				this.resetCache();
+				throw retry;
+			}
 		}
 		const damaged = !(await this.hasCompleteSource(input.expected));
 		if (damaged && this.fs.removeTree) this.resetCache();
@@ -627,23 +635,15 @@ export class GitWorkspace {
 					throw new GitUpdateRejected("Canonical Git update rejected; reconcile source and obtain fresh review");
 				throw error;
 			});
-		if (!result.ok) throw new Error(`push rejected: ${JSON.stringify(result.refs)}`);
+		if (!result.ok) {
+			if (input.expected) throw new GitUpdateRejected("Canonical Git update rejected; reconcile source and obtain fresh review");
+			throw new Error("Git push rejected");
+		}
 		return result;
 	}
 
 	async remoteRefs(input: { url: string; token: string }) {
 		return git.listServerRefs({ http: this.boundedHttp, url: input.url, headers: { Authorization: `Bearer ${input.token}` } });
-	}
-
-	async deleteRemote(input: { url: string; token: string; remoteRef: string }) {
-		await git.push({
-			...this.base,
-			http: this.boundedHttp,
-			url: input.url,
-			remoteRef: input.remoteRef,
-			delete: true,
-			headers: { Authorization: `Bearer ${input.token}` },
-		});
 	}
 
 	private async peel(ref: string): Promise<string> {

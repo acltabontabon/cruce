@@ -130,10 +130,13 @@ export async function platformRoute(
 	};
 	const execute = async (raw: unknown) => {
 		const cmd = CommandInput.parse(raw);
-		if (cmd.tool === "list_namespaces") return namespaces();
+		// A terminal bridge sees only the namespace and repository it was approved for.
+		if (cmd.tool === "list_namespaces") return (await namespaces()).filter((w) => !bridge || w.id === bridge.namespaceId);
 		const namespaceId = requireValue(cmd.namespaceId, "Namespace required"),
 			namespace = env.NAMESPACE.getByName(namespaceId);
-		if (cmd.tool === "list_repositories") return (await namespace.snapshot(grant)).repositories;
+		if (bridge && namespaceId !== bridge.namespaceId) throw new DomainError(403, "Human bridge workspace scope denied");
+		if (cmd.tool === "list_repositories")
+			return (await namespace.snapshot(grant)).repositories.filter((r) => !bridge || r.id === bridge.repositoryId);
 		const repositoryId = requireValue(cmd.repositoryId, "Repository required"),
 			repo = await namespace.repository(grant, repositoryId);
 		if (bridge) {

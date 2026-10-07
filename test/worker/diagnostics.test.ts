@@ -1,6 +1,9 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { DomainError, publicError } from "../../src/core/errors.ts";
+import { PUBLIC_ERRORS } from "../../src/core/public-errors.ts";
 import { ArtifactsBindingHost, ArtifactsRestHost } from "../../src/worker/artifacts.ts";
 import { correlate, diagnose, diagnoseError, diagnosticId, httpFailure, withDiagnostics } from "../../src/worker/diagnostics.ts";
 import { remoteMcp } from "../../src/worker/mcp.ts";
@@ -12,12 +15,17 @@ afterEach(() => vi.restoreAllMocks());
 const secret = "Bearer private-token /accounts/private-account oauth-payload source-content";
 const generic = { status: 500, message: "Operation unavailable; retry with the same operation identity" };
 
-async function mcp(execute: (command: never) => Promise<unknown>, args: Record<string, unknown> = {}) {
-	const response = await remoteMcp(execute as never)(
+async function mcp(
+	execute: (command: never) => Promise<unknown>,
+	args: Record<string, unknown> = {},
+	scopes?: Parameters<typeof remoteMcp>[1],
+	body: Record<string, unknown> = { method: "tools/call", params: { name: "get_source", arguments: args } },
+) {
+	const response = await remoteMcp(execute as never, scopes)(
 		new Request("https://cruce.test/mcp", {
 			method: "POST",
 			headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
-			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "get_source", arguments: args } }),
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, ...body }),
 		}),
 		{} as never,
 		{ waitUntil: vi.fn() } as never,
@@ -81,6 +89,57 @@ describe("safe public errors", () => {
 		});
 		expect(execute).not.toHaveBeenCalled();
 		expect(JSON.stringify(result)).not.toContain(secret);
+	});
+});
+
+describe("single public error allowlist", () => {
+	it("registers every literal error the worker can return, including direct HTTP responses", () => {
+		const literal = '"((?:[^"\\\\]|\\\\.)*)"';
+		const patterns: [RegExp, (m: RegExpMatchArray) => [number, string]][] = [
+			[new RegExp(`new DomainError\\(\\s*(\\d{3}),\\s*${literal}\\s*\\)`, "g"), (m) => [Number(m[1]), m[2]]],
+			[new RegExp(`new CoordinationError\\(\\s*(\\d{3}),\\s*${literal}\\s*\\)`, "g"), (m) => [Number(m[1]), m[2]]],
+			[new RegExp(`new ProviderIdentityError\\(\\s*${literal}\\s*\\)`, "g"), (m) => [409, m[1]]],
+			[new RegExp(`requireValue\\([^;]*?,\\s*${literal}\\s*\\)`, "g"), (m) => [400, m[1]]],
+			[new RegExp(`json\\(\\{\\s*error:\\s*${literal}\\s*\\},\\s*(\\d{3})\\)`, "g"), (m) => [Number(m[2]), m[1]]],
+			[new RegExp(`Response\\.json\\(\\{\\s*error:\\s*${literal}\\s*\\},\\s*\\{\\s*status:\\s*(\\d{3})`, "g"), (m) => [Number(m[2]), m[1]]],
+			[new RegExp(`new Response\\(${literal},\\s*\\{\\s*status:\\s*(\\d{3})`, "g"), (m) => [Number(m[2]), m[1]]],
+		];
+		const files = ["src/core", "src/worker", "src/shared"].flatMap((dir) =>
+			(readdirSync(dir, { recursive: true }) as string[]).filter((file) => file.endsWith(".ts")).map((file) => join(dir, file)),
+		);
+		const found: string[] = [],
+			missing: string[] = [];
+		for (const file of files) {
+			const source = readFileSync(file, "utf8");
+			for (const [pattern, read] of patterns)
+				for (const match of source.matchAll(pattern)) {
+					const [status, message] = read(match);
+					found.push(message);
+					if (!PUBLIC_ERRORS[status]?.includes(message)) missing.push(`${file}: ${status} ${message}`);
+				}
+		}
+		expect(found.length).toBeGreaterThan(200);
+		expect(found).toEqual(expect.arrayContaining(["GET required", "Invalid Git credentials", "Git authentication required", "Not found"]));
+		expect(missing).toEqual([]);
+	});
+});
+
+describe("MCP scope filtering", () => {
+	it("hides and refuses tools outside the connection's scopes before validation or execution", async () => {
+		vi.spyOn(console, "log").mockImplementation(() => {});
+		const execute = vi.fn(async () => ({ ok: true }));
+		const listed = (await mcp(execute, {}, ["cruce:read"], { method: "tools/list" })) as { tools: { name: string }[] };
+		const names = listed.tools.map((tool) => tool.name);
+		expect(names).toContain("get_source");
+		expect(names).not.toContain("publish_revision");
+		expect(names).not.toContain("start_workspace");
+		const call = { method: "tools/call", params: { name: "publish_revision", arguments: { unexpected: secret } } };
+		expect(await mcp(execute, {}, ["cruce:read"], call)).toEqual({
+			isError: true,
+			structuredContent: { status: 403 },
+			content: [{ type: "text", text: "Agent capability denied" }],
+		});
+		expect(execute).not.toHaveBeenCalled();
 	});
 });
 

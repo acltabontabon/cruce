@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, type Mock, vi } from "vitest";
 import { ArtifactsBindingHost, ResourceBoundary } from "../../src/worker/artifacts.ts";
 import { ProviderIdentity } from "../../src/worker/provider-identity.ts";
 
@@ -167,6 +167,38 @@ describe("durable provider repository identity", () => {
 		expect(p.createToken).not.toHaveBeenCalled();
 		expect(p.revokeToken).not.toHaveBeenCalled();
 		expect(new ProviderIdentity(store).expected("canonical")).toBeUndefined();
+	});
+	it.each(["source", "evidence", "fork"])("never adopts a %s repository whose creation response was lost", async (name) => {
+		const p = provider(),
+			{ store } = memory();
+		const host = () => new ArtifactsBindingHost(p.artifacts, ACCOUNT, "cruce", "team", new ProviderIdentity(store));
+		const run = () => (name === "fork" ? host().fork("canonical", name, "owned") : host().ensure(name, "owned"));
+		if (name === "fork") await host().ensure("canonical", "owned");
+		const mock = (name === "fork" ? p.fork : p.create) as unknown as Mock<(...args: unknown[]) => Promise<unknown>>;
+		const original = mock.getMockImplementation()!;
+		mock.mockImplementationOnce(async (...args) => {
+			await original(...args);
+			throw new Error("creation response lost before ID was recorded");
+		});
+		const calls = mock.mock.calls.length;
+		await expect(run()).rejects.toThrow("retry");
+		await expect(run()).rejects.toThrow("identity unavailable");
+		await expect(host().withToken(name, "read", vi.fn())).rejects.toThrow("identity unavailable");
+		expect(mock).toHaveBeenCalledTimes(calls + 1);
+		expect(new ProviderIdentity(store).expected(name)).toBeUndefined();
+	});
+	it("fails closed when the journal and repository state record different identities", async () => {
+		const p = provider(),
+			{ store } = memory();
+		const host = new ArtifactsBindingHost(p.artifacts, ACCOUNT, "cruce", "team", new ProviderIdentity(store));
+		const canonical = await host.ensure("canonical", "owned");
+		store.put("repository", { canonical: { id: "other-recorded-id", name: "canonical" }, workspaces: [], artifacts: [] });
+		expect(() => new ProviderIdentity(store).expected("canonical")).toThrow("identities disagree");
+		const source = vi.fn();
+		await expect(host.withToken("canonical", "read", source)).rejects.toThrow("identities disagree");
+		await expect(host.remove("canonical", canonical.id)).rejects.toThrow("identities disagree");
+		expect(source).not.toHaveBeenCalled();
+		expect(p.remove).not.toHaveBeenCalled();
 	});
 	it.each(["canonical", "source", "evidence", "fork"])(
 		"pins %s before interrupted cleanup and rejects a replacement after restart",

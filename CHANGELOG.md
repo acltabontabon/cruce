@@ -4,6 +4,12 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Fixed
+
+- Complete an interrupted promotion whose update already reached canonical, even if evidence or policy changed afterwards. Record evidence only for open changes.
+- Limit terminal bridge discovery to its approved namespace and repository.
+- Return actionable errors for malformed or oversized Git packs, and for evidence reads after cache loss. Never leave a partial pack after a failed cache recovery.
+
 ## [0.1.0-alpha.3] - 2026-10-07
 
 ### Changed

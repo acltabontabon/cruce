@@ -344,13 +344,20 @@ describe("repository runtime", () => {
 		await expect(f.runtime.command(cmd, grant)).rejects.toThrow(secret);
 		const restart = new RepositoryRuntime(f.store, f.git, f.port, {}, () => 1001);
 		await restart.command(cmd, grant);
+		// A completed replay keeps the same correlation without repeating provider work.
+		await new RepositoryRuntime(f.store, f.git, f.port, {}, () => 1002).command(cmd, grant);
 		const reservation = f.w.state.reservations.find((r) => r.id === `${agent.id}:${secret}`)!;
 		expect(reservation.state).toBe("complete");
 		expect(f.w.state.reservations.filter((r) => r.id === reservation.id)).toHaveLength(1);
 		const records = log.mock.calls.map(([value]) => JSON.parse(value));
 		const settled = records.filter((r) => r.event === "resource_settled");
 		expect(settled.map((r) => r.phase)).toEqual(["uncertain", "complete"]);
-		for (const record of settled)
+		const replayed = records.filter((r) => r.event === "operation_replayed");
+		expect(replayed).toHaveLength(1);
+		const outcomes = records.filter((r) => ["operation_completed", "operation_failed"].includes(r.event));
+		expect(outcomes.map((r) => r.event)).toEqual(["operation_failed", "operation_completed", "operation_completed"]);
+		for (const record of outcomes) expect(record.durationMs).toEqual(expect.any(Number));
+		for (const record of [...settled, ...replayed])
 			expect(record).toMatchObject({
 				namespaceId: await diagnosticId("namespaceId", repo.namespaceId),
 				repositoryId: await diagnosticId("repositoryId", repo.id),
@@ -399,6 +406,97 @@ describe("repository runtime", () => {
 		expect(f.host.withSource).toHaveBeenCalledTimes(calls);
 		await expect(f.call("inspect_source", fields, { ...grant, scopes: [] })).rejects.toThrow("authorized");
 		await expect(f.call("inspect_source", { ...fields, idempotencyKey: undefined })).rejects.toThrow("idempotency key");
+	});
+	/** Answers each retained ref with its recorded tip, as the provider would. */
+	function retainedReader(f: Awaited<ReturnType<typeof fixture>>, content = "stored source") {
+		const parents: Record<string, string[]> = { [f.head]: [f.base], [f.base]: [] };
+		const tip = (ref: string) => {
+			const state = f.runtime.state();
+			if (ref === `refs/heads/${repo.defaultBranch}`) return state.sourceHead;
+			return state.artifacts.find((a) => a.storage.ref === ref)?.storage.revision;
+		};
+		const source = {
+			log: vi.fn(async ({ ref }: { ref: string }) => [{ hash: tip(ref) }]),
+			readCommit: vi.fn(async (oid: string) => ({ hash: oid, parents: parents[oid] ?? [], treeHash: oid })),
+			readFile: vi.fn(async () => new Blob([content])),
+		};
+		f.host.withSource = vi.fn(async (_name, _id, run) => run(source as never));
+		return source;
+	}
+	it("recovers exact retained source through the gated tool after cache loss, with one reservation per retry", async () => {
+		const f = await fixture();
+		await f.call("publish_revision", { workspaceId: f.workspace.id, revision: f.head, pack: f.pack });
+		retainedReader(f);
+		const pack = await f.git.exportPack(f.head);
+		const recover = vi.spyOn(f.git, "recover").mockImplementation(async () => {
+			await f.git.importPack(pack);
+		});
+		f.git.resetCache();
+		await expect(f.call("get_source", { revision: f.head })).rejects.toThrow("explicitly recover");
+		const fields = { revision: f.head, idempotencyKey: "recover-head" };
+		expect(await f.call("recover_source", fields)).toEqual({ revision: f.head, recovered: true });
+		expect(await f.call("recover_source", fields)).toEqual({ revision: f.head, recovered: true });
+		expect(recover).toHaveBeenCalledTimes(1);
+		expect(f.w.state.reservations.filter((r) => r.action === "source.read")).toHaveLength(1);
+		expect(await f.call("get_source", { revision: f.head, path: "src/pay.ts" })).toMatchObject({
+			files: { "src/pay.ts": "export const retry=3;" },
+		});
+		f.git.resetCache();
+		const calls = vi.mocked(f.host.withSource!).mock.calls.length;
+		f.w.state.policy.rules["source.read"] = "deny";
+		await expect(f.call("recover_source", { revision: f.head, idempotencyKey: "denied" })).rejects.toThrow("policy denies");
+		await expect(f.call("recover_source", { revision: f.head, idempotencyKey: "unscoped" }, { ...grant, scopes: [] })).rejects.toThrow(
+			"authorized",
+		);
+		expect(f.host.withSource).toHaveBeenCalledTimes(calls);
+		expect(recover).toHaveBeenCalledTimes(1);
+	});
+	it("inspects retained evidence and exact diffs, and points cache-only evidence reads to explicit inspection", async () => {
+		const f = await fixture();
+		vi.spyOn(f.git, "remoteRefs").mockResolvedValue([]);
+		const evidence = (await f.call("publish_artifact", { workspaceId: f.workspace.id, revision: f.base, content: "test report" })) as {
+			id: string;
+			storage: { revision: string };
+		};
+		expect(await f.call("read_artifact", { artifactId: evidence.id })).toMatchObject({ content: "test report" });
+		retainedReader(f, "test report");
+		const view = { sourceView: "artifact" as const, artifactId: evidence.id, idempotencyKey: "inspect-evidence" };
+		expect(await f.call("inspect_source", view)).toMatchObject({ artifact: { id: evidence.id }, content: "test report" });
+		await f.call("publish_revision", { workspaceId: f.workspace.id, revision: f.head, pack: f.pack });
+		const diff = (await f.call("inspect_source", {
+			sourceView: "diff",
+			revision: f.head,
+			baseRevision: f.base,
+			idempotencyKey: "inspect-diff",
+		})) as { files: { path: string }[] };
+		expect(diff.files.map((file) => file.path)).toEqual(["src/pay.ts"]);
+		const before = structuredClone(f.runtime.state());
+		f.git.resetCache();
+		await expect(f.call("read_artifact", { artifactId: evidence.id })).rejects.toThrow(
+			"Artifact cache unavailable; inspect the retained artifact source",
+		);
+		expect(f.runtime.state()).toEqual(before);
+		expect(await f.call("inspect_source", { ...view, idempotencyKey: "inspect-evidence-again" })).toMatchObject({
+			content: "test report",
+		});
+	});
+	it("recovers a missing baseline from retained source before forking an attached workspace", async () => {
+		const f = await fixture();
+		retainedReader(f);
+		const pack = await f.git.exportPack(f.base);
+		const recover = vi.spyOn(f.git, "recover").mockImplementation(async () => {
+			await f.git.importPack(pack);
+		});
+		const s = (await f.call("start_workspace", { title: "Continue later", baseRevision: f.base })) as Workspace;
+		f.git.resetCache();
+		const forks = vi.mocked(f.host.fork).mock.calls.length;
+		await f.call("attach_workspace", {
+			workspaceId: s.id,
+			execution: { id: s.id, checkoutId: "second", machineId: "machine", kind: "worktree", owned: true },
+		});
+		expect(recover).toHaveBeenCalledTimes(1);
+		expect(f.host.fork).toHaveBeenCalledTimes(forks + 1);
+		expect(f.runtime.state().workspaces.find((w) => w.id === s.id)?.fork).toBeDefined();
 	});
 	it("forks canonical directly and keeps hosted identity out of local execution metadata", async () => {
 		const f = await fixture(true);
@@ -1270,6 +1368,104 @@ describe("exact approved-base promotion", () => {
 			await f.remote.close();
 		}
 	});
+	it.each(["same", "unrelated"])("refuses a non-forward update from a %s base before contacting canonical", async (kind) => {
+		const f = await prepared();
+		try {
+			const base =
+				kind === "same"
+					? f.candidate
+					: await f.git.commit({
+							ref: "refs/heads/unrelated",
+							parent: null,
+							files: { other: "history" },
+							message: "Unrelated root",
+							author: { name: "Fixture", email: "fixture@local", timestamp: 12348 },
+						});
+			const state = f.runtime.state();
+			state.proposals.find((p) => p.id === f.proposal.id)!.base = base;
+			state.artifacts.find((a) => a.id === f.proposal.artifactId)!.baseRevision = base;
+			state.sourceHead = base;
+			f.store.put("repository", state);
+			await expect(f.run()).rejects.toThrow("Promotion requires a non-forced forward update");
+			expect(f.remote.updates).toBe(0);
+			expect(f.remote.head()).toBe(f.base);
+			expect(f.runtime.state().promotions[0].state).toBe("failed");
+		} finally {
+			await f.remote.close();
+		}
+	});
+	it.each(["evidence", "policy"])("completes a landed update although later %s would block a new promotion", async (change) => {
+		const f = await prepared();
+		try {
+			f.remote.afterUpdate = () => {
+				throw new Error("response lost after ref update");
+			};
+			await expect(f.run()).rejects.toThrow();
+			f.remote.afterUpdate = () => {};
+			expect(f.runtime.state().promotions[0]).toMatchObject({ state: "uncertain", operation: { phase: "attempted" } });
+			const verification = {
+				proposalId: f.proposal.id,
+				revision: f.candidate,
+				kind: "tests",
+				outcome: "fail" as const,
+				reason: "Failed after the update was sent",
+			};
+			// Evidence cannot be added to a change whose update may already be canonical.
+			await expect(f.call("record_verification", verification)).rejects.toThrow("Verification requires an open change");
+			if (change === "policy") f.w.state.repositories.find((r) => r.id === repo.id)!.policy.requiredEvidence = ["tests"];
+			else {
+				const state = f.runtime.state();
+				state.verifications.push({
+					id: "late",
+					proposalId: f.proposal.id,
+					revision: f.candidate,
+					kind: "tests",
+					outcome: "fail",
+					trust: "reported",
+					reason: "Recorded before the open-change check existed",
+					actor: agent,
+					at: 1000,
+				} as never);
+				state.repository.policy.requiredEvidence = ["tests"];
+				f.store.put("repository", state);
+				f.w.state.repositories.find((r) => r.id === repo.id)!.policy.requiredEvidence = ["tests"];
+			}
+			expect(await f.run(f.restart())).toMatchObject({ state: "complete", from: f.base, to: f.candidate });
+			expect(f.remote.updates).toBe(1);
+			expect(f.runtime.state().sourceHead).toBe(f.candidate);
+			await expect(f.call("record_verification", verification)).rejects.toThrow("Verification requires an open change");
+		} finally {
+			await f.remote.close();
+		}
+	});
+	it("fails an update journaled as attempted but never sent, without sending it on retry", async () => {
+		const f = await prepared();
+		try {
+			const batch = f.store.batch.bind(f.store);
+			let interrupted = false;
+			vi.spyOn(f.store, "batch").mockImplementation((entries) => {
+				batch(entries);
+				const value = entries.find((entry) => entry.key === "repository")?.value as
+					| import("../../src/shared/platform.ts").RepositoryState
+					| undefined;
+				if (!interrupted && value?.promotions?.[0]?.operation?.phase === "attempted") {
+					interrupted = true;
+					throw new Error("interrupted after journaling the attempt");
+				}
+			});
+			await expect(f.run()).rejects.toThrow("interrupted after journaling");
+			expect(f.remote.updates).toBe(0);
+			expect(f.runtime.state().promotions[0]).toMatchObject({ state: "uncertain", operation: { phase: "attempted" } });
+			await expect(f.run(f.restart())).rejects.toThrow("Promotion outcome differs from the exact candidate");
+			expect(f.remote.updates).toBe(0);
+			expect(f.runtime.state().promotions[0].state).toBe("failed");
+			expect(f.runtime.state().proposals.find((p) => p.id === f.proposal.id)?.state).toBe("rejected");
+			await expect(f.run(f.restart())).rejects.toThrow("Promotion failed");
+			expect(f.remote.updates).toBe(0);
+		} finally {
+			await f.remote.close();
+		}
+	});
 });
 
 describe("authorized retention recovery (F6)", () => {
@@ -1390,6 +1586,79 @@ describe("authorized retention recovery (F6)", () => {
 		await expect(f.call("cleanup_workspace", { workspaceId: f.workspace.id })).rejects.toThrow("inventory exceeds");
 		expect(f.runtime.state().workspaces[0].retention).toMatchObject({ complete: false, refs: [] });
 		expect(f.host.remove).not.toHaveBeenCalled();
+	});
+	it("blocks cleanup while retention proof is unavailable from a lost cache", async () => {
+		const f = await fixture();
+		await f.call("end_workspace", { workspaceId: f.workspace.id });
+		vi.spyOn(f.git, "remoteRefs").mockResolvedValue([{ ref: "refs/heads/trunk", oid: f.base }]);
+		f.git.resetCache();
+		const result = (await f.call("inspect_retention", { workspaceId: f.workspace.id })) as { refs: unknown[]; blockers: string[] };
+		expect(result.refs).toEqual([{ ref: "refs/heads/trunk", revision: f.base, retained: false, reason: "unavailable" }]);
+		expect(result.blockers).toEqual(["Retention proof unavailable; recover or inspect source before cleanup"]);
+		await expect(f.call("cleanup_workspace", { workspaceId: f.workspace.id, idempotencyKey: "unproven" })).rejects.toThrow(
+			"Retention proof unavailable",
+		);
+		expect(f.host.remove).not.toHaveBeenCalled();
+		expect(f.runtime.state().workspaces[0].cleanup?.state).toBe("blocked");
+	});
+	it("refuses a second cleanup operation and backs off retries of the first within an hour", async () => {
+		const f = await fixture();
+		await f.call("end_workspace", { workspaceId: f.workspace.id });
+		vi.spyOn(f.git, "remoteRefs").mockResolvedValue([{ ref: "refs/heads/trunk", oid: f.base }]);
+		vi.mocked(f.host.remove).mockResolvedValue(false);
+		const fields = { workspaceId: f.workspace.id, idempotencyKey: "first-cleanup" };
+		const delays: number[] = [];
+		for (let n = 0; n < 9; n++) {
+			expect(await f.call("cleanup_workspace", fields)).toMatchObject({ state: "deleting" });
+			delays.push(f.runtime.state().workspaces[0].cleanup!.nextAttempt! - 1000);
+		}
+		expect(delays).toEqual([30_000, 60_000, 120_000, 240_000, 480_000, 960_000, 1_920_000, 3_600_000, 3_600_000]);
+		await expect(f.call("cleanup_workspace", { ...fields, idempotencyKey: "second-cleanup" })).rejects.toThrow(
+			"Resume the existing authorized cleanup operation",
+		);
+		expect(f.w.state.reservations.filter((r) => r.action === "workspace.cleanup")).toHaveLength(1);
+	});
+	it("recovers at most one bounded batch per wakeup and schedules the rest", async () => {
+		const f = await fixture();
+		vi.spyOn(f.git, "remoteRefs").mockResolvedValue([{ ref: "refs/heads/trunk", oid: f.base }]);
+		const ids = [f.workspace.id];
+		for (let n = 0; n < 4; n++) {
+			const s = (await f.call("start_workspace", { title: `Batch ${n}`, baseRevision: f.base })) as Workspace;
+			await f.call("attach_workspace", {
+				workspaceId: s.id,
+				execution: { id: s.id, checkoutId: `batch-${n}`, machineId: "machine", kind: "worktree", owned: true },
+			});
+			ids.push(s.id);
+		}
+		let time = 1000;
+		const schedule = vi.fn(async (_at: number) => {});
+		let runtime = new RepositoryRuntime(f.store, f.git, f.port, {}, () => time, { schedule, authorize: async (g) => g });
+		vi.mocked(f.host.remove).mockResolvedValue(false);
+		for (const id of ids) {
+			await runtime.command(
+				{ tool: "end_workspace", namespaceId: repo.namespaceId, repositoryId: repo.id, workspaceId: id, idempotencyKey: `end-${id}` },
+				grant,
+			);
+			await runtime.command(
+				{ tool: "cleanup_workspace", namespaceId: repo.namespaceId, repositoryId: repo.id, workspaceId: id, idempotencyKey: `clean-${id}` },
+				grant,
+			);
+		}
+		vi.mocked(f.host.remove).mockClear().mockResolvedValue(true);
+		schedule.mockClear();
+		time += 60_000;
+		runtime = new RepositoryRuntime(f.store, f.git, f.port, {}, () => time, { schedule, authorize: async (g) => g });
+		await runtime.recoverCleanup();
+		expect(f.host.remove).toHaveBeenCalledTimes(4);
+		expect(runtime.state().workspaces.filter((w) => w.cleanup?.state === "complete")).toHaveLength(4);
+		// The overdue fifth intent keeps a prompt wakeup after the bounded batch.
+		expect(schedule.mock.calls.at(-1)?.[0]).toBe(time + 1000);
+		await runtime.recoverCleanup();
+		expect(f.host.remove).toHaveBeenCalledTimes(5);
+		expect(runtime.state().workspaces.every((w) => w.cleanup?.state === "complete")).toBe(true);
+		schedule.mockClear();
+		await runtime.recoverCleanup();
+		expect(schedule).not.toHaveBeenCalled();
 	});
 });
 

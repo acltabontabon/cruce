@@ -23,6 +23,45 @@ The scenario scripts fix commit timestamps and isolate signing/hooks for their d
 
 The [timeout fixture](../demo/convergence/README.md) uses injected delay capture without timers or network calls. A shared driver exercises ordinary Git against disposable bare repositories served over loopback HTTP and the real in-process Cruce runtime. Only the provider adapter is substituted; Git fetch/push, publication, retained source/evidence, readiness and non-forced promotion run normally. Fixture grants and human attestations do not establish actual authenticated participation. `pnpm verify:scenario` replays the driver twice and checks identical revisions and behavioral outcomes, then writes non-secret results to ignored `dist/scenario-verification/result.json`, including the tested Cruce commit and working-tree-dirty flag.
 
+## Foundation gap audit (F1–F6)
+
+On **2026-10-07**, every F1–F6 roadmap claim was checked against code and tests in the working tree based on `101a23b`. Typecheck, lint, **287 unit/integration tests**, **64 browser journeys**, deterministic scenario verification and the offline cf build passed. Each code fix below has a test that fails without it. Lint retains its Biome deprecation notice, and the build retains its unavailable-Docker notice.
+
+Fixes:
+
+- **F1:** an update that may already have reached canonical (`attempted` or later) is only observed during recovery. Later evidence or evidence-policy changes can no longer strand it, and readiness still gates an unsent update. Evidence can be recorded only for an open change. A non-OK expected-base push is a definite rejection.
+- **F3/F4:** a terminal bridge discovers only its approved namespace and repository. After cache loss, `read_artifact` returns a 404 that points to explicit artifact inspection instead of a generic error.
+- **F4:** a cache reset and retry that still fails leaves no unindexed pack behind.
+- **F5:** malformed packs return 400 and oversized packs or exports return the registered 413. Direct HTTP error responses are on the single allowlist. Two unregistered messages now use registered text, and a completed replay logs its reservation digest.
+
+New coverage:
+
+- **Promotion:**
+  - the fast-forward guard, for both a same and an unrelated base;
+  - a landed update completing after later evidence or a policy change;
+  - an attempt journaled but never sent ending `failed` with no push;
+  - promotion through the real binding host and identity journal, including canonical and retained-source replacement.
+- **Source:**
+  - `recover_source` through the runtime gate (scope, policy, one reservation per retry);
+  - the evidence and diff `inspect_source` views;
+  - attach after cache loss.
+- **Reads:** revocation across every catalog read over HTTP, MCP commands, terminal and the real `/mcp` handler. Cache-loss responses for `get_source`, `get_history`, `get_diff`, `read_artifact` and `get_workspace_updates`.
+- **Identity:** lost creation responses for fork, source and evidence repositories. A journal/state identity disagreement fails closed.
+- **MCP:** out-of-scope tools are hidden from `tools/list` and refused on `tools/call` before validation or execution. Operation `durationMs` is checked.
+- **Cleanup:**
+  - unavailable retention proof after cache loss;
+  - the conflicting-operation refusal;
+  - backoff from 30 seconds to one hour;
+  - the four-intent recovery batch;
+  - the ControlTower alarm, which never moves a wakeup later.
+- **Limits:** Directory lookup, discovery and handle allocation, legacy conversion, namespace record and hot-state limits.
+
+**Known limitations, unchanged:**
+
+- Diagnostic digests are unkeyed SHA-256, so someone with log access can confirm a guessed identifier or revision.
+- Identity checks and name-addressed Git transfers are not atomic.
+- Hosted binding, alarm delivery, KV revocation propagation and Worker memory acceptance remain with D2.
+
 ## Alpha.3 release verification
 
 On **2026-10-07**, release preparation based on `5caea35` passed typecheck, lint, **259 unit/integration tests**, **64 browser journeys**, deterministic scenario replay, the offline cf build, exact-tag release metadata and **347 local documentation links/anchors**. Local socket access was required. Lint retains its existing Biome deprecation notice; the successful build retains the unavailable-Docker notice. This release changes version metadata and documentation; the underlying hardening coverage is described below.

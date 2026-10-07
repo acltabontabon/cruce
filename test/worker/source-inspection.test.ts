@@ -272,6 +272,34 @@ describe("recoverable SQL Git cache", () => {
 		await expect(f.inspect().recover(f.cache, f.head)).rejects.toThrow("ref differs");
 		expect(await f.cache.hasCompleteSource(f.head)).toBe(false);
 	});
+	it("resets instead of leaving an unindexed pack when a recovery retry still exceeds the cache", async () => {
+		const f = await fixture(true);
+		const pack = await f.source.exportPack(f.head);
+		const { sql, db } = database();
+		const probe = new SqlFs(sql);
+		await new GitWorkspace(probe, "/repository.git").ensureInit();
+		// Room for the pack but not its index, so both the first import and the retry fail mid-import.
+		const room = probe.cacheUsage().bytes + pack.byteLength + 128;
+		const cache = new GitWorkspace(new SqlFs(sql, { retainedBytes: room, maxBytes: room, maxEntries: 1000 }), "/repository.git");
+		await expect(f.inspect().recover(cache, f.head)).rejects.toThrow("bounded cache limit");
+		expect(db.prepare("SELECT path FROM gitfs WHERE path LIKE '%.pack' OR path LIKE '%.idx'").all()).toEqual([]);
+		expect(await cache.hasCompleteSource(f.head)).toBe(false);
+	});
+	it("rejects malformed and oversized packs with actionable public errors", async () => {
+		const f = await fixture(true);
+		const pack = await f.source.exportPack(f.head);
+		const corrupt = Uint8Array.from(pack);
+		corrupt[corrupt.length - 1] ^= 1;
+		await expect(f.cache.importPack(new TextEncoder().encode("not a pack at all, but long enough"))).rejects.toMatchObject({
+			status: 400,
+			message: "Invalid Git pack",
+		});
+		await expect(f.cache.importPack(corrupt)).rejects.toMatchObject({ status: 400, message: "Git pack checksum mismatch" });
+		await expect(f.cache.importPack(new Uint8Array(32 * 1024 * 1024 + 1))).rejects.toMatchObject({
+			status: 413,
+			message: "Git transfer exceeds the 32 MiB gateway limit",
+		});
+	});
 	it("caps SQL bytes and entries, evicts a whole generation and preserves authoritative metadata", async () => {
 		const { sql } = database(),
 			fs = new SqlFs(sql, { retainedBytes: 100, maxBytes: 500, maxEntries: 20 });

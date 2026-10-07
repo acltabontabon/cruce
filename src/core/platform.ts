@@ -130,6 +130,9 @@ export class RepositoryController {
 			promotion.from === p.base &&
 			promotion.to === p.revision &&
 			["prepared", "uncertain"].includes(promotion.state);
+		// Once a canonical update may have been sent, recovery only observes its exact outcome:
+		// later evidence or policy changes cannot strand an update that already landed.
+		const attempted = !!resuming && promotion?.operation?.phase !== "prepared";
 		if (p.state !== "open" && !resuming) reasons.push("Change is closed or promotion is in progress");
 		if (this.state.promotions.some((other) => other !== promotion && ["prepared", "uncertain"].includes(other.state)))
 			reasons.push("Reconcile the pending promotion before another canonical update");
@@ -160,8 +163,8 @@ export class RepositoryController {
 		});
 		const reviews = [...latest.values()];
 		return {
-			ready: !reasons.length,
-			reasons,
+			ready: attempted || !reasons.length,
+			reasons: attempted ? [] : reasons,
 			checks: {
 				open: p.state === "open" || !!resuming,
 				current: !head || p.base === head,
@@ -411,6 +414,7 @@ export class RepositoryController {
 				const p = this.proposal(cmd.proposalId);
 				if (cmd.revision !== p.revision || !["pass", "fail"].includes(cmd.outcome ?? ""))
 					throw new DomainError(409, "Verification must name the exact revision");
+				if (p.state !== "open") throw new DomainError(409, "Verification requires an open change");
 				if (cmd.humanAttested) humanMaintain(a);
 				if (cmd.artifactId && this.artifact(cmd.artifactId).revision !== p.revision)
 					throw new DomainError(409, "Evidence revision mismatch");

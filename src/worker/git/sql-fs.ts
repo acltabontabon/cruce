@@ -9,6 +9,9 @@
 import { DomainError } from "../../core/errors.ts";
 import { sqlTableExists } from "../store.ts";
 
+/** A full cache is recoverable by a reset; other limits are not. */
+export const CACHE_LIMIT = "Git source exceeds the bounded cache limit; use normal Git for larger repositories";
+
 export const GIT_CACHE_LIMITS = { retainedBytes: 48 * 1024 * 1024, maxBytes: 64 * 1024 * 1024, maxEntries: 20_000 } as const;
 
 interface Row {
@@ -104,8 +107,7 @@ export class SqlFs {
 		const usage = this.cacheUsage(),
 			old = this.metadata(path);
 		const size = usage.bytes - (old?.bytes ?? 0) + bytes + (old ? 0 : encoder.encode(path).length);
-		if (size > this.limits.maxBytes || usage.entries + (old ? 0 : 1) > this.limits.maxEntries)
-			throw new DomainError(413, "Git source exceeds the bounded cache limit; use normal Git for larger repositories");
+		if (size > this.limits.maxBytes || usage.entries + (old ? 0 : 1) > this.limits.maxEntries) throw new DomainError(413, CACHE_LIMIT);
 	}
 
 	private available() {

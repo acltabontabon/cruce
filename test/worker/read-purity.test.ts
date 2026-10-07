@@ -367,6 +367,75 @@ describe("pure coordination reads through persisted adapters", () => {
 		f.n.assertReads();
 		f.r.assertReads();
 	});
+	it("refuses every catalog read after membership revocation over HTTP, MCP and terminal without writes", async () => {
+		const f = await fixture();
+		const state = sqlStore(f.n.sql).get<import("../../src/shared/platform.ts").NamespaceState>("namespace")!;
+		delete state.members[f.user.id];
+		sqlStore(f.n.sql).put("namespace", state);
+		const before = f.snapshot();
+		f.freeze();
+		f.restart();
+		const bridge = { identity, namespaceId: f.personal.id, repositoryId: f.repository.id, connectionId: "terminal", tokenKey: "bridge" };
+		const args = {
+			namespaceId: f.personal.id,
+			repositoryId: f.repository.id,
+			workspaceId: f.workspaceId,
+			revision: f.head,
+			baseRevision: f.base,
+			artifactId: "evidence",
+			subjectId: f.workspaceId,
+			path: "file.ts",
+		};
+		for (const tool of reads) {
+			for (const [path, agent, terminal] of [
+				[`${f.path}/command`, false, false],
+				["/mcp/command", true, false],
+				["/bridge/command", false, true],
+			] as const) {
+				const request = f.call(path, { tool: tool.name, ...args }, agent, terminal ? bridge : undefined);
+				// A revoked namespace is simply absent from discovery; its repository route refuses outright.
+				if (tool.name === "list_namespaces" && path !== `${f.path}/command`) expect(await (await request)!.json(), path).toEqual([]);
+				else await expect(request, `${path}: ${tool.name}`).rejects.toMatchObject({ status: 403 });
+			}
+			const mcp = await f.call("/mcp", { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool.name, arguments: args } }, true);
+			const body = await mcp!.text();
+			if (tool.name === "list_namespaces") expect(body, tool.name).not.toContain(f.personal.id);
+			else {
+				expect(body, tool.name).toContain('"isError":true');
+				expect(body, tool.name).toContain('"status":403');
+			}
+		}
+		expect(f.snapshot()).toEqual(before);
+		expect(f.provider).not.toHaveBeenCalled();
+		expect(f.send).not.toHaveBeenCalled();
+		f.d.assertReads();
+		f.n.assertReads();
+		f.r.assertReads();
+	});
+	it("limits terminal discovery to the namespace and repository it was approved for", async () => {
+		const f = await fixture();
+		f.freeze();
+		const bound = (namespaceId: string, repositoryId: string) => ({
+			identity,
+			namespaceId,
+			repositoryId,
+			connectionId: "terminal",
+			tokenKey: "bridge",
+		});
+		const list = async (tool: string, bridge: ReturnType<typeof bound>) =>
+			(await f.call("/bridge/command", { tool, namespaceId: f.personal.id }, false, bridge))!.json();
+		expect(await list("list_namespaces", bound(f.personal.id, f.repository.id))).toMatchObject([{ id: f.personal.id }]);
+		expect(await list("list_repositories", bound(f.personal.id, f.repository.id))).toMatchObject([{ id: f.repository.id }]);
+		expect(await list("list_namespaces", bound("other-namespace", f.repository.id))).toEqual([]);
+		expect(await list("list_repositories", bound(f.personal.id, "other-repository"))).toEqual([]);
+		await expect(
+			f.call("/bridge/command", { tool: "list_repositories", namespaceId: f.personal.id }, false, bound("other-namespace", "other")),
+		).rejects.toMatchObject({ status: 403, message: "Human bridge workspace scope denied" });
+		expect((await (await f.call("/api/namespaces"))!.json()) as unknown[]).toHaveLength(1);
+		f.d.assertReads();
+		f.n.assertReads();
+		f.r.assertReads();
+	});
 	it("shows interrupted registration without creating metadata or a Git cache, then initializes only on explicit setup", async () => {
 		const f = await fixture(false);
 		const before = f.snapshot();
@@ -469,6 +538,21 @@ describe("pure coordination reads through persisted adapters", () => {
 		expect((await f.call(f.path))!.status).toBe(200);
 		await expect(f.call(`${f.path}/command`, { tool: "get_source", revision: f.head })).rejects.toThrow();
 		await expect(f.call(`${f.path}/export?revision=${f.head}`)).rejects.toThrow();
+		for (const tool of ["get_source", "get_history"])
+			await expect(f.call(`${f.path}/command`, { tool, revision: f.head })).rejects.toMatchObject({
+				status: 404,
+				message: "Source cache unavailable; explicitly recover retained source",
+			});
+		await expect(f.call(`${f.path}/command`, { tool: "get_diff", baseRevision: f.base, revision: f.head })).rejects.toMatchObject({
+			status: 404,
+			message: "Source cache unavailable; explicitly recover retained source",
+		});
+		await expect(f.call(`${f.path}/command`, { tool: "read_artifact", artifactId: "evidence" })).rejects.toMatchObject({
+			status: 404,
+			message: "Artifact cache unavailable; inspect the retained artifact source",
+		});
+		const updates = await f.call(`${f.path}/command`, { tool: "get_workspace_updates", workspaceId: f.workspaceId });
+		expect(await updates!.json()).toMatchObject({ available: false, comparison: "unavailable" });
 		expect(f.snapshot()).toEqual(before);
 		expect(f.provider).not.toHaveBeenCalled();
 		expect(f.send).not.toHaveBeenCalled();
