@@ -17,6 +17,9 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 - Filter repository Changes by **Needs you** or by attention group, and Workspaces by **Mine**, **Needs reconciliation** or owner. Filters live in the URL, so links, reloads and Back keep them.
 - Add **Continue this workspace** to workspace pages: what travels (only pushed commits), the reported head against the observed fork branch and last publication, and the existing detach and `cruce resume` steps. Other users are told that only the owner can attach it and that ownership transfer is unsupported.
 - Add a Cruce sign-in page at `/sign-in`. The homepage's **Sign in** opens it, and signed-out repository links, invitations and expired sessions show it in place with what signing in will open. Its button still hands off to Cloudflare Access; an optional `CRUCE_SIGN_IN_PROVIDER` label (for example GitHub) names the Access identity provider on the button.
+- Add **Earlier work** to repository History and the `get_archive` MCP read. An ended workspace whose fork is cleaned up moves there with its closed changes, publications, evidence and settled promotions, and stays readable by any of its IDs or revisions. Links to archived changes, workspaces and records open a read-only record instead of "unavailable".
+- Add an [operator runbook](docs/operations.md) for uncertain operations, storage identity mismatches, cleanup blockers, cache loss, observation delivery failures and coordination-state restoration. It states which procedures have not been rehearsed.
+- Document interface compatibility for the MCP catalog, console API and bridge in [releases](docs/releases.md#interface-compatibility).
 
 ### Changed
 
@@ -32,6 +35,10 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 - Redesign the console on one token-based visual system with Geist and JetBrains Mono, open lists between hairline rules, and frames only around the lane map, diffs and source.
 - Show each workspace's lane colour on its rows, its workspace page and its change's review checklist. Turn the repository attention bar into a strip of counts that each open where they are handled.
 - Add the attention items behind the counts, and the state of live workspaces, to repository summaries so Home can name each decision. Summaries carry the viewer's actionable items first, capped at eight, with exact totals.
+- Presence and change reports no longer use up repository storage. Each workspace keeps only its latest heartbeat and report, so connected bridges add no records over time. A retry of the latest report replays exactly; an older one is treated as a new report. The bridge no longer holds back other operations while a report is uncertain ([ADR 0009](docs/decisions/0009-replaceable-observations-and-archived-finished-work.md)).
+- Record at most one "changed files" activity event per workspace every 15 minutes. A change inside the window is recorded when it closes.
+- Repository limits of 256 workspaces, 512 changes and 512 promotions now count live work. Finished, cleaned-up work no longer counts, and change numbers continue without repeating. Settings shows live workspaces and the archived count.
+- Run the console browser tests in release checks.
 
 ### Removed
 

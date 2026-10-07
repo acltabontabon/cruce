@@ -112,6 +112,6 @@ The credential helper can use `--human-file /absolute/path/to/git-metadata/cruce
 | Checkout or cleanup is refused | Inspect persistent ownership, dirty/unpublished files and unretained remote refs; a stale heartbeat is not permission to delete |
 | Transfer exceeds bounds | Git request/response bodies are capped at 32 MiB, including chunked transfers; the gateway returns 413 rather than forwarding a partial pack. See [supported bounds](architecture.md#bounded-coordination-state-and-retention-recovery) |
 | Fork deletion is pending or blocked | Inspect retention in the workspace console or `get_retention`. Authorized pending cleanup recovers automatically; blocked cleanup needs the original actor to retry its recorded operation after restoring authority, policy, provider identity or retention. Expiry never authorizes deletion |
-| Coordination capacity is reached | Inspect Repository Settings and the supported state/record envelope. Data is retained; fork cleanup does not erase lifetime metadata or receipts |
+| Coordination capacity is reached | Inspect Repository Settings and the supported state/record envelope. Ending finished workspaces and cleaning up their forks moves them to Earlier work and frees live capacity; nothing is deleted. See [operations](operations.md) |
 
 Early-development state from retired models is not migrated. Missing live verification remains visible in [verification status](local-verification.md), separate from these operating instructions.

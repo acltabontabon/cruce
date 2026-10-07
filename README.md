@@ -59,6 +59,7 @@ Cruce is early, experimental software, and its name is provisional. The current 
 | Explore the console | [Local console walkthrough](docs/local-demo.md), [design guide](docs/design.md) |
 | Develop and verify a contribution | [Contributing](CONTRIBUTING.md), [verification](docs/local-verification.md) |
 | Configure hosted resources | [Cloudflare setup](docs/cloudflare-setup.md), [test environment](docs/test-environment.md) |
+| Recover a blocked or failed installation | [Operations](docs/operations.md) |
 | Work as a coding agent in this repository | [AGENTS.md](AGENTS.md) |
 | Inspect change history or release procedures | [Changelog](CHANGELOG.md), [releases](docs/releases.md) |
 

@@ -12,7 +12,7 @@ Use separate evidence for pure decisions, local integration, real provider behav
 | `pnpm lint` | Repository Biome checks |
 | `pnpm test` | Controller decisions, identity/grants, resource retries, Git transport, bridge isolation and Artifacts adapter behavior |
 | `pnpm test:browser` | Isolated homepage/console journeys, authentication boundaries, permissions, navigation and responsive layouts with Playwright |
-| `pnpm verify:limits` | Local SQLite/Node state, indexed page-query and buffered-transfer measurements; no provider calls or Worker peak-memory claim |
+| `pnpm verify:limits` | A declared sustained workload (ten workspaces reporting every 30 seconds) and 1,000 archived finished workspaces on local SQLite/Node, plus indexed page-query and buffered-transfer measurements; fails if receipts grow, activity exceeds the coalescing bound or the projected horizon falls below 180 days. No provider calls or Worker peak-memory claim |
 | `pnpm verify:scenario` | Reproducible console/auth-service history plus two-writer Git/publication/evidence/review convergence with an expected behavioral failure and repair |
 | `pnpm exec cf build --mode offline` | Worker/console build without configured cloud provisioning |
 | `pnpm release:check` | Version and changelog consistency |
@@ -22,6 +22,41 @@ The loopback fixture (`pnpm dev:fixture`) uses the real console and controllers,
 The scenario scripts fix commit timestamps and isolate signing/hooks for their disposable repositories. Preserve fixture source and reproducible IDs. Browser screenshots go to ignored `dist/ui-checks/`.
 
 The [timeout fixture](../demo/convergence/README.md) uses injected delay capture without timers or network calls. A shared driver exercises ordinary Git against disposable bare repositories served over loopback HTTP and the real in-process Cruce runtime. Only the provider adapter is substituted; Git fetch/push, publication, retained source/evidence, readiness and non-forced promotion run normally. Fixture grants and human attestations do not establish actual authenticated participation. `pnpm verify:scenario` replays the driver twice and checks identical revisions and behavioral outcomes, then writes non-secret results to ignored `dist/scenario-verification/result.json`, including the tested Cruce commit and working-tree-dirty flag.
+
+## Capacity lifecycle, release browser checks and operations
+
+On **2026-10-08**, against [ADR 0009](decisions/0009-replaceable-observations-and-archived-finished-work.md):
+
+- **Checks passed.** Typecheck, lint, **338 unit/integration tests**, **81 browser journeys** (passing on two consecutive runs), deterministic scenario verification and the offline cf build. The build retains its unavailable-Docker notice. The release workflow now runs `pnpm test:browser` after installing Chromium.
+- **Race fix.** The agent-connections journey previously read the list before `/api/connections` settled; it now waits for the loaded rows.
+- **Lint.** The untracked `tools/verification/participation.ts` was formatted, so repository-wide lint passes.
+
+**Observation records.** Runtime tests cover:
+- 200 heartbeat/report ticks adding no receipts
+- exact replay of the latest identity
+- refusal of changed input, cross-tool identity reuse and missing replies
+- re-execution of a superseded identity
+
+**Archival.** Runtime, core and storage tests cover:
+- archival in the cleanup transaction
+- pure reads of archived workspaces, artifacts, lineage, source and `get_archive`
+- refused mutations and receipt replay without provider calls
+- pause while a publication may settle, and skip-then-retry at capacity
+- 300 lifetime workspaces under the 256 live limit with continuous change numbers
+- referential closure and the 16-promotion window
+- atomic store deletes with exact counters and rollback
+
+A browser journey pages Earlier work and opens archived records by History and workspace deep links.
+
+**Measurement.** `pnpm verify:limits` ran ten attached workspaces for one simulated day: a heartbeat and a report every 30 seconds, the change set differing on every report and the head moving every ten minutes.
+- 57,600 commands added **no receipts** and kept **40 observation records**.
+- Activity grew by **960 records/day (about 286 KB/day)**, projecting **207 days** to the record ceiling.
+- Hot state stayed at **34,215 bytes**, with at most 30 SQL statements per command. Page queries used `sqlite_autoindex_records_1`.
+- It then started and cancelled 1,000 workspaces: **1,000 bundles archived**, 10 live workspaces kept hot, and all 1,000 paged back in 50 pages.
+
+These are local Node/SQLite observations. Worker CPU, memory, alarm delivery and the same workload against a deployed Worker remain unmeasured.
+
+**Not verified here.** No deployment was made for this change, and no hosted publication, promotion, cleanup, archival or restoration is claimed. [Operations](operations.md) procedures have not been rehearsed. The [roadmap](../ROADMAP.md#readiness-for-a-supported-010) lists the remaining gates for a supported release.
 
 ## Foundation gap audit (F1–F6)
 
@@ -158,7 +193,7 @@ On **2026-10-06**, F6 was locally verified in the working tree based on `7b549df
 
 [Runtime fault tests](../test/worker/repository-runtime.test.ts) cover recorded exact retention blockers, incomplete ref inventories, no deletion caused by elapsed time, lost delete responses, failed confirmation persistence and lost settlement across restarts. They preserve one reservation and one completion event; confirmed settlement recovery performs no additional deletion. Membership, scope, policy and provider identity changes block background attempts while preserving charged uncertainty. Existing explicitly requested deletion can be resumed by an authenticated retry. Full activity remains pageable after the hot window advances; old operation identities replay without changing current state. Repeated observations share immutable reply templates while returning the exact historical result; missing templates fail closed. Publication at the record ceiling is refused before a reservation or provider call. The SQL-backed [HTTP/MCP read tests](../test/worker/read-purity.test.ts) include the new reads and continue proving no schema/counter/alarm writes or provider calls after cold starts.
 
-`pnpm verify:limits` runs [the local measurement harness](../tools/measure-state.ts) and writes ignored `dist/state-verification/measurements.json`. The observed synthetic 10,000-report dataset retained **10,000 receipts and 10,002 events** in **20,006 indexed records / 5,589,865 logical bytes**, including two shared workspace result templates. Current state was **26,931 bytes**, its snapshot **27,847 bytes**, and a report used at most **23 SQL statements**. Runtime was about **6.2 seconds** on this local Node/SQLite run. The page query plan used `sqlite_autoindex_records_1`. An exact **33,554,432-byte** chunked gateway body was accepted in about **23 ms**. Timings and whole-process Node RSS are environment observations, not Worker CPU/peak-memory acceptance. The enforced [capacity envelope](architecture.md#bounded-coordination-state-and-retention-recovery) is a pilot bound; raising it requires fresh measurements. Reaching it retains records rather than pruning them. Fork deletion does not free lifetime metadata capacity.
+`pnpm verify:limits` runs [the local measurement harness](../tools/measure-state.ts) and writes ignored `dist/state-verification/measurements.json`. The observed synthetic 10,000-report dataset retained **10,000 receipts and 10,002 events** in **20,006 indexed records / 5,589,865 logical bytes**, including two shared workspace result templates. Current state was **26,931 bytes**, its snapshot **27,847 bytes**, and a report used at most **23 SQL statements**. Runtime was about **6.2 seconds** on this local Node/SQLite run. The page query plan used `sqlite_autoindex_records_1`. An exact **33,554,432-byte** chunked gateway body was accepted in about **23 ms**. Timings and whole-process Node RSS are environment observations, not Worker CPU/peak-memory acceptance. The enforced [capacity envelope](architecture.md#bounded-coordination-state-and-retention-recovery) is a pilot bound; raising it requires fresh measurements. Reaching it retains records rather than pruning them. Fork deletion did not free lifetime metadata capacity at the time; [ADR 0009](decisions/0009-replaceable-observations-and-archived-finished-work.md) and the [capacity lifecycle evidence](#capacity-lifecycle-release-browser-checks-and-operations) supersede this measurement.
 
 The two new browser journeys disclose the retention inspection's cloud/budget cost, show an exact unpublished ref while the fork stays available, and browse retained activity through a read-only page. Screenshot: ignored `dist/ui-checks/retention-blockers.png`. This fixture simulates Artifacts and identity; it does not establish provider deletion or alarm delivery.
 

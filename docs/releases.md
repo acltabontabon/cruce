@@ -12,6 +12,16 @@ Cruce's current alpha is **[0.1.0-alpha.3](https://github.com/acltabontabon/cruc
 - Follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/): group brief user-facing changes under `[Unreleased]` using applicable `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed` or `Security` headings; omit empty categories and maintain release/comparison links. Before release, move them into a heading matching the package version. Summarize user-facing changes; Git history and review descriptions retain implementation details. Keep current local/live verification evidence in [verification](local-verification.md).
 - Release tags are `v` plus the exact package version. Never move or reuse a published tag; fix a release with a new version.
 
+## Interface compatibility
+
+The MCP tool catalog ([`src/shared/tools.ts`](../src/shared/tools.ts)), the console HTTP API and the bridge command route are versioned together with `package.json`. MCP clients read the version from the server's `serverInfo`.
+
+- A breaking change is a removed or renamed tool, field or route; a new required argument; a narrower accepted value; or a changed meaning or shape of a result. During `0.x`, a breaking change increments the minor version and is listed under `Changed` or `Removed` in the changelog with what clients must do.
+- A new tool, a new optional argument or a new result field is compatible and increments the patch version.
+- Prerelease versions (`-alpha.N`, `-beta.N`) may break interfaces between prereleases. The changelog still names every break.
+- Cruce does not keep compatibility aliases or adapters for removed interfaces. A breaking change replaces the old interface in the same release.
+- Stored coordination state is not an interface. Layout changes are converted on explicit mutation within the same domain, and never by reads.
+
 `pnpm release:check` checks the version and changelog. `pnpm release:check v0.1.0-alpha.3` also checks the tag. A matching entry with release notes is required.
 
 ## One-time GitHub setup
