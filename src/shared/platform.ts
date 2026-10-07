@@ -148,6 +148,8 @@ export interface Workspace {
 	state: "preparing" | "active" | "detached" | "disconnected" | "completed" | "cancelled";
 	startedAt: number;
 	lastActivity: number;
+	/** Change-report time, independent of presence. Missing historical values are unknown. */
+	lastReportAt?: number;
 	endedAt?: number;
 	changes: WorkspaceChange[];
 	commits: string[];
@@ -180,7 +182,7 @@ export interface Overlap {
 	workspaces: string[];
 	surface: string;
 	evidence: "reported";
-	observedAt: number;
+	observedAt?: number;
 }
 /** Cruce retained source/evidence record, not the Cloudflare Artifacts provider; retention does not imply correctness. */
 export interface Artifact {
@@ -203,6 +205,8 @@ export interface Review {
 	actor: Actor;
 	revision: string;
 	outcome: "approve" | "concern" | "disagree";
+	/** Server-recorded authority at approval time; never accepted as a command input. */
+	approvalAuthority?: "human-maintainer";
 	reason: string;
 	at: number;
 	resolution?: { actor: Actor; reason: string; at: number };
@@ -266,7 +270,10 @@ export interface RepositoryState {
 	verifications: Verification[];
 	promotions: Promotion[];
 	activity: ActivityEvent[];
-	receipts: Record<string, { fingerprint: string; result: unknown; workspaceResult?: { templateId: string; lastActivity: number } }>;
+	receipts: Record<
+		string,
+		{ fingerprint: string; result: unknown; workspaceResult?: { templateId: string; lastActivity: number; lastReportAt?: number } }
+	>;
 	sourceHead?: string;
 	canonical?: { id: string; name: string; remote: string };
 }
@@ -280,22 +287,23 @@ export interface Readiness {
 		current: boolean;
 		canonical?: string;
 		approved: boolean;
+		reviewIds: string[];
 		concerns: number;
-		evidence: { kind: string; trusted: boolean; reported: boolean; failed: boolean }[];
+		evidence: { kind: string; trusted: boolean; reported: boolean; failed: boolean; verificationIds: string[] }[];
 		blockedByPromotion: boolean;
 	};
 }
 export interface RepositorySnapshot extends Omit<RepositoryState, "receipts"> {
 	overlaps: Overlap[];
 	workspaceUpdates: Record<string, WorkspaceUpdates>;
-	permissions: { write: boolean; maintain: boolean; human: boolean };
+	permissions: { write: boolean; maintain: boolean; human: boolean; approve: boolean };
 	sourceAvailable: boolean;
 	readiness: Record<string, Readiness>;
 	promotionRecovery: Record<string, { command: Command; ready: boolean; reasons: string[] }>;
 	forkCleanup: Record<string, { ready: boolean; reasons: string[] }>;
 	executionRelease: Record<string, { ready: boolean; reasons: string[] }>;
 	/** Canonical storage is missing after a failed creation; `retry` says whether this viewer may replay setup. */
-	canonicalSetup: { required: boolean; retry: boolean };
+	canonicalSetup: { required: boolean; retry: boolean; settlementPending?: boolean };
 	capacity?: { bytes: number; records: number; stateBytes: number; limits: typeof import("./limits.ts").STATE_LIMITS };
 }
 

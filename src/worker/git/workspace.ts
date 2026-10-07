@@ -3,7 +3,7 @@ import git, { Errors, type PromiseFsClient, type TreeEntry } from "isomorphic-gi
 import http from "isomorphic-git/http/web";
 import { DomainError } from "../../core/errors.ts";
 import { changedRanges } from "../../core/line-diff.ts";
-import type { ChangesResponse } from "../../shared/api.ts";
+import type { ChangesResponse, GitEntry } from "../../shared/api.ts";
 import type { ChangedFile } from "../../shared/git.ts";
 import { TRANSFER_LIMITS } from "../../shared/limits.ts";
 import { MemoryFs } from "./memory-fs.ts";
@@ -306,13 +306,14 @@ export class GitWorkspace {
 		requestedPath?: string,
 	): Promise<Pick<ChangesResponse, "files" | "additions" | "deletions" | "statsComplete" | "file">> {
 		const blobs = async (ref: string) => {
-			const result = new Map<string, string>();
+			const result = new Map<string, GitEntry>();
 			let entries = 0;
 			const walk = async (oid: string, prefix = "") => {
 				for (const entry of (await git.readTree({ ...this.base, oid })).tree) {
 					if (++entries > 5000) throw new DomainError(413, "Diff tree exceeds the inspection limit");
 					if (entry.type === "tree") await walk(entry.oid, `${prefix}${entry.path}/`);
-					else if (entry.type === "blob") result.set(`${prefix}${entry.path}`, entry.oid);
+					else if (entry.type === "blob" || entry.type === "commit")
+						result.set(`${prefix}${entry.path}`, { oid: entry.oid, mode: entry.mode, type: entry.type });
 				}
 			};
 			await walk(await this.treeOf(await this.peel(ref)));
@@ -329,8 +330,17 @@ export class GitWorkspace {
 		for (const path of [...new Set([...before.keys(), ...after.keys()])].sort()) {
 			const a = before.get(path);
 			const b = after.get(path);
-			if (a === b) continue;
-			const read = async (oid?: string) => (oid ? (await git.readBlob({ ...this.base, oid })).blob : new Uint8Array());
+			if (a?.oid === b?.oid && a?.mode === b?.mode && a?.type === b?.type) continue;
+			if (a && b && a.oid === b.oid && a.type === b.type) {
+				result.files.push({ path, status: "modified", additions: 0, deletions: 0, binary: false, tooLarge: false, before: a, after: b });
+				if (requestedPath === path) result.file = { path, patch: null, reason: "File mode changed; contents unchanged." };
+				continue;
+			}
+			const read = async (entry?: GitEntry) => {
+				if (!entry) return new Uint8Array();
+				if (entry.type === "commit") return encoder.encode(`Subproject commit ${entry.oid}\n`);
+				return (await git.readBlob({ ...this.base, oid: entry.oid })).blob;
+			};
 			const [oldBytes, newBytes] = await Promise.all([read(a), read(b)]);
 			inspectedBytes += oldBytes.byteLength + newBytes.byteLength;
 			const binary = oldBytes.includes(0) || newBytes.includes(0);
@@ -373,7 +383,16 @@ export class GitWorkspace {
 					}
 				}
 			}
-			result.files.push({ path, status: !a ? "added" : !b ? "deleted" : "modified", additions, deletions, binary, tooLarge });
+			result.files.push({
+				path,
+				status: !a ? "added" : !b ? "deleted" : "modified",
+				additions,
+				deletions,
+				binary,
+				tooLarge,
+				before: a,
+				after: b,
+			});
 			if (requestedPath === path) result.file = { path, patch, ...(reason ? { reason } : {}) };
 		}
 		return boundedInspection(result);

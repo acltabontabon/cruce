@@ -49,14 +49,14 @@ const proposal = (id: string, number: number, workspaceId: string, extra: Partia
 const readiness = (checks: Partial<Readiness["checks"]> = {}, ready = false): Readiness => ({
 	ready,
 	reasons: [],
-	checks: { open: true, current: true, approved: false, concerns: 0, evidence: [], blockedByPromotion: false, ...checks },
+	checks: { open: true, current: true, approved: false, reviewIds: [], concerns: 0, evidence: [], blockedByPromotion: false, ...checks },
 });
 function view(extra: Partial<RepositorySnapshot> = {}): RepositorySnapshot {
 	return {
 		...initialRepository(repository),
 		overlaps: [],
 		workspaceUpdates: {},
-		permissions: { write: true, maintain: true, human: true },
+		permissions: { write: true, maintain: true, human: true, approve: true },
 		sourceAvailable: true,
 		readiness: {},
 		forkCleanup: {},
@@ -122,7 +122,7 @@ describe("console status language", () => {
 		});
 		expect(canonicalRelation(v, v.workspaces[0])).toMatchObject({ key: "behind", label: "Behind canonical" });
 		expect(canonicalRelation(v, v.workspaces[1])).toMatchObject({ key: "current" });
-		expect(overlapsFor(v, v.workspaces[0])).toEqual([{ path: "README.md", others: ["Timeouts"] }]);
+		expect(overlapsFor(v, v.workspaces[0])).toEqual([{ path: "README.md", others: ["Timeouts"], observedAt: 0 }]);
 		expect(attention(v)).toMatchObject({ review: 1, ready: 0, stale: 0, behind: 1, overlaps: 1 });
 	});
 	it("describes elapsed time plainly", () => {

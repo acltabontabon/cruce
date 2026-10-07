@@ -106,7 +106,7 @@ export class RepositoryController {
 				workspaces: s.map((s) => s.id).sort(),
 				surface,
 				evidence: "reported",
-				observedAt: Math.min(...s.map((s) => s.lastActivity)),
+				observedAt: s.every((s) => s.lastReportAt !== undefined) ? Math.min(...s.map((s) => s.lastReportAt!)) : undefined,
 			}));
 	}
 	forkCleanup(s: Workspace) {
@@ -137,8 +137,10 @@ export class RepositoryController {
 		if (head && p.base !== head) reasons.push("Base revision changed; refresh and propose the reconciled revision");
 		const latest = new Map<string, (typeof p.reviews)[number]>();
 		for (const r of p.reviews.filter((r) => r.revision === p.revision)) latest.set(r.actor.id, r);
-		if (![...latest.values()].some((r) => r.actor.kind === "human" && r.outcome === "approve"))
-			reasons.push("Human approval required for this revision");
+		const approved = [...latest.values()].some(
+			(r) => r.actor.kind === "human" && !r.actor.connectionId && r.outcome === "approve" && r.approvalAuthority === "human-maintainer",
+		);
+		if (!approved) reasons.push("Human approval required for this revision");
 		if ([...latest.values()].some((r) => r.outcome !== "approve" && !r.resolution))
 			reasons.push("Review concern requires a reasoned human resolution");
 		const evidenceChecks = this.state.repository.policy.requiredEvidence.map((kind) => {
@@ -151,6 +153,7 @@ export class RepositoryController {
 				trusted: current.some((v) => v.outcome === "pass" && v.trust !== "reported"),
 				reported: current.some((v) => v.outcome === "pass" && v.trust === "reported"),
 				failed: current.some((v) => v.outcome === "fail"),
+				verificationIds: current.map((v) => v.id),
 			};
 			if (!check.trusted || check.failed) reasons.push(`Trusted passing ${kind} evidence required`);
 			return check;
@@ -163,7 +166,8 @@ export class RepositoryController {
 				open: p.state === "open" || !!resuming,
 				current: !head || p.base === head,
 				canonical: head,
-				approved: reviews.some((r) => r.actor.kind === "human" && r.outcome === "approve"),
+				approved,
+				reviewIds: reviews.map((r) => r.id),
 				concerns: reviews.filter((r) => r.outcome !== "approve" && !r.resolution).length,
 				evidence: evidenceChecks,
 				blockedByPromotion: this.state.promotions.some((other) => other !== promotion && ["prepared", "uncertain"].includes(other.state)),
@@ -182,7 +186,12 @@ export class RepositoryController {
 			...state,
 			overlaps: this.overlaps(),
 			workspaceUpdates: Object.fromEntries(this.state.workspaces.map((s) => [s.id, this.workspaceUpdates(s)])),
-			permissions: { write: a.repositoryRole !== "read", maintain: a.repositoryRole === "maintain", human: a.actor.kind === "human" },
+			permissions: {
+				write: a.repositoryRole !== "read",
+				maintain: a.repositoryRole === "maintain",
+				human: a.actor.kind === "human",
+				approve: a.actor.kind === "human" && !a.actor.connectionId && a.repositoryRole === "maintain",
+			},
 			sourceAvailable: !!this.state.sourceHead || !!this.state.artifacts.find((a) => a.kind === "source"),
 			forkCleanup: Object.fromEntries(this.state.workspaces.map((s) => [s.id, this.forkCleanup(s)])),
 			executionRelease: Object.fromEntries(this.state.workspaces.map((s) => [s.id, this.executionRelease(s, a)])),
@@ -333,6 +342,7 @@ export class RepositoryController {
 				s.branch = cmd.branch ?? s.branch;
 				s.lastActivity = this.now;
 				s.state = "active";
+				s.lastReportAt = this.now;
 				if (before !== stable(changes))
 					this.event(a.actor, "changes_reported", `${a.actor.name} changed ${changes.length} ${changes.length === 1 ? "file" : "files"}`, [
 						s.id,
@@ -371,6 +381,7 @@ export class RepositoryController {
 			}
 			case "review_proposal": {
 				writeAccess(a);
+				if (cmd.outcome === "approve" && a.actor.kind === "human") humanMaintain(a);
 				const p = this.proposal(cmd.proposalId);
 				if (p.state !== "open" || cmd.revision !== p.revision || !["approve", "concern", "disagree"].includes(cmd.outcome ?? ""))
 					throw new DomainError(409, "Review must name the open change's exact revision");
@@ -379,6 +390,7 @@ export class RepositoryController {
 					actor: a.actor,
 					revision: p.revision,
 					outcome: cmd.outcome as "approve" | "concern" | "disagree",
+					approvalAuthority: cmd.outcome === "approve" && a.actor.kind === "human" ? "human-maintainer" : undefined,
 					reason: requireValue(cmd.reason, "Review reason required"),
 					at: this.now,
 				});

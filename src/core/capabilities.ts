@@ -39,7 +39,8 @@ export function writeAccess(a: Authority) {
 	if (a.repositoryRole !== "write" && a.repositoryRole !== "maintain") throw new DomainError(403, "Repository write permission required");
 }
 export function humanMaintain(a: Authority) {
-	if (a.actor.kind !== "human" || a.repositoryRole !== "maintain") throw new DomainError(403, "Human repository maintainer required");
+	if (a.actor.kind !== "human" || a.actor.connectionId || a.repositoryRole !== "maintain")
+		throw new DomainError(403, "Human repository maintainer required");
 }
 export function namespaceMaintain(a: Authority) {
 	if (a.actor.kind !== "human" || !["owner", "maintainer"].includes(a.role))

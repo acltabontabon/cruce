@@ -76,6 +76,7 @@ export function overlapsFor(view: RepositorySnapshot, w: Workspace) {
 		.filter((o) => o.workspaces.includes(w.id))
 		.map((o) => ({
 			path: o.surface,
+			observedAt: o.observedAt,
 			others: o.workspaces.filter((id) => id !== w.id).map((id) => view.workspaces.find((x) => x.id === id)?.title ?? "another workspace"),
 		}));
 }
