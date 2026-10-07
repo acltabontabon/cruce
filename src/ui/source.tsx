@@ -194,6 +194,22 @@ export function ChangeDiff({ base, revision, execute }: { base: string; revision
 					</nav>
 					<section>
 						<h3>{diff.file?.path ?? "Select a file to see its changes"}</h3>
+						{diff.files
+							.filter((file) => file.path === diff.file?.path)
+							.map((file) => (
+								<p className="muted" key={file.path}>
+									{file.before?.mode !== file.after?.mode && (
+										<>
+											Mode {file.before?.mode ?? "absent"} → {file.after?.mode ?? "absent"}.{" "}
+										</>
+									)}
+									{(file.before?.type === "commit" || file.after?.type === "commit") && (
+										<>
+											Submodule {file.before?.oid ?? "absent"} → {file.after?.oid ?? "absent"}.
+										</>
+									)}
+								</p>
+							))}
 						{diff.file?.patch ? (
 							<pre className="patch">
 								{diff.file.patch.split("\n").map((line, i) => (

@@ -39,7 +39,7 @@ Namespace → Repository → Workspace
 | **Published revision** | A pushed workspace revision retained by Cruce for review, with its review base, content hash, storage and producing actor (`Artifact` with `kind: "source"`) | Approval; correctness |
 | **Evidence** | Revision-linked claims or results such as reported test runs or a human attestation (`Artifact` with `kind: "evidence"`, `Verification`) | Cruce-executed CI |
 | **Proposal** (product term: *change*) | An exact published revision offered for review against a pinned base | A pull request on a moving branch |
-| **Review / approval** | A participant's reasoned evaluation of one exact revision. Only an authenticated human approval satisfies promotion | Approval of a workspace or a branch |
+| **Review / approval** | A participant's reasoned evaluation of one exact revision. Only an authenticated human Maintain approval, recorded with its authority, satisfies promotion | Approval of a workspace or a branch |
 | **Reconciliation** | Explicitly combining a workspace's work with accepted canonical source using Git, verifying the result, and publishing it as a new revision for fresh review | Fetching; receiving an update |
 | **Promotion** | The human-authorized, controller-gated, non-forced Git update that advances canonical from the approved base to the approved revision | Approval alone; local merge |
 | **Provenance / lineage** | The durable record linking workspace, owner, actors, baseline, revisions, evidence, reviews and promotions | Agent conversations or prompts |
@@ -144,6 +144,8 @@ canonical ─▶ workspace fork ─▶ local worktree / clone / existing checkou
 - Several tools may operate in the same attached checkout. That is a local choice; Cruce records which actor performed each operation.
 - To continue a workspace on another machine or in another checkout, detach the old execution and attach a new one. The new checkout starts from the workspace's pushed fork head.
 
+Change reports record `lastReportAt` independently of presence. Heartbeats never refresh report age. Historical reports without a timestamp have unknown freshness; stale reports do not release ownership or establish that changes are safe.
+
 ## Concurrency model
 
 Workspaces relate through canonical and through the paths they touch. Cruce shows those relationships honestly:
@@ -201,6 +203,8 @@ Authority is derived on every request, including retries, from the authenticated
 | Approve for promotion, attest evidence, resolve concerns, reject, promote | Authenticated human with Maintain; never an agent and never a paired terminal |
 | Clean up a workspace fork | The workspace owner's agent connection, or a human with Maintain; only after the workspace ends and every ref is retained |
 
+Promotion approval is stamped server-side with the human maintainer authority exercised for that exact revision. Unmarked historical reviews remain visible, but open changes require fresh qualified approval. Completed canonical promotions remain unchanged. Qualified approvals are historical decisions; the current promoter must still be authorized. See [ADR 0006](decisions/0006-qualified-approval-and-publication-recovery.md).
+
 Effective agent authority is the intersection of its user's current authority, the approved repositories and the granted scopes. Revoking any of them applies to the next request, including retries of earlier operations.
 
 ## Retention and cleanup
@@ -210,7 +214,7 @@ Effective agent authority is the intersection of its user's current authority, t
 - Fork cleanup requires an ended workspace and proof that every fork ref is retained by canonical or retained storage. Unretained commits, annotated tags and unknown refs block deletion, and so does uncertainty.
 - Explicit retention inspection records exact fork refs, retained/unretained results, completeness and check time. Recorded inspection is an observation; cleanup checks again before accepting deletion.
 - Cleanup authorization is durable for one exact operation and fork ID. An alarm may resume only that submitted operation, using its original reservation under current membership, repository access, scopes and resource policy. It never creates a new system actor or derives permission from age. OAuth grant removal, expiry or changed repository approval blocks recovery until a current authenticated retry. Confirmed deletion is recorded before reservation settlement.
-- Source referenced by a published revision is retained.
+- Source referenced by a published revision is retained. Publication pins an exact retention intent before pushing and saves its artifact, activity and receipt before settling the original resource reservation. Already-confirmed retention can be recorded after workspace completion or cache loss; recovering an older publication never regresses newer workspace state.
 - The local Git cache is disposable. Eviction preserves retained source and provenance; explicit identity-checked recovery restores exact source without requiring the workspace fork. Cache-only coordination reads may show source or ancestry as unavailable. Provider first-parent history does not establish complete Git ancestry.
 - Presence expiry, disconnection and detachment are never cleanup triggers. Cleanup is always an explicit, authorized operation.
 

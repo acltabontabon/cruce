@@ -37,6 +37,214 @@ async function openHomepage() {
 const stageNames = ["Baseline", "Work", "Overlap", "Review", "Promote", "Reconcile", "Continue"];
 const stageDurations = [3800, 4400, 4800, 5400, 4600, 5400, 6000];
 const desktop = (selector) => page.locator(`.crossing-desktop ${selector}`);
+test("initial identity failures can retry without signing in again", async () => {
+	let fail = true;
+	await page.route("**/api/me", (route) =>
+		fail ? route.fulfill({ status: 503, json: { error: "Identity temporarily unavailable" } }) : route.continue(),
+	);
+	await page.goto(server.origin);
+	await page.getByRole("heading", { name: "Connection unavailable", exact: true }).waitFor();
+	fail = false;
+	await page.getByRole("button", { name: "Retry", exact: true }).click();
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
+});
+test("namespace access denial clears settings and controls, and successful retry restores them", async () => {
+	await page.clock.install();
+	let denied = false;
+	await page.route("**/api/namespaces/fernloop", (route) =>
+		denied ? route.fulfill({ status: 403, json: { error: "Namespace access denied" } }) : route.continue(),
+	);
+	await page.goto(`${server.origin}/?namespace=fernloop#/settings`);
+	await page.getByRole("heading", { name: "Daily operations", exact: true }).waitFor();
+	denied = true;
+	await page.clock.fastForward(15000);
+	await page.getByRole("alert").filter({ hasText: "Namespace access denied" }).waitFor();
+	assert.equal(await page.getByRole("heading", { name: "Daily operations", exact: true }).count(), 0);
+	assert.equal(await page.getByRole("button", { name: "Save namespace", exact: true }).count(), 0);
+	denied = false;
+	await page.getByRole("button", { name: "Retry", exact: true }).click();
+	await page.getByRole("heading", { name: "Daily operations", exact: true }).waitFor();
+});
+test("slow polling does not overlap, and a forced refresh rejects the earlier response", async () => {
+	await page.clock.install();
+	let armed = false,
+		calls = 0,
+		failNamespace = false;
+	let release, started;
+	const waiting = new Promise((resolve) => {
+		started = resolve;
+	});
+	const held = new Promise((resolve) => {
+		release = resolve;
+	});
+	await page.route("**/api/namespaces/fernloop", (route) =>
+		failNamespace ? route.fulfill({ status: 503, json: { error: "Refresh unavailable" } }) : route.continue(),
+	);
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		const response = await route.fetch(),
+			data = await response.json();
+		if (armed) {
+			calls++;
+			data.repository.name = calls === 1 ? "Earlier snapshot" : "Current snapshot";
+			if (calls === 1) {
+				started();
+				await held;
+			}
+		}
+		await route.fulfill({ json: data });
+	});
+	try {
+		await openRepo();
+		armed = true;
+		failNamespace = true;
+		await page.clock.fastForward(15000);
+		await waiting;
+		await page.clock.fastForward(15000);
+		assert.equal(calls, 1);
+		await page.getByRole("alert").filter({ hasText: "Refresh unavailable" }).waitFor();
+		failNamespace = false;
+		await page.getByRole("button", { name: "Retry", exact: true }).click();
+		await page.getByRole("heading", { name: "Current snapshot", exact: true }).waitFor();
+		release();
+		await page.waitForTimeout(100);
+		assert.equal(await page.getByRole("heading", { name: "Earlier snapshot", exact: true }).count(), 0);
+	} finally {
+		release();
+	}
+});
+test("partial repository status stays unavailable rather than showing zero attention", async () => {
+	await page.route("**/api/namespaces/fernloop", async (route) => {
+		const response = await route.fetch(),
+			data = await response.json();
+		data.repositorySummaries = [];
+		data.repositoryFailures = data.repositories.map((repo) => ({ repositoryId: repo.id, message: "Status unavailable" }));
+		await route.fulfill({ json: data });
+	});
+	await page.goto(`${server.origin}/?namespace=fernloop`);
+	await page.getByText("Counts cover available repositories.", { exact: false }).waitFor();
+	assert.equal(await page.locator(".stats").getByText("—", { exact: true }).count(), 3);
+	assert.equal(await page.getByRole("button", { name: "Retry unavailable repositories", exact: true }).count(), 1);
+});
+test("setup gives Clone its credentials and offers a separate existing-checkout path", async () => {
+	await openRepo();
+	await page.getByRole("button", { name: "Clone", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "Clone repository", exact: true });
+	await dialog.getByText(/git-credential.mjs login/).waitFor();
+	await dialog.getByText(/credential.helper=.*clone/).waitFor();
+	await dialog.getByRole("button", { name: "Attach local checkout", exact: true }).click();
+	await dialog.getByText(/files, branch and existing remotes are preserved/).waitFor();
+	await dialog.getByText(/creates an isolated fork and uses namespace resource operations/).waitFor();
+	await page.keyboard.press("Escape");
+	await page.getByRole("button", { name: "Attach local checkout", exact: true }).click();
+	await page.getByRole("dialog", { name: "Attach local checkout", exact: true }).waitFor();
+});
+test("review remains usable after approval and after a failed evidence result", async () => {
+	await openChange();
+	await page.getByRole("button", { name: "Approve", exact: true }).click();
+	await page.getByRole("button", { name: "Approve again", exact: true }).waitFor();
+	assert.equal(await page.getByRole("button", { name: "Raise concern", exact: true }).isVisible(), true);
+	await page.getByRole("button", { name: "Record failure", exact: true }).click();
+	await page.getByLabel("Record failure note", { exact: true }).fill("Check needs another run");
+	await page.locator(".note-action").getByRole("button", { name: "Record failure", exact: true }).click();
+	await page.getByText("Tests failing", { exact: false }).waitFor();
+	await page.getByRole("button", { name: "Record updated tests pass", exact: true }).click();
+	await page.getByText("Tests confirmed", { exact: false }).waitFor();
+	assert.equal(await page.getByRole("button", { name: "Promote to main", exact: true }).isEnabled(), true);
+	await page.screenshot({ path: "dist/ui-checks/review-completed-checks.png", fullPage: true });
+});
+test("historical approvals require a fresh decision and Developers cannot approve", async () => {
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		const data = await (await route.fetch()).json(),
+			proposal = data.proposals[0];
+		proposal.reviews.push({
+			id: "historical",
+			actor: { id: "former", userId: "former", name: "Former reviewer", kind: "human" },
+			revision: proposal.revision,
+			outcome: "approve",
+			reason: "Old approval",
+			at: 0,
+		});
+		data.readiness[proposal.id].checks.approved = false;
+		data.permissions = { write: true, human: true, maintain: false, approve: false };
+		await route.fulfill({ json: data });
+	});
+	await openChange();
+	assert.equal(await page.getByRole("button", { name: "Approve", exact: true }).count(), 0);
+	assert.equal(await page.getByRole("button", { name: "Raise concern", exact: true }).isVisible(), true);
+	await page.getByText("A repository maintainer confirms checks and promotes.", { exact: true }).waitFor();
+});
+test("copy failures provide a manual-copy alternative", async () => {
+	await openRepo();
+	await page.evaluate(() =>
+		Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.reject(new Error("denied")) } }),
+	);
+	await page.getByRole("button", { name: "Clone", exact: true }).click();
+	await page.getByRole("dialog").getByRole("button", { name: "Copy", exact: true }).first().click();
+	await page.getByRole("alert").filter({ hasText: "Select and copy the command above." }).waitFor();
+});
+test("metadata-only Git changes remain visible in source review", async () => {
+	await page.route("**/command", (route) => {
+		const body = route.request().postDataJSON();
+		if (body.tool !== "get_diff") return route.continue();
+		return route.fulfill({
+			json: {
+				files: [
+					{
+						path: "script.sh",
+						status: "modified",
+						additions: 0,
+						deletions: 0,
+						binary: false,
+						tooLarge: false,
+						before: { oid: "a".repeat(40), mode: "100644", type: "blob" },
+						after: { oid: "a".repeat(40), mode: "100755", type: "blob" },
+					},
+				],
+				additions: 0,
+				deletions: 0,
+				statsComplete: true,
+				...(body.path ? { file: { path: "script.sh", patch: null, reason: "File mode changed; contents unchanged." } } : {}),
+			},
+		});
+	});
+	await openChange();
+	await page.getByText("Mode 100644 → 100755.", { exact: false }).waitFor();
+	await page.getByText("File mode changed; contents unchanged.", { exact: true }).waitFor();
+});
+test("a completed mutation cannot navigate away from the page opened while it was pending", async () => {
+	let release, started;
+	const held = new Promise((resolve) => {
+		release = resolve;
+	});
+	const waiting = new Promise((resolve) => {
+		started = resolve;
+	});
+	await page.route("**/api/namespaces", async (route) => {
+		if (route.request().method() !== "POST") return route.continue();
+		const response = await route.fetch();
+		started();
+		await held;
+		await route.fulfill({ response });
+	});
+	try {
+		await page.goto(`${server.origin}/?namespace=fernloop`);
+		await page.getByRole("button", { name: "Switch namespace", exact: true }).click();
+		await page.getByRole("button", { name: "Create namespace", exact: true }).click();
+		const dialog = page.getByRole("dialog", { name: "Create namespace", exact: true });
+		await dialog.getByLabel("Name", { exact: true }).fill("Later result");
+		await dialog.getByRole("button", { name: "Create namespace", exact: true }).click();
+		await waiting;
+		await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+		await page.getByRole("link", { name: "Cruce home", exact: true }).click();
+		await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
+		release();
+		await page.waitForTimeout(100);
+		assert.equal(new URL(page.url()).search, "");
+		assert.equal(await page.getByRole("heading", { name: "Your repositories", exact: true }).isVisible(), true);
+	} finally {
+		release();
+	}
+});
 test("public homepage leads with context, then shows how it works, without requesting private repository data", async () => {
 	const privateRequests = [];
 	page.on("request", (request) => {
@@ -1087,6 +1295,7 @@ test("changes exclude stale and unrelated reports while keeping explicitly linke
 			actor: data.workspaces[1].createdBy,
 			summary: "Linked reported check",
 		});
+		data.readiness[proposal.id].checks.evidence.find((check) => check.kind === "tests").verificationIds = ["linked-check"];
 		await route.fulfill({ json: data });
 	});
 	await openChange();
@@ -1225,7 +1434,14 @@ test("namespace home, account and creation remain usable on mobile", async () =>
 test("repository clone uses normal Git and fork deletion waits until the workspace ends", async () => {
 	await openRepo();
 	await page.getByRole("button", { name: "Clone", exact: true }).click();
-	await page.getByText(`git clone ${server.origin}/mcp/git/fernloop/payments/canonical.git`, { exact: true }).waitFor();
+	await page
+		.getByRole("dialog", { name: "Clone repository" })
+		.getByText(/credential.helper=.*clone/)
+		.waitFor();
+	await page
+		.getByRole("dialog")
+		.getByText(/git-credential.mjs login/)
+		.waitFor();
 	await page.keyboard.press("Escape");
 	await repoNav()
 		.getByRole("button", { name: /^Workspaces/ })

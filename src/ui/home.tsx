@@ -101,7 +101,10 @@ export function NamespaceHome({
 		setSpaces({});
 		setFailures({});
 		let sequence = 0;
+		let pending = false;
 		const load = async () => {
+			if (pending) return;
+			pending = true;
 			const ticket = ++sequence;
 			await Promise.all(
 				me.namespaces.map(async (w) => {
@@ -128,6 +131,7 @@ export function NamespaceHome({
 				}),
 			);
 			if (!controller.signal.aborted && ticket === sequence) setLoading(false);
+			pending = false;
 		};
 		void load();
 		const timer = setInterval(() => void load(), 15000);
@@ -157,7 +161,8 @@ export function NamespaceHome({
 		(w) => spaces[w.id]?.repositories.map((r) => spaces[w.id]?.repositorySummaries?.find((s) => s.id === r.id)) ?? [],
 	);
 	const sum = totals(all),
-		count = (n: number) => (loading && !all.length ? "—" : n);
+		partial = Object.keys(failures).length > 0 || all.some((summary) => !summary),
+		count = (n: number) => (!all.some(Boolean) && (loading || partial) ? "—" : n);
 	return (
 		<>
 			<PageHeader kicker="All namespaces" title="Your repositories">
@@ -181,6 +186,14 @@ export function NamespaceHome({
 				]}
 			/>
 			<div className="overview">
+				{partial && (
+					<p role="status">
+						Some repository status is unavailable. Counts cover available repositories.{" "}
+						<button type="button" onClick={() => setRetry((n) => n + 1)}>
+							Retry unavailable repositories
+						</button>
+					</p>
+				)}
 				<div className="overview-main">
 					<Section title="Repositories" count={rows.length}>
 						{rows.length ? (

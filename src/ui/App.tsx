@@ -6,6 +6,7 @@ import { Dialog } from "./design.tsx";
 import { NamespaceHome } from "./home.tsx";
 import { NamespacePage, namespaceViews } from "./namespace.tsx";
 import { ConsoleHeader } from "./navigation.tsx";
+import { poll } from "./poll.ts";
 import { RepositoryPage, repositoryTabs } from "./repository.tsx";
 import { request } from "./request.ts";
 import { Shell } from "./shell.tsx";
@@ -44,17 +45,34 @@ export function App() {
 		[namespace, setNamespace] = useState<NamespaceView>(),
 		[view, setView] = useState<RepositorySnapshot>(),
 		[error, setError] = useState<Error>(),
+		[namespaceError, setNamespaceError] = useState<Error>(),
+		[identityError, setIdentityError] = useState<Error>(),
+		[updatedAt, setUpdatedAt] = useState<number>(),
+		[namespaceUpdatedAt, setNamespaceUpdatedAt] = useState<number>(),
 		[notice, setNotice] = useState(""),
 		[refresh, setRefresh] = useState(0),
 		[overlay, setOverlay] = useState<"create-namespace" | "repository">();
 	const namespaceTab = namespaceTabs.includes(route.tab) ? route.tab : "repositories";
+	const screenError = namespaceError ?? error;
 	const routeRef = useRef(route);
 	routeRef.current = route;
 	const retries = useRef(new Map<string, string>()),
+		alive = useRef(true),
+		navigationVersion = useRef(0),
+		pendingActions = useRef(0),
 		generation = useRef(0),
 		[busy, setBusy] = useState(false);
 	const reload = useCallback(() => setRefresh((n) => n + 1), []);
+	useEffect(() => {
+		alive.current = true;
+		return () => {
+			alive.current = false;
+			navigationVersion.current++;
+		};
+	}, []);
 	const navigate = useCallback((namespaceId: string, repositoryId = "", tab = "", id = "") => {
+		navigationVersion.current++;
+		pendingActions.current = 0;
 		tab ||= repositoryId ? "changes" : "repositories";
 		const url = new URL(location.href);
 		url.pathname = "/";
@@ -71,10 +89,14 @@ export function App() {
 		if (previous.namespaceId !== namespaceId) setNamespace(undefined);
 		setNotice("");
 		setError(undefined);
+		setNamespaceError(undefined);
+		setBusy(false);
 		setRoute(readRoute());
 		setOverlay(undefined);
 	}, []);
 	const navigateHome = useCallback(() => {
+		navigationVersion.current++;
+		pendingActions.current = 0;
 		const url = new URL(location.href);
 		url.pathname = "/";
 		url.search = "";
@@ -85,6 +107,8 @@ export function App() {
 		setNamespace(undefined);
 		setNotice("");
 		setError(undefined);
+		setNamespaceError(undefined);
+		setBusy(false);
 		setOverlay(undefined);
 		setRoute(readRoute());
 	}, []);
@@ -130,6 +154,8 @@ export function App() {
 
 	useEffect(() => {
 		const change = () => {
+			navigationVersion.current++;
+			pendingActions.current = 0;
 			const next = readRoute();
 			if (next.namespaceId !== routeRef.current.namespaceId || next.repositoryId !== routeRef.current.repositoryId) {
 				generation.current++;
@@ -138,6 +164,9 @@ export function App() {
 			if (next.namespaceId !== routeRef.current.namespaceId) setNamespace(undefined);
 			setRoute(next);
 			setNotice("");
+			setError(undefined);
+			setNamespaceError(undefined);
+			setBusy(false);
 			setOverlay(undefined);
 		};
 		window.addEventListener("popstate", change);
@@ -148,16 +177,16 @@ export function App() {
 		};
 	}, []);
 	useEffect(() => {
-		const controller = new AbortController();
-		void request<{ user: User; namespaces: Namespace[] }>("/api/me", undefined, "GET", controller.signal)
-			.then((data) => {
-				setMe(data);
-			})
-			.catch((e) => {
-				if (e.name !== "AbortError") setError(e);
-			});
-		return () => controller.abort();
-	}, []);
+		void refresh;
+		return poll(
+			(signal) => request<{ user: User; namespaces: Namespace[] }>("/api/me", undefined, "GET", signal),
+			(data) => {
+				setMe((current) => (JSON.stringify(current) === JSON.stringify(data) ? current : data));
+				setIdentityError(undefined);
+			},
+			setIdentityError,
+		);
+	}, [refresh]);
 	useEffect(() => {
 		if (route.screen === "namespace") return;
 		const url = new URL(location.href);
@@ -176,62 +205,65 @@ export function App() {
 	}, [route.screen]);
 
 	useEffect(() => {
-		// Keep the current namespace on screen while a refresh loads; only a different namespace clears it.
 		setNamespace((current) => (current?.namespace.id === route.namespaceId ? current : undefined));
 		if (!route.namespaceId) return;
-		void refresh; // Explicit invalidation after a successful mutation.
-		const controller = new AbortController();
-		const load = () =>
-			request<NamespaceView>(`/api/namespaces/${route.namespaceId}`, undefined, "GET", controller.signal)
-				.then((data) => {
-					if (!controller.signal.aborted) setNamespace(data);
-				})
-				.catch((e) => {
-					if (e.name !== "AbortError") setError(e);
-				});
-		void load();
-		const timer = setInterval(() => void load(), 15000);
-		return () => {
-			controller.abort();
-			clearInterval(timer);
-		};
-	}, [route.namespaceId, refresh]);
+		void refresh;
+		let denied = false;
+		return poll(
+			(signal) => request<NamespaceView>(`/api/namespaces/${route.namespaceId}`, undefined, "GET", signal),
+			(data) => {
+				setNamespace(data);
+				setNamespaceError(undefined);
+				setNamespaceUpdatedAt(Date.now());
+				if (denied) {
+					denied = false;
+					reload();
+				}
+				if (!route.repositoryId) {
+					setUpdatedAt(Date.now());
+					setError(undefined);
+				}
+			},
+			(e) => {
+				setNamespaceError(e);
+				if ([401, 403].includes((e as { status?: number }).status ?? 0)) {
+					denied = true;
+					generation.current++;
+					setNamespace(undefined);
+					setView(undefined);
+					setOverlay(undefined);
+				}
+			},
+		);
+	}, [route.namespaceId, route.repositoryId, refresh, reload]);
 	useEffect(() => {
 		if (!route.repositoryId || !route.namespaceId) {
 			setView(undefined);
 			return;
 		}
-		void refresh; // Explicit invalidation after a successful mutation.
-		const controller = new AbortController(),
-			ticket = ++generation.current;
-		const load = () =>
-			request<RepositorySnapshot>(
-				`/api/namespaces/${route.namespaceId}/repositories/${route.repositoryId}`,
-				undefined,
-				"GET",
-				controller.signal,
-			)
-				.then((data) => {
-					if (generation.current === ticket) {
-						setView(data);
-						setError(undefined);
-					}
-				})
-				.catch((e) => {
-					if (e.name !== "AbortError" && generation.current === ticket) {
-						setError(e);
-						if (e.status === 401 || e.status === 403) setView(undefined);
-					}
-				});
-		void load();
-		const timer = setInterval(() => void load(), 15000);
-		return () => {
-			controller.abort();
-			clearInterval(timer);
-		};
+		void refresh;
+		const ticket = ++generation.current;
+		return poll(
+			(signal) =>
+				request<RepositorySnapshot>(`/api/namespaces/${route.namespaceId}/repositories/${route.repositoryId}`, undefined, "GET", signal),
+			(data) => {
+				if (generation.current === ticket) {
+					setView(data);
+					setError(undefined);
+					setUpdatedAt(Date.now());
+				}
+			},
+			(e) => {
+				if (generation.current !== ticket) return;
+				setError(e);
+				if ([401, 403].includes((e as { status?: number }).status ?? 0)) setView(undefined);
+			},
+		);
 	}, [route.namespaceId, route.repositoryId, refresh]);
 
 	const mutate = async <T,>(url: string, body: Record<string, unknown>, method = "POST", refreshAfter = true) => {
+		const originRoute = location.href;
+		const originVersion = navigationVersion.current;
 		const fingerprint = JSON.stringify({ url, body, method }),
 			key = (body.idempotencyKey as string | undefined) ?? retries.current.get(fingerprint) ?? crypto.randomUUID();
 		retries.current.set(fingerprint, key);
@@ -245,6 +277,8 @@ export function App() {
 		);
 		retries.current.delete(fingerprint);
 		if (refreshAfter) reload();
+		if (!alive.current || navigationVersion.current !== originVersion || location.href !== originRoute)
+			throw new DOMException("The action completed on the previous page.", "AbortError");
 		return result;
 	};
 	const execute = async (command: Partial<Command> & { tool: string }) => {
@@ -252,13 +286,19 @@ export function App() {
 		const url = `/api/namespaces/${route.namespaceId}/repositories/${route.repositoryId}/command`;
 		if (command.tool.startsWith("get_") || command.tool === "read_artifact") return request(url, command);
 		if (command.tool === "inspect_source" || command.tool === "recover_source") return mutate(url, command, "POST", false);
+		const originRoute = location.href;
+		const originVersion = navigationVersion.current;
+		pendingActions.current++;
 		setBusy(true);
 		try {
 			const result = await mutate(url, command);
 			setNotice("Saved.");
 			return result;
 		} finally {
-			setBusy(false);
+			if (alive.current && navigationVersion.current === originVersion && location.href === originRoute) {
+				pendingActions.current--;
+				setBusy(pendingActions.current > 0);
+			}
 		}
 	};
 	const base = `/api/namespaces/${route.namespaceId}`;
@@ -266,10 +306,13 @@ export function App() {
 		return (
 			<main className="welcome">
 				<strong>{BRAND.name}</strong>
-				<h1>{error ? `Sign in to ${BRAND.name}` : `Loading ${BRAND.name}…`}</h1>
-				{error && (
+				<h1>{identityError ? "Connection unavailable" : `Loading ${BRAND.name}…`}</h1>
+				{identityError && (
 					<>
-						<p>{error.message}</p>
+						<p role="alert">{identityError.message}</p>
+						<button type="button" onClick={reload}>
+							Retry
+						</button>
 						<a href="/auth/login">Sign in</a>
 					</>
 				)}
@@ -325,15 +368,29 @@ export function App() {
 				tabIndex={-1}
 				data-screen={route.screen === "namespace" ? (route.repositoryId ? route.tab : namespaceTab) : route.screen}
 			>
-				{error && (
+				{screenError && (
 					<div role="alert" className="alert">
-						{error.message}
+						{screenError.message}
+						{(view || namespace) && updatedAt && (
+							<p>
+								Showing the last successful update from{" "}
+								{new Date(namespaceError ? (namespaceUpdatedAt ?? updatedAt) : updatedAt).toLocaleTimeString()}.
+							</p>
+						)}
 						<button type="button" onClick={reload}>
 							Retry
 						</button>
 					</div>
 				)}
 				{notice && <p role="status">{notice}</p>}
+				{!!namespace?.repositoryFailures?.length && (
+					<p role="status">
+						{namespace.repositoryFailures.length} repository status unavailable.{" "}
+						<button type="button" onClick={reload}>
+							Retry unavailable repositories
+						</button>
+					</p>
+				)}
 				{route.screen === "namespaces" ? (
 					<NamespaceHome me={me} refresh={refresh} open={navigate} create={() => setOverlay("create-namespace")} />
 				) : route.repositoryId ? (
@@ -348,10 +405,12 @@ export function App() {
 							open={(tab, id) => navigate(route.namespaceId, route.repositoryId, tab, id)}
 							mutate={mutate}
 							base={base}
-							onError={setError}
+							onError={(error) => {
+								if (error.name !== "AbortError") setError(error);
+							}}
 						/>
 					) : (
-						<Empty>Loading repository…</Empty>
+						<Empty>{error ? "Repository unavailable." : "Loading repository…"}</Empty>
 					)
 				) : namespace ? (
 					<NamespacePage
@@ -364,7 +423,7 @@ export function App() {
 						renamed={(w) => setMe({ ...me, namespaces: me.namespaces.map((old) => (old.id === w.id ? w : old)) })}
 					/>
 				) : (
-					<Empty>Loading namespace…</Empty>
+					<Empty>{error ? "Namespace unavailable." : "Loading namespace…"}</Empty>
 				)}
 			</main>
 			{overlay === "create-namespace" && (

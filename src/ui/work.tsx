@@ -35,7 +35,11 @@ function WorkspaceRow({ view, w, open }: { view: RepositorySnapshot; w: Workspac
 				<small className="row-meta">
 					<span>{workedBy(w)}</span>
 					<span>
-						{w.state === "active" || w.state === "disconnected" ? `reported ${ago(w.lastActivity)}` : `started ${ago(w.startedAt)}`}
+						{w.state === "active" || w.state === "disconnected"
+							? w.lastReportAt === undefined
+								? "Report time unavailable"
+								: `reported ${ago(w.lastReportAt)}`
+							: `started ${ago(w.startedAt)}`}
 					</span>
 				</small>
 				{overlaps.length > 0 && (
@@ -153,6 +157,11 @@ export function WorkspaceDetail({ view, id, execute, open }: { view: RepositoryS
 							{overlaps.map((o) => (
 								<span key={o.path} className="overlap-line">
 									<code>{o.path}</code> is also changed in {o.others.join(", ")}.
+									<small className="muted">
+										{o.observedAt === undefined
+											? "Report time unavailable."
+											: `Reports from ${ago(o.observedAt)}${Date.now() - o.observedAt >= 90000 ? " · stale reports" : ""}.`}
+									</small>
 								</span>
 							))}
 							<small className="muted">Shared files are a heads-up, not a conflict.</small>

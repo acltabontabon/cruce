@@ -242,6 +242,7 @@ export function Initials({ name, className = "" }: { name: string; className?: s
 /** A shell command with a copy button. Values shown are addresses and IDs, never credentials. */
 export function CopyCommand({ text, label }: { text: string; label?: string }) {
 	const [copied, setCopied] = useState(false);
+	const [copyError, setCopyError] = useState("");
 	return (
 		<div className="copy-command">
 			{label && <span className="copy-label">{label}</span>}
@@ -251,18 +252,21 @@ export function CopyCommand({ text, label }: { text: string; label?: string }) {
 			<button
 				type="button"
 				className="text-button"
-				onClick={() =>
-					void navigator.clipboard
-						?.writeText(text)
-						.then(() => {
-							setCopied(true);
-							setTimeout(() => setCopied(false), 1500);
-						})
-						.catch(() => undefined)
-				}
+				onClick={async () => {
+					setCopyError("");
+					try {
+						if (!navigator.clipboard) throw new Error();
+						await navigator.clipboard.writeText(text);
+						setCopied(true);
+						setTimeout(() => setCopied(false), 1500);
+					} catch {
+						setCopyError("Copy unavailable. Select and copy the command above.");
+					}
+				}}
 			>
 				{copied ? "Copied" : "Copy"}
 			</button>
+			{copyError && <p role="alert">{copyError}</p>}
 		</div>
 	);
 }

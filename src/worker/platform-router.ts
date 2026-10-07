@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { namespaceMaintain, SCOPES, type Scope } from "../core/capabilities.ts";
-import { DomainError, requireValue } from "../core/errors.ts";
+import { DomainError, publicError, requireValue } from "../core/errors.ts";
 import { repositorySummary } from "../shared/coordination.ts";
 import { parseGitRoute } from "../shared/git-access.ts";
 import { TRANSFER_LIMITS } from "../shared/limits.ts";
@@ -24,6 +24,24 @@ export async function input(request: Request) {
 	} catch {
 		throw new DomainError(400, "Invalid JSON");
 	}
+}
+/** Bounded fan-out; completed snapshots are projected immediately rather than retained together. */
+export async function boundedMap<T, R>(items: T[], read: (item: T) => Promise<R>): Promise<PromiseSettledResult<R>[]> {
+	const results: PromiseSettledResult<R>[] = new Array(items.length);
+	let next = 0;
+	await Promise.all(
+		Array.from({ length: Math.min(4, items.length) }, async () => {
+			while (next < items.length) {
+				const index = next++;
+				try {
+					results[index] = { status: "fulfilled", value: await read(items[index]) };
+				} catch (reason) {
+					results[index] = { status: "rejected", reason };
+				}
+			}
+		}),
+	);
+	return results;
 }
 const displayName = z.string().trim().min(1).max(120);
 const role = z.enum(["maintainer", "developer", "viewer"]);
@@ -177,26 +195,40 @@ export async function platformRoute(
 	if (parts.length === 3) {
 		if (request.method === "GET") {
 			const view = await namespace.snapshot(grant);
-			const snapshots = await Promise.all(
-				view.repositories.map(
-					(repo) =>
-						env.CONTROL_TOWER.getByName(repo.id).command(
-							repo,
-							{ tool: "get_repository", namespaceId, repositoryId: repo.id },
-							grant,
-						) as Promise<import("../shared/platform.ts").RepositorySnapshot>,
-				),
+			const results = await boundedMap(view.repositories, async (repo) => {
+				const snapshot = (await env.CONTROL_TOWER.getByName(repo.id).command(
+					repo,
+					{ tool: "get_repository", namespaceId, repositoryId: repo.id },
+					grant,
+				)) as import("../shared/platform.ts").RepositorySnapshot;
+				return {
+					summary: repositorySummary(snapshot),
+					activity: snapshot.activity
+						.slice(-20)
+						.map((event) => ({ ...event, repositoryId: repo.id, repositoryName: snapshot.repository.name })),
+				};
+			});
+			const current = await namespace.snapshot(grant);
+			const allowed = new Set(current.repositories.map((repo) => repo.id));
+			const successes = results.flatMap((result, index) =>
+				allowed.has(view.repositories[index].id) && result.status === "fulfilled" ? [result.value] : [],
 			);
-			const repositorySummaries = snapshots.map(repositorySummary);
-			const activity = snapshots
-				.flatMap((s) => s.activity.map((event) => ({ ...event, repositoryId: s.repository.id, repositoryName: s.repository.name })))
+			const repositoryFailures = results.flatMap((result, index) =>
+				allowed.has(view.repositories[index].id) && result.status === "rejected"
+					? [{ repositoryId: view.repositories[index].id, message: publicError(result.reason).message }]
+					: [],
+			);
+			const repositorySummaries = successes.map((result) => result.summary);
+			const activity = successes
+				.flatMap((result) => result.activity)
 				.sort((a, b) => b.at - a.at)
 				.slice(0, 20);
 			return json({
-				...view,
+				...current,
 				namespace: await directory.namespace(namespaceId),
-				people: await directory.users(Object.keys(view.members)),
+				people: await directory.users(Object.keys(current.members)),
 				repositorySummaries,
+				repositoryFailures,
 				activity,
 			});
 		}

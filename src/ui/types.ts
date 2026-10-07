@@ -2,6 +2,7 @@ import type { RepositorySummary } from "../shared/coordination.ts";
 import type { Namespace, NamespaceRole, Repository, ResourcePolicy, ResourceStorage, Team } from "../shared/platform.ts";
 export type NamespaceView = {
 	repositorySummaries?: RepositorySummary[];
+	repositoryFailures?: { repositoryId: string; message: string }[];
 	activity?: {
 		id: string;
 		kind: string;

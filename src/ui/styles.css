@@ -3189,3 +3189,21 @@ details.team-row {
 		flex-basis: 100%;
 	}
 }
+
+/* Recovery state spans the overview; completed review details stay out of the next action. */
+.overview > [role="status"] {
+	grid-column: 1 / -1;
+}
+.next-action {
+	border-left: 2px solid var(--attention);
+	padding: 8px 12px;
+	background: var(--paper);
+	font-weight: 600;
+}
+.completed-check > summary {
+	cursor: pointer;
+	font-weight: 600;
+}
+.completed-check[open] > summary {
+	margin-bottom: 8px;
+}

@@ -3,7 +3,7 @@ import { DirectoryController, initialNamespace, NamespaceController } from "../.
 import { initialRepository, RepositoryController } from "../../src/core/platform.ts";
 import type { Actor, Command, Namespace, Repository } from "../../src/shared/platform.ts";
 import type { ConnectionGrant } from "../../src/worker/namespace-runtime.ts";
-import { type PlatformEnv, platformRoute } from "../../src/worker/platform-router.ts";
+import { boundedMap, type PlatformEnv, platformRoute } from "../../src/worker/platform-router.ts";
 
 vi.mock("../../src/worker/auth.ts", () => ({
 	consoleIdentity: async () => ({ tenantId: "issuer", developerId: "subject", email: "owner@example.com" }),
@@ -79,6 +79,43 @@ function fixture() {
 	return { call, path, repo, directory, controller, command, user, namespace, getDirectory, retired, port };
 }
 describe("namespace repository contracts", () => {
+	it("returns available summaries when one repository fails, without exposing internal errors", async () => {
+		const f = fixture();
+		f.namespace.state.repositories.push({ ...f.repo, id: "unavailable", name: "unavailable" });
+		const original = f.command.getMockImplementation()!;
+		f.command.mockImplementation(async (repo, command, grant) => {
+			if (repo.id === "unavailable") throw new Error("private-provider-token");
+			return original(repo, command, grant);
+		});
+		const response = await f.call(`/api/namespaces/${f.repo.namespaceId}`);
+		const data = (await response!.json()) as {
+			repositories: Repository[];
+			repositorySummaries: { id: string }[];
+			repositoryFailures: { repositoryId: string; message: string }[];
+		};
+		expect(data.repositories).toHaveLength(2);
+		expect(data.repositorySummaries.map((item) => item.id)).toEqual([f.repo.id]);
+		expect(data.repositoryFailures[0].repositoryId).toBe("unavailable");
+		expect(JSON.stringify(data)).not.toContain("private-provider-token");
+	});
+	it("bounds concurrent summary reads to four and retains failures in their original positions", async () => {
+		let active = 0,
+			peak = 0;
+		const results = await boundedMap(
+			Array.from({ length: 12 }, (_, i) => i),
+			async (id) => {
+				active++;
+				peak = Math.max(peak, active);
+				await new Promise((resolve) => setTimeout(resolve, 1));
+				active--;
+				if (id === 3) throw new Error("unavailable");
+				return id;
+			},
+		);
+		expect(peak).toBe(4);
+		expect(results[3].status).toBe("rejected");
+		expect(results[11]).toEqual({ status: "fulfilled", value: 11 });
+	});
 	it.each(["account", "account/verify"])("rejects the retired namespace storage endpoint %s", async (endpoint) => {
 		const f = fixture();
 		await expect(

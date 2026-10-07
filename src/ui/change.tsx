@@ -14,11 +14,23 @@ function Check({ done, warn, title, children }: { done: boolean; warn?: boolean;
 				{done ? "✓" : warn ? "!" : ""}
 			</span>
 			<div>
-				<strong>
-					<span className="sr-only">{done ? "Done: " : warn ? "Blocked: " : "To do: "}</span>
-					{title}
-				</strong>
-				{children}
+				{done ? (
+					<details className="completed-check">
+						<summary>
+							<span className="sr-only">Done: </span>
+							{title}
+						</summary>
+						{children}
+					</details>
+				) : (
+					<>
+						<strong>
+							<span className="sr-only">{warn ? "Blocked: " : "To do: "}</span>
+							{title}
+						</strong>
+						{children}
+					</>
+				)}
 			</div>
 		</li>
 	);
@@ -97,11 +109,27 @@ function ReviewChecklist({ view, p, execute, busy }: { view: RepositorySnapshot;
 	if (!readiness) return null;
 	const { checks } = readiness;
 	const verificationFor = (kind: string) =>
-		view.verifications.filter((v) => v.proposalId === p.id && v.revision === p.revision && v.kind === kind);
-	const approval = p.reviews.find((r) => r.outcome === "approve" && r.actor.kind === "human" && r.revision === p.revision);
+		view.verifications.filter((v) => checks.evidence.find((e) => e.kind === kind)?.verificationIds.includes(v.id));
+	const approval = p.reviews
+		.toReversed()
+		.find((r) => checks.reviewIds.includes(r.id) && r.outcome === "approve" && r.approvalAuthority === "human-maintainer");
+	const next = !checks.current
+		? "Merge canonical and publish a new revision"
+		: checks.blockedByPromotion
+			? "Reconcile the pending promotion"
+			: checks.evidence.some((e) => !e.trusted || e.failed)
+				? "Confirm the required evidence"
+				: checks.concerns
+					? "Resolve the review concerns"
+					: !checks.approved
+						? "Obtain maintainer approval for this revision"
+						: "Promote this revision";
 	return (
 		<section className="review-panel" aria-label="Review checklist">
 			<h2>Review</h2>
+			<p className="next-action" role="status">
+				Next: {next}
+			</p>
 			<p className="review-revision">
 				Revision <code>{short(p.revision)}</code> against <code>{short(p.base)}</code>
 			</p>
@@ -137,17 +165,17 @@ function ReviewChecklist({ view, p, execute, busy }: { view: RepositorySnapshot;
 						>
 							<p>
 								{e.failed
-									? "A failing result is recorded for this exact revision. Its workspace needs to publish a fix."
+									? "A failing result is recorded for this exact revision. Its author can record an updated result after checking again, or the workspace can publish a fix."
 									: e.trusted
 										? `Confirmed by ${actorLabel(confirmed?.actor)} for this exact revision.`
 										: reported
 											? `${actorLabel(reported.actor)} reported a pass: “${reported.summary}”. Repository policy needs a maintainer to confirm it.`
 											: `Repository policy needs confirmed ${e.kind} for this exact revision.`}
 							</p>
-							{!e.trusted && !e.failed && view.permissions.maintain && view.permissions.human && checks.open && (
+							{view.permissions.approve && checks.open && (
 								<div className="check-actions">
 									<NoteAction
-										label={`Confirm ${e.kind} pass`}
+										label={e.failed ? `Record updated ${e.kind} pass` : `Confirm ${e.kind} pass`}
 										immediate
 										placeholder="What did you check? (optional)"
 										fallback={`Confirmed ${e.kind} in the console`}
@@ -188,7 +216,7 @@ function ReviewChecklist({ view, p, execute, busy }: { view: RepositorySnapshot;
 				{checks.concerns > 0 && (
 					<Check done={false} warn title={`${checks.concerns} unresolved ${checks.concerns === 1 ? "concern" : "concerns"}`}>
 						{p.reviews.map((r, i) =>
-							r.outcome !== "approve" && !r.resolution && r.revision === p.revision ? (
+							checks.reviewIds.includes(r.id) && r.outcome !== "approve" && !r.resolution && r.revision === p.revision ? (
 								<div key={r.id} className="concern">
 									<p>
 										{actorLabel(r.actor)}: “{r.reason}”
@@ -212,30 +240,28 @@ function ReviewChecklist({ view, p, execute, busy }: { view: RepositorySnapshot;
 							? `Approved by ${actorLabel(approval?.actor)}.`
 							: `Approval covers ${short(p.revision)} only. A new revision needs a new review.`}
 					</p>
-					{!checks.approved && checks.open && view.permissions.write && view.permissions.human && (
-						<div className="check-actions">
-							<NoteAction
-								label="Approve"
-								immediate
-								placeholder="Approval note (optional)"
-								fallback="Approved in the console"
-								run={(note) =>
-									execute({ tool: "review_proposal", proposalId: p.id, revision: p.revision, outcome: "approve", reason: note })
-								}
-							/>
-							<NoteAction
-								label="Raise concern"
-								className="quiet"
-								placeholder="What's the concern?"
-								fallback="Concern raised in the console"
-								run={(note) =>
-									execute({ tool: "review_proposal", proposalId: p.id, revision: p.revision, outcome: "concern", reason: note })
-								}
-							/>
-						</div>
-					)}
 				</Check>
 			</ol>
+			{checks.open && view.permissions.write && view.permissions.human && (
+				<div className="check-actions">
+					{view.permissions.approve && (
+						<NoteAction
+							label={checks.approved ? "Approve again" : "Approve"}
+							immediate
+							placeholder="Approval note (optional)"
+							fallback="Approved in the console"
+							run={(note) => execute({ tool: "review_proposal", proposalId: p.id, revision: p.revision, outcome: "approve", reason: note })}
+						/>
+					)}
+					<NoteAction
+						label="Raise concern"
+						className="quiet"
+						placeholder="What's the concern?"
+						fallback="Concern raised in the console"
+						run={(note) => execute({ tool: "review_proposal", proposalId: p.id, revision: p.revision, outcome: "concern", reason: note })}
+					/>
+				</div>
+			)}
 			{checks.blockedByPromotion && <p className="muted">Another promotion is being reconciled. Finish it first.</p>}
 			{view.permissions.maintain && view.permissions.human && checks.open && (
 				<div className="promote-bar">

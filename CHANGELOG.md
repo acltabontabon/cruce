@@ -6,6 +6,12 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Fixed
 
+- Require authenticated human Maintain authority for promotion approval. Preserve historical reviews while requiring fresh qualified approval for still-open changes with unmarked approvals; keep agent reviews informational.
+- Include executable-bit changes, symlink conversions and submodule changes in review and protected-path enforcement.
+- Journal exact source/evidence publication and save results before resource settlement. Recover confirmed retention after workspace completion or cache loss without regressing newer work; repair setup and attachment settlement without repeating provider writes.
+- Keep change-report freshness separate from heartbeats. Prevent overlapping or late console polls, clear scoped data after access denial, retry identity loading, and retain available repository summaries when another repository fails.
+- Preserve local mutation identities through interrupted attachment and local state completion. Write private state atomically, serialize updates, recover worktree creation from exact ownership intent, preserve existing-checkout remotes and hold writer ownership through cleanup.
+
 - Recover explicitly authorized fork deletion after interruption using its original operation and namespace reservation. Persist deletion confirmation before settlement; recheck current authority, policy and provider identity. Expiry never starts cleanup.
 
 - Allowlist public HTTP and MCP error text, including field validation and serialized Durable Object errors. Correlate resource operations and promotion phases through retries with redacted identifiers; omit provider paths, raw errors, credentials, OAuth payloads and source from application diagnostics.
@@ -14,6 +20,9 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 - Pin provider repository IDs before token cleanup or Git access and validate canonical, fork and source/evidence retention identities on resource operations and retries. Recreated names fail closed. Storage restoration preserves interrupted promotion recovery and existing reservations. Published storage records now include the provider ID; unrecorded existing storage requires administrator reconciliation.
 
 ### Changed
+
+- Unify Clone, Attach local checkout and Connect an agent setup. Clone includes credential-helper steps; existing-checkout setup discloses fork cost and preserves files, branches and existing remotes.
+- Lead review with its next blocker, collapse completed checklist details, show effective review/evidence attribution, and keep concern and updated-evidence controls available after earlier decisions. Explain clipboard failures and partial or stale console data.
 
 - Bound current coordination state, indexed retained records and gateway inputs. Keep receipts, activity and resource history outside hot snapshots, with bounded history pages and inspectable capacity. Add explicit cloud retention inspection showing exact unpublished refs and incomplete inventories; preserve retained source and provenance at every capacity limit.
 

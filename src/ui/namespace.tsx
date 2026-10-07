@@ -319,6 +319,7 @@ function Overview({
 }) {
 	const summaries = namespace.repositories.map((r) => namespace.repositorySummaries?.find((s) => s.id === r.id));
 	const sum = totals(summaries);
+	const incomplete = summaries.some((summary) => !summary);
 	const shared = namespace.namespace.kind === "shared";
 	return (
 		<>
@@ -327,13 +328,18 @@ function Overview({
 					label={`${namespace.namespace.name} at a glance`}
 					items={[
 						{ label: "Repositories", value: namespace.repositories.length },
-						{ label: "Needs review", value: sum.review, tone: sum.review ? "accent" : "" },
-						{ label: "Ready to promote", value: sum.ready, tone: sum.ready ? "success" : "" },
-						{ label: "Active workspaces", value: sum.active },
+						{ label: "Needs review", value: incomplete && !summaries.some(Boolean) ? "—" : sum.review, tone: sum.review ? "accent" : "" },
+						{
+							label: "Ready to promote",
+							value: incomplete && !summaries.some(Boolean) ? "—" : sum.ready,
+							tone: sum.ready ? "success" : "",
+						},
+						{ label: "Active workspaces", value: incomplete && !summaries.some(Boolean) ? "—" : sum.active },
 					]}
 				/>
 			)}
 			<div className="overview">
+				{incomplete && <p role="status">Some repository status is unavailable. Counts cover available repositories.</p>}
 				<div className="overview-main">
 					<Section title="Repositories" count={namespace.repositories.length}>
 						{namespace.repositories.length ? (
