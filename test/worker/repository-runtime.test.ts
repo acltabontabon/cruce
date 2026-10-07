@@ -14,6 +14,7 @@ import { GitWorkspace } from "../../src/worker/git/workspace.ts";
 import { RepositoryRuntime } from "../../src/worker/repository-runtime.ts";
 import { memoryStore, type Store } from "../../src/worker/store.ts";
 import { gitServer } from "../git/http-fixture.ts";
+import { nativeRepository } from "../git/native-fixture.ts";
 
 const owner: Actor = { id: "human", userId: "owner", name: "Cris", kind: "human" };
 const agent: Actor = { id: "agent", userId: "owner", name: "Codex", kind: "agent", connectionId: "oauth" };
@@ -129,6 +130,202 @@ async function fixture(_hosted = true) {
 	return { w, git, host, push, store, port, runtime, call, workspace: s, execution, base, head, pack };
 }
 describe("repository runtime", () => {
+	it("repairs fork-attachment settlement from its saved receipt without another fork or push", async () => {
+		const f = await fixture();
+		const workspace = (await f.call("start_workspace", { title: "Attachment", baseRevision: f.base })) as Workspace;
+		const fields = {
+			workspaceId: workspace.id,
+			execution: { id: workspace.id, checkoutId: "new-checkout", machineId: "machine", kind: "worktree" as const, owned: true },
+			idempotencyKey: "attach-settlement",
+		};
+		const settle = f.port.settle;
+		let fail = true;
+		vi.spyOn(f.port, "settle").mockImplementation((id, state) => {
+			if (state === "complete" && fail) {
+				fail = false;
+				throw new Error("settlement lost");
+			}
+			settle(id, state);
+		});
+		await expect(f.call("attach_workspace", fields)).rejects.toThrow("settlement lost");
+		expect(f.runtime.state().workspaces.find((w) => w.id === workspace.id)?.fork?.state).toBe("ready");
+		vi.mocked(f.host.fork).mockClear();
+		f.push.mockClear();
+		f.git.resetCache();
+		await new RepositoryRuntime(f.store, f.git, f.port, {}, () => 2000).command(
+			{ tool: "attach_workspace", namespaceId: repo.namespaceId, repositoryId: repo.id, ...fields },
+			grant,
+		);
+		expect(f.host.fork).not.toHaveBeenCalled();
+		expect(f.push).not.toHaveBeenCalled();
+	});
+	it.each(["publish_revision", "publish_artifact"])(
+		"saves %s before settlement and repairs a lost settlement without provider I/O",
+		async (tool) => {
+			const f = await fixture();
+			const fields = {
+				workspaceId: f.workspace.id,
+				revision: tool === "publish_revision" ? f.head : f.base,
+				idempotencyKey: "settlement-loss",
+				...(tool === "publish_revision" ? { pack: f.pack } : { content: "report" }),
+			};
+			const original = f.port.settle;
+			let fail = true;
+			vi.spyOn(f.port, "settle").mockImplementation((id, state) => {
+				if (state === "complete" && fail) {
+					fail = false;
+					throw new Error("settlement response lost");
+				}
+				original(id, state);
+			});
+			await expect(f.call(tool, fields)).rejects.toThrow("settlement response lost");
+			expect(f.runtime.state().artifacts).toHaveLength(1);
+			const saved = f.runtime.state().artifacts[0];
+			f.git.resetCache();
+			f.push.mockClear();
+			vi.mocked(f.host.info).mockClear();
+			vi.mocked(f.host.ensure).mockClear();
+			const { pack: _, ...commandFields } = fields as typeof fields & { pack?: string };
+			const later = new RepositoryRuntime(f.store, f.git, f.port, {}, () => 5000);
+			expect(
+				await later.command(
+					{
+						tool,
+						namespaceId: repo.namespaceId,
+						repositoryId: repo.id,
+						...commandFields,
+						...(tool === "publish_revision" ? { ref: "work" } : {}),
+					},
+					grant,
+				),
+			).toEqual(saved);
+			expect(f.push).not.toHaveBeenCalled();
+			expect(f.host.info).not.toHaveBeenCalled();
+			expect(f.host.ensure).not.toHaveBeenCalled();
+			expect(f.w.state.reservations.filter((r) => r.id.endsWith(":settlement-loss"))).toHaveLength(1);
+			expect(f.w.state.reservations.find((r) => r.id.endsWith(":settlement-loss"))?.state).toBe("complete");
+			await expect(
+				later.command(
+					{
+						tool,
+						namespaceId: repo.namespaceId,
+						repositoryId: repo.id,
+						...commandFields,
+						...(tool === "publish_revision" ? { ref: "work" } : {}),
+					},
+					{ ...grant, scopes: ["cruce:read"] },
+				),
+			).rejects.toThrow("capability denied");
+		},
+	);
+	it.each(["publish_revision", "publish_artifact"])(
+		"recovers retained %s after a save failure, workspace end and cache loss",
+		async (tool) => {
+			const f = await fixture();
+			const original = f.store.batch.bind(f.store);
+			let fail = true;
+			vi.spyOn(f.store, "batch").mockImplementation((entries) => {
+				if (
+					fail &&
+					entries.some((entry) => entry.key.startsWith("receipt:") && (entry.value as { result?: { kind?: string } }).result?.kind)
+				) {
+					fail = false;
+					throw new Error("durable save interrupted");
+				}
+				original(entries);
+			});
+			const fields = {
+				workspaceId: f.workspace.id,
+				revision: tool === "publish_revision" ? f.head : f.base,
+				idempotencyKey: "save-loss",
+				...(tool === "publish_revision" ? { pack: f.pack } : { content: "report" }),
+			};
+			f.push.mockClear();
+			await expect(f.call(tool, fields)).rejects.toThrow("save interrupted");
+			expect(f.runtime.state().artifacts).toHaveLength(0);
+			expect(f.w.state.reservations.find((r) => r.id.endsWith(":save-loss"))?.state).toBe("uncertain");
+			let newer: string | undefined;
+			if (tool === "publish_revision") {
+				newer = await f.git.commit({
+					ref: "refs/heads/newer",
+					parent: f.head,
+					files: { "next.txt": "newer" },
+					message: "Newer",
+					author: { name: "Fixture", email: "f@example.com", timestamp: 12346 },
+				});
+				await f.call(tool, {
+					workspaceId: f.workspace.id,
+					revision: newer,
+					pack: Buffer.from(await f.git.exportPack(newer)).toString("base64"),
+				});
+			}
+			await f.call("end_workspace", { workspaceId: f.workspace.id });
+			f.git.resetCache();
+			f.push.mockClear();
+			const { pack: _, ...commandFields } = fields as typeof fields & { pack?: string };
+			const later = new RepositoryRuntime(f.store, f.git, f.port, {}, () => 5000);
+			const artifact = (await later.command(
+				{
+					tool,
+					namespaceId: repo.namespaceId,
+					repositoryId: repo.id,
+					...commandFields,
+					...(tool === "publish_revision" ? { ref: "work" } : {}),
+				},
+				grant,
+			)) as { at: number; revision: string };
+			expect(artifact).toMatchObject({ at: 1000, revision: fields.revision });
+			expect(f.push).not.toHaveBeenCalled();
+			expect(
+				later
+					.state()
+					.artifacts.filter((a) => a.revision === fields.revision && a.kind === (tool === "publish_revision" ? "source" : "evidence")),
+			).toHaveLength(1);
+			if (newer) expect(later.state().workspaces[0].publishedRevision).toBe(newer);
+		},
+	);
+	it("reconciles an attempted exact retention write after the workspace ends, and refuses a different retained revision", async () => {
+		const f = await fixture();
+		const fields = { workspaceId: f.workspace.id, revision: f.base, content: "report", idempotencyKey: "retention-loss" };
+		f.push.mockRejectedValueOnce(new Error("retention reply lost"));
+		await expect(f.call("publish_artifact", fields)).rejects.toThrow("reply lost");
+		const storage = f.push.mock.calls.at(-1)![0],
+			oid = await f.git.resolve(storage.localRef);
+		await f.call("end_workspace", { workspaceId: f.workspace.id });
+		vi.spyOn(f.git, "remoteRefs").mockResolvedValue([{ ref: storage.remoteRef, oid: "f".repeat(40) }]);
+		await expect(f.call("publish_artifact", fields)).rejects.toThrow("differs from its exact revision");
+		vi.mocked(f.git.remoteRefs).mockResolvedValue([{ ref: storage.remoteRef, oid: oid! }]);
+		f.git.resetCache();
+		f.push.mockClear();
+		await f.call("publish_artifact", fields);
+		expect(f.push).not.toHaveBeenCalled();
+		expect(f.runtime.state().artifacts).toHaveLength(1);
+	});
+	it("enforces protected paths for a native mode-only commit", async () => {
+		const f = await fixture();
+		const native = await nativeRepository(await f.git.exportPack(f.base), f.base);
+		try {
+			native.run(["update-index", "--chmod=+x", "src/pay.ts"]);
+			native.run(["commit", "-qm", "Mode only"]);
+			const head = native.run(["rev-parse", "HEAD"]);
+			f.w.member(f.w.authority(owner), "dev", "developer");
+			f.w.state.repositories[0].grants = [{ subject: "user", id: "dev", role: "write" }];
+			f.w.state.repositories[0].policy.protectedPaths = ["src"];
+			const dev = { ...grant, actor: { ...agent, id: "dev-agent", userId: "dev" } };
+			const s = (await f.call("start_workspace", { title: "Mode", baseRevision: f.base }, dev)) as Workspace;
+			await f.call(
+				"attach_workspace",
+				{ workspaceId: s.id, execution: { id: s.id, checkoutId: "mode-checkout", machineId: "m", kind: "worktree", owned: true } },
+				dev,
+			);
+			await expect(
+				f.call("publish_revision", { workspaceId: s.id, revision: head, pack: native.pack(head).toString("base64") }, dev),
+			).rejects.toThrow("Protected paths");
+			expect(f.runtime.state().artifacts).toHaveLength(0);
+		} finally {
+			await native.close();
+		}
+	});
 	it("correlates an uncertain evidence publication across restart without logging content or operation keys", async () => {
 		const f = await fixture();
 		const log = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -167,6 +364,7 @@ describe("repository runtime", () => {
 	});
 	it("reconstructs the same pending evidence commit after cache loss and a later retry", async () => {
 		const f = await fixture();
+		vi.spyOn(f.git, "remoteRefs").mockResolvedValue([]);
 		const fields = { workspaceId: f.workspace.id, revision: f.base, content: "test report", idempotencyKey: "pending-evidence" };
 		f.push.mockRejectedValueOnce(new Error("retention response lost"));
 		await expect(f.call("publish_artifact", fields)).rejects.toThrow("response lost");
@@ -285,6 +483,7 @@ describe("repository runtime", () => {
 	});
 	it("pins a reconciled publication's review base across uncertain push retries even as upstream advances", async () => {
 		const f = await fixture();
+		vi.spyOn(f.git, "remoteRefs").mockResolvedValue([]);
 		const upstream = await f.git.commit({
 			ref: "refs/heads/upstream",
 			parent: f.base,
@@ -493,6 +692,7 @@ describe("repository runtime", () => {
 	});
 	it("reconciles a failed publication with one reservation and one artifact", async () => {
 		const f = await fixture();
+		vi.spyOn(f.git, "remoteRefs").mockResolvedValue([]);
 		f.push.mockRejectedValueOnce(new Error("response lost after push"));
 		const cmd = { workspaceId: f.workspace.id, revision: f.head, pack: f.pack, idempotencyKey: "same-operation" };
 		await expect(f.call("publish_revision", cmd)).rejects.toThrow("response lost");
@@ -555,6 +755,31 @@ describe("repository setup recovery", () => {
 		const creations = () => f.w.state.reservations.filter((r) => r.action === "repository.create");
 		return { ...f, setup, creations };
 	}
+	it("shows unfinished setup settlement and finishes it without provisioning again", async () => {
+		const f = await unprovisioned();
+		const settle = f.port.settle;
+		let fail = true;
+		vi.spyOn(f.port, "settle").mockImplementation((id, state) => {
+			if (state === "complete" && fail) {
+				fail = false;
+				throw new Error("setup settlement lost");
+			}
+			settle(id, state);
+		});
+		await expect(f.setup("provision_repository", "setup-loss")).rejects.toThrow("settlement lost");
+		expect(((await f.setup("get_repository", "", human)) as RepositorySnapshot).canonicalSetup).toEqual({
+			required: false,
+			retry: true,
+			settlementPending: true,
+		});
+		vi.mocked(f.host.ensure).mockClear();
+		f.push.mockClear();
+		f.git.resetCache();
+		await f.setup("retry_repository_setup", "retry");
+		expect(f.host.ensure).not.toHaveBeenCalled();
+		expect(f.push).not.toHaveBeenCalled();
+		expect(f.creations()).toMatchObject([{ state: "complete" }]);
+	});
 	it("retries a failed creation with its original operation and reservation, then refuses once canonical exists", async () => {
 		const f = await unprovisioned();
 		vi.mocked(f.host.ensure!).mockRejectedValueOnce(new Error("Cloudflare API: Authentication error"));

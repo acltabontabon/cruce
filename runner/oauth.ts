@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { auth, type OAuthClientProvider, type StoredOAuthClientInformation, type StoredOAuthTokens } from "@modelcontextprotocol/client";
 import type { Scope } from "../src/core/capabilities.ts";
+import { withStateLock, writeState } from "./state-file.ts";
 
 async function read<T>(path: string, fallback: T) {
 	try {
@@ -14,9 +15,13 @@ async function read<T>(path: string, fallback: T) {
 		return fallback;
 	}
 }
-async function save(path: string, value: unknown) {
-	await mkdir(dirname(path), { recursive: true });
-	await writeFile(path, JSON.stringify(value, null, 2), { mode: 0o600 });
+async function save(path: string, value: Partial<Credentials["data"]>): Promise<Credentials["data"]> {
+	return withStateLock(path, async () => {
+		const current = await read<Credentials["data"]>(path, {});
+		const merged = { ...current, ...value };
+		await writeState(path, merged);
+		return merged;
+	});
 }
 export class Credentials implements OAuthClientProvider {
 	redirectUrl: string | undefined;
@@ -30,6 +35,7 @@ export class Credentials implements OAuthClientProvider {
 	data: { client?: StoredOAuthClientInformation; tokens?: StoredOAuthTokens; verifier?: string; state?: string } = {};
 	path: string;
 	constructor(server: string, connection = "agent") {
+		if (!/^[a-zA-Z0-9-]{1,160}$/.test(connection)) throw new Error("Use a connection name containing only letters, numbers and dashes");
 		this.clientMetadata.client_name = `Cruce ${connection} bridge`;
 		this.path = join(homedir(), ".config/cruce", `${Buffer.from(new URL(server).origin).toString("base64url")}-${connection}.json`);
 	}
@@ -47,28 +53,25 @@ export class Credentials implements OAuthClientProvider {
 		return this.data.client;
 	}
 	async saveClientInformation(client: StoredOAuthClientInformation) {
-		this.data.client = client;
-		await save(this.path, this.data);
+		this.data = await save(this.path, { client });
 	}
 	tokens() {
 		return this.data.tokens;
 	}
 	async saveTokens(tokens: StoredOAuthTokens) {
-		this.data.tokens = tokens;
-		await save(this.path, this.data);
+		this.data = await save(this.path, { tokens });
 	}
 	async saveCodeVerifier(verifier: string) {
-		this.data.verifier = verifier;
-		await save(this.path, this.data);
+		this.data = await save(this.path, { verifier });
 	}
 	codeVerifier() {
 		if (!this.data.verifier) throw new Error("No pending authorization");
 		return this.data.verifier;
 	}
 	async state() {
-		this.data.state = randomUUID();
-		await save(this.path, this.data);
-		return this.data.state;
+		const state = randomUUID();
+		this.data = await save(this.path, { state });
+		return state;
 	}
 	redirectToAuthorization(url: URL) {
 		process.stderr.write(`Open this sign-in link in your browser:\n${url.href}\n`);

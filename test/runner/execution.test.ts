@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanupExecution, context, createExecution, observeChanges, releaseCheckout, reserveCheckout } from "../../runner/execution.ts";
 import { configureFork, continueFromFork } from "../../runner/git-remotes.ts";
 import { git, pipeGit } from "../../runner/local-git.ts";
+import { withStateLock, writeState } from "../../runner/state-file.ts";
 import { MemoryFs } from "../../src/worker/git/memory-fs.ts";
 import { GitWorkspace } from "../../src/worker/git/workspace.ts";
 
@@ -41,6 +42,73 @@ async function repository() {
 	return { root, run, base: run(["rev-parse", "HEAD"]) };
 }
 describe("local workspace execution", () => {
+	it("recovers interrupted worktree creation only from the recorded exact intent", async () => {
+		const { root, base } = await repository();
+		const work = await createExecution(root, "interrupted", base);
+		const state = await git(work.directory, ["rev-parse", "--absolute-git-dir"]);
+		const common = await git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+		await rm(join(state, "cruce", "ownership.json"));
+		await writeState(join(common, "cruce", "execution-interrupted.json"), {
+			workspaceId: "interrupted",
+			target: work.directory,
+			branch: "cruce/workspace-interrupted",
+			base,
+			phase: "creating",
+		});
+		expect((await createExecution(root, "interrupted", base)).directory).toBe(work.directory);
+		await expect(createExecution(root, "interrupted", "f".repeat(40))).rejects.toThrow("ownership mismatch");
+	});
+	it("recovers an exactly journalled branch created before its worktree", async () => {
+		const { root, base } = await repository();
+		const common = await git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+		const target = join(common, "cruce", "worktrees", "branch-interruption");
+		await git(root, ["branch", "cruce/workspace-branch-interruption", base]);
+		await writeState(join(common, "cruce", "execution-branch-interruption.json"), {
+			workspaceId: "branch-interruption",
+			target,
+			branch: "cruce/workspace-branch-interruption",
+			base,
+			phase: "creating",
+		});
+		expect((await createExecution(root, "branch-interruption", base)).directory).toBe(target);
+	});
+	it("never adopts a pre-existing branch by leaving a false creation intent after a collision", async () => {
+		const { root, base } = await repository();
+		await git(root, ["branch", "cruce/workspace-collision", base]);
+		for (let attempt = 0; attempt < 2; attempt++)
+			await expect(createExecution(root, "collision", base)).rejects.toThrow("existing branches are preserved");
+		expect(await git(root, ["rev-parse", "cruce/workspace-collision"])).toBe(base);
+	});
+	it("keeps persistent writer ownership when Git refuses checkout removal", async () => {
+		const { root, base } = await repository();
+		const work = await createExecution(root, "locked", base);
+		await git(root, ["worktree", "lock", work.directory]);
+		await expect(cleanupExecution(work.directory, "locked", base)).rejects.toThrow();
+		await expect(reserveCheckout(work.directory, "other")).rejects.toThrow("already has a writer");
+		await git(root, ["worktree", "unlock", work.directory]);
+		await cleanupExecution(work.directory, "locked", base);
+	});
+	it("serializes the same worktree creation and exposes only complete writer files", async () => {
+		const { root, base } = await repository();
+		const work = await Promise.all([createExecution(root, "same", base), createExecution(root, "same", base)]);
+		expect(work[0].directory).toBe(work[1].directory);
+		await Promise.all(Array.from({ length: 10 }, () => reserveCheckout(work[0].directory, "same")));
+		await expect(reserveCheckout(work[0].directory, "other")).rejects.toThrow("already has a writer");
+	});
+	it("serializes atomic state updates without losing concurrent values", async () => {
+		const { root } = await repository();
+		const path = join(root, "state.json");
+		await writeState(path, { count: 0 });
+		await Promise.all(
+			Array.from({ length: 12 }, () =>
+				withStateLock(path, async () => {
+					const current = JSON.parse(await readFile(path, "utf8")) as { count: number };
+					await writeState(path, { count: current.count + 1 });
+				}),
+			),
+		);
+		expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ count: 12 });
+	});
 	it("configures independent fork push destinations without changing another worktree or origin", async () => {
 		const { root, base } = await repository();
 		const a = await createExecution(root, "agent-a", base);
@@ -99,7 +167,20 @@ describe("local workspace execution", () => {
 		expect(await readFile(join(b.directory, "code.txt"), "utf8")).toBe("pushed work\n");
 		expect(await git(second, ["rev-parse", "HEAD"])).toBe(first.base);
 
-		await git(b.directory, ["-c", "user.name=Fixture", "-c", "user.email=f@example.com", "commit", "--allow-empty", "-m", "Local"]);
+		await git(b.directory, [
+			"-c",
+			"commit.gpgsign=false",
+			"-c",
+			"core.hooksPath=/dev/null",
+			"-c",
+			"user.name=Fixture",
+			"-c",
+			"user.email=f@example.com",
+			"commit",
+			"--allow-empty",
+			"-m",
+			"Local",
+		]);
 		first.run(["-C", a.directory, "commit", "--amend", "-am", "Rewritten"]);
 		first.run(["-C", a.directory, "push", "--force", fork, "HEAD:refs/heads/cruce/workspace-ws"]);
 		await expect(continueFromFork(b.directory, "cruce-ws", "ws")).rejects.toThrow("does not fast-forward");
