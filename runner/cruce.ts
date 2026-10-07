@@ -241,7 +241,11 @@ async function main() {
 
 				const fingerprint = JSON.stringify(command);
 				const retrying = !!connection.pending;
-				if (tool.mutation) {
+				// Presence and reports are latest-wins observations: an uncertain one is superseded by the
+				// next tick rather than journaled, and never displaces another operation's pending identity.
+				const observation = raw.tool === "heartbeat" || raw.tool === "report_change";
+				if (observation) command.idempotencyKey = randomUUID();
+				else if (tool.mutation) {
 					if (connection.pending && connection.pending.command.tool !== command.tool)
 						throw new Error("A previous mutation has an uncertain outcome. Retry that operation before starting another.");
 					if (connection.pending) Object.assign(command, connection.pending.command);
@@ -255,7 +259,7 @@ async function main() {
 				} catch (error) {
 					// Explicit authorization/validation rejection is a known outcome. Network/provider
 					// failures keep the operation identity until the caller reconciles the attempt.
-					if (!retrying && [400, 401, 403, 404, 405, 409, 413].includes((error as { status: number }).status)) {
+					if (!observation && !retrying && [400, 401, 403, 404, 405, 409, 413].includes((error as { status: number }).status)) {
 						delete connection.pending;
 						await save();
 					}
@@ -298,7 +302,7 @@ async function main() {
 					delete connection.pending;
 					await save(cleanup ? undefined : directory);
 				}
-				if (tool.mutation && connection.pending) {
+				if (tool.mutation && !observation && connection.pending) {
 					delete connection.pending;
 					await save();
 				}

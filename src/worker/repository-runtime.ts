@@ -43,6 +43,18 @@ type RecoveryPort = {
 	schedule: (at: number) => Promise<void>;
 	authorize: (grant: ConnectionGrant) => Promise<ConnectionGrant>;
 };
+/** Latest heartbeat or report for one workspace; rewritten in place so presence never accumulates records. */
+interface ObservationSlot {
+	op: string;
+	fingerprint: string;
+	templateId: string;
+	lastActivity: number;
+	lastReportAt?: number;
+}
+interface ObservationResult {
+	templateId: string;
+	template: Omit<Workspace, "lastActivity" | "lastReportAt">;
+}
 interface ResourceOperation {
 	fingerprint: string;
 	action: ResourceAction;
@@ -412,7 +424,33 @@ export class RepositoryRuntime {
 				throw new DomainError(409, "Operation identity reused");
 			return this.promote(c, cmd, grant, op, fingerprint);
 		}
-		if (mutation && receipt && cmd.tool !== "inspect_source" && cmd.tool !== "recover_source" && cmd.tool !== "cleanup_workspace") {
+		// Presence and reports are latest-wins observations. Each workspace keeps one replaceable slot per
+		// tool: the latest operation replays exactly; an older or unknown one is a new observation.
+		const observing = cmd.tool === "heartbeat" || cmd.tool === "report_change";
+		const slotKey = `observation:${cmd.workspaceId}:${cmd.tool}`;
+		if (observing) {
+			if (!cmd.workspaceId) throw new DomainError(404, "Workspace unavailable");
+			const other = cmd.tool === "heartbeat" ? "report_change" : "heartbeat";
+			if (this.store.get<ObservationSlot>(`observation:${cmd.workspaceId}:${other}`)?.op === op)
+				throw new DomainError(409, "Operation identity reused");
+			const slot = this.store.get<ObservationSlot>(slotKey);
+			if (slot?.op === op) {
+				if (slot.fingerprint !== fingerprint) throw new DomainError(409, "Operation identity reused");
+				const stored = this.store.get<ObservationResult>(`observation-result:${cmd.workspaceId}:${cmd.tool}`);
+				if (!stored || stored.templateId !== slot.templateId || (await hash(stable(stored.template))) !== slot.templateId)
+					throw new DomainError(409, "Retained operation result unavailable; restore its recorded state before retrying");
+				diagnose("operation_replayed");
+				return { ...stored.template, lastActivity: slot.lastActivity, lastReportAt: slot.lastReportAt };
+			}
+		}
+		if (
+			mutation &&
+			receipt &&
+			!observing &&
+			cmd.tool !== "inspect_source" &&
+			cmd.tool !== "recover_source" &&
+			cmd.tool !== "cleanup_workspace"
+		) {
 			if (receipt.fingerprint !== fingerprint && receipt.fingerprint !== rawFingerprint)
 				throw new DomainError(409, "Operation identity reused");
 			const operation = this.store.get<ResourceOperation>(`resource-operation:${op}`);
@@ -426,18 +464,10 @@ export class RepositoryRuntime {
 					this.store.put(`resource-operation:${op}`, { ...operation, settled: true });
 				}
 			}
-			if (receipt.workspaceResult) {
-				const template = this.store.get<Omit<Workspace, "lastActivity" | "lastReportAt">>(
-					`workspace-result:${receipt.workspaceResult.templateId}`,
-				);
-				if (!template || (await hash(stable(template))) !== receipt.workspaceResult.templateId)
-					throw new DomainError(409, "Retained operation result unavailable; restore its recorded state before retrying");
-				return { ...template, lastActivity: receipt.workspaceResult.lastActivity, lastReportAt: receipt.workspaceResult.lastReportAt };
-			}
 			return receipt.result;
 		}
 		const publicationRecovery = !!this.store.get<PublicationIntent>(`publication-intent:${op}`);
-		if (mutation && !receipt && cmd.tool !== "cleanup_workspace" && !publicationRecovery) this.store.admit();
+		if (mutation && !receipt && !observing && cmd.tool !== "cleanup_workspace" && !publicationRecovery) this.store.admit();
 		if (mutation && !["cleanup_workspace", "end_workspace", "detach_workspace", "heartbeat", "report_change"].includes(cmd.tool)) {
 			const recovery = publicationRecovery || (cmd.tool === "promote_proposal" && state.promotions.some((p) => p.operation?.id === op));
 			if (!recovery) {
@@ -674,15 +704,19 @@ export class RepositoryRuntime {
 			if (cmd.tool === "start_workspace" && a.actor.kind === "human" && a.actor.connectionId)
 				this.store.put(`human-workspace:${a.actor.connectionId}`, (result as { id: string }).id);
 			const extra: { key: string; value: unknown }[] = [];
-			if (cmd.tool === "heartbeat" || cmd.tool === "report_change") {
+			if (observing) {
 				const { lastActivity, lastReportAt, ...template } = result as Workspace;
 				const templateId = await hash(stable(template));
-				const key = `workspace-result:${templateId}`;
-				if (!this.store.get(key)) {
-					this.store.admit(jsonBytes(template) * 2 + 4096, 4);
-					extra.push({ key, value: template });
-				}
-				state.receipts[op] = { fingerprint, result: undefined, workspaceResult: { templateId, lastActivity, lastReportAt } };
+				const resultKey = `observation-result:${cmd.workspaceId}:${cmd.tool}`;
+				const previous = this.store.get<ObservationResult>(resultKey);
+				const slot: ObservationSlot = { op, fingerprint, templateId, lastActivity, lastReportAt };
+				const records = (this.store.get(slotKey) ? 0 : 1) + (previous ? 0 : 1);
+				const changed = previous?.templateId !== templateId;
+				const growth = changed ? jsonBytes({ templateId, template }) - (previous ? jsonBytes(previous) : 0) : 0;
+				// Steady presence rewrites fixed keys; only real growth must fit outside the recovery reserve.
+				if (records > 0 || growth > 0) this.store.admit(Math.max(growth, 0) + jsonBytes(slot) + 1024, records);
+				extra.push({ key: slotKey, value: slot });
+				if (changed) extra.push({ key: resultKey, value: { templateId, template } satisfies ObservationResult });
 			} else state.receipts[op] = { fingerprint, result };
 			this.save(c, extra);
 		}

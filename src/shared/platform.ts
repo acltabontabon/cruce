@@ -164,6 +164,10 @@ export interface Workspace {
 	commits: string[];
 	publishedRevision?: string;
 	integratedRevision?: string;
+	/** Time of the last `changes_reported` event; reports in between are coalesced. */
+	changeEventAt?: number;
+	/** A reported change is waiting for the coalescing window to close. */
+	changeEventPending?: boolean;
 }
 export interface RetentionInspection {
 	checkedAt: number;
@@ -325,10 +329,7 @@ export interface RepositoryState {
 	verifications: Verification[];
 	promotions: Promotion[];
 	activity: ActivityEvent[];
-	receipts: Record<
-		string,
-		{ fingerprint: string; result: unknown; workspaceResult?: { templateId: string; lastActivity: number; lastReportAt?: number } }
-	>;
+	receipts: Record<string, { fingerprint: string; result: unknown }>;
 	sourceHead?: string;
 	/** Latest confirmed provider ref; never accepted provenance. */
 	observedCanonical?: RefObservation;

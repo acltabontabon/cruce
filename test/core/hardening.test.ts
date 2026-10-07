@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialRepository, RepositoryController } from "../../src/core/platform.ts";
+import { CHANGE_EVENT_INTERVAL, initialRepository, RepositoryController } from "../../src/core/platform.ts";
 import { type Actor, type Authority, CommandInput, type Repository } from "../../src/shared/platform.ts";
 
 const base = "a".repeat(40),
@@ -136,5 +136,40 @@ describe("report freshness", () => {
 		expect(f.state.workspaces[0].lastReportAt).toBe(60000);
 		expect(f.c.overlaps()[0].observedAt).toBe(0);
 		expect(f.state.workspaces[0].execution).toBeDefined();
+	});
+});
+describe("coalesced change reports", () => {
+	it("records at most one change event per window and the pending change after it closes", () => {
+		const f = fixture(0);
+		const { attachedAt: _, attachedBy: __, ...execution } = f.state.workspaces[0].execution!;
+		const at = (now: number, path: string, head = revision) => {
+			new RepositoryController(f.state, now, () => `event-${now}`).command(
+				{
+					namespaceId: "namespace",
+					repositoryId: "repo",
+					workspaceId: "work",
+					execution,
+					tool: "report_change",
+					revision: head,
+					changes: [{ path, status: "modified" }],
+				},
+				f.authority,
+			);
+			return f.state.activity.filter((event) => event.kind === "changes_reported").length;
+		};
+		expect(at(1000, "a.ts")).toBe(1);
+		expect(at(2000, "b.ts")).toBe(1);
+		expect(f.state.workspaces[0].changeEventPending).toBe(true);
+		expect(at(3000, "b.ts", "c".repeat(40))).toBe(1);
+		// The first report after the window records the pending change even though nothing new changed.
+		expect(at(1000 + CHANGE_EVENT_INTERVAL, "b.ts", "c".repeat(40))).toBe(2);
+		expect(f.state.workspaces[0].changeEventPending).toBeUndefined();
+		expect(at(2000 + CHANGE_EVENT_INTERVAL, "b.ts", "c".repeat(40))).toBe(2);
+		expect(at(3000 + CHANGE_EVENT_INTERVAL, "b.ts", "d".repeat(40))).toBe(2);
+		new RepositoryController(f.state, 4000 + CHANGE_EVENT_INTERVAL, () => "detach").command(
+			{ namespaceId: "namespace", repositoryId: "repo", workspaceId: "work", tool: "detach_workspace" },
+			f.authority,
+		);
+		expect(f.state.workspaces[0].changeEventPending).toBeUndefined();
 	});
 });

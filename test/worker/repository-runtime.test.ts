@@ -1751,8 +1751,8 @@ describe("bounded retained state (F6)", () => {
 	});
 });
 
-describe("compact immutable observation replies", () => {
-	it("shares unchanged workspace snapshots while replaying exact historic results, and refuses a missing template", async () => {
+describe("replaceable observation receipts", () => {
+	it("keeps one slot per workspace and tool, replays only the latest operation exactly, and refuses a missing result", async () => {
 		const f = await fixture();
 		let now = 2000;
 		const runtime = new RepositoryRuntime(f.store, f.git, f.port, {}, () => now);
@@ -1762,19 +1762,37 @@ describe("compact immutable observation replies", () => {
 			repositoryId: repo.id,
 			workspaceId: f.workspace.id,
 			execution: f.execution,
-			idempotencyKey: "first-beat",
+			idempotencyKey: "beat-0",
 		};
-		const original = await runtime.command(command, grant);
-		now = 3000;
-		await runtime.command({ ...command, idempotencyKey: "second-beat" }, grant);
-		expect(f.store.scan("workspace-result:")).toHaveLength(1);
+		const records = f.store.usage().records;
+		const receipts = f.store.scan("receipt:").length;
+		for (let tick = 0; tick < 200; tick++) {
+			now = 2000 + tick * 30000;
+			await runtime.command({ ...command, idempotencyKey: `beat-${tick}` }, grant);
+			await runtime.command(
+				{ ...command, tool: "report_change", idempotencyKey: `report-${tick}`, revision: f.workspace.baseRevision, changes: [] },
+				grant,
+			);
+		}
+		expect(f.store.scan("receipt:")).toHaveLength(receipts);
+		expect(f.store.scan("observation:")).toHaveLength(2);
+		expect(f.store.scan("observation-result:")).toHaveLength(2);
+		expect(f.store.scan("workspace-result:")).toHaveLength(0);
+		expect(f.store.usage().records - records).toBeLessThanOrEqual(5);
+
+		const latest = { ...command, idempotencyKey: "beat-199" };
 		const before = runtime.state();
-		now = 4000;
-		expect(await runtime.command(command, grant)).toEqual(original);
+		now += 5000;
+		const replay = await runtime.command(latest, grant);
+		expect(replay).toMatchObject({ id: f.workspace.id, lastActivity: 2000 + 199 * 30000 });
 		expect(runtime.state()).toEqual(before);
-		const row = f.store.scan("workspace-result:")[0];
-		f.store.delete(row.key);
-		await expect(runtime.command(command, grant)).rejects.toThrow("Retained operation result unavailable");
-		expect(runtime.state()).toEqual(before);
+		await expect(runtime.command({ ...latest, title: "changed" }, grant)).rejects.toThrow("Operation identity reused");
+		// A report key reused for presence is a different operation, never a replay.
+		await expect(runtime.command({ ...command, idempotencyKey: "report-199" }, grant)).rejects.toThrow("Operation identity reused");
+		// Superseded identities are new latest-wins observations under current authority.
+		const again = (await runtime.command({ ...command, idempotencyKey: "beat-3" }, grant)) as { lastActivity: number };
+		expect(again.lastActivity).toBe(now);
+		f.store.delete(`observation-result:${f.workspace.id}:heartbeat`);
+		await expect(runtime.command({ ...command, idempotencyKey: "beat-3" }, grant)).rejects.toThrow("Retained operation result unavailable");
 	});
 });

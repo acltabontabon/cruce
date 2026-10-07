@@ -17,6 +17,8 @@ import { attentionView } from "./attention.ts";
 import { humanMaintain, writeAccess } from "./capabilities.ts";
 import { DomainError, requireValue, stable } from "./errors.ts";
 export const WORKSPACE_TTL = 90_000;
+/** Minimum interval between `changes_reported` activity events for one workspace. */
+export const CHANGE_EVENT_INTERVAL = 15 * 60_000;
 export const initialRepository = (repository: Repository): RepositoryState => ({
 	repository,
 	version: 0,
@@ -335,6 +337,7 @@ export class RepositoryController {
 				s.execution = undefined;
 				s.state = "detached";
 				s.changes = [];
+				s.changeEventPending = undefined;
 				this.event(a.actor, "execution_detached", `${a.actor.name} detached ${s.title}`, [s.id, s.headRevision]);
 				return s;
 			}
@@ -347,7 +350,7 @@ export class RepositoryController {
 			case "report_change": {
 				const s = this.attached(a, cmd);
 				const changes = requireValue(cmd.changes, "Changes required");
-				const before = stable(s.changes);
+				const before = stable([s.headRevision, s.changes]);
 				s.changes = changes;
 				s.headRevision = requireValue(cmd.revision, "Head revision required");
 				s.commits = cmd.commits ?? [];
@@ -355,11 +358,20 @@ export class RepositoryController {
 				s.lastActivity = this.now;
 				s.state = "active";
 				s.lastReportAt = this.now;
-				if (before !== stable(changes))
-					this.event(a.actor, "changes_reported", `${a.actor.name} changed ${changes.length} ${changes.length === 1 ? "file" : "files"}`, [
-						s.id,
-						s.headRevision,
-					]);
+				// Reports are observations: at most one activity event per workspace per window, and a change
+				// seen inside the window is recorded by the first report after it closes.
+				if (before !== stable([s.headRevision, changes]) || s.changeEventPending) {
+					if (s.changeEventAt === undefined || this.now - s.changeEventAt >= CHANGE_EVENT_INTERVAL) {
+						this.event(
+							a.actor,
+							"changes_reported",
+							`${a.actor.name} changed ${changes.length} ${changes.length === 1 ? "file" : "files"}`,
+							[s.id, s.headRevision],
+						);
+						s.changeEventAt = this.now;
+						s.changeEventPending = undefined;
+					} else s.changeEventPending = true;
+				}
 				return s;
 			}
 			case "end_workspace": {
