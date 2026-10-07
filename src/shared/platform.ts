@@ -320,9 +320,26 @@ export interface ActivityEvent {
 	ids: string[];
 	at: number;
 }
+/**
+ * Finished work moved out of hot repository state: one ended workspace whose fork is gone, with its
+ * closed changes, publications, evidence and settled promotions. Immutable once written; never deleted.
+ */
+export interface ArchiveBundle {
+	sequence: number;
+	archivedAt: number;
+	workspace: Workspace;
+	artifacts: Artifact[];
+	proposals: Proposal[];
+	verifications: Verification[];
+	promotions: Promotion[];
+}
 export interface RepositoryState {
 	repository: Repository;
 	version: number;
+	/** Lifetime change count; change numbers never repeat after finished work is archived. */
+	proposalCount: number;
+	/** Finished-work bundles moved to archive records. */
+	archiveCount: number;
 	workspaces: Workspace[];
 	artifacts: Artifact[];
 	proposals: Proposal[];

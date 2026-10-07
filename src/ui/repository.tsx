@@ -6,7 +6,7 @@ import { Form, value } from "./controls.tsx";
 import { BackLink, CopyCommand, Dialog, Icon, Initials, PageHeader, Pill, Section, SettingRow } from "./design.tsx";
 import { laneIndex } from "./lanes.ts";
 import { LaneBullet, LaneTrack } from "./lanes.tsx";
-import { RetainedActivity, RetainedRecordDetail, RetainedRecordRow } from "./records.tsx";
+import { ArchivedRecord, EarlierWork, RetainedActivity, RetainedRecordDetail, RetainedRecordRow } from "./records.tsx";
 import { type Execute, RevisionBrowser } from "./source.tsx";
 import {
 	ACTION_LABELS,
@@ -448,6 +448,8 @@ function HistoryScreen({
 				)}
 			</article>
 		);
+	// Finished work leaves the live view once its fork is cleaned up; any ID it contains still opens it.
+	if (id) return <ArchivedRecord key={id} id={id} execute={execute} open={open} who={who} missing="That record is unavailable." />;
 	const promotions = view.promotions.filter((p) => p.state === "complete").sort((a, b) => b.at - a.at);
 	const created = view.activity.find((e) => e.kind === "repository_created");
 	const publications = view.artifacts.filter((a) => a.kind === "source").toReversed(),
@@ -455,7 +457,6 @@ function HistoryScreen({
 	return (
 		<div className="overview history-screen">
 			<div className="overview-main">
-				{id && <p role="status">That record is unavailable.</p>}
 				<Section
 					title={`Canonical ${view.repository.defaultBranch}`}
 					action={
@@ -515,6 +516,9 @@ function HistoryScreen({
 					) : (
 						<p className="panel-note">Revisions appear here once a workspace publishes them.</p>
 					)}
+				</Section>
+				<Section title="Earlier work" count={view.archiveCount}>
+					<EarlierWork execute={execute} total={view.archiveCount} open={(id) => open("history", id)} who={who} />
 				</Section>
 				{evidence.length > 0 && (
 					<Section title="Evidence" count={evidence.length}>
@@ -692,7 +696,7 @@ function RepositorySettings({
 			{view.capacity && (
 				<SettingRow
 					title="Coordination capacity"
-					detail="Retained records are never deleted by expiry. New work stops at the supported capacity; authorized recovery keeps reserved headroom."
+					detail="Retained records are never deleted by expiry. Ended workspaces whose forks are cleaned up move to Earlier work in History and stop counting toward live limits. New work stops at the supported capacity; authorized recovery keeps reserved headroom."
 				>
 					<dl className="facts">
 						<dt>Current state</dt>
@@ -707,10 +711,12 @@ function RepositorySettings({
 						<dd>
 							{(view.capacity.bytes / 1024 / 1024).toFixed(2)} / {view.capacity.limits.storeBytes / 1024 / 1024} MiB
 						</dd>
-						<dt>Workspaces</dt>
+						<dt>Live workspaces</dt>
 						<dd>
 							{view.workspaces.length} / {view.capacity.limits.workspaces}
 						</dd>
+						<dt>Earlier work</dt>
+						<dd>{view.archiveCount} archived; does not count toward live limits</dd>
 					</dl>
 				</SettingRow>
 			)}

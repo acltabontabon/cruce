@@ -1805,6 +1805,22 @@ test("History can inspect retained activity through a read-only page", async () 
 	await page.getByText("End of retained activity.", { exact: true }).waitFor();
 });
 
+test("History pages finished work and archived records still open by deep link", async () => {
+	await openRepo();
+	await page.getByRole("button", { name: "History", exact: true }).click();
+	const earlier = page.getByRole("region", { name: "Earlier work", exact: true });
+	await earlier.getByRole("button", { name: "Show earlier work", exact: true }).click();
+	await earlier.getByRole("button", { name: /Spike: idempotency keys/ }).click();
+	await page.getByRole("heading", { name: "Spike: idempotency keys", level: 1 }).waitFor();
+	assert.equal(new URL(page.url()).hash, "#/history/archived-spike");
+	await page.getByText("Idempotency key spike · published revision", { exact: false }).waitFor();
+	// A retired workspace link resolves to the same read-only record, and an unknown one says so.
+	await page.goto(`${server.origin}/?namespace=fernloop&repository=payments#/workspaces/archived-spike`);
+	await page.getByRole("heading", { name: "Spike: idempotency keys", level: 1 }).waitFor();
+	await page.goto(`${server.origin}/?namespace=fernloop&repository=payments#/history/missing-record`);
+	await page.getByText("That record is unavailable.", { exact: true }).waitFor();
+});
+
 test("reconciliation exposes published ancestry, all proposal blockers and degraded observation without granting authority", async () => {
 	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
 		const data = await (await route.fetch()).json();

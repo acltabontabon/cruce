@@ -22,6 +22,8 @@ export const CHANGE_EVENT_INTERVAL = 15 * 60_000;
 export const initialRepository = (repository: Repository): RepositoryState => ({
 	repository,
 	version: 0,
+	proposalCount: 0,
+	archiveCount: 0,
 	workspaces: [],
 	artifacts: [],
 	proposals: [],
@@ -389,7 +391,7 @@ export class RepositoryController {
 					throw new DomainError(403, "Propose a published revision from your own workspace");
 				const p: Proposal = {
 					id: this.nextId(),
-					number: this.state.proposals.length + 1,
+					number: ++this.state.proposalCount,
 					workspaceId: s.id,
 					artifactId: artifact.id,
 					base: artifact.baseRevision ?? s.baseRevision,

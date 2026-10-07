@@ -183,6 +183,41 @@ const result = {
 	nodeRssBytes: process.memoryUsage().rss,
 	limits: STATE_LIMITS,
 };
+// Finished-work lifecycle: workspaces that start and end without a fork are archived at the
+// transition, so lifetime work beyond the live limits stays admissible and pageable.
+const FINISHED = 1000;
+console.log = () => {};
+for (let n = 0; n < FINISHED; n++) {
+	now += 1000;
+	const common = { namespaceId: repository.namespaceId, repositoryId: repository.id };
+	const s = (await runtime.command(
+		{ ...common, tool: "start_workspace", title: `Finished ${n}`, baseRevision: "a".repeat(40), idempotencyKey: `start-${n}` },
+		{ actor },
+	)) as Workspace;
+	await runtime.command({ ...common, tool: "end_workspace", workspaceId: s.id, cancelled: true, idempotencyKey: `end-${n}` }, { actor });
+}
+let archivePages = 0,
+	archived = 0,
+	cursor: string | undefined;
+do {
+	const page = (await runtime.command(
+		{ tool: "get_archive", namespaceId: repository.namespaceId, repositoryId: repository.id, cursor },
+		{ actor },
+	)) as { items: unknown[]; cursor?: string };
+	archivePages++;
+	archived += page.items.length;
+	cursor = page.cursor;
+} while (cursor);
+console.log = originalLog;
+const archive = {
+	finishedWorkspaces: FINISHED,
+	hotWorkspaces: runtime.state().workspaces.length,
+	archiveCount: runtime.state().archiveCount,
+	pagedBundles: archived,
+	pages: archivePages,
+	hotStateBytes: jsonBytes(runtime.state()),
+};
+Object.assign(result, { archive });
 const windows = Math.ceil((TICKS * TICK) / CHANGE_EVENT_INTERVAL);
 const failures = [
 	transfer.byteLength !== bytes && "gateway transfer",
@@ -194,6 +229,9 @@ const failures = [
 	result.activityGrowth > WORKSPACES * (windows + 1) && "change event coalescing",
 	result.hotStateBytes >= STATE_LIMITS.admissionBytes && "hot state bytes",
 	result.projectedDaysToCeiling < 180 && "sustained capacity horizon",
+	(archive.hotWorkspaces !== WORKSPACES || archive.archiveCount !== FINISHED || archive.pagedBundles !== FINISHED) &&
+		"finished-work archive",
+	archive.hotStateBytes >= STATE_LIMITS.admissionBytes && "hot state after archival",
 ].filter(Boolean);
 if (failures.length) throw new Error(`Bounded storage measurement failed: ${failures.join(", ")}`);
 await mkdir("dist/state-verification", { recursive: true });

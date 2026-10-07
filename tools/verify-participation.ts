@@ -8,7 +8,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Credentials, login } from "../runner/oauth.ts";
 import { gitRemotePath } from "../src/shared/git-access.ts";
-import type { ActivityEvent, Command, RepositorySnapshot } from "../src/shared/platform.ts";
+import type { ActivityEvent, ArchiveBundle, Command, RepositorySnapshot } from "../src/shared/platform.ts";
 import { nativeGit } from "./verification/convergence.ts";
 
 const root = resolve(process.env.CRUCE_VERIFY_OUTPUT_DIR ?? "dist/d2-participation");
@@ -78,6 +78,18 @@ async function call<T>(command: Partial<Command>): Promise<T> {
 
 async function observe(): Promise<Observation> {
 	const view = await call<RepositorySnapshot>({ tool: "get_repository" });
+	// Finished work leaves the snapshot once its fork is cleaned up; its archived records stay observable.
+	let cursor: string | undefined;
+	do {
+		const page = await call<{ items: ArchiveBundle[]; cursor?: string }>({ tool: "get_archive", cursor });
+		for (const bundle of page.items) {
+			view.workspaces.push(bundle.workspace);
+			view.artifacts.push(...bundle.artifacts);
+			view.proposals.push(...bundle.proposals);
+			view.promotions.unshift(...bundle.promotions);
+		}
+		cursor = page.cursor;
+	} while (cursor);
 	const remote = `${origin}${gitRemotePath(namespaceId!, repositoryId!)}`;
 	const advertised = await nativeGit(["ls-remote", remote, `refs/heads/${view.repository.defaultBranch}`], token()).catch(
 		(error: Error) => `unavailable: ${error.message.split("\n")[0]}`,

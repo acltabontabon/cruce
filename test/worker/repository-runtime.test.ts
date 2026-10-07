@@ -5,8 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DomainError } from "../../src/core/errors.ts";
 import { initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
-import type { Actor, Command, Proposal, Repository, RepositorySnapshot, Workspace } from "../../src/shared/platform.ts";
+import { STATE_LIMITS } from "../../src/shared/limits.ts";
+import type { Actor, ArchiveBundle, Command, Proposal, Repository, RepositorySnapshot, Workspace } from "../../src/shared/platform.ts";
 import { type RepositoryHost, ResourceBoundary } from "../../src/worker/artifacts.ts";
 import { diagnosticId } from "../../src/worker/diagnostics.ts";
 import { MemoryFs } from "../../src/worker/git/memory-fs.ts";
@@ -33,6 +35,10 @@ const grant: import("../../src/worker/namespace-runtime.ts").ConnectionGrant = {
 	scopes: ["cruce:read", "workspace:write", "revision:publish", "artifact:publish", "change:write"],
 	repositories: [repo.id],
 };
+/** Hot and archived workspaces: finished work leaves hot state once its fork is gone. */
+function everyWorkspace(runtime: RepositoryRuntime, store: Store) {
+	return [...runtime.state().workspaces, ...store.scan<ArchiveBundle>("archive:").map(({ value }) => value.workspace)];
+}
 function memory(): Store {
 	const map = new Map<string, unknown>();
 	return {
@@ -224,7 +230,7 @@ describe("repository runtime", () => {
 			const f = await fixture();
 			const original = f.store.batch.bind(f.store);
 			let fail = true;
-			vi.spyOn(f.store, "batch").mockImplementation((entries) => {
+			vi.spyOn(f.store, "batch").mockImplementation((entries, deletes) => {
 				if (
 					fail &&
 					entries.some((entry) => entry.key.startsWith("receipt:") && (entry.value as { result?: { kind?: string } }).result?.kind)
@@ -232,7 +238,7 @@ describe("repository runtime", () => {
 					fail = false;
 					throw new Error("durable save interrupted");
 				}
-				original(entries);
+				original(entries, deletes);
 			});
 			const fields = {
 				workspaceId: f.workspace.id,
@@ -562,7 +568,7 @@ describe("repository runtime", () => {
 		expect(await f.call("cleanup_workspace", fields)).toMatchObject({ state: "deleted" });
 		expect(f.host.remove).toHaveBeenCalledTimes(2);
 		expect(f.w.state.reservations.filter((r) => r.action === "workspace.cleanup")).toHaveLength(1);
-		expect(f.runtime.state().workspaces[0].baseRevision).toBe(f.base);
+		expect(everyWorkspace(f.runtime, f.store).find((w) => w.id === f.workspace.id)?.baseRevision).toBe(f.base);
 	});
 	it("reserves bounded baseline recovery but rejects unavailable source before provisioning a fork", async () => {
 		const f = await fixture(true);
@@ -619,7 +625,7 @@ describe("repository runtime", () => {
 		f.store.put("repository", advanced);
 		expect(await f.call("publish_revision", fields)).toMatchObject({ revision: merged.oid, baseRevision: upstream });
 		expect(f.w.state.reservations.filter((r) => r.action === "revision.publish")).toHaveLength(1);
-		expect(f.runtime.state().workspaces[0].baseRevision).toBe(f.base);
+		expect(everyWorkspace(f.runtime, f.store).find((w) => w.id === f.workspace.id)?.baseRevision).toBe(f.base);
 	});
 	it("gives hosted writers distinct forks and reconciles uncertain attachment without another reservation", async () => {
 		const f = await fixture(true);
@@ -1214,7 +1220,7 @@ describe("exact approved-base promotion", () => {
 		try {
 			const batch = f.store.batch.bind(f.store);
 			let interrupted = false;
-			vi.spyOn(f.store, "batch").mockImplementation((entries) => {
+			vi.spyOn(f.store, "batch").mockImplementation((entries, deletes) => {
 				const value = entries.find((entry) => entry.key === "repository")?.value;
 				const promotion = (value as import("../../src/shared/platform.ts").RepositoryState | undefined)?.promotions?.[0];
 				if (
@@ -1225,7 +1231,7 @@ describe("exact approved-base promotion", () => {
 					interrupted = true;
 					throw new Error("interrupted persistence");
 				}
-				batch(entries);
+				batch(entries, deletes);
 			});
 			await expect(f.run()).rejects.toThrow("interrupted persistence");
 			expect(f.remote.head()).toBe(f.candidate);
@@ -1472,8 +1478,8 @@ describe("exact approved-base promotion", () => {
 		try {
 			const batch = f.store.batch.bind(f.store);
 			let interrupted = false;
-			vi.spyOn(f.store, "batch").mockImplementation((entries) => {
-				batch(entries);
+			vi.spyOn(f.store, "batch").mockImplementation((entries, deletes) => {
+				batch(entries, deletes);
 				const value = entries.find((entry) => entry.key === "repository")?.value as
 					| import("../../src/shared/platform.ts").RepositoryState
 					| undefined;
@@ -1533,13 +1539,13 @@ describe("authorized retention recovery (F6)", () => {
 		if (fault === "confirmed-save") {
 			const batch = f.store.batch.bind(f.store);
 			let interrupted = false;
-			vi.spyOn(f.store, "batch").mockImplementation((entries) => {
+			vi.spyOn(f.store, "batch").mockImplementation((entries, deletes) => {
 				const operation = entries.find((entry) => entry.key === `cleanup:${f.workspace.id}`)?.value as { phase?: string } | undefined;
 				if (!interrupted && operation?.phase === "confirmed") {
 					interrupted = true;
 					throw new Error("Lost confirmation persistence");
 				}
-				batch(entries);
+				batch(entries, deletes);
 			});
 		}
 		if (fault === "settlement") {
@@ -1568,7 +1574,10 @@ describe("authorized retention recovery (F6)", () => {
 		runtime = new RepositoryRuntime(f.store, f.git, f.port, {}, () => time, { schedule, authorize });
 		await runtime.recoverCleanup();
 		expect(requests).toBe(1);
-		expect(runtime.state().workspaces[0]).toMatchObject({ fork: { state: "deleted" }, cleanup: { state: "complete", phase: "confirmed" } });
+		expect(everyWorkspace(runtime, f.store).find((w) => w.id === f.workspace.id)).toMatchObject({
+			fork: { state: "deleted" },
+			cleanup: { state: "complete", phase: "confirmed" },
+		});
 		expect(runtime.state().activity.filter((event) => event.kind === "fork_deleted")).toHaveLength(1);
 		expect(f.w.state.reservations.filter((r) => r.action === "workspace.cleanup")).toHaveLength(1);
 		expect(f.w.state.reservations.at(-1)?.state).toBe("complete");
@@ -1679,12 +1688,16 @@ describe("authorized retention recovery (F6)", () => {
 		runtime = new RepositoryRuntime(f.store, f.git, f.port, {}, () => time, { schedule, authorize: async (g) => g });
 		await runtime.recoverCleanup();
 		expect(f.host.remove).toHaveBeenCalledTimes(4);
-		expect(runtime.state().workspaces.filter((w) => w.cleanup?.state === "complete")).toHaveLength(4);
+		expect(everyWorkspace(runtime, f.store).filter((w) => w.cleanup?.state === "complete")).toHaveLength(4);
 		// The overdue fifth intent keeps a prompt wakeup after the bounded batch.
 		expect(schedule.mock.calls.at(-1)?.[0]).toBe(time + 1000);
 		await runtime.recoverCleanup();
 		expect(f.host.remove).toHaveBeenCalledTimes(5);
-		expect(runtime.state().workspaces.every((w) => w.cleanup?.state === "complete")).toBe(true);
+		expect(
+			everyWorkspace(runtime, f.store)
+				.filter((w) => ids.includes(w.id))
+				.every((w) => w.cleanup?.state === "complete"),
+		).toBe(true);
 		schedule.mockClear();
 		await runtime.recoverCleanup();
 		expect(schedule).not.toHaveBeenCalled();
@@ -1794,5 +1807,112 @@ describe("replaceable observation receipts", () => {
 		expect(again.lastActivity).toBe(now);
 		f.store.delete(`observation-result:${f.workspace.id}:heartbeat`);
 		await expect(runtime.command({ ...command, idempotencyKey: "beat-3" }, grant)).rejects.toThrow("Retained operation result unavailable");
+	});
+});
+
+describe("archived finished work", () => {
+	async function finish(f: Awaited<ReturnType<typeof fixture>>) {
+		const artifact = (await f.call("publish_revision", { workspaceId: f.workspace.id, revision: f.head, pack: f.pack })) as {
+			id: string;
+		};
+		const change = (await f.call("create_proposal", { artifactId: artifact.id })) as Proposal;
+		await f.call("reject_proposal", { proposalId: change.id, reason: "Superseded" }, { actor: owner } as typeof grant);
+		await f.call("end_workspace", { workspaceId: f.workspace.id });
+		vi.spyOn(f.git, "remoteRefs").mockResolvedValue([{ ref: "refs/heads/trunk", oid: f.base }]);
+		return { artifact, change };
+	}
+	const read = (f: Awaited<ReturnType<typeof fixture>>, tool: string, fields: Partial<Command> = {}) =>
+		f.runtime.command({ tool, namespaceId: repo.namespaceId, repositoryId: repo.id, ...fields }, grant);
+
+	it("moves an ended, cleaned-up workspace and its closed change out of hot state in the cleanup transaction", async () => {
+		const f = await fixture();
+		const { artifact, change } = await finish(f);
+		const batch = vi.spyOn(f.store, "batch");
+		await f.call("cleanup_workspace", { workspaceId: f.workspace.id, idempotencyKey: "cleanup" });
+		const archived = batch.mock.calls.find(([entries]) => entries.some((e) => e.key.startsWith("archive:")));
+		expect(archived?.[0].map((e) => e.key)).toEqual(
+			expect.arrayContaining(["repository", `archived:${f.workspace.id}`, `archived:${change.id}`, `archived-revision:${f.head}`]),
+		);
+		const state = f.runtime.state();
+		expect(state.workspaces.map((w) => w.id)).not.toContain(f.workspace.id);
+		expect(state.proposals.map((p) => p.id)).not.toContain(change.id);
+		expect(state.artifacts.map((a) => a.id)).not.toContain(artifact.id);
+		expect(state.archiveCount).toBe(1);
+		expect(f.store.scan(`observation:${f.workspace.id}`)).toHaveLength(0);
+		// The deleted fork's provider identity stays recorded after its hot record leaves.
+		expect(f.store.get(`provider-repository:repo-${repo.id}-workspace-${f.workspace.id}`)).toBeDefined();
+	});
+
+	it("serves archived records to reads without writing, and refuses new mutations on them", async () => {
+		const f = await fixture();
+		const { artifact, change } = await finish(f);
+		const cleanup = await f.call("cleanup_workspace", { workspaceId: f.workspace.id, idempotencyKey: "cleanup" });
+		const before = structuredClone(f.runtime.state());
+		const usage = f.store.usage();
+		expect(await read(f, "get_workspace", { workspaceId: f.workspace.id })).toMatchObject({ id: f.workspace.id, state: "completed" });
+		expect(await read(f, "read_artifact", { artifactId: artifact.id })).toMatchObject({ artifact: { id: artifact.id } });
+		const lineage = (await read(f, "get_lineage", { subjectId: change.id })) as { type: string }[];
+		expect(lineage.map((r) => r.type)).toEqual(expect.arrayContaining(["workspace", "artifact", "change"]));
+		expect(await read(f, "get_source", { revision: f.head, path: "src/pay.ts" })).toMatchObject({ revision: f.head });
+		const page = (await read(f, "get_archive")) as { items: ArchiveBundle[]; total: number };
+		expect(page).toMatchObject({ total: 1, items: [{ sequence: 1, workspace: { id: f.workspace.id } }] });
+		expect(await read(f, "get_archive", { subjectId: artifact.id })).toMatchObject({ workspace: { id: f.workspace.id } });
+		expect(await read(f, "get_archive", { subjectId: "unknown" })).toBeNull();
+		expect(f.runtime.state()).toEqual(before);
+		expect(f.store.usage()).toEqual(usage);
+
+		await expect(
+			f.call("review_proposal", { proposalId: change.id, revision: f.head, outcome: "concern", reason: "Late" }),
+		).rejects.toThrow("Change is not open");
+		await expect(f.call("create_proposal", { artifactId: artifact.id })).rejects.toThrow("Workspace has ended");
+		await expect(f.call("inspect_retention", { workspaceId: f.workspace.id })).rejects.toThrow("Workspace has ended");
+		// The operation that finished the work still replays its recorded result without provider calls.
+		const removals = vi.mocked(f.host.remove).mock.calls.length;
+		expect(await f.call("cleanup_workspace", { workspaceId: f.workspace.id, idempotencyKey: "cleanup" })).toEqual(cleanup);
+		expect(f.host.remove).toHaveBeenCalledTimes(removals);
+		expect(f.runtime.state()).toEqual(before);
+	});
+
+	it("keeps finished work hot while a publication may settle or storage is full, then archives on a later save", async () => {
+		const f = await fixture();
+		await finish(f);
+		f.store.put("pending-publication-count", 1);
+		await f.call("cleanup_workspace", { workspaceId: f.workspace.id, idempotencyKey: "cleanup" });
+		expect(f.runtime.state().workspaces.map((w) => w.id)).toContain(f.workspace.id);
+		f.store.put("pending-publication-count", 0);
+		// Only the archive's own admission fails: the transition that triggered it still succeeds.
+		const admit = vi.spyOn(f.store, "admit").mockImplementation((_bytes, records) => {
+			if ((records ?? 0) > 4)
+				throw new DomainError(409, "Coordination storage capacity reached; inspect retained records before adding work");
+		});
+		await f.call("start_workspace", { title: "Next", baseRevision: f.base });
+		expect(admit).toHaveBeenCalledWith(expect.any(Number), expect.any(Number));
+		admit.mockRestore();
+		expect(f.runtime.state().workspaces.map((w) => w.id)).toContain(f.workspace.id);
+		await f.call("start_workspace", { title: "Later", baseRevision: f.base });
+		expect(f.runtime.state().workspaces.map((w) => w.id)).not.toContain(f.workspace.id);
+	});
+
+	it("bounds live workspaces rather than lifetime workspaces and keeps change numbers unique", async () => {
+		const f = await fixture();
+		const numbers = new Set<number>();
+		for (let n = 0; n < STATE_LIMITS.workspaces + 44; n++) {
+			const s = (await f.call("start_workspace", { title: `Short ${n}`, baseRevision: f.base })) as Workspace;
+			await f.call("end_workspace", { workspaceId: s.id, cancelled: true });
+		}
+		expect(f.runtime.state().workspaces.length).toBeLessThan(STATE_LIMITS.workspaces);
+		expect(f.runtime.state().archiveCount).toBe(STATE_LIMITS.workspaces + 44);
+		const { change } = await finish(f);
+		numbers.add(change.number);
+		expect(change.number).toBe(1);
+		expect(f.runtime.state().proposalCount).toBe(1);
+		let cursor: string | undefined;
+		let seen = 0;
+		do {
+			const page = (await read(f, "get_archive", { cursor })) as { items: ArchiveBundle[]; cursor?: string };
+			seen += page.items.length;
+			cursor = page.cursor;
+		} while (cursor);
+		expect(seen).toBe(STATE_LIMITS.workspaces + 44);
 	});
 });

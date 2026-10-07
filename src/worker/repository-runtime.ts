@@ -1,3 +1,4 @@
+import { archiveLayout, bundleIds, finishedWork, withBundles, withoutBundles } from "../core/archive.ts";
 import { attentionView } from "../core/attention.ts";
 import { humanMaintain, writeAccess } from "../core/capabilities.ts";
 import { DomainError, requireValue, stable } from "../core/errors.ts";
@@ -8,6 +9,7 @@ import { gitRemotePath, parseGitRoute } from "../shared/git-access.ts";
 import { STATE_LIMITS } from "../shared/limits.ts";
 import type {
 	ActivityEvent,
+	ArchiveBundle,
 	Artifact,
 	Command,
 	Repository,
@@ -129,6 +131,7 @@ export class RepositoryRuntime {
 		return requireValue(this.store.get<RepositoryState>("repository"), "Repository not initialized");
 	}
 	save(c: RepositoryController, extra: { key: string; value: unknown }[] = []) {
+		archiveLayout(c.state);
 		const latest = this.store.get<number>("activity-version") ?? 0;
 		const activity = c.state.activity.filter((event) => Number(event.id.slice(6)) > latest);
 		const entries: { key: string; value: unknown }[] = [
@@ -136,12 +139,70 @@ export class RepositoryRuntime {
 			...activity.map((event) => ({ key: `activity:${event.id.slice(6).padStart(16, "0")}`, value: event })),
 		];
 		for (const [id, receipt] of Object.entries(c.state.receipts)) entries.push({ key: `receipt:${id}`, value: receipt });
-		const state = { ...c.state, receipts: {}, activity: c.state.activity.slice(-STATE_LIMITS.recentActivity) };
+		let state: RepositoryState = { ...c.state, receipts: {}, activity: c.state.activity.slice(-STATE_LIMITS.recentActivity) };
+		const deletes: string[] = [];
+		const archive = this.archive(state, new Set(entries.map((e) => e.key)));
+		if (archive) {
+			entries.push(...archive.entries);
+			deletes.push(...archive.deletes);
+			state = withoutBundles(state, archive.bundles);
+		}
 		assertRepositoryCapacity(state);
 		entries.push({ key: "repository", value: state }, { key: "activity-version", value: c.state.version });
-		this.store.batch(entries);
-		c.state.receipts = {};
-		c.state.activity = state.activity;
+		this.store.batch(entries, deletes);
+		Object.assign(c.state, {
+			receipts: {},
+			activity: state.activity,
+			archiveCount: state.archiveCount,
+			workspaces: state.workspaces,
+			artifacts: state.artifacts,
+			proposals: state.proposals,
+			verifications: state.verifications,
+			promotions: state.promotions,
+		});
+	}
+	/**
+	 * Finished work moves to immutable archive records in the same transaction as the transition that
+	 * finished it. Archival waits while a publication may still settle, never uses the recovery
+	 * reserve, and is retried by a later save when storage is full rather than blocking the transition.
+	 */
+	private archive(state: RepositoryState, written: Set<string>) {
+		if (this.store.get<number>("pending-publication-count")) return;
+		const bundles = finishedWork(state, this.now());
+		if (!bundles.length) return;
+		const entries: { key: string; value: unknown }[] = [];
+		const add = (key: string, value: unknown) => {
+			if (written.has(key) || entries.some((e) => e.key === key) || this.store.get(key) !== undefined) return;
+			entries.push({ key, value });
+		};
+		const deletes: string[] = [];
+		for (const bundle of bundles) {
+			const key = `archive:${String(Number.MAX_SAFE_INTEGER - bundle.sequence).padStart(16, "0")}`;
+			entries.push({ key, value: bundle });
+			for (const id of bundleIds(bundle)) add(`archived:${id}`, key);
+			for (const artifact of bundle.artifacts) {
+				if (artifact.kind === "source") add(`archived-revision:${artifact.revision}`, key);
+				// Provider identity evidence otherwise derived from hot records stays recorded.
+				if (artifact.storage.providerId) add(`provider-repository:${artifact.storage.repository}`, artifact.storage.providerId);
+			}
+			if (bundle.workspace.fork) add(`provider-repository:${bundle.workspace.fork.name}`, bundle.workspace.fork.id);
+			for (const tool of ["heartbeat", "report_change"])
+				for (const prefix of ["observation", "observation-result"]) {
+					const observation = `${prefix}:${bundle.workspace.id}:${tool}`;
+					if (!written.has(observation) && this.store.get(observation) !== undefined) deletes.push(observation);
+				}
+		}
+		try {
+			this.store.admit(jsonBytes(entries) + 4096, entries.length);
+		} catch (error) {
+			if (error instanceof DomainError && error.status === 409) return;
+			throw error;
+		}
+		return { bundles, entries, deletes };
+	}
+	private archived(id?: string) {
+		const key = id && (this.store.get<string>(`archived:${id}`) ?? this.store.get<string>(`archived-revision:${id}`));
+		return key ? this.store.get<ArchiveBundle>(key) : undefined;
 	}
 	private async resources() {
 		const config = await this.namespace.resourceConfiguration();
@@ -232,7 +293,7 @@ export class RepositoryRuntime {
 		];
 		if (!(await this.git.hasCompleteSource(revision)))
 			throw new DomainError(404, "Source cache unavailable; explicitly recover retained source");
-		if (tips.includes(revision)) return;
+		if (tips.includes(revision) || this.store.get(`archived-revision:${revision}`)) return;
 		if ((await this.git.log(revision, 1)).length) {
 			for (const tip of tips) if ((await this.git.mergeBase(revision, tip)) === revision) return;
 		}
@@ -360,7 +421,7 @@ export class RepositoryRuntime {
 			throw new DomainError(403, "Repository identity mismatch");
 		// An interrupted registration can still be inspected and retried from the console.
 		// This empty projection is not persisted until explicit canonical setup.
-		const state = stored ? structuredClone(stored) : initialRepository(repository);
+		const state = archiveLayout(stored ? structuredClone(stored) : initialRepository(repository));
 		state.repository = repository;
 		if (cmd.tool === "retry_repository_setup") {
 			// Replay the original provisioning intent so a failed creation reuses its operation identity
@@ -382,9 +443,19 @@ export class RepositoryRuntime {
 		const proposal = state.proposals.find((p) => p.id === cmd.proposalId);
 		const artifact = state.artifacts.find((item) => item.id === (cmd.artifactId ?? proposal?.artifactId));
 		if (artifact) await correlate({ workspaceId: artifact.workspaceId, revision: artifact.revision });
+		const mutation = HUMAN_TOOLS.has(cmd.tool) || toolByName(cmd.tool)?.mutation || cmd.tool === "provision_repository";
+		// Reads naming finished work see its archived records; this view is never saved. Source
+		// inspection reserves but never saves repository state.
+		const sourceRead = cmd.tool === "inspect_source" || cmd.tool === "recover_source";
+		if (!mutation || sourceRead)
+			withBundles(
+				state,
+				[cmd.workspaceId, cmd.artifactId, cmd.proposalId, cmd.subjectId, cmd.revision, cmd.baseRevision]
+					.map((id) => this.archived(id))
+					.filter((bundle) => !!bundle),
+			);
 		let sequence = 0;
 		const c = new RepositoryController(state, this.now(), () => `${op.slice(0, 24)}-${sequence++}`);
-		const mutation = HUMAN_TOOLS.has(cmd.tool) || toolByName(cmd.tool)?.mutation || cmd.tool === "provision_repository";
 		if (mutation && !cmd.idempotencyKey) throw new DomainError(400, "Mutation requires an idempotency key");
 		if (mutation && !["inspect_source", "recover_source", "inspect_retention"].includes(cmd.tool)) writeAccess(a);
 		if (cmd.tool === "review_proposal" && cmd.outcome === "approve" && a.actor.kind === "human") humanMaintain(a);
@@ -411,6 +482,17 @@ export class RepositoryRuntime {
 			)
 				throw new DomainError(409, "Operation identity reused");
 		}
+		const observing = cmd.tool === "heartbeat" || cmd.tool === "report_change";
+		const archivedTarget =
+			mutation && !sourceRead && [cmd.workspaceId, cmd.proposalId, cmd.artifactId].find((id) => id && this.store.get(`archived:${id}`));
+		if (archivedTarget) {
+			// Finished work is immutable. Retries of the operation that finished it return its receipt.
+			if (receipt && !observing) {
+				diagnose("operation_replayed");
+				return receipt.result;
+			}
+			throw new DomainError(409, archivedTarget === cmd.proposalId ? "Change is not open" : "Workspace has ended");
+		}
 		if (cmd.tool === "promote_proposal") {
 			humanMaintain(a);
 			if (!state.promotions.some((p) => p.operation?.id === op)) {
@@ -426,7 +508,6 @@ export class RepositoryRuntime {
 		}
 		// Presence and reports are latest-wins observations. Each workspace keeps one replaceable slot per
 		// tool: the latest operation replays exactly; an older or unknown one is a new observation.
-		const observing = cmd.tool === "heartbeat" || cmd.tool === "report_change";
 		const slotKey = `observation:${cmd.workspaceId}:${cmd.tool}`;
 		if (observing) {
 			if (!cmd.workspaceId) throw new DomainError(404, "Workspace unavailable");
@@ -650,6 +731,16 @@ export class RepositoryRuntime {
 			return {
 				items: rows.slice(0, STATE_LIMITS.pageSize).map(({ value }) => value),
 				cursor: rows.length > STATE_LIMITS.pageSize ? rows[STATE_LIMITS.pageSize - 1].key.slice("activity:".length) : undefined,
+			};
+		} else if (cmd.tool === "get_archive") {
+			// A subject that is not archived (still live, or unknown) reads as null.
+			if (cmd.subjectId) return this.archived(cmd.subjectId) ?? null;
+			const page = STATE_LIMITS.archivePage;
+			const rows = this.store.scan<ArchiveBundle>("archive:", cmd.cursor ? `archive:${cmd.cursor}` : "archive:", page + 1);
+			return {
+				items: rows.slice(0, page).map(({ value }) => value),
+				cursor: rows.length > page ? rows[page - 1].key.slice("archive:".length) : undefined,
+				total: state.archiveCount,
 			};
 		} else if (cmd.tool === "get_retention") {
 			const workspace = c.workspace(cmd.workspaceId);

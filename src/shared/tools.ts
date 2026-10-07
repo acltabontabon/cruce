@@ -42,6 +42,11 @@ export const CRUCE_TOOLS: Tool[] = [
 	read("list_namespaces", "List your authorized namespaces."),
 	read("list_repositories", "List repositories authorized for this connection.", ["namespaceId"]),
 	read("get_activity", "Read retained activity in bounded pages; pass the returned cursor for the next page.", ["cursor"]),
+	read(
+		"get_archive",
+		"Finished work, newest first in bounded pages: ended workspaces whose forks are gone, with their closed changes, publications, evidence and promotions. Pass subjectId for the archived record containing it.",
+		["cursor", "subjectId"],
+	),
 	read("get_retention", "Inspect recorded retention blockers and authorized cleanup recovery without provider calls.", ["workspaceId"]),
 	read(
 		"get_reconciliation",

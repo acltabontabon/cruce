@@ -15,6 +15,9 @@ export const STATE_LIMITS = {
 	proposals: 512,
 	verifications: 2048,
 	promotions: 512,
+	/** Newest complete promotions kept hot so reconciliation always sees the accepted chain's tip. */
+	recentPromotions: 16,
+	archivePage: 20,
 	recentActivity: 100,
 	cleanupRefs: 256,
 	recoveryBatch: 4,

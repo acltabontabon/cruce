@@ -5,7 +5,8 @@ export interface Store {
 	get<T>(key: string): T | undefined;
 	put(key: string, value: unknown): void;
 	delete(key: string): void;
-	batch(entries: { key: string; value: unknown }[]): void;
+	/** Atomically writes `entries` and removes `deletes`; capacity counts the result. */
+	batch(entries: { key: string; value: unknown }[], deletes?: string[]): void;
 	scan<T>(prefix: string, after?: string, limit?: number): { key: string; value: T }[];
 	usage(): { bytes: number; records: number };
 	admit(bytes?: number, records?: number): void;
@@ -65,30 +66,41 @@ export function sqlStore(sql: SqlStorage, atomic: <T>(run: () => T) => T = (run)
 		put(key, value) {
 			store.batch([{ key, value }]);
 		},
-		batch(entries) {
+		batch(entries, deletes = []) {
 			const encoded = entries.map(({ key, value }) => encode(key, value));
-			if (new Set(entries.map(({ key }) => key)).size !== entries.length) throw new Error("Duplicate storage key in transaction");
+			if (new Set([...entries.map(({ key }) => key), ...deletes]).size !== entries.length + deletes.length)
+				throw new Error("Duplicate storage key in transaction");
+			const existing = (key: string) =>
+				available()
+					? sql
+							.exec<{ bytes: number }>(
+								"SELECT length(CAST(key AS BLOB)) + length(CAST(body AS BLOB)) AS bytes FROM records WHERE key = ?",
+								key,
+							)
+							.toArray()[0]
+					: undefined;
 			try {
 				atomic(() => {
 					const current = usage();
 					let bytes = current.bytes,
 						records = current.records;
 					for (const row of encoded) {
-						const old = available()
-							? sql
-									.exec<{ bytes: number }>(
-										"SELECT length(CAST(key AS BLOB)) + length(CAST(body AS BLOB)) AS bytes FROM records WHERE key = ?",
-										row.key,
-									)
-									.toArray()[0]
-							: undefined;
+						const old = existing(row.key);
 						bytes += row.bytes - (old?.bytes ?? 0);
 						if (!old) records++;
 					}
+					const removed = deletes.filter((key) => {
+						const old = existing(key);
+						if (!old) return false;
+						bytes -= old.bytes;
+						records--;
+						return true;
+					});
 					capacity(bytes, records);
 					initialize();
 					for (const row of encoded)
 						sql.exec("INSERT INTO records VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET body = excluded.body", row.key, row.body);
+					for (const key of removed) sql.exec("DELETE FROM records WHERE key = ?", key);
 					sql.exec("UPDATE record_usage SET bytes = ?, records = ? WHERE id = 1", bytes, records);
 				});
 			} catch (error) {
@@ -137,15 +149,19 @@ export function memoryStore(values = new Map<string, unknown>()): Store {
 	const store: Store = {
 		get: <T>(key: string) => structuredClone(values.get(key)) as T | undefined,
 		put: (key, value) => store.batch([{ key, value }]),
-		batch(entries) {
+		batch(entries, deletes = []) {
 			for (const { key, value } of entries) encode(key, value);
+			if (new Set([...entries.map(({ key }) => key), ...deletes]).size !== entries.length + deletes.length)
+				throw new Error("Duplicate storage key in transaction");
 			const candidate = new Map(values);
 			for (const { key, value } of entries) candidate.set(key, structuredClone(value));
+			for (const key of deletes) candidate.delete(key);
 			capacity(
 				[...candidate].reduce((sum, [key, value]) => sum + encode(key, value).bytes, 0),
 				candidate.size,
 			);
 			for (const { key, value } of entries) values.set(key, structuredClone(value));
+			for (const key of deletes) values.delete(key);
 		},
 		delete: (key) => {
 			values.delete(key);

@@ -76,6 +76,24 @@ describe("bounded indexed coordination storage", () => {
 		f.store.delete("a");
 		expect(f.store.usage()).toEqual({ bytes: 0, records: 0 });
 	});
+	it("writes and removes keys in one transaction with exact counters, and rolls both back together", () => {
+		const f = database();
+		f.store.batch([
+			{ key: "observation:w:heartbeat", value: { op: "a" } },
+			{ key: "observation-result:w:heartbeat", value: { templateId: "t" } },
+		]);
+		const before = f.store.usage();
+		expect(() => f.store.batch([{ key: "same", value: 1 }], ["same"])).toThrow("Duplicate storage key");
+		f.store.batch([{ key: "archive:1", value: { sequence: 1 } }], ["observation:w:heartbeat", "observation-result:w:heartbeat", "missing"]);
+		expect(f.store.get("observation:w:heartbeat")).toBeUndefined();
+		expect(f.store.usage()).toEqual({ bytes: new TextEncoder().encode('archive:1{"sequence":1}').length, records: 1 });
+		expect(before.records).toBe(2);
+		f.db.exec("CREATE TRIGGER reject_archive BEFORE INSERT ON records WHEN NEW.key = 'archive:2' BEGIN SELECT RAISE(ABORT, 'fault'); END");
+		const kept = f.store.usage();
+		expect(() => f.store.batch([{ key: "archive:2", value: {} }], ["archive:1"])).toThrow("fault");
+		expect(f.store.get("archive:1")).toEqual({ sequence: 1 });
+		expect(f.store.usage()).toEqual(kept);
+	});
 	it("pages 10,000 retained records with indexed scans, without deleting identities or scanning usage", () => {
 		const f = database();
 		for (let n = 0; n < 10_000; n++) f.store.put(`receipt:${String(n).padStart(8, "0")}`, { fingerprint: `hash-${n}`, result: { id: n } });

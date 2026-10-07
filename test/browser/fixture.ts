@@ -1,10 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { bundleIds } from "../../src/core/archive.ts";
 import { attentionView } from "../../src/core/attention.ts";
 import { stable } from "../../src/core/errors.ts";
 import { DirectoryController, initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
 import { initialRepository, RepositoryController } from "../../src/core/platform.ts";
 import { repositorySummary } from "../../src/shared/coordination.ts";
-import type { ObservationStatus } from "../../src/shared/platform.ts";
+import type { ArchiveBundle, ObservationStatus } from "../../src/shared/platform.ts";
 import { type Actor, type Command, CommandInput, type Repository } from "../../src/shared/platform.ts";
 import { MemoryFs } from "../../src/worker/git/memory-fs.ts";
 import { GitWorkspace } from "../../src/worker/git/workspace.ts";
@@ -120,6 +121,60 @@ export async function fixture() {
 		storage: { repository: "fixture-evidence", providerId: "fixture-evidence", revision: head, path: "tests.txt" },
 		at: FIXED_TIME,
 	});
+	// Finished work that already left the live view: an ended spike whose fork was cleaned up.
+	const archives = new Map<string, ArchiveBundle[]>([
+		[
+			repository.id,
+			[
+				{
+					sequence: 1,
+					archivedAt: FIXED_TIME - 86_400_000,
+					workspace: {
+						id: "archived-spike",
+						repositoryId: repository.id,
+						ownerId: user.id,
+						createdBy: actor,
+						title: "Spike: idempotency keys",
+						baseRevision: base,
+						headRevision: head,
+						state: "cancelled",
+						startedAt: FIXED_TIME - 3 * 86_400_000,
+						lastActivity: FIXED_TIME - 2 * 86_400_000,
+						endedAt: FIXED_TIME - 2 * 86_400_000,
+						changes: [],
+						commits: [head],
+						fork: {
+							id: "archived-spike",
+							name: "fork-archived-spike",
+							remote: "https://fixture.invalid/archived-spike.git",
+							state: "deleted",
+						},
+					},
+					artifacts: [
+						{
+							id: "archived-spike-source",
+							namespaceId: shared.id,
+							repositoryId: repository.id,
+							workspaceId: "archived-spike",
+							actor,
+							revision: head,
+							baseRevision: base,
+							kind: "source",
+							title: "Idempotency key spike",
+							contentHash: "fixture-archived-hash",
+							trust: "reported",
+							storage: { repository: "fixture-source", providerId: "fixture-source", revision: head },
+							at: FIXED_TIME - 2 * 86_400_000,
+						},
+					],
+					proposals: [],
+					verifications: [],
+					promotions: [],
+				},
+			],
+		],
+	]);
+	c.state.archiveCount = 1;
 	const runtimes = new Map([[repository.id, c]]),
 		calls: unknown[] = [];
 	const people: { id: string; name: string; email: string }[] = [user];
@@ -340,6 +395,11 @@ export async function fixture() {
 			calls.push(cmd);
 			if (cmd.tool === "get_reconciliation") return json(res, await readReconciliation(runtime, observation(runtime), git));
 			if (cmd.tool === "get_activity") return json(res, { items: runtime.state.activity, cursor: undefined });
+			if (cmd.tool === "get_archive") {
+				const bundles = archives.get(runtime.state.repository.id) ?? [];
+				if (cmd.subjectId) return json(res, bundles.find((bundle) => bundleIds(bundle).includes(cmd.subjectId!)) ?? null);
+				return json(res, { items: bundles, cursor: undefined, total: bundles.length });
+			}
 			if (cmd.tool === "inspect_retention") {
 				const workspace = runtime.workspace(cmd.workspaceId);
 				const reservation = w.reserve(authority, cmd.idempotencyKey!, stable(cmd), "source.read", workspace.id);

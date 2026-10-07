@@ -6,6 +6,7 @@ import { BackLink, CopyCommand, Icon, Pill, Section } from "./design.tsx";
 import { WorkspaceUpdateInspection } from "./inspect.tsx";
 import { laneIndex } from "./lanes.ts";
 import { LaneBullet, LaneMap, LaneStrip, LaneTrack } from "./lanes.tsx";
+import { ArchivedRecord } from "./records.tsx";
 import type { Execute } from "./source.tsx";
 import {
 	ACTION_LABELS,
@@ -364,7 +365,7 @@ export function WorkspaceDetail({
 }) {
 	const w = view.workspaces.find((s) => s.id === id);
 	const [error, setError] = useState("");
-	if (!w) return <p className="empty">This workspace is unavailable.</p>;
+	if (!w) return <ArchivedRecord key={id} id={id} execute={execute} open={open} who={who} missing="This workspace is unavailable." />;
 	const status = workspaceStatus(w),
 		relation = canonicalRelation(view, w),
 		overlaps = overlapsFor(view, w),

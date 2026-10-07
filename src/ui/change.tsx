@@ -3,6 +3,7 @@ import type { Proposal, RepositorySnapshot } from "../shared/platform.ts";
 import { BackLink, Pill, Section } from "./design.tsx";
 import { laneIndex } from "./lanes.ts";
 import { LaneBullet } from "./lanes.tsx";
+import { ArchivedRecord } from "./records.tsx";
 import { ChangeDiff, type Execute } from "./source.tsx";
 import {
 	actorLabel,
@@ -338,7 +339,7 @@ export function ChangeDetail({
 }) {
 	const p = view.proposals.find((p) => p.id === id);
 	const [error, setError] = useState("");
-	if (!p) return <p className="empty">This change is unavailable.</p>;
+	if (!p) return <ArchivedRecord key={id} id={id} execute={execute} open={open} who={who} missing="This change is unavailable." />;
 	const status = changeStatus(view, p),
 		workspace = view.workspaces.find((w) => w.id === p.workspaceId),
 		artifact = view.artifacts.find((a) => a.id === p.artifactId),

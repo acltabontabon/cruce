@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import type { ActivityEvent, Artifact, RepositorySnapshot } from "../shared/platform.ts";
+import type { ActivityEvent, ArchiveBundle, Artifact, RepositorySnapshot } from "../shared/platform.ts";
 import { Form, short, time, value } from "./controls.tsx";
-import { Icon } from "./design.tsx";
+import { BackLink, Icon, PageHeader } from "./design.tsx";
 import type { Execute } from "./inspect.tsx";
-import { actorLabel } from "./status.ts";
+import { actorLabel, ago, ownerName, type People } from "./status.ts";
 
 export function RetainedRecordRow({ record: a, open }: { record: Artifact; open: (id: string) => void }) {
 	return (
@@ -261,5 +261,175 @@ export function RetainedActivity({ execute }: { execute: Execute }) {
 			{page && !page.cursor && <p className="muted">End of retained activity.</p>}
 			{error && <p role="alert">{error}</p>}
 		</details>
+	);
+}
+
+function bundleSummary(bundle: ArchiveBundle) {
+	const promoted = bundle.proposals.filter((p) => p.state === "promoted").length,
+		rejected = bundle.proposals.filter((p) => p.state === "rejected").length;
+	if (!bundle.proposals.length) return bundle.workspace.state === "cancelled" ? "Cancelled, nothing proposed" : "Ended, nothing proposed";
+	return [promoted && `${promoted} promoted`, rejected && `${rejected} rejected`].filter(Boolean).join(" · ");
+}
+
+/** Finished work that left the live repository view, newest first, one bounded page at a time. */
+export function EarlierWork({ execute, total, open, who }: { execute: Execute; total: number; open: (id: string) => void; who: People }) {
+	const [pages, setPages] = useState<ArchiveBundle[]>([]),
+		[cursor, setCursor] = useState<string>(),
+		[loaded, setLoaded] = useState(false),
+		[error, setError] = useState(""),
+		[loading, setLoading] = useState(false);
+	const ticket = useRef(0);
+	useEffect(
+		() => () => {
+			ticket.current++;
+		},
+		[],
+	);
+	const load = async () => {
+		const current = ++ticket.current;
+		setLoading(true);
+		setError("");
+		try {
+			const result = (await execute({ tool: "get_archive", cursor })) as { items: ArchiveBundle[]; cursor?: string };
+			if (current !== ticket.current) return;
+			setPages((items) => [...items, ...result.items]);
+			setCursor(result.cursor);
+			setLoaded(true);
+		} catch (failure) {
+			if (current === ticket.current) setError((failure as Error).message);
+		} finally {
+			if (current === ticket.current) setLoading(false);
+		}
+	};
+	if (!total) return <p className="panel-note">Ended workspaces move here once their forks are cleaned up.</p>;
+	return (
+		<>
+			{pages.length > 0 && (
+				<div className="rows">
+					{pages.map((bundle) => (
+						<button type="button" className="retained-row" key={bundle.workspace.id} onClick={() => open(bundle.workspace.id)}>
+							<span className="row-main">
+								<strong>{bundle.workspace.title}</strong>
+								<small className="row-meta">
+									<span>{ownerName(bundle.workspace.ownerId, who)}</span>
+									<span>{bundleSummary(bundle)}</span>
+									<span>ended {ago(bundle.workspace.endedAt ?? bundle.archivedAt)}</span>
+								</small>
+							</span>
+							<Icon name="arrow" className="row-arrow" />
+						</button>
+					))}
+				</div>
+			)}
+			{(!loaded || cursor) && (
+				<button type="button" className="ghost" disabled={loading} onClick={() => void load()}>
+					{loading ? "Loading…" : error ? "Retry earlier work" : loaded ? "Show more earlier work" : "Show earlier work"}
+				</button>
+			)}
+			{error && <p role="alert">{error}</p>}
+		</>
+	);
+}
+
+/** Read-only record of finished work, found by any ID it contains. */
+export function ArchivedRecord({
+	id,
+	execute,
+	open,
+	who,
+	missing,
+}: {
+	id: string;
+	execute: Execute;
+	open: (tab: string, id?: string) => void;
+	who: People;
+	missing: string;
+}) {
+	const [bundle, setBundle] = useState<ArchiveBundle | null>(),
+		[error, setError] = useState("");
+	const ticket = useRef(0),
+		run = useRef(execute);
+	run.current = execute;
+	useEffect(() => {
+		const current = ++ticket.current;
+		setBundle(undefined);
+		setError("");
+		run.current({ tool: "get_archive", subjectId: id }).then(
+			(result) => current === ticket.current && setBundle(result as ArchiveBundle | null),
+			(failure: Error) => current === ticket.current && setError(failure.message),
+		);
+		return () => {
+			ticket.current++;
+		};
+	}, [id]);
+	if (error) return <p role="alert">{error}</p>;
+	if (bundle === undefined) return <p className="muted">Loading…</p>;
+	if (bundle === null) return <p className="empty">{missing}</p>;
+	const w = bundle.workspace;
+	return (
+		<article className="detail-page">
+			<BackLink label="History" onClick={() => open("history")} />
+			<PageHeader kicker={<span>Earlier work · {ownerName(w.ownerId, who)}</span>} title={w.title}>
+				<p className="muted">
+					{w.state === "cancelled" ? "Cancelled" : "Completed"} {w.endedAt ? ago(w.endedAt) : ""}. Its fork was cleaned up; these records
+					are kept read-only.
+				</p>
+			</PageHeader>
+			<dl className="facts">
+				<dt>Baseline</dt>
+				<dd>
+					<code>{short(w.baseRevision)}</code>
+				</dd>
+				<dt>Last reported head</dt>
+				<dd>
+					<code>{short(w.headRevision)}</code>
+				</dd>
+			</dl>
+			{bundle.proposals.length > 0 && (
+				<section aria-label="Changes">
+					<h2>Changes</h2>
+					<ul className="feed">
+						{bundle.proposals.map((p) => (
+							<li key={p.id}>
+								<code>{short(p.revision)}</code>
+								<span>
+									#{p.number} {p.title} · {p.state}
+								</span>
+							</li>
+						))}
+					</ul>
+				</section>
+			)}
+			{bundle.artifacts.length > 0 && (
+				<section aria-label="Published revisions and evidence">
+					<h2>Published revisions and evidence</h2>
+					<ul className="feed">
+						{bundle.artifacts.map((a) => (
+							<li key={a.id}>
+								<code>{short(a.revision)}</code>
+								<span>
+									{a.title} · {a.kind === "source" ? "published revision" : "evidence"} · {actorLabel(a.actor)}
+								</span>
+							</li>
+						))}
+					</ul>
+				</section>
+			)}
+			{bundle.promotions.length > 0 && (
+				<section aria-label="Promotions">
+					<h2>Promotions</h2>
+					<ul className="feed">
+						{bundle.promotions.map((p) => (
+							<li key={p.id}>
+								<code>{short(p.to)}</code>
+								<span>
+									{p.state === "complete" ? "Promoted" : "Promotion failed"} from <code>{short(p.from)}</code> by {actorLabel(p.actor)}
+								</span>
+							</li>
+						))}
+					</ul>
+				</section>
+			)}
+		</article>
 	);
 }
