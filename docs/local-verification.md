@@ -10,7 +10,7 @@ On **2026-10-08**, connection-presence pulses, finite reported-head/publication 
 
 Native lane-model tests distinguish active attachments from disconnected, detached and missing-execution state. Browser checks cover initial snapshots with no invented commit activity, changed reported heads, Pause/Resume, reduced motion, ten connected workspaces alongside two quiet and five detached workspaces, map pagination, retained detached rows, keyboard scrolling and mobile overflow. Screenshots were inspected in light, dark and mobile layouts; captures are in ignored `dist/ui-checks/lane-map-*.png`. Existing setup journeys cover cloning credentials, checkout preservation, client choice, clipboard fallback and canonical-setup readiness. Lint retains its Biome deprecation notice; the build retains its unavailable-Docker notice.
 
-These are isolated fixture checks. Hosted authenticated lane rendering, actual Claude parallel participation and hosted publication/promotion are not established by them. Deployment evidence is recorded in the [test environment](test-environment.md).
+These are isolated fixture checks. Deployed from `e8adaec` plus preserved startup/alignment working changes to test Worker **`5a2c7e62-9d48-4b2a-96d6-fb0cd0f1df92`**. Anonymous HTTPS confirmed expected public/authentication responses and byte-for-byte matches for the App JavaScript, stylesheet and updated client archive. Hosted authenticated lane rendering, actual Claude parallel participation and hosted publication/promotion remain unverified. The [test environment](test-environment.md#latest-test-deployment--2026-10-08) records the receipt and limits.
 
 ## Parallel workspace bridge
 
