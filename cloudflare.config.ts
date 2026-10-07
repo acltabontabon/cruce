@@ -1,4 +1,4 @@
-import { bindings, defineConfig, exports } from "cf/config";
+import { bindings, defineConfig, exports, triggers } from "cf/config";
 import * as entrypoint from "./src/worker/index.ts" with { type: "cf-worker" };
 import { installationConfig } from "./tools/installation-config.mjs";
 
@@ -7,6 +7,7 @@ export default defineConfig(({ mode }) => {
 	const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
 	const config = installationConfig(env, mode === "production");
 	const offline = mode === "offline";
+	const observationQueue = env.CRUCE_OBSERVATION_QUEUE?.trim() || `${config.workerName}-artifact-events`;
 	return {
 		accountId: offline ? undefined : config.accountId,
 		worker: {
@@ -32,6 +33,15 @@ export default defineConfig(({ mode }) => {
 				NAMESPACE: bindings.durableObject({ worker: config.workerName, exportName: "NamespaceRuntime" }),
 				OAUTH_KV: bindings.kv(),
 				...(offline ? {} : { ARTIFACTS: bindings.artifacts({ namespace: config.artifactsNamespace }) }),
+				...(!offline
+					? {
+							OBSERVATION_QUEUE: bindings.queue({ name: observationQueue }),
+							OBSERVATION_DEAD_QUEUE: bindings.queue({ name: `${observationQueue}-dead` }),
+						}
+					: {}),
+				CRUCE_OBSERVATION_QUEUE: bindings.text(observationQueue),
+				CRUCE_OBSERVATION_QUEUE_ID: bindings.text(env.CRUCE_OBSERVATION_QUEUE_ID ?? ""),
+				CF_EVENTS_API_TOKEN: bindings.secret(),
 				CRUCE_STORAGE_ACCOUNT_ID: bindings.text(offline ? "" : (config.accountId ?? "")),
 				CRUCE_ARTIFACTS_NAMESPACE: bindings.text(config.artifactsNamespace),
 				CRUCE_PUBLIC_ORIGIN: bindings.text(config.origin),
@@ -39,7 +49,19 @@ export default defineConfig(({ mode }) => {
 				CRUCE_ACCESS_AUD: bindings.text(env.CRUCE_ACCESS_AUD ?? ""),
 				CRUCE_SECRET: bindings.secret(),
 			},
-			triggers: [],
+			triggers: offline
+				? []
+				: [
+						triggers.queue({
+							name: observationQueue,
+							deadLetterQueue: `${observationQueue}-dead`,
+							maxBatchSize: 10,
+							maxBatchTimeout: 1,
+							maxRetries: 5,
+							retryDelay: 30,
+						}),
+						triggers.queue({ name: `${observationQueue}-dead`, maxBatchSize: 10, maxBatchTimeout: 1, maxRetries: 10 }),
+					],
 		},
 	};
 });

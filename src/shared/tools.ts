@@ -43,6 +43,10 @@ export const CRUCE_TOOLS: Tool[] = [
 	read("list_repositories", "List repositories authorized for this connection.", ["namespaceId"]),
 	read("get_activity", "Read retained activity in bounded pages; pass the returned cursor for the next page.", ["cursor"]),
 	read("get_retention", "Inspect recorded retention blockers and authorized cleanup recovery without provider calls.", ["workspaceId"]),
+	read(
+		"get_reconciliation",
+		"Read repository reconciliation, exact published ancestry, proposal blockers and observation health. Never fetches or writes.",
+	),
 	read("get_repository", "Repository state, current workspaces, changes, artifacts and observation freshness."),
 	read("get_workspace", "Inspect a workspace: owner, baseline, fork, current execution attachment and revisions.", ["workspaceId"]),
 	read(
@@ -154,7 +158,13 @@ export const CRUCE_TOOLS: Tool[] = [
 	),
 	write("request_promotion", "Request human review and source promotion.", ["proposalId"], "promotion:request"),
 ];
-export const HUMAN_TOOLS = new Set(["resolve_review", "reject_proposal", "promote_proposal", "retry_repository_setup"]);
+export const HUMAN_TOOLS = new Set([
+	"resolve_review",
+	"reject_proposal",
+	"promote_proposal",
+	"retry_repository_setup",
+	"configure_observation",
+]);
 export function toolByName(name: string) {
 	return CRUCE_TOOLS.find((t) => t.name === name);
 }

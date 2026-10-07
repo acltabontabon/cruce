@@ -21,7 +21,9 @@ import { boundedBody, bufferedGitRequest, type RepositoryHost, ResourceBoundary,
 import { commandContext, correlate, diagnose, diagnoseError, withDiagnostics } from "./diagnostics.ts";
 import { GitUpdateRejected, type GitWorkspace } from "./git/workspace.ts";
 import type { ConnectionGrant, NamespaceRuntime } from "./namespace-runtime.ts";
+import { Observation, type ObservationRoute, type PushSignal } from "./observation.ts";
 import { ProviderIdentity, ProviderIdentityError } from "./provider-identity.ts";
+import { readReconciliation } from "./reconciliation.ts";
 import { SourceInspection } from "./source-inspection.ts";
 import { hash, jsonBytes, memoryStore, Serial, type Store } from "./store.ts";
 
@@ -70,7 +72,37 @@ export class RepositoryRuntime {
 		readonly env: StorageEnv,
 		readonly now = Date.now,
 		readonly recovery?: RecoveryPort,
+		readonly observationRoute?: (subscription: string, route: ObservationRoute) => Promise<void>,
 	) {}
+	private observation() {
+		return new Observation(this.store, this.env, this.git, this.now, {
+			authority: async (grant) => this.namespace.authority(grant, this.state().repository.id),
+			reserve: async (grant, id, fingerprint) =>
+				this.namespace.reserve(grant, this.state().repository.id, id, fingerprint, "observation.read"),
+			settle: async (id) => this.namespace.settle(id, "complete"),
+			host: async () => (await this.resources()).host(),
+			schedule: async (at) => {
+				if (this.recovery) await this.recovery.schedule(at);
+			},
+			route: async (subscription, route) => {
+				if (!this.observationRoute) throw new DomainError(503, "Observation installation is not configured");
+				await this.observationRoute(subscription, route);
+			},
+			canonical: (observation) => {
+				const state = this.state();
+				if (state.observedCanonical && state.observedCanonical.generation >= observation.generation) return;
+				state.observedCanonical = observation;
+				this.save(new RepositoryController(state, this.now(), () => "observation"));
+			},
+		});
+	}
+	ingestObservation(messageId: string, signal: PushSignal, route: ObservationRoute, failed = false) {
+		return this.serial.run(() => this.observation().ingest(this.state(), messageId, signal, route, failed));
+	}
+	recoverObservation() {
+		return this.serial.run(() => this.observation().recover(this.state()));
+	}
+
 	initialize(repository: Repository) {
 		const state = this.store.get<RepositoryState>("repository");
 		if (state) {
@@ -426,7 +458,11 @@ export class RepositoryRuntime {
 		let result: unknown;
 		let resourceSaved = false;
 		const repo = state.repository;
-		if (cmd.tool === "inspect_source" || cmd.tool === "recover_source") {
+		if (cmd.tool === "configure_observation") {
+			result = await this.observation().configure(state, grant, requireValue(cmd.enabled, "Observation enabled flag required"), op);
+		} else if (cmd.tool === "get_reconciliation") {
+			return readReconciliation(c, this.observation().status(state), this.git);
+		} else if (cmd.tool === "inspect_source" || cmd.tool === "recover_source") {
 			return this.gate(grant, cmd, "source.read", async (host) => {
 				if (!this.store.get(`source-intent:${op}`)) this.store.put(`source-intent:${op}`, fingerprint);
 				const source = new SourceInspection(host, state);
@@ -478,36 +514,36 @@ export class RepositoryRuntime {
 		} else if (cmd.tool === "get_workspace_updates") {
 			const s = c.workspace(cmd.workspaceId),
 				updates = c.workspaceUpdates(s);
+			const reconciliation = await readReconciliation(c, this.observation().status(state), this.git);
+			const relation = reconciliation.workspaces.find((w) => w.workspaceId === s.id);
+			const canonical = relation?.canonicalRevision;
 			let available = false;
 			let comparison: WorkspaceUpdateDetails["comparison"] = "unavailable";
 			let files: import("../shared/platform.ts").WorkspaceChange[] = [];
 			try {
-				await this.known(c, requireValue(updates.revision, "Upstream unavailable"));
-				available = true;
+				requireValue(canonical, "Upstream unavailable");
+				if (!(await this.git.hasCompleteSource(canonical!)))
+					throw new DomainError(404, "Source cache unavailable; explicitly recover retained source");
 				await this.known(c, updates.baselineRevision);
-				files = (await this.git.reviewChanges(updates.baselineRevision, updates.revision!)).files.map(({ path, status, binary }) => ({
+				files = (await this.git.reviewChanges(updates.baselineRevision, canonical!)).files.map(({ path, status, binary }) => ({
 					path,
 					status,
 					binary,
 				}));
-				await this.known(c, s.headRevision);
-				const common = await this.git.mergeBase(s.headRevision, updates.revision!);
-				comparison =
-					s.headRevision === updates.revision
-						? "current"
-						: common === updates.revision
-							? "ahead"
-							: common === s.headRevision
-								? "behind"
-								: common
-									? "diverged"
-									: "unrelated";
+				available = true;
 			} catch (error) {
 				if (!(error instanceof DomainError)) throw error;
 			}
+			comparison = relation?.relation && relation.relation !== "unknown" ? relation.relation : "unavailable";
+			available = available && comparison !== "unavailable";
 			const touched = new Set(s.changes.flatMap((f) => [f.path, ...(f.previousPath ? [f.previousPath] : [])]));
 			result = {
 				...updates,
+				status: comparison === "unavailable" ? "unknown" : comparison === "current" ? "current" : "available",
+				trust: reconciliation.observation.canonical ? "observed" : "accepted",
+				basis: relation?.basis ?? "baseline",
+				comparedRevision: relation?.revision,
+				revision: relation?.canonicalRevision,
 				available,
 				comparison,
 				changes: files,
@@ -601,8 +637,17 @@ export class RepositoryRuntime {
 			result = await this.publish(c, cmd, grant, op, fingerprint);
 		} else {
 			result = c.command(cmd, a);
+			if (cmd.tool === "get_workspace") {
+				const workspace = result as Workspace;
+				result = {
+					...workspace,
+					observedRef: this.observation().status(state).workspaces[workspace.id],
+					observedRefs: this.store.get(`observation-inventory:${workspace.id}`),
+				};
+			}
 			if (cmd.tool === "get_repository") {
 				const snapshot = result as import("../shared/platform.ts").RepositorySnapshot;
+				snapshot.reconciliation = await readReconciliation(c, this.observation().status(state), this.git);
 				const setup = this.store.get<Command>("provision-command");
 				if (
 					setup?.idempotencyKey &&
@@ -637,6 +682,10 @@ export class RepositoryRuntime {
 				state.receipts[op] = { fingerprint, result: undefined, workspaceResult: { templateId, lastActivity, lastReportAt } };
 			} else state.receipts[op] = { fingerprint, result };
 			this.save(c, extra);
+		}
+		if (mutation) {
+			await this.observation().sync(state);
+			if (this.observation().status(state).enabled) await this.recovery?.schedule(this.now() + 1000);
 		}
 		return result;
 	}
@@ -1190,6 +1239,14 @@ export class RepositoryRuntime {
 			operation.phase = "confirmed";
 			promotion.state = "complete";
 			state.sourceHead = promotion.to;
+			if (state.observedCanonical)
+				state.observedCanonical = {
+					...state.observedCanonical,
+					revision: promotion.to,
+					deleted: false,
+					checkedAt: this.now(),
+					generation: state.observedCanonical.generation + 1,
+				};
 			p.state = "promoted";
 			c.event(promotion.actor, "source_promoted", p.title, [p.id, p.revision, promotion.id]);
 			state.receipts[op] = { fingerprint, result: promotion };

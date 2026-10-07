@@ -4,6 +4,12 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+### Added
+
+- Add opt-in pushed-ref observation with namespace-budgeted subscriptions, idempotent Queue ingestion, bounded gap recovery and visible degraded state. Observations never publish or approve source.
+- Add a repository reconciliation view and `get_reconciliation` MCP read based on exact published Git ancestry, with proposal blockers and explicit unknown results.
+- Show report freshness independently of presence throughout workspace and reconciliation views.
+
 ### Fixed
 
 - Complete an interrupted promotion whose update already reached canonical, even if evidence or policy changed afterwards. Record evidence only for open changes.

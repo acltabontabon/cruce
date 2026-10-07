@@ -51,6 +51,7 @@ describe("canonical Git product boundary", () => {
 			"revision.publish",
 			"artifact.publish",
 			"source.read",
+			"observation.read",
 		]);
 		const snapshot = controller().snapshot(authority());
 		expect(snapshot).not.toHaveProperty("environments");

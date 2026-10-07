@@ -25,7 +25,9 @@ export function repositorySummary(snapshot: RepositorySnapshot): RepositorySumma
 			ready: open.filter((p) => snapshot.readiness[p.id]?.ready).length,
 			stale: open.filter((p) => snapshot.readiness[p.id] && !snapshot.readiness[p.id].checks.current).length,
 			behind: snapshot.workspaces.filter(
-				(w) => !["completed", "cancelled"].includes(w.state) && snapshot.workspaceUpdates[w.id]?.status === "available",
+				(w) =>
+					!["completed", "cancelled"].includes(w.state) &&
+					snapshot.reconciliation?.workspaces.some((row) => row.workspaceId === w.id && row.relation === "behind"),
 			).length,
 		},
 	};

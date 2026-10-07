@@ -762,6 +762,35 @@ describe("repository runtime", () => {
 		expect(f.host.ensure).not.toHaveBeenCalled();
 		expect(f.w.state.reservations).toHaveLength(1);
 	});
+	it("compares canonical files against the exact observed revision without accepting it", async () => {
+		const f = await fixture();
+		const observed = await f.git.commit({
+			ref: "refs/heads/external",
+			parent: f.base,
+			files: { "external.txt": "remote change" },
+			message: "External movement",
+			author: { name: "Other", email: "other@local", timestamp: 12346 },
+		});
+		const state = f.runtime.state();
+		state.observedCanonical = {
+			providerId: "canonical",
+			ref: "refs/heads/trunk",
+			revision: observed,
+			deleted: false,
+			checkedAt: 1000,
+			generation: 1,
+		};
+		f.store.put("repository", state);
+		expect(await f.call("get_workspace_updates", { workspaceId: f.workspace.id })).toMatchObject({
+			revision: observed,
+			trust: "observed",
+			comparison: "behind",
+			available: true,
+			basis: "baseline",
+			changes: [{ path: "external.txt", status: "added" }],
+		});
+		expect(f.runtime.state().sourceHead).toBe(f.base);
+	});
 	it("keeps reported heads separate from authoritative canonical source", async () => {
 		const f = await fixture();
 		await f.call("report_change", { workspaceId: f.workspace.id, execution: f.execution, revision: "e".repeat(40), changes: [] });

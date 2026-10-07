@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { reportFreshness } from "../core/reconciliation.ts";
 import { gitRemotePath } from "../shared/git-access.ts";
 import type { RepositorySnapshot, Workspace } from "../shared/platform.ts";
 import { BackLink, CopyCommand, Icon, Pill, Section } from "./design.tsx";
@@ -16,6 +17,17 @@ import {
 	workedBy,
 	workspaceStatus,
 } from "./status.ts";
+
+function ReportAge({ at, now }: { at?: number; now: number }) {
+	const report = reportFreshness(at, now);
+	return (
+		<span>
+			{report.state === "unknown"
+				? "Report time unavailable"
+				: `${report.state === "stale" ? "Stale report" : "Reported"} · ${ago(at!, now)}`}
+		</span>
+	);
+}
 
 type Open = (tab: string, id?: string) => void;
 
@@ -35,11 +47,7 @@ function WorkspaceRow({ view, w, open }: { view: RepositorySnapshot; w: Workspac
 				<small className="row-meta">
 					<span>{workedBy(w)}</span>
 					<span>
-						{w.state === "active" || w.state === "disconnected"
-							? w.lastReportAt === undefined
-								? "Report time unavailable"
-								: `reported ${ago(w.lastReportAt)}`
-							: `started ${ago(w.startedAt)}`}
+						<ReportAge at={w.lastReportAt} now={view.asOf ?? Date.now()} />
 					</span>
 				</small>
 				{overlaps.length > 0 && (
@@ -58,40 +66,127 @@ function WorkspaceRow({ view, w, open }: { view: RepositorySnapshot; w: Workspac
 	);
 }
 
+function Reconciliation({ view, open }: { view: RepositorySnapshot; open: Open }) {
+	const r = view.reconciliation;
+	if (!r) return null;
+	return (
+		<section className="panel" aria-label="Reconciliation">
+			<div className="panel-head">
+				<h2>Reconciliation</h2>
+				<span>
+					Observation {r.observation.state}
+					{r.observation.pending ? ` · ${r.observation.pending} checks pending` : ""}
+				</span>
+			</div>
+			<p className="panel-note">
+				Accepted <code>{short(r.acceptedRevision)}</code> · Observed canonical{" "}
+				<code>{r.observation.canonical?.deleted ? "ref deleted" : short(r.observation.canonical?.revision)}</code>
+				{r.observation.lastCheckedAt !== undefined
+					? ` · checked ${ago(r.observation.lastCheckedAt, r.asOf)}`
+					: " · no complete observation yet"}
+				. {r.observation.reason}
+			</p>
+			<div className="rows">
+				{r.workspaces
+					.filter((row) => view.workspaces.some((w) => w.id === row.workspaceId))
+					.map((row) => {
+						const workspace = view.workspaces.find((w) => w.id === row.workspaceId)!;
+						const missing = row.incorporationCounts.missing;
+						const unknown = row.incorporationCounts.unknown;
+						return (
+							<button
+								type="button"
+								className="reconciliation-row"
+								key={row.workspaceId}
+								aria-label={`Inspect reconciliation for ${workspace.title}`}
+								onClick={() => open("workspaces", row.workspaceId)}
+							>
+								<span className="row-main">
+									<strong>{workspace.title}</strong>
+									<small>
+										{row.basis === "published" ? "Published" : "Baseline only"} <code>{short(row.revision)}</code> ·{" "}
+										{canonicalRelation(view, workspace).label}
+									</small>
+									<small>
+										{row.basis === "baseline"
+											? "Incorporation unverified before publication"
+											: missing
+												? `${missing} accepted revisions missing`
+												: unknown
+													? `${unknown} accepted revisions unverified`
+													: row.incorporationCounts.present
+														? "Accepted revisions incorporated"
+														: "No accepted promotions to compare"}
+									</small>
+									<small>
+										<ReportAge at={row.report.reportedAt} now={r.asOf} />
+									</small>
+								</span>
+							</button>
+						);
+					})}
+			</div>
+			{r.proposals.length > 0 && (
+				<div className="rows">
+					{r.proposals
+						.filter((row) => view.proposals.some((p) => p.id === row.proposalId))
+						.map((row) => {
+							const proposal = view.proposals.find((p) => p.id === row.proposalId)!;
+							return (
+								<button type="button" className="reconciliation-row" key={row.proposalId} onClick={() => open("changes", row.proposalId)}>
+									<span className="row-main">
+										<strong>
+											#{proposal.number} {proposal.title}
+											{row.stale ? " · stale" : ""}
+										</strong>
+										<small>{row.readiness.reasons.join(" · ") || "Ready for human promotion"}</small>
+									</span>
+								</button>
+							);
+						})}
+				</div>
+			)}
+		</section>
+	);
+}
+
 export function WorkspaceList({ view, open }: { view: RepositorySnapshot; open: Open }) {
 	const sorted = [...view.workspaces].sort((a, b) => b.lastActivity - a.lastActivity || a.id.localeCompare(b.id));
 	const live = sorted.filter((w) => !ended(w)),
 		done = sorted.filter(ended);
 	return (
-		<section className="panel workspaces-screen">
-			<div className="panel-head">
-				<h2>Active workspaces</h2>
-				<span className="panel-count">{live.length}</span>
-			</div>
-			{live.length ? (
-				<div className="rows">
-					{live.map((w) => (
-						<WorkspaceRow key={w.id} view={view} w={w} open={open} />
-					))}
+		<>
+			<Reconciliation view={view} open={open} />
+			<section className="panel workspaces-screen">
+				<div className="panel-head">
+					<h2>Active workspaces</h2>
+					<span className="panel-count">{live.length}</span>
 				</div>
-			) : (
-				<p className="panel-note">
-					No active workspaces. One appears when you or an agent starts work through Cruce. Use Connect an agent to begin.
-				</p>
-			)}
-			{done.length > 0 && (
-				<details className="group">
-					<summary>
-						{done.length} ended {done.length === 1 ? "workspace" : "workspaces"}
-					</summary>
+				{live.length ? (
 					<div className="rows">
-						{done.map((w) => (
+						{live.map((w) => (
 							<WorkspaceRow key={w.id} view={view} w={w} open={open} />
 						))}
 					</div>
-				</details>
-			)}
-		</section>
+				) : (
+					<p className="panel-note">
+						No active workspaces. One appears when you or an agent starts work through Cruce. Use Connect an agent to begin.
+					</p>
+				)}
+				{done.length > 0 && (
+					<details className="group">
+						<summary>
+							{done.length} ended {done.length === 1 ? "workspace" : "workspaces"}
+						</summary>
+						<div className="rows">
+							{done.map((w) => (
+								<WorkspaceRow key={w.id} view={view} w={w} open={open} />
+							))}
+						</div>
+					</details>
+				)}
+			</section>
+		</>
 	);
 }
 
@@ -140,6 +235,26 @@ export function WorkspaceDetail({ view, id, execute, open }: { view: RepositoryS
 					</dd>
 				</div>
 				<div>
+					<dt>Observed pushed ref</dt>
+					<dd>
+						{view.reconciliation?.observation.workspaces[w.id] ? (
+							<>
+								<code>{view.reconciliation.observation.workspaces[w.id].ref}</code> ·{" "}
+								<code>
+									{view.reconciliation.observation.workspaces[w.id].deleted
+										? "ref unavailable"
+										: short(view.reconciliation.observation.workspaces[w.id].revision)}
+								</code>{" "}
+								· checked {ago(view.reconciliation.observation.workspaces[w.id].checkedAt, view.asOf)} · observed, not published
+							</>
+						) : (
+							"Not yet observed"
+						)}
+					</dd>
+					<dt>Report freshness</dt>
+					<dd>
+						<ReportAge at={w.lastReportAt} now={view.asOf ?? Date.now()} />
+					</dd>
 					<dt>Latest reported head</dt>
 					<dd>
 						<code title={w.headRevision}>{short(w.headRevision)}</code> · {w.commits.length} {w.commits.length === 1 ? "commit" : "commits"}
@@ -160,7 +275,7 @@ export function WorkspaceDetail({ view, id, execute, open }: { view: RepositoryS
 									<small className="muted">
 										{o.observedAt === undefined
 											? "Report time unavailable."
-											: `Reports from ${ago(o.observedAt)}${Date.now() - o.observedAt >= 90000 ? " · stale reports" : ""}.`}
+											: `Reports from ${ago(o.observedAt, view.asOf)}${reportFreshness(o.observedAt, view.asOf ?? Date.now()).state === "stale" ? " · stale reports" : ""}.`}
 									</small>
 								</span>
 							))}

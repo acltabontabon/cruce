@@ -51,6 +51,7 @@ const repositoryInput = z.object({
 	idempotencyKey: id,
 });
 const humanBridgeTools = new Set([
+	"get_reconciliation",
 	"get_repository",
 	"get_activity",
 	"get_retention",

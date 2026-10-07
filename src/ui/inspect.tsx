@@ -35,7 +35,7 @@ export function WorkspaceUpdateInspection({ id, execute }: { id: string; execute
 				<div>
 					<p>
 						{updates.available
-							? `Compared with its latest published revision, the workspace is ${updates.comparison === "behind" ? "behind canonical" : updates.comparison === "diverged" ? "diverged from canonical" : updates.comparison === "ahead" ? "ahead of canonical" : updates.comparison === "current" ? "up to date" : "unrelated to canonical"}.`
+							? `Compared with its ${updates.basis === "baseline" ? "baseline (no publication yet)" : "latest published revision"}, the workspace is ${updates.comparison === "behind" ? "behind canonical" : updates.comparison === "diverged" ? "diverged from canonical" : updates.comparison === "ahead" ? "ahead of canonical" : updates.comparison === "current" ? "up to date" : "unrelated to canonical"}.`
 							: "Canonical changes are unavailable until committed source is published."}
 					</p>
 					{updates.changes.length > 0 && (

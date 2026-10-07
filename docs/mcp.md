@@ -25,7 +25,7 @@ The bridge supplies namespace, repository, workspace and execution identities, p
 | Purpose | Commands | Scope / resource boundary |
 | --- | --- | --- |
 | Discover | `list_namespaces`, `list_repositories`, `get_repository` | `cruce:read`; recorded state only |
-| Inspect workspaces and concurrency | `get_workspace`, `list_active_workspaces`, `get_workspace_updates`, `inspect_overlap` | `cruce:read`; overlap is advisory; divergence uses available objects only |
+| Inspect workspaces and concurrency | `get_workspace`, `list_active_workspaces`, `get_workspace_updates`, `get_reconciliation`, `inspect_overlap` | `cruce:read`; overlap is advisory; divergence uses available objects only |
 | Inspect cached source and provenance | `get_git_access`, `get_source`, `get_history`, `get_diff`, `read_artifact`, `get_lineage` | `cruce:read`; source requires locally available objects; never fetches |
 | Inspect or recover stored source explicitly | `inspect_source`, `recover_source` | Read grant / `cruce:read`; `source.read` resource policy, daily budget and idempotency key |
 | Workspace lifecycle | `start_workspace`, `detach_workspace`, `end_workspace` | `workspace:write`; owner only for existing workspaces |
@@ -54,7 +54,7 @@ There is deliberately no tool to launch, pause, resume, message or schedule an a
 5. **Reconcile when canonical moves.** Fetch canonical, merge with Git, verify, push, publish and propose the reconciled revision for fresh review. Fetching or receiving an update is not reconciliation.
 6. **Detach or end deliberately.** `detach_workspace` frees the workspace for another checkout. `end_workspace` completes it without promoting anything. Fork cleanup is a separate, retention-checked step.
 
-These steps are cooperative guidance, not scheduling gates. Cruce cannot make an agent read context, cannot see unconnected participants, and never reconstructs an agent conversation. A push is observed only when publication reads the fork today; [roadmap C1](../ROADMAP.md#coordination-intelligence) adds observed pushes.
+These steps are cooperative guidance, not scheduling gates. Cruce cannot make an agent read context, cannot see unconnected participants, and never reconstructs an agent conversation. In repositories with human-enabled observation, push events trigger identity-checked ref inspection with bounded backfill. `get_reconciliation` exposes its health and published-ancestry relationships; it never fetches or writes. `get_workspace` additionally exposes the bounded last observed fork-ref inventory. Publication and acceptance remain separate.
 
 ## Failures and retries
 

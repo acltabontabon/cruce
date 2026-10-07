@@ -861,7 +861,7 @@ strong {
 	top: 18%;
 }
 .record {
-	border-bottom: 1px solid var(--line);
+	border-bottom: 1px solid var(--hairline);
 	padding: 20px 0;
 }
 .record p {
@@ -1223,7 +1223,7 @@ main[data-screen="settings"] > h2 {
 	}
 	.source-browser nav {
 		border-right: 0;
-		border-bottom: 1px solid var(--line);
+		border-bottom: 1px solid var(--hairline);
 		max-height: 200px;
 		overflow: auto;
 	}
@@ -3206,4 +3206,19 @@ details.team-row {
 }
 .completed-check[open] > summary {
 	margin-bottom: 8px;
+}
+
+.reconciliation-row {
+	display: block;
+	width: 100%;
+	padding: 12px 16px;
+	text-align: left;
+	border: 0;
+	border-bottom: 1px solid var(--hairline);
+	background: transparent;
+	overflow-wrap: anywhere;
+}
+.reconciliation-row .row-main {
+	display: grid;
+	gap: 4px;
 }

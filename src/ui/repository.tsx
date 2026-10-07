@@ -81,6 +81,14 @@ function AttentionBar({ view, open }: { view: RepositorySnapshot; open: Open }) 
 	if (a.behind) items.push({ label: `${plural(a.behind, "workspace")} behind canonical`, tab: "workspaces", tone: "warning" });
 	if (a.overlaps)
 		items.push({ label: `${plural(a.overlaps, "file")} changed in more than one workspace`, tab: "workspaces", tone: "warning" });
+	if (view.reconciliation?.observation.state === "degraded")
+		items.push({ label: "Observation degraded", tab: "workspaces", tone: "warning" });
+	if (
+		view.reconciliation &&
+		(view.reconciliation.workspaces.length || view.reconciliation.proposals.length) &&
+		!items.some((item) => item.tab === "workspaces")
+	)
+		items.push({ label: "Inspect reconciliation", tab: "workspaces", tone: "neutral" });
 	if (a.quiet) items.push({ label: `${plural(a.quiet, "workspace")} not reporting`, tab: "workspaces", tone: "neutral" });
 	return (
 		<section className="attention" aria-label="Needs attention">
@@ -526,6 +534,7 @@ function ConnectGuide({ view, initial = "connect" }: { view: RepositorySnapshot;
 }
 
 function RepositorySettings({
+	execute,
 	view,
 	namespace,
 	mutate,
@@ -539,11 +548,34 @@ function RepositorySettings({
 	base: string;
 	onError: (e: Error) => void;
 	setup: () => void;
+	execute: Execute;
 }) {
 	const url = `${base}/repositories/${view.repository.id}`;
 	const manage = view.permissions.maintain && namespace;
 	return (
 		<div className="settings">
+			<SettingRow
+				title="Push observation"
+				detail="Observe pushed refs without publishing or approving them. Missed events are checked every 15 minutes when policy and budget permit."
+			>
+				<p>
+					Observation {view.reconciliation?.observation.state ?? "disabled"}. {view.reconciliation?.observation.reason}
+				</p>
+				<p>
+					Estimated idle checks: {view.reconciliation?.observation.estimatedDailyOperations ?? 96} namespace operations/day, plus push
+					checks and subscription setup. Enabling does not raise the namespace budget. Adjust its limit explicitly in namespace settings.
+				</p>
+				{view.permissions.approve && (
+					<Form
+						label={view.reconciliation?.observation.enabled ? "Disable observation" : "Enable observation"}
+						submit={() =>
+							execute({ tool: "configure_observation", enabled: !view.reconciliation?.observation.enabled }).then(() => undefined)
+						}
+					>
+						<span>Uses installation cloud resources and the namespace observation policy.</span>
+					</Form>
+				)}
+			</SettingRow>
 			{view.capacity && (
 				<SettingRow
 					title="Coordination capacity"
@@ -824,6 +856,7 @@ export function RepositoryPage({
 			{tab === "history" && <HistoryScreen key={id} view={view} id={id} execute={execute} open={open} />}
 			{tab === "settings" && (
 				<RepositorySettings
+					execute={execute}
 					view={view}
 					namespace={namespace}
 					mutate={mutate}

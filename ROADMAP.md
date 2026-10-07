@@ -52,18 +52,18 @@ Canonical divergence, concurrent workspace awareness, path overlap, staleness an
 
 | ID | Item | Priority | Status |
 | --- | --- | --- | --- |
-| C1 | Observed pushed revisions and canonical movement | Next | Open; feasibility questions below |
-| C2 | Staleness and reconciliation view | Next | Open |
+| C1 | Observed pushed revisions and canonical movement | Next | Implemented; verification below |
+| C2 | Staleness and reconciliation view | Next | Implemented; verification below |
 | C3 | Report freshness separate from presence | Next | Done locally |
 | C4 | Relationship hints beyond paths | Later | Evidence-gated |
 
-**C1 — Observed pushed revisions.** A successful push does not update an observed workspace head; only publication reads the fork. *Target:* observe fork pushes and canonical movement through Artifacts event subscriptions → Queues → authenticated idempotent ingestion → Repository DO, with bounded reconciliation and backfill after gaps. Keep observed state separate from accepted provenance. Duplicates, reordering, rewinds, deleted refs and truncated payloads never regress or approve state. Degraded observation is visible. No event starts an agent or promotes code.
+**C1 — Observed pushed revisions.** Implemented: explicit human-maintainer opt-in, Artifacts push subscriptions → Queues → private idempotent Repository DO ingestion, identity-checked current-ref inspection, and bounded 15-minute reconciliation. Reported heads, observed refs, retained publications and accepted canonical remain distinct. Rewinds/deleted refs remain visible without rewriting accepted history; duplicates, reordering and truncated event payloads cannot assign heads. Namespace policy, current authority and charged reservations govern retries. Degraded observations and recurring cost are visible. No event starts an agent or promotes code. See [ADR 0007](docs/decisions/0007-observed-refs-and-reconciliation.md) and [verification](docs/local-verification.md#coordination-observation-and-reconciliation-c1c3).
 
-**C2 — Staleness and reconciliation view.** One compact, read-only view per repository answers: which workspaces are behind canonical, which open proposals are stale against canonical, which continuing workspaces have not yet incorporated accepted revisions (derived from Git ancestry of published revisions, never from acknowledgements), and what blocks each proposal. Expose it in the console and through the existing MCP boundary.
+**C2 — Staleness and reconciliation view.** Implemented: the Workspaces view and `get_reconciliation` expose published-ancestry relations, accepted-revision incorporation and every open proposal's controller-derived blockers. Before publication the comparison is explicitly baseline-only; incorporation remains unverified. Complete all-parent cached Git traversal proves ancestry; missing objects and traversal limits stay unknown. Reads neither fetch nor mutate. Observed canonical movement never becomes accepted provenance. Verification is linked above.
 
-**C3 — Report freshness.** Implemented locally: explicit report time is separate from presence, and the console labels stale or unknown report age. Hosted acceptance remains separate.
+**C3 — Report freshness.** Explicit server report time remains separate from presence. Shared freshness is fresh below 90 seconds, stale at or above 90 seconds, and unknown without a timestamp. Workspace, reconciliation and overlap views label the distinction. Hosted acceptance is recorded separately in verification.
 
-**C4 — Relationship hints.** Symbol, module or dependency hints that catch interactions path overlap misses. Proceed only after C1–C3 are in use and measured misses justify it. Hints never grant authority or claim compatibility.
+**C4 — Relationship hints.** Remains evidence-gated. After C1–C3 are operational, require **two independently reviewed, reproducible real interactions missed by path overlap**, identifying exact revisions, disjoint paths and consequences. Measure observation delay, unknown comparisons, coordination effort, false alarms and misses. Synthetic examples alone cannot unlock the gate. Those cases determine the smallest symbol, module or dependency hint in a subsequent implementation plan; no analyzer ships in this stage. Hints never grant authority or claim compatibility.
 
 ## Review and reconciliation
 
@@ -147,4 +147,4 @@ Count deliberate review separately from routine coordination. If value concentra
 
 ## Open feasibility questions
 
-Artifacts event delivery, event identity and replay guarantees, and private-import transport are unresolved. Resolve them with current primary documentation and bounded verification before choosing a mechanism. Record an unknown rather than inferring a guarantee from an example.
+Hosted Artifacts subscription privileges, event latency and recovery remain acceptance checks; event ordering and historical replay are not assumed. Private-import transport remains unresolved. Resolve them with current primary documentation and bounded verification before choosing a mechanism. Record an unknown rather than inferring a guarantee from an example.

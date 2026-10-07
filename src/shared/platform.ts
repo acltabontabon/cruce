@@ -64,6 +64,7 @@ export const RESOURCE_ACTIONS = [
 	"revision.publish",
 	"artifact.publish",
 	"source.read",
+	"observation.read",
 ] as const;
 export type ResourceAction = (typeof RESOURCE_ACTIONS)[number];
 export type ResourceRule = "allow" | "approval" | "deny";
@@ -163,13 +164,59 @@ export interface RetentionInspection {
 	refs: { ref: string; revision: string; retained: boolean; reason?: "unretained" | "unavailable" }[];
 	blockers: string[];
 }
+/** Provider observations are never publication or acceptance. */
+export interface RefObservation {
+	providerId: string;
+	ref: string;
+	revision?: string;
+	deleted: boolean;
+	checkedAt: number;
+	generation: number;
+}
+export interface ObservationStatus {
+	enabled: boolean;
+	state: "disabled" | "pending" | "healthy" | "degraded";
+	generation: number;
+	lastCheckedAt?: number;
+	pending: number;
+	reason?: string;
+	canonical?: RefObservation;
+	workspaces: Record<string, RefObservation>;
+	estimatedDailyOperations: number;
+}
+export type GitRelation = "unknown" | "current" | "ahead" | "behind" | "diverged" | "unrelated";
+export interface ReportFreshness {
+	state: "fresh" | "stale" | "unknown";
+	reportedAt?: number;
+	ageMs?: number;
+}
+export interface ReconciliationView {
+	asOf: number;
+	acceptedRevision?: string;
+	canonicalRevision?: string;
+	observation: ObservationStatus;
+	workspaces: {
+		workspaceId: string;
+		revision: string;
+		basis: "published" | "baseline";
+		canonicalRevision?: string;
+		relation: GitRelation;
+		report: ReportFreshness;
+		incorporationCounts: { present: number; missing: number; unknown: number };
+		incorporationTruncated: boolean;
+		incorporation: { revision: string; promotionId: string; state: "present" | "missing" | "unknown" }[];
+	}[];
+	proposals: { proposalId: string; stale: boolean; readiness: Readiness }[];
+}
 export interface WorkspaceUpdates {
 	baselineRevision: string;
 	revision?: string;
-	trust?: "accepted" | "reported";
+	trust?: "accepted" | "reported" | "observed";
 	status: "unknown" | "current" | "available";
 }
 export interface WorkspaceUpdateDetails extends WorkspaceUpdates {
+	basis?: "published" | "baseline";
+	comparedRevision?: string;
 	available: boolean;
 	comparison: "unavailable" | "current" | "ahead" | "behind" | "diverged" | "unrelated";
 	changes: WorkspaceChange[];
@@ -275,6 +322,8 @@ export interface RepositoryState {
 		{ fingerprint: string; result: unknown; workspaceResult?: { templateId: string; lastActivity: number; lastReportAt?: number } }
 	>;
 	sourceHead?: string;
+	/** Latest confirmed provider ref; never accepted provenance. */
+	observedCanonical?: RefObservation;
 	canonical?: { id: string; name: string; remote: string };
 }
 /** Controller-derived promotion readiness for one exact revision. */
@@ -294,6 +343,8 @@ export interface Readiness {
 	};
 }
 export interface RepositorySnapshot extends Omit<RepositoryState, "receipts"> {
+	reconciliation?: ReconciliationView;
+	asOf?: number;
 	overlaps: Overlap[];
 	workspaceUpdates: Record<string, WorkspaceUpdates>;
 	permissions: { write: boolean; maintain: boolean; human: boolean; approve: boolean };
@@ -355,6 +406,7 @@ export const ChangeInput = z
 export const CommandInput = z
 	.object({
 		tool: z.string(),
+		enabled: z.boolean().optional(),
 		namespaceId: id.optional(),
 		repositoryId: id.optional(),
 		workspaceId: id.optional(),

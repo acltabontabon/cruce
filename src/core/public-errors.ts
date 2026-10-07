@@ -1,6 +1,8 @@
 /** Explicit public text, paired with its status. Adding an internal error never publishes its message implicitly. */
 export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 	400: [
+		"Observation enabled flag required",
+
 		"Invalid page limit",
 		"Artifact content required",
 		"Attach a hosted fork first",
@@ -122,6 +124,15 @@ export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 	],
 	405: ["GET required", "POST required"],
 	409: [
+		"Fork parent identity changed",
+		"Observation subscription identity changed",
+		"Observation subscription is disabled",
+		"Observation recovery must finish before enabling a new configuration",
+		"Observation provider identity changed",
+		"Observation installation identity changed",
+		"Observation fork parent is unavailable",
+		"Observed canonical differs from accepted history; reconcile canonical before promotion",
+
 		"Retained operation result unavailable; restore its recorded state before retrying",
 		"Retention proof unavailable; recover or inspect source before cleanup",
 		"Directory layout exceeds the supported conversion limit",
@@ -212,6 +223,9 @@ export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 		"Workspace is attached to another execution context; detach it first",
 	],
 	413: [
+		"Observation ref inventory exceeds its limit",
+		"Observation subscription inventory exceeds its limit",
+
 		"Git ref advertisement exceeds the inspection limit",
 		"Coordination record exceeds its byte limit",
 		"Coordination state exceeds its byte limit; inspect capacity before adding work",
@@ -240,6 +254,11 @@ export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 		"Invalid Artifacts Git remote",
 	],
 	503: [
+		"Observation installation is not configured",
+		"Observation subscription service unavailable",
+		"Observation subscription inventory is incomplete",
+		"Observation subscription creation is uncertain",
+
 		"Access identity verification unavailable; retry",
 		"Configure Cloudflare Access identity for Cruce",
 		"Git cache reset unavailable",

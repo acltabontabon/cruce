@@ -3,9 +3,11 @@ import { stable } from "../../src/core/errors.ts";
 import { DirectoryController, initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
 import { initialRepository, RepositoryController } from "../../src/core/platform.ts";
 import { repositorySummary } from "../../src/shared/coordination.ts";
+import type { ObservationStatus } from "../../src/shared/platform.ts";
 import { type Actor, type Command, CommandInput, type Repository } from "../../src/shared/platform.ts";
 import { MemoryFs } from "../../src/worker/git/memory-fs.ts";
 import { GitWorkspace } from "../../src/worker/git/workspace.ts";
+import { readReconciliation } from "../../src/worker/reconciliation.ts";
 export const FIXED_TIME = 1791158400000;
 export async function fixture() {
 	const git = new GitWorkspace(new MemoryFs() as never);
@@ -25,6 +27,19 @@ export async function fixture() {
 		message: "Bound retries",
 		author,
 	});
+	const observation = (runtime: RepositoryController): ObservationStatus => ({
+		enabled: false,
+		state: "disabled",
+		generation: 0,
+		pending: 0,
+		workspaces: {},
+		estimatedDailyOperations: 96 * (1 + runtime.state.workspaces.filter((w) => w.fork?.state === "ready").length),
+	});
+	const snapshotsFor = async (runtime: RepositoryController, authority: Parameters<RepositoryController["snapshot"]>[0]) => ({
+		...runtime.snapshot(authority),
+		reconciliation: await readReconciliation(runtime, observation(runtime), git),
+	});
+
 	let counter = 0;
 	const next = () => `fixture-${++counter}`;
 	const directory = new DirectoryController({ users: [], namespaces: [] }, FIXED_TIME, next),
@@ -170,8 +185,8 @@ export async function fixture() {
 					Object.assign(w.state.namespace, directory.rename(w.state.namespace.id, body));
 					return json(res, w.state.namespace);
 				}
-				const snapshots = w.state.repositories.map((r) =>
-					runtimes.get(r.id)!.snapshot({ ...a, repositoryId: r.id, repositoryRole: "maintain" }),
+				const snapshots = await Promise.all(
+					w.state.repositories.map((r) => snapshotsFor(runtimes.get(r.id)!, { ...a, repositoryId: r.id, repositoryRole: "maintain" })),
 				);
 				const repositorySummaries = snapshots.map(repositorySummary);
 				// Mirrors the Worker's namespace view: the newest events across its repositories.
@@ -227,9 +242,10 @@ export async function fixture() {
 				w.repository(a, runtime.state.repository);
 				return json(res, runtime.state.repository);
 			}
-			if (req.method === "GET") return json(res, runtime.snapshot(authority));
+			if (req.method === "GET") return json(res, await snapshotsFor(runtime, authority));
 			const cmd = CommandInput.parse({ ...body, namespaceId: w.state.namespace.id, repositoryId: runtime.state.repository.id });
 			calls.push(cmd);
+			if (cmd.tool === "get_reconciliation") return json(res, await readReconciliation(runtime, observation(runtime), git));
 			if (cmd.tool === "get_activity") return json(res, { items: runtime.state.activity, cursor: undefined });
 			if (cmd.tool === "inspect_retention") {
 				const workspace = runtime.workspace(cmd.workspaceId);

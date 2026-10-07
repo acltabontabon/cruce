@@ -32,6 +32,7 @@ export const DEFAULT_RESOURCE_POLICY: ResourcePolicy = {
 		"revision.publish": "allow",
 		"artifact.publish": "allow",
 		"source.read": "allow",
+		"observation.read": "approval",
 	},
 	dailyLimit: 100,
 };

@@ -77,11 +77,12 @@ Correctness depends on naming the exact revision. "Latest" is never sufficient w
 | --- | --- | --- |
 | Baseline | `Workspace.baseRevision` | Recorded at start; immutable |
 | Reported head | `Workspace.headRevision`, `changes`, `commits` from the attached execution | Reported by the participant |
-| Pushed revision | Workspace fork ref | Observed by Cruce only when it reads the fork (today at publication; event observation is on the [roadmap](../ROADMAP.md)) |
+| Pushed revision | Workspace fork ref | Observed by identity-checked ref inspection after opt-in event ingestion or bounded reconciliation; never publication or acceptance |
 | Published revision | `Artifact.revision` with pinned `Artifact.baseRevision` | Retained and hashed by Cruce; says nothing about correctness |
 | Integrated revision | `Workspace.integratedRevision`: review base of the latest publication | Advances only through publication, never through a fetch |
 | Proposed revision | `Proposal.revision` against `Proposal.base` | Fixed for the life of the proposal |
 | Approved revision | Human `Review.revision` with outcome `approve` | Applies to that revision only |
+| Observed canonical | `RepositoryState.observedCanonical` | Confirmed provider ref; movement or deletion can block promotion but cannot accept source |
 | Canonical revision | `RepositoryState.sourceHead` | Advanced by initial provisioning or a completed promotion |
 
 ## Workspace lifecycle
@@ -152,7 +153,7 @@ Workspaces relate through canonical and through the paths they touch. Cruce show
 
 | Relationship | Basis | Meaning |
 | --- | --- | --- |
-| Baseline vs canonical | Workspace integrated revision compared with `sourceHead` | *current* or *available*: canonical has moved and reconciliation may be needed |
+| Published revision vs canonical | Complete all-parent cached Git ancestry; labelled baseline before first publication | current / ahead / behind / diverged / unrelated; unknown when ancestry is unavailable |
 | Ancestry comparison | Git ancestry over available objects | ahead / behind / diverged / unrelated, or *unavailable* when objects are missing |
 | Path overlap | Changed paths reported by present writers, including both rename endpoints, deletions and binary files | Advisory: work touches the same files |
 | Presence | Recent activity from the attachment | Whether the reported state is recent, not whether it is complete |

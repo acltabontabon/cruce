@@ -296,6 +296,39 @@ export class GitWorkspace {
 		return { files, base };
 	}
 
+	/** Cache-only, checksum-verified complete commit ancestry. Never treats shallow history as complete. */
+	async ancestors(head: string, parents = new Map<string, string[]>(), budget = { remaining: 20_000, bytes: 64 * 1024 * 1024 }) {
+		const seen = new Set<string>(),
+			pending = [head];
+		while (pending.length) {
+			const oid = pending.pop()!;
+			if (seen.has(oid)) continue;
+			seen.add(oid);
+			if (seen.size > 20_000) throw new DomainError(413, "Git source exceeds the object traversal limit");
+			if (--budget.remaining < 0) throw new DomainError(413, "Git source exceeds the object traversal limit");
+			let links = parents.get(oid);
+			if (!links) {
+				const object = await git.readObject({ ...this.base, oid, format: "content" });
+				if (object.type !== "commit" || !(object.object instanceof Uint8Array)) throw new Error("Commit unavailable");
+				const content = object.object;
+				budget.bytes -= content.byteLength;
+				if (budget.bytes < 0) throw new DomainError(413, "Git source exceeds the expanded object limit");
+				const header = encoder.encode(`commit ${content.byteLength}\0`);
+				const wrapped = new Uint8Array(header.length + content.length);
+				wrapped.set(header);
+				wrapped.set(content, header.length);
+				const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-1", wrapped)), (b) =>
+					b.toString(16).padStart(2, "0"),
+				).join("");
+				if (digest !== oid) throw new Error("Commit checksum mismatch");
+				links = (await git.readCommit({ ...this.base, oid })).commit.parent;
+				parents.set(oid, links);
+			}
+			pending.push(...links);
+		}
+		return seen;
+	}
+
 	async mergeBase(a: string, b: string): Promise<string | null> {
 		const bases = await git.findMergeBase({ ...this.base, oids: [await this.peel(a), await this.peel(b)] });
 		return bases[0] ?? null;

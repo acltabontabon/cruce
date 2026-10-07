@@ -4,3 +4,6 @@ CRUCE_ACCESS_ISSUER=https://YOUR_TEAM.cloudflareaccess.com
 CRUCE_ACCESS_AUD=YOUR_APPLICATION_AUDIENCE
 # Server-only identity credential encryption. Installation storage uses the Worker binding.
 CRUCE_SECRET=change-me-to-a-long-random-string
+
+# Installation event-subscription management only (Queues Write). Never a Git credential.
+CF_EVENTS_API_TOKEN=

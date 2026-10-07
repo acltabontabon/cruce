@@ -16,6 +16,7 @@ export interface RepoRef {
 }
 
 export interface RepositoryHost {
+	verifyFork?(name: string, expectedId: string, parentId: string, parentName: string): Promise<void>;
 	ensure(name: string, description: string, defaultBranch?: string): Promise<RepoRef>;
 	fork(source: string, target: string, description: string): Promise<RepoRef>;
 	remove(name: string, expectedId?: string): Promise<boolean>;
@@ -322,6 +323,9 @@ async function forwardGit(
 }
 
 export interface StorageEnv {
+	CF_EVENTS_API_TOKEN?: string;
+	CRUCE_OBSERVATION_QUEUE_ID?: string;
+	CRUCE_OBSERVATION_QUEUE?: string;
 	ARTIFACTS?: Artifacts;
 	CRUCE_STORAGE_ACCOUNT_ID?: string;
 	CRUCE_ARTIFACTS_NAMESPACE?: string;
@@ -431,6 +435,18 @@ export class ArtifactsBindingHost implements RepositoryHost {
 	async info(name: string) {
 		return this.repository(name, async (_repo, info) => ({ ...info, name }));
 	}
+	async verifyFork(name: string, expectedId: string, parentId: string, parentName: string) {
+		const parent = await this.info(parentName);
+		await this.repository(name, async (_repo, info) => {
+			if (
+				info.id !== expectedId ||
+				parent.id !== parentId ||
+				info.source !== `artifacts:${this.storageNamespace}/${this.physical(parentName)}`
+			)
+				throw new ProviderIdentityError("Fork parent identity changed");
+		});
+	}
+
 	async withSource<T>(name: string, expectedId: string, run: (source: SourceReader) => Promise<T>) {
 		this.identities.require(name);
 		return this.repository(name, async (repo, info) => {

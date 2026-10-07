@@ -1614,3 +1614,44 @@ test("History can inspect retained activity through a read-only page", async () 
 	await page.getByRole("button", { name: "Browse retained activity", exact: true }).click();
 	await page.getByText("End of retained activity.", { exact: true }).waitFor();
 });
+
+test("reconciliation exposes published ancestry, all proposal blockers and degraded observation without granting authority", async () => {
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		const data = await (await route.fetch()).json();
+		data.reconciliation.observation = {
+			...data.reconciliation.observation,
+			enabled: true,
+			state: "degraded",
+			reason: "Observation checks are overdue",
+		};
+		data.workspaces[0].lastReportAt = data.asOf - 90000;
+		data.reconciliation.workspaces[0].report = { state: "stale", reportedAt: data.asOf - 90000, ageMs: 90000 };
+		await route.fulfill({ json: data });
+	});
+	await openRepo();
+	await page.getByRole("button", { name: "Observation degraded", exact: true }).click();
+	const panel = page.getByRole("region", { name: "Reconciliation", exact: true });
+	await panel.getByText(/Observation checks are overdue/).waitFor();
+	await panel.getByText(/Stale report/).waitFor();
+	await panel.getByText(/Human approval required for this revision/).waitFor();
+	await panel.getByRole("button", { name: /Inspect reconciliation for Implement retry policy/ }).click();
+	await page.locator(".change-header").getByRole("heading", { name: "Implement retry policy", exact: true }).waitFor();
+	await page.goBack();
+	await panel.waitFor();
+	await page.screenshot({ path: "dist/ui-checks/reconciliation.png", fullPage: true });
+});
+
+test("observation opt-in discloses recurring cost and is absent for read-only viewers", async () => {
+	await openRepo();
+	await repoNav().getByRole("button", { name: "Settings", exact: true }).click();
+	await page.getByText(/Estimated idle checks:/).waitFor();
+	await page.getByRole("button", { name: "Enable observation", exact: true }).waitFor();
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		const data = await (await route.fetch()).json();
+		data.permissions = { write: false, maintain: false, human: true, approve: false };
+		await route.fulfill({ json: data });
+	});
+	await page.reload();
+	await page.getByText(/Estimated idle checks:/).waitFor();
+	assert.equal(await page.getByRole("button", { name: "Enable observation", exact: true }).count(), 0);
+});

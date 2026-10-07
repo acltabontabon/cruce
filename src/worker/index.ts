@@ -2,6 +2,7 @@ import { DomainError } from "../core/errors.ts";
 import { type AuthProps, authRoute, oauthProvider } from "./auth.ts";
 import { bridgeRoute } from "./bridge-auth.ts";
 import { httpFailure } from "./diagnostics.ts";
+import { observationQueue } from "./observation-queue.ts";
 import { json, type PlatformEnv, platformRoute } from "./platform-router.ts";
 
 export { ControlTower } from "./control-tower.ts";
@@ -34,6 +35,7 @@ const api = {
 	},
 } satisfies ExportedHandler<PlatformEnv>;
 export default {
+	queue: observationQueue,
 	async fetch(request, env, ctx) {
 		try {
 			const url = new URL(request.url),

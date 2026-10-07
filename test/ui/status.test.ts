@@ -120,10 +120,10 @@ describe("console status language", () => {
 			proposals: [proposal("p", 1, "Retry")],
 			readiness: { p: readiness() },
 		});
-		expect(canonicalRelation(v, v.workspaces[0])).toMatchObject({ key: "behind", label: "Behind canonical" });
+		expect(canonicalRelation(v, v.workspaces[0])).toMatchObject({ key: "unknown", label: "Canonical moved" });
 		expect(canonicalRelation(v, v.workspaces[1])).toMatchObject({ key: "current" });
 		expect(overlapsFor(v, v.workspaces[0])).toEqual([{ path: "README.md", others: ["Timeouts"], observedAt: 0 }]);
-		expect(attention(v)).toMatchObject({ review: 1, ready: 0, stale: 0, behind: 1, overlaps: 1 });
+		expect(attention(v)).toMatchObject({ review: 1, ready: 0, stale: 0, behind: 0, overlaps: 1 });
 	});
 	it("describes elapsed time plainly", () => {
 		expect(ago(1000, 2000)).toBe("just now");
@@ -139,7 +139,7 @@ describe("console status language", () => {
 			readiness: { p: readiness(), q: readiness({}, true) },
 		});
 		const summary = repositorySummary(v);
-		expect(summary.attention).toEqual({ review: 1, ready: 1, stale: 0, behind: 1 });
+		expect(summary.attention).toEqual({ review: 1, ready: 1, stale: 0, behind: 0 });
 		// Superseded changes don't count as stale attention, even when canonical has moved past them.
 		const superseded = view({
 			sourceHead: moved,

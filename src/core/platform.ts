@@ -136,7 +136,12 @@ export class RepositoryController {
 		if (p.state !== "open" && !resuming) reasons.push("Change is closed or promotion is in progress");
 		if (this.state.promotions.some((other) => other !== promotion && ["prepared", "uncertain"].includes(other.state)))
 			reasons.push("Reconcile the pending promotion before another canonical update");
-		const head = this.upstream();
+		const head = this.state.observedCanonical?.revision ?? this.upstream();
+		if (
+			this.state.observedCanonical &&
+			(this.state.observedCanonical.deleted || this.state.observedCanonical.revision !== this.state.sourceHead)
+		)
+			reasons.push("Observed canonical differs from accepted history; reconcile canonical before promotion");
 		if (head && p.base !== head) reasons.push("Base revision changed; refresh and propose the reconciled revision");
 		const latest = new Map<string, (typeof p.reviews)[number]>();
 		for (const r of p.reviews.filter((r) => r.revision === p.revision)) latest.set(r.actor.id, r);
@@ -187,6 +192,7 @@ export class RepositoryController {
 		}));
 		return {
 			...state,
+			asOf: this.now,
 			overlaps: this.overlaps(),
 			workspaceUpdates: Object.fromEntries(this.state.workspaces.map((s) => [s.id, this.workspaceUpdates(s)])),
 			permissions: {

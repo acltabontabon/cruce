@@ -57,15 +57,32 @@ export function workspaceStatus(w: Workspace): Status {
 }
 
 export function canonicalRelation(view: RepositorySnapshot, w: Workspace): Status & { detail: string } {
+	const relation = view.reconciliation?.workspaces.find((row) => row.workspaceId === w.id);
+	if (relation) {
+		const labels = {
+			unknown: "Ancestry unavailable",
+			current: "Up to date",
+			ahead: "Ahead of canonical",
+			behind: "Behind canonical",
+			diverged: "Diverged from canonical",
+			unrelated: "Unrelated to canonical",
+		};
+		return {
+			key: relation.relation,
+			label: labels[relation.relation],
+			tone: ["behind", "diverged"].includes(relation.relation) ? "warning" : relation.relation === "unknown" ? "neutral" : "success",
+			detail: `${relation.basis === "published" ? "Published revision" : "Baseline"} ${short(relation.revision)} compared with canonical ${short(relation.canonicalRevision)}.${["behind", "diverged"].includes(relation.relation) ? ` Canonical moved to ${short(relation.canonicalRevision)}; reconcile with Git and publish for fresh review.` : ""}`,
+		};
+	}
 	const updates = view.workspaceUpdates[w.id];
 	if (!updates || updates.status === "unknown")
 		return { key: "unknown", label: "Canonical unavailable", tone: "neutral", detail: "Canonical revision is unavailable." };
 	if (updates.status === "available")
 		return {
-			key: "behind",
-			label: "Behind canonical",
+			key: "unknown",
+			label: "Canonical moved",
 			tone: "warning",
-			detail: `Canonical moved to ${short(updates.revision)}. Merge it before publishing again.`,
+			detail: "Inspect published ancestry to determine whether reconciliation is needed.",
 		};
 	return { key: "current", label: "Up to date", tone: "success", detail: "Built on the current canonical revision." };
 }

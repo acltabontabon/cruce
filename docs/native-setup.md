@@ -65,7 +65,7 @@ node /absolute/path/to/cruce/runner/cruce.mjs publish --title "Bound retries"
 
 Publication seals the exact pushed branch revision into retained source storage. It validates ancestry/protected paths and pins a review base; it neither commits nor pushes local files. Through MCP, create a proposal from the returned artifact, record exact-revision evidence and request human promotion. The console supports review and the human decision. See [MCP command families](mcp.md#command-families).
 
-A push alone does not currently produce an observed head in Cruce: reported local heads, publication's verified pushed revision and accepted canonical source are different facts. There is no event subscription delivering push notifications today ([roadmap C1](../ROADMAP.md#coordination-intelligence)). Do not treat heartbeat presence as proof that change reports are current.
+When a maintainer enables observation, push events trigger bounded, identity-checked fork inspection. Reported local heads, observed fork refs, published revisions and accepted canonical source remain different facts. Observation health and published ancestry are available through `get_reconciliation`. Do not treat heartbeat presence as proof that change reports are current.
 
 When source advances, inspect `get_workspace_updates`, fetch canonical with Git and merge explicitly. Use the canonical helper options from above when fetching its URL; the worktree's automatic credential helper is scoped to its fork. Resolve conflicts, run relevant checks, then push/publish and propose the reconciled revision for fresh review. Published ancestry must remain reachable: rebasing away previously published commits will fail publication checks. The original workspace base and earlier artifacts never change.
 

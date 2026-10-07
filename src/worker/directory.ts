@@ -3,10 +3,20 @@ import { DomainError } from "../core/errors.ts";
 import { DirectoryController, type DirectoryState } from "../core/ownership.ts";
 import { STATE_LIMITS } from "../shared/limits.ts";
 import type { Namespace, User } from "../shared/platform.ts";
+import type { ObservationRoute } from "./observation.ts";
 import { sqlStore } from "./store.ts";
 
 const identityKey = (issuer: string, subject: string) => `identity:${JSON.stringify([issuer, subject])}`;
 export class Directory extends DurableObject {
+	observationRoute(subscription: string, route?: ObservationRoute) {
+		const key = `observation-route:${subscription}`;
+		if (route) {
+			const old = this.store.get<ObservationRoute>(key);
+			if (old && JSON.stringify(old) !== JSON.stringify(route)) throw new DomainError(409, "Observation subscription identity changed");
+			this.store.put(key, route);
+		}
+		return this.store.get<ObservationRoute>(key);
+	}
 	private store = sqlStore(this.ctx.storage.sql, (run) => this.ctx.storage.transactionSync(run));
 	private legacy() {
 		const state = this.store.get<DirectoryState>("directory");
