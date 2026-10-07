@@ -309,13 +309,11 @@ function Overview({
 	base,
 	mutate,
 	open,
-	newRepository,
 }: {
 	namespace: NamespaceView;
 	base: string;
 	mutate: Mutate;
 	open: (repositoryId: string, tab?: string) => void;
-	newRepository: () => void;
 }) {
 	const summaries = namespace.repositories.map((r) => namespace.repositorySummaries?.find((s) => s.id === r.id));
 	const sum = totals(summaries);
@@ -362,18 +360,12 @@ function Overview({
 								<p>
 									A repository gives concurrent work a canonical Git history in this Cruce installation. Agents and developers then work in
 									their own workspaces and propose exact revisions for review.
+									{namespace.storage.ready && namespace.permissions.maintain && " Use New repository above to create the first one."}
 								</p>
-								{!namespace.storage.ready ? (
+								{!namespace.storage.ready && (
 									<button type="button" onClick={() => open("", "settings")}>
 										View storage setup
 									</button>
-								) : (
-									namespace.permissions.maintain && (
-										<button type="button" className="primary" onClick={newRepository}>
-											<Icon name="plus" />
-											New repository
-										</button>
-									)
 								)}
 							</div>
 						)}
@@ -585,7 +577,7 @@ export function NamespacePage({
 			{settings ? (
 				<Settings namespace={namespace} base={base} mutate={mutate} renamed={renamed} />
 			) : (
-				<Overview namespace={namespace} base={base} mutate={mutate} open={open} newRepository={newRepository} />
+				<Overview namespace={namespace} base={base} mutate={mutate} open={open} />
 			)}
 		</>
 	);

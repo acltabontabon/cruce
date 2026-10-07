@@ -640,7 +640,8 @@ test("empty namespaces inherit installation storage and creation dialogs keep fo
 	await page.getByRole("button", { name: "Alex Morgan", exact: true }).click();
 	await page.getByRole("heading", { name: "No repositories yet", exact: true }).waitFor();
 	assert.equal(await page.getByRole("button", { name: "View storage setup", exact: true }).count(), 0);
-	assert.equal(await page.getByRole("button", { name: "New repository", exact: true }).count(), 2);
+	// Actions live in the page header; the empty state explains rather than repeating the button.
+	assert.equal(await page.getByRole("button", { name: "New repository", exact: true }).count(), 1);
 	await page.screenshot({ path: "dist/ui-checks/empty-namespace.png", fullPage: true });
 	await page.goto(`${server.origin}/?namespace=fernloop`);
 	const trigger = page.getByRole("button", { name: "New repository", exact: true });
@@ -672,7 +673,9 @@ test("a new repository opens on Changes with a way to connect an agent", async (
 	await page.getByRole("heading", { name: "local-tools", exact: true }).waitFor();
 	await page.getByRole("heading", { name: "No changes yet", exact: true }).waitFor();
 	await page.getByText("Nothing needs you right now.", { exact: true }).waitFor();
-	await page.locator(".changes-screen").getByRole("button", { name: "Connect an agent", exact: true }).click();
+	await page.locator(".changes-screen").getByText("Use Connect an agent above to start.", { exact: false }).waitFor();
+	assert.equal(await page.getByRole("button", { name: "Connect an agent", exact: true }).count(), 1);
+	await page.getByRole("button", { name: "Connect an agent", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "Connect an agent", exact: true });
 	await dialog.getByRole("button", { name: "Codex", exact: true }).click();
 	await dialog.getByText(/--client codex/).waitFor();
@@ -752,8 +755,79 @@ test("avatar menu fits a narrow screen and tabbing out dismisses it without trap
 	assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 320);
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
 	await page.screenshot({ path: "dist/ui-checks/account-narrow.png", fullPage: true });
+	// Focus starts on the selected appearance; Tab reaches Sign out, and the next Tab leaves and dismisses the menu.
+	assert.equal(await menu.getByRole("radio", { name: "System", exact: true }).evaluate((e) => e === document.activeElement), true);
+	await page.keyboard.press("Tab");
+	assert.equal(await menu.getByRole("link", { name: "Sign out", exact: true }).evaluate((e) => e === document.activeElement), true);
 	await page.keyboard.press("Tab");
 	assert.equal(await menu.count(), 0);
+});
+test("appearance matches the system by default, persists a choice and survives unavailable storage", async () => {
+	await page.emulateMedia({ colorScheme: "dark" });
+	await page.goto(server.origin);
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
+	const theme = () => page.evaluate(() => document.documentElement.dataset.theme);
+	assert.equal(await theme(), "dark");
+	const background = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+	const dark = await background();
+	await page.emulateMedia({ colorScheme: "light" });
+	await page.waitForFunction(() => document.documentElement.dataset.theme === "light");
+	assert.notEqual(await background(), dark);
+	await page.getByRole("button", { name: "Your account", exact: true }).click();
+	const menu = page.getByRole("region", { name: "Your account", exact: true });
+	await menu.getByRole("radio", { name: "Dark", exact: true }).check();
+	assert.equal(await theme(), "dark");
+	await page.reload();
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
+	assert.equal(await theme(), "dark");
+	await page.screenshot({ path: "dist/ui-checks/home-dark.png", fullPage: true });
+	await page.getByRole("button", { name: "Your account", exact: true }).click();
+	await menu.getByRole("radio", { name: "System", exact: true }).check();
+	assert.equal(await theme(), "light");
+	await page.addInitScript(() => {
+		Object.defineProperty(window, "localStorage", {
+			configurable: true,
+			get() {
+				throw new Error("Storage unavailable");
+			},
+		});
+	});
+	await page.reload();
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
+	assert.equal(await theme(), "light");
+});
+test("the public homepage stays on its light paper whatever the console appearance", async () => {
+	await page.emulateMedia({ colorScheme: "dark" });
+	await openHomepage();
+	assert.equal(await page.locator(".landing").evaluate((e) => getComputedStyle(e).backgroundColor), "rgb(245, 245, 239)");
+});
+test("the lane map draws each live workspace from its baseline and highlights its row", async () => {
+	await openRepo();
+	await repoNav()
+		.getByRole("button", { name: /^Workspaces/ })
+		.click();
+	const map = page.locator(".lane-map");
+	await map.getByText("2 live workspaces from main", { exact: false }).waitFor();
+	assert.equal(await map.locator(".lane").count(), 2);
+	await workspaceRow("Implement retry policy").hover();
+	assert.equal(
+		await map.getAttribute("data-focus"),
+		(await page.request.get(`${server.origin}/api/namespaces/fernloop/repositories/payments`).then((r) => r.json())).workspaces.find(
+			(w) => w.title === "Implement retry policy",
+		).id,
+	);
+	await page.screenshot({ path: "dist/ui-checks/lane-map.png", fullPage: true });
+	await page.emulateMedia({ colorScheme: "dark" });
+	await page.screenshot({ path: "dist/ui-checks/lane-map-dark.png", fullPage: true });
+	await map.locator(".lane").first().click();
+	await page.locator(".lane-strip").waitFor();
+});
+test("home names each decision waiting across repositories and opens it", async () => {
+	await page.goto(server.origin);
+	const decision = page.locator(".decision-row").filter({ hasText: "Bounded retry policy" });
+	await decision.getByText("Needs review", { exact: true }).waitFor();
+	await decision.click();
+	await page.getByRole("heading", { name: /Bounded retry policy/, level: 1 }).waitFor();
 });
 test("namespace dropdown switches scope with keyboard selection and restores focus after cancelling creation", async () => {
 	await openRepo();

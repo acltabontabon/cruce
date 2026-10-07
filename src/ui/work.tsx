@@ -4,6 +4,8 @@ import { gitRemotePath } from "../shared/git-access.ts";
 import type { RepositorySnapshot, Workspace } from "../shared/platform.ts";
 import { BackLink, CopyCommand, Icon, Pill, Section } from "./design.tsx";
 import { WorkspaceUpdateInspection } from "./inspect.tsx";
+import { laneIndex } from "./lanes.ts";
+import { LaneBullet, LaneMap, LaneStrip, LaneTrack } from "./lanes.tsx";
 import type { Execute } from "./source.tsx";
 import {
 	activityText,
@@ -31,17 +33,35 @@ function ReportAge({ at, now }: { at?: number; now: number }) {
 
 type Open = (tab: string, id?: string) => void;
 
-function WorkspaceRow({ view, w, open }: { view: RepositorySnapshot; w: Workspace; open: Open }) {
+function WorkspaceRow({
+	view,
+	w,
+	open,
+	focused,
+	setFocus,
+}: {
+	view: RepositorySnapshot;
+	w: Workspace;
+	open: Open;
+	focused?: boolean;
+	setFocus?: (id?: string) => void;
+}) {
 	const status = workspaceStatus(w),
 		relation = canonicalRelation(view, w),
 		overlaps = overlapsFor(view, w),
 		change = view.proposals.filter((p) => p.workspaceId === w.id).sort((a, b) => b.number - a.number)[0];
 	const changeLabel = change && changeStatus(view, change);
 	return (
-		<button type="button" className="workspace-row" onClick={() => open("workspaces", w.id)}>
-			<span className={`row-glyph ${w.execution ? "attached" : ""}`} aria-hidden="true">
-				<Icon name={w.execution ? "local" : "branch"} />
-			</span>
+		<button
+			type="button"
+			className={`workspace-row${focused ? " is-focus" : ""}`}
+			onClick={() => open("workspaces", w.id)}
+			onMouseEnter={() => setFocus?.(w.id)}
+			onMouseLeave={() => setFocus?.(undefined)}
+			onFocus={() => setFocus?.(w.id)}
+			onBlur={() => setFocus?.(undefined)}
+		>
+			<LaneTrack lane={laneIndex(view).get(w.id)} done={ended(w)} quiet={w.state === "disconnected"} />
 			<span className="row-main">
 				<strong>{w.title}</strong>
 				<small className="row-meta">
@@ -151,12 +171,13 @@ function Reconciliation({ view, open }: { view: RepositorySnapshot; open: Open }
 }
 
 export function WorkspaceList({ view, open }: { view: RepositorySnapshot; open: Open }) {
+	const [focus, setFocus] = useState<string>();
 	const sorted = [...view.workspaces].sort((a, b) => b.lastActivity - a.lastActivity || a.id.localeCompare(b.id));
 	const live = sorted.filter((w) => !ended(w)),
 		done = sorted.filter(ended);
 	return (
 		<>
-			<Reconciliation view={view} open={open} />
+			<LaneMap view={view} focus={focus} setFocus={setFocus} open={(id) => open("workspaces", id)} />
 			<section className="panel workspaces-screen">
 				<div className="panel-head">
 					<h2>Active workspaces</h2>
@@ -165,7 +186,7 @@ export function WorkspaceList({ view, open }: { view: RepositorySnapshot; open: 
 				{live.length ? (
 					<div className="rows">
 						{live.map((w) => (
-							<WorkspaceRow key={w.id} view={view} w={w} open={open} />
+							<WorkspaceRow key={w.id} view={view} w={w} open={open} focused={focus === w.id} setFocus={setFocus} />
 						))}
 					</div>
 				) : (
@@ -186,6 +207,7 @@ export function WorkspaceList({ view, open }: { view: RepositorySnapshot; open: 
 					</details>
 				)}
 			</section>
+			<Reconciliation view={view} open={open} />
 		</>
 	);
 }
@@ -220,6 +242,7 @@ export function WorkspaceDetail({ view, id, execute, open }: { view: RepositoryS
 					</p>
 					<h1>{w.title}</h1>
 					<p className="change-meta">
+						<LaneBullet lane={laneIndex(view).get(w.id)} />
 						<Pill tone={status.tone}>{status.label}</Pill>
 						{!ended(w) && <Pill tone={relation.tone}>{relation.label}</Pill>}
 						<span>{workedBy(w)}</span>
@@ -227,6 +250,7 @@ export function WorkspaceDetail({ view, id, execute, open }: { view: RepositoryS
 					{w.description && <p className="page-lead">{w.description}</p>}
 				</div>
 			</header>
+			<LaneStrip view={view} workspace={w} lane={laneIndex(view).get(w.id) ?? 1} />
 			<dl className="facts fact-grid">
 				<div>
 					<dt>Started from</dt>

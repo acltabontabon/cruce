@@ -4,6 +4,8 @@ import type { Proposal, RepositorySnapshot } from "../shared/platform.ts";
 import { ChangeDetail } from "./change.tsx";
 import { Form, value } from "./controls.tsx";
 import { BackLink, CopyCommand, Dialog, Icon, Initials, PageHeader, Pill, Section, SettingRow } from "./design.tsx";
+import { laneIndex } from "./lanes.ts";
+import { LaneBullet, LaneTrack } from "./lanes.tsx";
 import { RetainedActivity, RetainedRecordDetail, RetainedRecordRow } from "./records.tsx";
 import { type Execute, RevisionBrowser } from "./source.tsx";
 import {
@@ -71,16 +73,18 @@ function CanonicalSetup({ view, execute }: { view: RepositorySnapshot; execute: 
 	);
 }
 
+/** One item per thing that needs a person; the count leads so the strip reads at a glance, the words say what it is. */
 function AttentionBar({ view, open }: { view: RepositorySnapshot; open: Open }) {
 	const a = attention(view);
-	const items: { label: string; tab: string; tone: string }[] = [];
-	if (a.review)
-		items.push({ label: `${plural(a.review, "change")} ${a.review === 1 ? "needs" : "need"} your review`, tab: "changes", tone: "accent" });
-	if (a.ready) items.push({ label: `${plural(a.ready, "change")} ready to promote`, tab: "changes", tone: "success" });
-	if (a.stale) items.push({ label: plural(a.stale, "stale change"), tab: "changes", tone: "warning" });
-	if (a.behind) items.push({ label: `${plural(a.behind, "workspace")} behind canonical`, tab: "workspaces", tone: "warning" });
-	if (a.overlaps)
-		items.push({ label: `${plural(a.overlaps, "file")} changed in more than one workspace`, tab: "workspaces", tone: "warning" });
+	const items: { count?: number; label: string; tab: string; tone: string }[] = [];
+	const counted = (count: number, one: string, many: string, tab: string, tone: string) => {
+		if (count) items.push({ count, label: count === 1 ? one : many, tab, tone });
+	};
+	counted(a.review, "change needs your review", "changes need your review", "changes", "accent");
+	counted(a.ready, "change ready to promote", "changes ready to promote", "changes", "success");
+	counted(a.stale, "stale change", "stale changes", "changes", "warning");
+	counted(a.behind, "workspace behind canonical", "workspaces behind canonical", "workspaces", "warning");
+	counted(a.overlaps, "file changed in more than one workspace", "files changed in more than one workspace", "workspaces", "warning");
 	if (view.reconciliation?.observation.state === "degraded")
 		items.push({ label: "Observation degraded", tab: "workspaces", tone: "warning" });
 	if (
@@ -89,13 +93,13 @@ function AttentionBar({ view, open }: { view: RepositorySnapshot; open: Open }) 
 		!items.some((item) => item.tab === "workspaces")
 	)
 		items.push({ label: "Inspect reconciliation", tab: "workspaces", tone: "neutral" });
-	if (a.quiet) items.push({ label: `${plural(a.quiet, "workspace")} not reporting`, tab: "workspaces", tone: "neutral" });
+	counted(a.quiet, "workspace not reporting", "workspaces not reporting", "workspaces", "neutral");
 	return (
 		<section className="attention" aria-label="Needs attention">
 			{items.length ? (
 				items.map((item) => (
 					<button type="button" key={item.label} className={`attention-item ${item.tone}`} onClick={() => open(item.tab)}>
-						{item.label}
+						{item.count !== undefined && <b>{item.count}</b>} {item.label}
 					</button>
 				))
 			) : (
@@ -111,6 +115,7 @@ function ChangeRow({ view, p, open }: { view: RepositorySnapshot; p: Proposal; o
 		artifact = view.artifacts.find((a) => a.id === p.artifactId);
 	return (
 		<button type="button" className="change-row" onClick={() => open("changes", p.id)}>
+			<LaneTrack lane={laneIndex(view).get(p.workspaceId)} done={s.key === "promoted"} />
 			<span className="row-number">#{p.number}</span>
 			<span className="row-main">
 				<strong>{p.title}</strong>
@@ -205,7 +210,8 @@ function CanonicalPanel({ view, open }: { view: RepositorySnapshot; open: Open }
 }
 
 function LiveWorkspaces({ view, open }: { view: RepositorySnapshot; open: Open }) {
-	const live = view.workspaces.filter((w) => !ended(w)).sort((a, b) => b.lastActivity - a.lastActivity);
+	const live = view.workspaces.filter((w) => !ended(w)).sort((a, b) => b.lastActivity - a.lastActivity),
+		colours = laneIndex(view);
 	return (
 		<Section
 			title="Workspaces"
@@ -224,6 +230,7 @@ function LiveWorkspaces({ view, open }: { view: RepositorySnapshot; open: Open }
 						const relation = canonicalRelation(view, w);
 						return (
 							<button type="button" key={w.id} className="mini-row" onClick={() => open("workspaces", w.id)}>
+								<LaneBullet lane={colours.get(w.id)} />
 								<span className="row-main">
 									<strong>{w.title}</strong>
 									<small>{workedBy(w)}</small>
@@ -240,7 +247,7 @@ function LiveWorkspaces({ view, open }: { view: RepositorySnapshot; open: Open }
 	);
 }
 
-function ChangesScreen({ view, open, connect, execute }: { view: RepositorySnapshot; open: Open; connect: () => void; execute: Execute }) {
+function ChangesScreen({ view, open, execute }: { view: RepositorySnapshot; open: Open; execute: Execute }) {
 	const groups = changeGroups(view);
 	return (
 		<div className="overview changes-screen">
@@ -257,11 +264,10 @@ function ChangesScreen({ view, open, connect, execute }: { view: RepositorySnaps
 					) : (
 						<div className="empty-state">
 							<h3>No changes yet</h3>
-							<p>When an agent or developer publishes a revision and proposes it, it shows up here for review against canonical.</p>
-							<button type="button" className="primary" onClick={connect}>
-								<Icon name="local" />
-								Connect an agent
-							</button>
+							<p>
+								When an agent or developer publishes a revision and proposes it, it shows up here for review against canonical. Use Connect
+								an agent above to start.
+							</p>
 						</div>
 					)}
 				</Section>
@@ -339,8 +345,9 @@ function HistoryScreen({ view, id, execute, open }: { view: RepositorySnapshot; 
 					<ol className="canonical-timeline">
 						{promotions.map((promotion) => {
 							const change = view.proposals.find((p) => p.id === promotion.proposalId);
+							const lane = change && laneIndex(view).get(change.workspaceId);
 							return (
-								<li key={promotion.id}>
+								<li key={promotion.id} className={lane ? `lane-${lane}` : undefined}>
 									<code>{short(promotion.to)}</code>
 									<span>
 										{change ? (
@@ -802,16 +809,23 @@ export function RepositoryPage({
 					</p>
 					<h1>{view.repository.name}</h1>
 					<p className="canonical-line">
-						<Icon name="branch" />
+						<span className="branch">
+							<Icon name="branch" />
+							{view.repository.defaultBranch}
+						</span>
 						{view.sourceHead ? (
 							<>
-								<code>{view.repository.defaultBranch}</code> at <code title={view.sourceHead}>{short(view.sourceHead)}</code>
-								{last ? ` · last promoted ${ago(last.at)}` : ""}
+								<span>at</span>
+								<code title={view.sourceHead}>{short(view.sourceHead)}</code>
+								{last && (
+									<>
+										<span className="sep">·</span>
+										<span>last promoted {ago(last.at)}</span>
+									</>
+								)}
 							</>
 						) : (
-							<>
-								<code>{view.repository.defaultBranch}</code> · Canonical revision unavailable
-							</>
+							<span>Canonical revision unavailable</span>
 						)}
 					</p>
 				</div>
@@ -823,7 +837,7 @@ export function RepositoryPage({
 					<button type="button" className="ghost" onClick={() => setDialog("attach")} disabled={!view.sourceHead}>
 						Attach local checkout
 					</button>
-					<button type="button" className="ghost" onClick={() => setDialog("clone")} disabled={!view.sourceHead}>
+					<button type="button" className="primary" onClick={() => setDialog("clone")} disabled={!view.sourceHead}>
 						<Icon name="branch" />
 						Clone
 					</button>
@@ -849,7 +863,7 @@ export function RepositoryPage({
 				(id ? (
 					<ChangeDetail key={id} view={view} id={id} execute={execute} busy={busy} open={open} />
 				) : (
-					<ChangesScreen view={view} open={open} connect={() => setDialog("connect")} execute={execute} />
+					<ChangesScreen view={view} open={open} execute={execute} />
 				))}
 			{tab === "workspaces" &&
 				(id ? <WorkspaceDetail key={id} view={view} id={id} execute={execute} open={open} /> : <WorkspaceList view={view} open={open} />)}

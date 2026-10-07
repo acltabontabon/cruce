@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import type { Namespace, Repository, User } from "../shared/platform.ts";
 import { Empty } from "./controls.tsx";
-import { Icon, Initials, PageHeader, Pill, Section, Stats } from "./design.tsx";
+import { Icon, Initials, PageHeader, Pill, Section } from "./design.tsx";
+import { MiniLanes } from "./lanes.tsx";
 import { request } from "./request.ts";
+import { actorLabel, short } from "./status.ts";
 import type { NamespaceView } from "./types.ts";
 
 export type Summary = NonNullable<NamespaceView["repositorySummaries"]>[number];
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+type Open = (namespaceId: string, repositoryId?: string, tab?: string, id?: string) => void;
 
 /** The short attention list for a repository row; quiet when nothing needs a person. */
 export function AttentionPills({ summary }: { summary?: Summary }) {
@@ -34,9 +37,6 @@ export function RepositoryRow({
 }) {
 	return (
 		<button type="button" className="repo-row" onClick={open}>
-			<span className="row-glyph" aria-hidden="true">
-				<Icon name="branch" />
-			</span>
 			<span className="row-main">
 				<strong>{repository.name}</strong>
 				<small className="row-meta">
@@ -45,6 +45,7 @@ export function RepositoryRow({
 					{summary && <span>{summary.active ? plural(summary.active, "active workspace") : "No active workspaces"}</span>}
 				</small>
 			</span>
+			{summary?.lanes && <MiniLanes lanes={summary.lanes} />}
 			<AttentionPills summary={summary} />
 			<Icon name="arrow" className="row-arrow" />
 		</button>
@@ -77,6 +78,113 @@ export function SkeletonRows({ label }: { label: string }) {
 	);
 }
 
+type Row = { namespace: Namespace; repository: Repository; summary?: Summary };
+const decisionKinds = {
+	review: { label: "Needs review", tone: "accent", action: "Review", primary: true, order: 0 },
+	ready: { label: "Ready to promote", tone: "success", action: "Promote", primary: true, order: 1 },
+	stale: { label: "Stale", tone: "warning", action: "Open", primary: false, order: 2 },
+} as const;
+
+/** Every change waiting on a person, across repositories, each with the one action that moves it forward. */
+function Decisions({ rows, open, partial }: { rows: Row[]; open: Open; partial: boolean }) {
+	const decisions = rows
+		.flatMap((row) => (row.summary?.changes ?? []).map((change) => ({ ...row, change })))
+		.sort((a, b) => decisionKinds[a.change.status].order - decisionKinds[b.change.status].order || b.change.number - a.change.number);
+	return (
+		<Section title="Needs you" count={decisions.length}>
+			{decisions.length ? (
+				<div className="rows">
+					{decisions.map(({ namespace, repository, change }) => {
+						const kind = decisionKinds[change.status];
+						const why =
+							change.status === "review"
+								? `${change.actor ? `${actorLabel({ name: change.actor, kind: "agent" })} published` : "Published"} ${short(change.revision)}. Confirm its checks, then approve this exact revision.`
+								: change.status === "ready"
+									? `Every check passed for ${short(change.revision)}. Promoting moves canonical to exactly this revision.`
+									: "Canonical moved past its base. Its workspace merges canonical with Git and publishes again.";
+						return (
+							<button
+								type="button"
+								key={`${repository.id}/${change.id}`}
+								className={`decision-row ${kind.tone}`}
+								onClick={() => open(namespace.id, repository.id, "changes", change.id)}
+							>
+								<span className="decision-edge" aria-hidden="true" />
+								<span className="row-main">
+									<span className="decision-where">
+										{namespace.handle}/{repository.name}
+									</span>
+									<span className="decision-title">
+										<span className="row-number">#{change.number}</span>
+										{change.title}
+										<Pill tone={kind.tone}>{kind.label}</Pill>
+									</span>
+									<span className="decision-why">{why}</span>
+								</span>
+								<span className={`decision-action${kind.primary ? " primary" : ""}`} aria-hidden="true">
+									{kind.action}
+								</span>
+							</button>
+						);
+					})}
+				</div>
+			) : (
+				<p className="calm">{partial ? "Nothing waiting in the repositories that loaded." : "Nothing needs you right now."}</p>
+			)}
+		</Section>
+	);
+}
+
+/** Facts worth knowing that need no decision yet: work behind canonical, quiet checkouts, shared paths. */
+function HeadsUp({ rows, open }: { rows: Row[]; open: Open }) {
+	const items = rows.flatMap(({ namespace, repository, summary }) => {
+		if (!summary) return [];
+		const quiet = (summary.lanes ?? []).filter((lane) => lane.quiet).length;
+		return [
+			summary.attention.behind && {
+				key: "behind",
+				label: "Behind",
+				tone: "warning",
+				text: `${plural(summary.attention.behind, "workspace")} behind canonical`,
+			},
+			quiet && { key: "quiet", label: "Quiet", tone: "neutral", text: `${plural(quiet, "workspace")} stopped reporting` },
+			summary.overlaps && {
+				key: "shared",
+				label: "Shared",
+				tone: "warning",
+				text: `${plural(summary.overlaps, "file")} changed in more than one workspace`,
+			},
+		]
+			.filter((item): item is { key: string; label: string; tone: string; text: string } => !!item)
+			.map((item) => ({ ...item, namespace, repository }));
+	});
+	if (!items.length) return null;
+	return (
+		<Section title="Heads-up" count={items.length} action={<span className="row-quiet">No decision needed yet</span>}>
+			<div className="rows">
+				{items.map((item) => (
+					<button
+						type="button"
+						key={`${item.repository.id}/${item.key}`}
+						className="heads-row"
+						onClick={() => open(item.namespace.id, item.repository.id, "workspaces")}
+					>
+						<Pill tone={item.tone}>{item.label}</Pill>
+						<span className="row-main">
+							{item.text}
+							<span className="decision-where">
+								{" · "}
+								{item.namespace.handle}/{item.repository.name}
+							</span>
+						</span>
+						<Icon name="arrow" className="row-arrow" />
+					</button>
+				))}
+			</div>
+		</Section>
+	);
+}
+
 export function NamespaceHome({
 	me,
 	refresh,
@@ -85,7 +193,7 @@ export function NamespaceHome({
 }: {
 	me: { user: User; namespaces: Namespace[] };
 	refresh: number;
-	open: (namespaceId: string, repositoryId?: string) => void;
+	open: Open;
 	create: () => void;
 }) {
 	const [spaces, setSpaces] = useState<Record<string, NamespaceView>>({}),
@@ -160,9 +268,7 @@ export function NamespaceHome({
 	const all = me.namespaces.flatMap(
 		(w) => spaces[w.id]?.repositories.map((r) => spaces[w.id]?.repositorySummaries?.find((s) => s.id === r.id)) ?? [],
 	);
-	const sum = totals(all),
-		partial = Object.keys(failures).length > 0 || all.some((summary) => !summary),
-		count = (n: number) => (!all.some(Boolean) && (loading || partial) ? "—" : n);
+	const partial = Object.keys(failures).length > 0 || all.some((summary) => !summary);
 	return (
 		<>
 			<PageHeader kicker="All namespaces" title="Your repositories">
@@ -176,15 +282,6 @@ export function NamespaceHome({
 					/>
 				</label>
 			</PageHeader>
-			<Stats
-				label="Across your namespaces"
-				items={[
-					{ label: "Repositories", value: count(all.length) },
-					{ label: "Needs review", value: count(sum.review), tone: sum.review ? "accent" : "" },
-					{ label: "Ready to promote", value: count(sum.ready), tone: sum.ready ? "success" : "" },
-					{ label: "Active workspaces", value: count(sum.active) },
-				]}
-			/>
 			<div className="overview">
 				{partial && (
 					<p role="status">
@@ -195,6 +292,14 @@ export function NamespaceHome({
 					</p>
 				)}
 				<div className="overview-main">
+					{loading && !rows.length ? (
+						<Section title="Needs you">
+							<SkeletonRows label="Loading what needs you…" />
+						</Section>
+					) : (
+						<Decisions rows={rows} open={open} partial={partial} />
+					)}
+					<HeadsUp rows={rows} open={open} />
 					<Section title="Repositories" count={rows.length}>
 						{rows.length ? (
 							<div className="rows">

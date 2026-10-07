@@ -18,21 +18,22 @@ The Cloudflare Access sign-in uses the ink symbol, paper background and forest t
 
 ## Materials and hierarchy
 
-| Token | Value | Use |
-| --- | --- | --- |
-| Forest | `#17251F` | Header, primary text and decisive actions |
-| Paper | `#F5F5EF` | Main canvas |
-| White | `#FFFFFF` | Working surfaces and inputs |
-| Lime | `#B5E86A` | Brand and selection against forest |
-| Moss | `#879D7B` | Nonessential decorative palette; never body text on paper |
-| Green | `#346345` | Links, retained source and positive state labels |
-| Copper | `#8A5128` | Advisory intersections and human attention |
-| Muted text | `#5C695F` | Supporting copy and metadata |
-| Error | `#A12F34` | Failures and errors |
+The console has two themes on one token set in [styles.css](../src/ui/styles.css). **Midnight** is the dark theme and **Daylight** the light one. With no saved preference the console matches the system; the avatar menu's Appearance control chooses System, Dark or Light per browser, applied before first paint. The public homepage and the session screen keep their own paper palette whatever the console appearance.
 
-The main text, muted text, green and copper achieve contrast ratios of approximately 14.5, 5.3, 6.4 and 5.8 against paper. Input borders use `#7B8976` (approximately 3.4 against paper). Light dividers separate groups without carrying state. Color always accompanies text or shape.
+| Token | Midnight | Daylight | Use |
+| --- | --- | --- | --- |
+| `--bg` | `#0F111A` | `#F5F6F9` | Page canvas |
+| `--surface` | `#151826` | `#FFFFFF` | Inputs, menus and framed objects |
+| `--border` / `--border-subtle` | `#2A2F46` / `#1F2336` | `#DCE0E8` / `#E7EAF0` | Section rules and row dividers; they carry no state |
+| `--text` / `--text-muted` | `#DCE1F5` / `#9CA5C7` | `#151925` / `#535B70` | Copy and metadata |
+| `--accent` | `#82A6FF` | `#2C58D0` | Primary actions, links, focus and exact revisions |
+| `--canonical` | `#E9ECF8` | `#151925` | The canonical branch: trunk, branch chip and history |
+| `--tone-success` / `--tone-warning` / `--tone-danger` | `#7DD3A0` / `#F0B36A` / `#FF8A9A` | `#1C7A4F` / `#A0570C` / `#C0304A` | Status. Warning marks advisory facts and human attention |
+| `--lane-1` … `--lane-6` | teal, violet, orange, pink, gold, sky | darker counterparts | Telling parallel workspaces apart |
 
-Inter supplies headings and interface copy; JetBrains Mono identifies exact revisions, branches and paths. The scale uses 4px spacing increments, 6–8px corners, thin separators and minimal shadows. Page hierarchy comes from typography and space rather than nested cards. Repository names and paths wrap; code panes scroll internally.
+Every text and tone colour reaches WCAG AA on its own theme's canvas and surfaces. A workspace's lane colour comes from its start order among all the repository's workspaces, so it never changes while the workspace exists; it never carries state, and every lane also shows its title. Colour always accompanies text or shape.
+
+Geist supplies interface copy; JetBrains Mono identifies exact revisions, branches, paths and page titles. Both are bundled locally. Lists sit open on the page between hairline rules, with generous space between sections; only real objects, the lane map, diffs and source, get a frame. Repository names and paths wrap; code panes scroll internally. Theme switches apply in one frame without animated transitions.
 
 ## Status language
 
@@ -49,16 +50,16 @@ Tool names are shown as the tool ("Codex", "Claude Code"), derived from the OAut
 
 ## Screens and interaction
 
-The slim forest header uses a 56px content row with a smaller wordmark and inline repository search field. Avatar, scope controls and the unboxed mobile search icon retain 44px targets. Search follows the current scope (Home, namespace, or namespace and repository). The Cruce mark returns to unscoped Home. Scoped names are anchored searchable dropdowns, with native links, arrow-key selection, normal Tab navigation, Escape dismissal and trigger restoration. Repository search accepts typing directly in the header, and Command/Ctrl K focuses the same field; arrows and Enter select a result, while Escape, Tab and outside clicks dismiss the results without trapping focus. Loading, partial failures and retry stay in the result panel. On narrow screens the search icon reveals the field and results together in an anchored panel.
+The slim header uses a 56px content row with the junction mark, the name and an inline repository search field. Avatar, scope controls and the unboxed mobile search icon retain 44px targets. Search follows the current scope (Home, namespace, or namespace and repository). The Cruce mark returns to unscoped Home. Scoped names are anchored searchable dropdowns, with native links, arrow-key selection, normal Tab navigation, Escape dismissal and trigger restoration. Repository search accepts typing directly in the header, and Command/Ctrl K focuses the same field; arrows and Enter select a result, while Escape, Tab and outside clicks dismiss the results without trapping focus. Loading, partial failures and retry stay in the result panel. On narrow screens the search icon reveals the field and results together in an anchored panel.
 
-The avatar opens a compact profile card with name, email and Sign out, preserving the current page. Saved account links open it on Home with history replacement. The Alpha label sits quietly in the footer.
+The avatar opens a compact profile card with name, email, the Appearance control and Sign out, preserving the current page. Saved account links open it on Home with history replacement. The Alpha label sits quietly in the footer.
 
-**Home** lists your repositories across namespaces, sorted by what needs a person (changes to review or promote, stale changes, workspaces behind canonical), then your namespaces. A namespace whose installation storage is unavailable says so, without asking users for provider credentials.
+**Home** leads with **Needs you**: every open change waiting on a person across your repositories, each with its status, a one-line reason and the action that moves it forward (Review, Promote or Open). **Heads-up** lists facts that need no decision yet: workspaces behind canonical, quiet checkouts and shared paths. Your repositories follow, sorted by what needs a person, each with a small sketch of canonical and its live workspaces; your namespaces sit beside them. A namespace whose installation storage is unavailable says so, without asking users for provider credentials.
 
-**A repository** opens on a header (name, canonical branch and revision, last promotion, Connect an agent, Clone) and an attention bar: one plain sentence per thing that needs someone, each linking to where it is handled, or "Nothing needs you right now". Four tabs follow:
+**A repository** opens on a header (name, canonical branch and revision, last promotion, Connect an agent, Attach local checkout, Clone) and an attention strip: one count and plain words per thing that needs someone, each opening where it is handled, or "Nothing needs you right now". Four tabs follow:
 
-- **Changes** lists changes that need attention first. Stale or superseded changes, and promoted or closed ones, are collapsed below. A change opens as a review: header, then one checklist (built on current canonical; each policy-required check, which a maintainer confirms in one click; concerns needing a resolution; approval of this exact revision), then **Promote to *branch***, which explains exactly which revisions it moves between. Approval and confirmation are single clicks with an optional note; raising a concern, recording a failure, resolving and closing ask for a reason. The diff loads straight away with the first file open, followed by evidence and reviews.
-- **Workspaces** lists live workspaces with their state, canonical relation, overlaps and latest change; ended ones are collapsed. A workspace page shows its fixed baseline, reported head, canonical relation (with "See what changed on canonical" when behind), overlap in a sentence, its changes, reported files, and checkout and storage actions (Release checkout, Delete fork with the reasons it is unavailable).
+- **Changes** lists changes that need attention first. Stale or superseded changes, and promoted or closed ones, are collapsed below. A change opens as a review: header, then one checklist drawn down its workspace's lane colour (built on current canonical; each policy-required check, which a maintainer confirms in one click; concerns needing a resolution; approval of this exact revision), then **Promote to *branch***, which explains exactly which revisions it moves between. Approval and confirmation are single clicks with an optional note; raising a concern, recording a failure, resolving and closing ask for a reason. The diff loads straight away with the first file open, followed by evidence and reviews.
+- **Workspaces** opens on the **lane map**: canonical drawn as a trunk of recorded promotions, and each live workspace as a coloured lane leaving it at its fixed baseline, through its reported head, published revision and change, to its relation with canonical. The horizontal axis is lifecycle stage, not time or distance. A baseline that is not a recorded canonical revision gets a dashed, unattached lane rather than a guessed junction; quiet checkouts are dashed; shared paths are a dashed advisory bracket. Hovering a lane highlights its row and the reverse. Below it, live workspaces list their state, canonical relation, overlaps and latest change, each row carrying its lane colour; ended ones are collapsed. A workspace page opens on its own lane drawing (canonical, baseline, reported head, observed pushed ref, published revision and change) and shows its fixed baseline, reported head, canonical relation (with "See what changed on canonical" when behind), overlap in a sentence, its changes, reported files, and checkout and storage actions (Release checkout, Delete fork with the reasons it is unavailable).
 - **History** shows canonical promotions as a timeline, published revisions, stored evidence and activity written as sentences. Records open with provenance, lineage, storage details and a read-only file and history browser at that exact revision; Browse files opens the current canonical revision.
 - **Settings** holds the Connect an agent guide, the review policy (required checks, protected paths), access grants, rename, and the repository's IDs.
 
@@ -86,7 +87,7 @@ The logged-out page sells the idea before the mechanism, in three sections and a
 
 Motion is explanation, not decoration. The story waits until it is visible, pauses when hidden or offscreen, plays once and offers Replay. Paths draw with native SVG animations that hold their painted frame when paused. The generations draw on load and the plates draw once as they scroll in. Reduced motion starts everything static. Stage notes share one grid cell, so the tallest reserves the space and the controls never shift. Revision-bound text equivalents describe each stage for assistive technology, and the ledger has a text alternative. Below 720px a smaller graph shows two workspaces and names the third in text. Breakpoints use the root container width, supporting 320px screens and 200% zoom.
 
-The page uses presentation-only example data and requests no private repository data or provider resources. Sign in preserves repository and invitation destinations through the existing login route. The authenticated console and its light theme are unchanged; no dark theme exists today. The page introduces a product under development. It is not a live repository inspector or proof of hosted availability, and it does not claim automatic push observation or upstream forge integration.
+The page uses presentation-only example data and requests no private repository data or provider resources. Sign in preserves repository and invitation destinations through the existing login route. The page keeps its paper palette and Inter type even when the console uses Midnight. The page introduces a product under development. It is not a live repository inspector or proof of hosted availability, and it does not claim automatic push observation or upstream forge integration.
 
 ## Hardening interaction rules
 

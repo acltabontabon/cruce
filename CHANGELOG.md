@@ -9,6 +9,15 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 - Add opt-in pushed-ref observation with namespace-budgeted subscriptions, idempotent Queue ingestion, bounded gap recovery and visible degraded state. Observations never publish or approve source.
 - Add a repository reconciliation view and `get_reconciliation` MCP read based on exact published Git ancestry, with proposal blockers and explicit unknown results.
 - Show report freshness independently of presence throughout workspace and reconciliation views.
+- Add a dark console theme, Midnight, alongside the light Daylight theme. The console matches the system by default, and the avatar menu offers System, Dark or Light.
+- Lead Home with **Needs you**: every open change waiting on a person across repositories, with its status, a one-line reason and its action (Review, Promote or Open), followed by advisory heads-ups.
+- Add a lane map to Workspaces that draws canonical promotions and each live workspace from its fixed baseline through head, published revision and change. Unplaced baselines and quiet checkouts are drawn dashed, and shared paths are marked as advisory.
+
+### Changed
+
+- Redesign the console on one token-based visual system with Geist and JetBrains Mono, open lists between hairline rules, and frames only around the lane map, diffs and source.
+- Show each workspace's lane colour on its rows, its workspace page and its change's review checklist. Turn the repository attention bar into a strip of counts that each open where they are handled.
+- Add the open changes behind the counts, and the state of live workspaces, to repository summaries so Home can name each decision.
 
 ### Fixed
 

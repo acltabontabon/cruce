@@ -3,6 +3,13 @@ import type { Namespace, Repository, User } from "../shared/platform.ts";
 import { BRAND, Brand } from "./brand.tsx";
 import { Icon } from "./design.tsx";
 import { RepositorySearch } from "./search.tsx";
+import { type Appearance, useAppearance } from "./theme.ts";
+
+const appearances: [Appearance, string][] = [
+	["system", "System"],
+	["dark", "Dark"],
+	["light", "Light"],
+];
 
 type Option = { id: string; name: string; detail: string; href: string; selected?: boolean; select: () => void };
 function HeaderDropdown({
@@ -33,7 +40,9 @@ function HeaderDropdown({
 	}, [routeKey, initialOpen]);
 	useEffect(() => {
 		if (!open) return;
-		panel.current?.querySelector<HTMLElement>("input,a[href],button")?.focus();
+		(
+			panel.current?.querySelector<HTMLElement>("input:checked") ?? panel.current?.querySelector<HTMLElement>("input,a[href],button")
+		)?.focus();
 		const outside = (event: Event) => {
 			if (!root.current?.contains(event.target as Node)) setOpen(false);
 		};
@@ -85,6 +94,8 @@ function HeaderDropdown({
 							close(true);
 							return;
 						}
+						// Radio groups keep their native arrow-key selection.
+						if (event.target instanceof HTMLInputElement && event.target.type === "radio") return;
 						const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("a[href],button:not(:disabled)"));
 						const current = items.indexOf(document.activeElement as HTMLElement);
 						if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -214,6 +225,7 @@ export function ConsoleHeader({
 	accountRequested: boolean;
 	create: () => void;
 }) {
+	const [appearance, setAppearance] = useAppearance();
 	return (
 		<header className="console-header" data-scope={screen}>
 			<div className="header-inner">
@@ -311,10 +323,6 @@ export function ConsoleHeader({
 					>
 						{() => (
 							<>
-								<div className="account-card-heading" aria-hidden="true">
-									<span>Account</span>
-									<img src={BRAND.symbol} alt="" />
-								</div>
 								<div className="account-summary">
 									<span className="account-portrait" aria-hidden="true">
 										{me.user.name.slice(0, 1).toUpperCase()}
@@ -324,6 +332,23 @@ export function ConsoleHeader({
 										<p>{me.user.email}</p>
 									</div>
 								</div>
+								<fieldset className="appearance">
+									<legend>Appearance</legend>
+									<div className="appearance-options">
+										{appearances.map(([value, label]) => (
+											<label key={value}>
+												<input
+													type="radio"
+													name="appearance"
+													value={value}
+													checked={appearance === value}
+													onChange={() => setAppearance(value)}
+												/>
+												{label}
+											</label>
+										))}
+									</div>
+								</fieldset>
 								<div className="account-actions">
 									<a className="account-sign-out" href="/auth/logout">
 										<Icon name="logout" />

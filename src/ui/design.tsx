@@ -270,21 +270,3 @@ export function CopyCommand({ text, label }: { text: string; label?: string }) {
 		</div>
 	);
 }
-export function BranchArt() {
-	return (
-		<div className="branch-art" aria-hidden="true">
-			<svg viewBox="0 0 320 180" fill="none" aria-hidden="true">
-				<path d="M24 54h272M24 126h272" stroke="currentColor" strokeWidth="2" />
-				{[54, 126].map((y) => (
-					<g key={y}>
-						<circle cx="24" cy={y} r="5" fill="var(--paper)" stroke="currentColor" strokeWidth="2" />
-						<circle cx="296" cy={y} r="5" fill="var(--paper)" stroke="currentColor" strokeWidth="2" />
-					</g>
-				))}
-				<path d="M170 40h-12v100h12" stroke="var(--attention)" strokeWidth="2" />
-			</svg>
-			<span className="art-label label-code">independent work</span>
-			<span className="art-label label-work">shared context</span>
-		</div>
-	);
-}

@@ -164,6 +164,31 @@ The two new browser journeys disclose the retention inspection's cloud/budget co
 
 **Remaining hosted acceptance:** in the configured test environment, submit cleanup through authenticated console and OAuth connections, interrupt the caller and restart/wake the DO, independently confirm every retained ref and exact provider ID, and retrieve retained source/evidence after deletion. Verify grant, scope, membership and policy changes during recovery, including KV propagation; induce provider pending deletion and lost confirmation/settlement; confirm alarm redelivery/backoff and batching without duplicate completion or new reservations. Measure Worker memory/CPU at state, advertisement and 32 MiB request/response boundaries. At-least-once wakeups do not establish exactly-once provider delivery, and external provider writers can still race name-addressed metadata/ref checks. General publication receipt/settlement parity remains R3.
 
+## Midnight console and lane map verification
+
+On **2026-10-08** the Midnight/Daylight console, the Home **Needs you** list and the Workspaces lane map passed:
+
+- typecheck;
+- Biome on all changed source, tests and docs;
+- **313 unit/integration tests**, including the lane model and the extended repository summaries;
+- **70 browser journeys**, of which 4 are new;
+- `pnpm verify:scenario`;
+- the offline cf build, which keeps its unavailable-Docker notice.
+
+The new journeys cover:
+
+- matching the system theme by default, persisting an explicit choice, and falling back to the system theme when storage throws;
+- the public homepage keeping its paper background under a dark system theme;
+- the lane map counting live workspaces and highlighting a lane from its row;
+- Home naming a waiting decision and opening it.
+
+The existing journeys still pass. Two were updated:
+
+- The avatar menu now takes one more Tab to leave, past the Appearance control.
+- Empty namespace and repository states explain the header action instead of repeating its button.
+
+Screens were reviewed in both themes at 1440, 1024 and 390px. These are fixture checks: hosted appearance and summaries have not been verified on a deployed Worker. The full `pnpm lint` still reports the pre-existing formatting of the untracked `tools/verification/participation.ts`.
+
 ## Console redesign verification
 
 On **2026-10-06** the console redesign and safe errors (F5) passed typecheck, lint, **132 unit/integration tests** and **50 browser journeys** against the local fixture, which now simulates promotion so the review flow completes end to end. The journeys cover the attention bar, the review checklist through promotion, concerns and resolution, failed-promotion retry identity, interrupted-promotion reconciliation, workspace release, behind-canonical inspection, history and lineage, redirects of retired links, account check and budget, read-only authority, keyboard and mobile reflow at 1440, 1024 and 390px, and 200% zoom. Unit tests cover the status language, attention summaries and the public-error mapper, including a provider error that must not leak its API path or account ID. These are fixture checks. Deployed to the test Worker as `10d8141b-1e3c-4156-a9aa-7267229aab6c`, the owner's signed-in console rendered Home, `d2-proof` and the legacy `gateway-reconciliation` repository (pre-reset data shape) without errors. Home and repository attention agreed after superseded changes stopped counting as stale. **Check connection** re-verified the sealed token against the real Artifacts account, and an invalid revision returned `Invalid revision: …` (HTTP 400). Provider-error sanitisation was exercised by unit tests only; no provider failure was induced live.

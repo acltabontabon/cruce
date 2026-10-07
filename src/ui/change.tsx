@@ -1,6 +1,8 @@
-import { type ReactNode, useState } from "react";
+import { type CSSProperties, type ReactNode, useState } from "react";
 import type { Proposal, RepositorySnapshot } from "../shared/platform.ts";
 import { BackLink, Pill, Section } from "./design.tsx";
+import { laneIndex } from "./lanes.ts";
+import { LaneBullet } from "./lanes.tsx";
 import { ChangeDiff, type Execute } from "./source.tsx";
 import { actorLabel, ago, changeStatus, short } from "./status.ts";
 
@@ -125,7 +127,11 @@ function ReviewChecklist({ view, p, execute, busy }: { view: RepositorySnapshot;
 						? "Obtain maintainer approval for this revision"
 						: "Promote this revision";
 	return (
-		<section className="review-panel" aria-label="Review checklist">
+		<section
+			className="review-panel"
+			aria-label="Review checklist"
+			style={{ "--lane": `var(--lane-${laneIndex(view).get(p.workspaceId) ?? 1})` } as CSSProperties}
+		>
 			<h2>Review</h2>
 			<p className="next-action" role="status">
 				Next: {next}
@@ -337,6 +343,7 @@ export function ChangeDetail({
 					</p>
 					<h1>{p.title}</h1>
 					<p className="change-meta">
+						<LaneBullet lane={laneIndex(view).get(p.workspaceId)} />
 						<Pill tone={status.tone}>{status.label}</Pill>
 						<span>
 							Revision <code title={p.revision}>{short(p.revision)}</code> on <code title={p.base}>{short(p.base)}</code>
