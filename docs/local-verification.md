@@ -23,6 +23,12 @@ The scenario scripts fix commit timestamps and isolate signing/hooks for their d
 
 The [timeout fixture](../demo/convergence/README.md) uses injected delay capture without timers or network calls. A shared driver exercises ordinary Git against disposable bare repositories served over loopback HTTP and the real in-process Cruce runtime. Only the provider adapter is substituted; Git fetch/push, publication, retained source/evidence, readiness and non-forced promotion run normally. Fixture grants and human attestations do not establish actual authenticated participation. `pnpm verify:scenario` replays the driver twice and checks identical revisions and behavioral outcomes, then writes non-secret results to ignored `dist/scenario-verification/result.json`, including the tested Cruce commit and working-tree-dirty flag.
 
+## Tool authorization presentation
+
+On **2026-10-08**, the OAuth consent redesign passed typecheck, lint, **340 unit/integration tests**, **83 browser journeys**, deterministic scenario verification and the offline cf build. The build retains its Docker-unavailable notice. A focused final browser run also passed both consent journeys after spacing and keyboard-selection updates; the identity suite passed all 15 tests after response-header assertions were added.
+
+The isolated fixture renders the production consent page, including its nonce-based content security policy. Browser checks cover searching by namespace/name, retaining hidden selections, submitted repository and scope choices, mandatory read access, keyboard selection, permission disclosure, empty/expired recovery and no horizontal overflow at 320px. Desktop and mobile screenshots were visually inspected in ignored `dist/ui-checks/consent-desktop.png` and `dist/ui-checks/consent-mobile.png`. Identity tests preserve consent headers/escaping and verify requested defaults and the script nonce. Existing OAuth approval and repository filtering remain unchanged. These checks do not establish a deployed OAuth callback flow; this redesign has not been deployed.
+
 ## Installable local client and Git onboarding
 
 On **2026-10-08**, typecheck, lint, **340 unit/integration tests**, **81 browser journeys**, deterministic scenario verification, release metadata validation and the offline cf build passed. The build includes `/downloads/cruce-client.tgz`; the Docker-unavailable notice remains.

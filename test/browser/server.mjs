@@ -25,8 +25,40 @@ export async function startFixtureServer() {
 		appType: "spa",
 	});
 	const { fixture } = await server.ssrLoadModule("/test/browser/fixture.ts");
+	const { consentPage, consentErrorPage } = await server.ssrLoadModule("/src/worker/consent-page.ts");
 	let data = await fixture();
 	handle = async (req, res, next) => {
+		if (req.url?.startsWith("/__fixture/consent")) {
+			const response = req.url.includes("error")
+				? consentErrorPage("This connection request has expired. Start again from your tool.", "/__fixture/consent")
+				: consentPage(
+						{
+							clientName: "Cruce git bridge",
+							email: "maya@example.test",
+							handle: "fixture-consent",
+							redirectUri: "http://127.0.0.1:53605/callback",
+							repositories: req.url.includes("empty")
+								? []
+								: [
+										{ id: "hello", label: "maya/hello-world" },
+										{ id: "payments", label: "fernloop/payment-service" },
+										{ id: "gateway", label: "gateway-check-20261006/gateway-reconciliation" },
+										{
+											id: "long",
+											label: "a-very-long-namespace-name-for-narrow-screens/a-very-long-repository-name-that-must-wrap-instead-of-overflow",
+										},
+									],
+							preset: ["cruce:read", "workspace:write", "revision:publish", "artifact:publish", "change:write", "promotion:request"],
+						},
+						new Headers(),
+					);
+			res.statusCode = response.status;
+			response.headers.forEach((value, key) => {
+				res.setHeader(key, value);
+			});
+			res.end(await response.text());
+			return;
+		}
 		if (req.url === "/__fixture/reset") {
 			data = await fixture();
 			res.setHeader("content-type", "application/json");

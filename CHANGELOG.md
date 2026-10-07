@@ -23,6 +23,8 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Changed
 
+- Redesign tool authorization with a focused repository picker, search, plain-language permissions, connection details and clear connect/cancel actions. Empty and expired requests include recovery guidance.
+
 - Make Home's **Needs you** viewer-specific: it lists only decisions you can make now, each with its owner, exact revision, primary blocker, the number of further blockers and your action. Visible work whose next step belongs to its owner or a maintainer moves to **Waiting on others**. Capped repository summaries say "Showing 8 of 17" and link to the full filtered list.
 - Lead change and workspace rows with the accountable owner, resolved from namespace identity with an explicit fallback; tool labels move to provenance ("Worktree attached through Codex", "published through Codex, Maya's connection"). The lane map labels each lane with its owner.
 - Group repository Changes by next action instead of one review list, and count recovery, promotion, review, preparation and reconciliation separately in the attention bar, where each count opens its filtered list. Stale changes are now reconciliation work rather than hidden with superseded ones.

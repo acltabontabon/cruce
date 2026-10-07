@@ -155,6 +155,11 @@ describe("native identity", () => {
 		expect(html).toContain('name="repository" value="repo"');
 		expect(html).toContain('name="handle" value="consent-handle"');
 		expect(html).toContain("Gateway &lt;client>");
+		expect(html).toContain('name="viewport"');
+		expect(html).toContain('name="scope" value="cruce:read" checked disabled');
+		expect(html).toContain('name="scope" value="workspace:write">');
+		const nonce = html.match(/<script nonce="([^"]+)"/)![1];
+		expect(response.headers.get("content-security-policy")).toContain(`script-src 'nonce-${nonce}'`);
 	});
 	it("verifies real signatures, issuer, application audience and expiry", async () => {
 		const f = await identityFixture(),

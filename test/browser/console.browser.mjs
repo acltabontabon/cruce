@@ -1967,3 +1967,52 @@ test("unknown ancestry is reported as missing knowledge, never as nothing waitin
 		.getByText(/^Ancestry unavailable for 2 workspaces/)
 		.waitFor();
 });
+
+test("tool consent searches repositories, preserves selections and submits only chosen access", async () => {
+	await page.goto(`${server.origin}/__fixture/consent`);
+	const connect = page.getByRole("button", { name: "Connect", exact: true });
+	assert.equal(await connect.isDisabled(), true);
+	await page.getByRole("checkbox", { name: "maya hello-world" }).check();
+	assert.equal(await connect.isEnabled(), true);
+	await page.getByRole("searchbox", { name: "Find a repository" }).fill("fernloop");
+	assert.equal(await page.locator(".repository:visible").count(), 1);
+	await page.getByRole("checkbox", { name: "fernloop payment-service" }).check();
+	assert.equal(await page.getByRole("status").textContent(), "2 repositories selected");
+	await page.getByRole("searchbox").fill("no-match");
+	await page.getByText("No repositories match your search.").waitFor();
+	assert.equal(await connect.isEnabled(), true);
+	await page.getByRole("searchbox").fill("");
+	await page.getByText("Review permissions", { exact: false }).click();
+	await page.getByRole("checkbox", { name: "Publish Git revisions" }).uncheck();
+	assert.equal(await page.getByRole("checkbox", { name: "Read repositories and work history" }).isDisabled(), true);
+	assert.equal(await page.locator("#permission-count").textContent(), "5 enabled");
+	await page.route("**/__fixture/consent", async (route) => {
+		const submitted = new URLSearchParams(route.request().postData());
+		assert.deepEqual(submitted.getAll("repository"), ["hello", "payments"]);
+		assert.equal(submitted.get("handle"), "fixture-consent");
+		assert.equal(submitted.getAll("scope").includes("revision:publish"), false);
+		await route.fulfill({ body: "Consent submitted" });
+	});
+	await connect.click();
+	await page.getByText("Consent submitted").waitFor();
+});
+
+test("tool consent stays legible on desktop and mobile and provides empty and expired recovery", async () => {
+	await page.goto(`${server.origin}/__fixture/consent`);
+	await page.getByRole("checkbox", { name: "maya hello-world" }).focus();
+	await page.keyboard.press("Space");
+	assert.equal(await page.getByRole("button", { name: "Connect", exact: true }).isEnabled(), true);
+	await page.screenshot({ path: "dist/ui-checks/consent-desktop.png", fullPage: true });
+	await page.setViewportSize({ width: 375, height: 812 });
+	await page.getByText("Review permissions", { exact: false }).click();
+	await page.screenshot({ path: "dist/ui-checks/consent-mobile.png", fullPage: true });
+	await page.setViewportSize({ width: 320, height: 812 });
+	await page.getByText("Connection details", { exact: true }).click();
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+	await page.goto(`${server.origin}/__fixture/consent?empty`);
+	await page.getByText("You don’t have any repositories available to connect.", { exact: false }).waitFor();
+	assert.equal(await page.getByRole("button", { name: "Connect", exact: true }).isDisabled(), true);
+	await page.goto(`${server.origin}/__fixture/consent?error`);
+	await page.getByRole("link", { name: "Start again" }).click();
+	await page.getByRole("heading", { name: "Connect to Cruce" }).waitFor();
+});

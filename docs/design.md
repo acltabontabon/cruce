@@ -92,6 +92,12 @@ Motion is explanation, not decoration. The story waits until it is visible, paus
 
 The page uses presentation-only example data and requests no private repository data or provider resources. Sign in preserves repository and invitation destinations through the existing login route. The page keeps its paper palette and Inter type even when the console uses Midnight. The page introduces a product under development. It is not a live repository inspector or proof of hosted availability, and it does not claim automatic push observation or upstream forge integration.
 
+## Tool authorization
+
+The OAuth connection page uses the public paper palette, forest text and Cruce mark in a narrow, responsive column. It leads with the requesting tool and signed-in account, then a searchable repository picker with explicit selection and a **Connect** action. Namespace labels sit above repository names, and long names wrap. Selections survive filtering; connecting requires a selection when JavaScript is available. An empty repository list directs the user to Home.
+
+Permissions use plain language in an expandable section, preserving the requested defaults and mandatory read scope. Technical scope identifiers, the client-supplied name disclosure, callback address and cloud resource policy appear in Connection details. Human promotion approval and connection revocation remain visible. Native forms, checkboxes and disclosure controls keep keyboard operation and submission working without JavaScript. Expired consent uses the same page styling with Start again and Cancel. This presentation does not change OAuth authority or approved-repository filtering.
+
 ## Hardening interaction rules
 
 Clone, Attach local checkout and Connect an agent share one setup guide. Each header action opens its corresponding method, and Settings links to that guide. Clone includes Git authorization and its credential helper. Existing-checkout setup preserves files, branch and remotes, adds a separate fork remote, and discloses resource consumption. The guide never launches an agent or uploads history.
