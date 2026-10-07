@@ -52,6 +52,8 @@
 	--lane-5: #876800;
 	--lane-6: #2470b6;
 	--grid-dot: rgb(21 25 37 / 0.08);
+	--hover-glow: 9%;
+	--hover-wash: 5%;
 	--glow: 10%;
 	--crossing: 0.1;
 	--backdrop-dot: rgb(21 25 37 / 0.1);
@@ -95,6 +97,8 @@
 		--lane-5: #e0c35a;
 		--lane-6: #7ccbff;
 		--grid-dot: rgb(220 225 245 / 0.055);
+		--hover-glow: 15%;
+		--hover-wash: 7%;
 		--glow: 15%;
 		--crossing: 0.12;
 		--backdrop-dot: rgb(220 225 245 / 0.085);
@@ -138,6 +142,8 @@
 	--lane-5: #e0c35a;
 	--lane-6: #7ccbff;
 	--grid-dot: rgb(220 225 245 / 0.055);
+	--hover-glow: 15%;
+	--hover-wash: 7%;
 	--glow: 15%;
 	--crossing: 0.12;
 	--backdrop-dot: rgb(220 225 245 / 0.085);
@@ -1404,9 +1410,69 @@ body {
 	font-weight: 400;
 	text-align: left;
 }
-:where(.shell) :is(.change-row, .workspace-row, .repo-row, .namespace-link, .mini-row, .retained-row, .decision-row, .heads-row):hover {
+/*
+ * Row hover: a soft spotlight that follows the pointer over a faint accent wash, with an accent edge drawing in from the
+ * left. Keyboard focus gets the same highlight. Rows with their own edge (decisions) keep it instead of a second one.
+ */
+:where(.shell) :is(.change-row, .workspace-row, .repo-row, .namespace-link, .mini-row, .retained-row, .decision-row, .heads-row) {
+	position: relative;
+	isolation: isolate;
+	border-radius: var(--r-md);
+}
+:where(.shell) :is(.change-row, .workspace-row, .repo-row, .namespace-link, .mini-row, .retained-row, .decision-row, .heads-row)::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	border-radius: inherit;
+	background:
+		radial-gradient(
+			260px circle at var(--hover-x, 30%) var(--hover-y, 50%),
+			color-mix(in oklab, var(--accent) var(--hover-glow), transparent),
+			transparent 72%
+		),
+		linear-gradient(90deg, color-mix(in oklab, var(--accent) var(--hover-wash), transparent), transparent 75%);
+	opacity: 0;
+	transition: opacity var(--slow) var(--ease);
+}
+:where(.shell)
+	:is(.change-row, .workspace-row, .repo-row, .namespace-link, .mini-row, .retained-row, .decision-row, .heads-row):not(
+		.decision-row
+	)::after {
+	content: "";
+	position: absolute;
+	top: 22%;
+	bottom: 22%;
+	left: 0;
+	width: 2px;
+	border-radius: 2px;
+	background: var(--accent);
+	opacity: 0;
+	transform: scaleY(0.2);
+	transition:
+		transform var(--slow) var(--ease),
+		opacity var(--slow) var(--ease);
+}
+:where(.shell)
+	:is(.change-row, .workspace-row, .repo-row, .namespace-link, .mini-row, .retained-row, .decision-row, .heads-row):is(
+		:hover,
+		:focus-visible
+	) {
 	border-color: transparent;
-	background: var(--surface-2);
+	background: transparent;
+}
+:where(.shell)
+	:is(.change-row, .workspace-row, .repo-row, .namespace-link, .mini-row, .retained-row, .decision-row, .heads-row):is(
+		:hover,
+		:focus-visible
+	)::before,
+:where(.shell)
+	:is(.change-row, .workspace-row, .repo-row, .namespace-link, .mini-row, .retained-row, .decision-row, .heads-row):is(
+		:hover,
+		:focus-visible
+	)::after {
+	opacity: 1;
+	transform: none;
 }
 .rows > button:focus-visible,
 .namespace-link:focus-visible {

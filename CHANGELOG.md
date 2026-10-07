@@ -18,6 +18,7 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 ### Changed
 
 - Give the console a quiet branded backdrop: a faint accent glow, a fading dot grid and the Cruce crossing in hairlines, in both themes.
+- Highlight rows on hover or keyboard focus with a soft accent spotlight that follows the pointer, a faint accent wash and an accent edge drawn in from the left.
 - Redesign the console on one token-based visual system with Geist and JetBrains Mono, open lists between hairline rules, and frames only around the lane map, diffs and source.
 - Show each workspace's lane colour on its rows, its workspace page and its change's review checklist. Turn the repository attention bar into a strip of counts that each open where they are handled.
 - Add the open changes behind the counts, and the state of live workspaces, to repository summaries so Home can name each decision.
