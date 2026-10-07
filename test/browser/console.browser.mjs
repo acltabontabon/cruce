@@ -2130,3 +2130,23 @@ test("lane maps bound parallel work, fold detached work, and keep every lane rea
 	await map.locator(".lane-canvas").focus();
 	assert.equal(await map.locator(".lane-canvas").evaluate((e) => document.activeElement === e), true);
 });
+
+test("repository-scoped consent confirms one known repository without a picker", async () => {
+	await page.goto(`${server.origin}/__fixture/consent?bound`);
+	await page.getByText("Access is limited to this repository.", { exact: true }).waitFor();
+	assert.equal(await page.getByRole("searchbox").count(), 0);
+	assert.equal(await page.locator('input[type="checkbox"][name="repository"]').count(), 0);
+	assert.equal(await page.locator(".repositories .repository").count(), 1);
+	assert.equal(await page.getByRole("button", { name: "Connect", exact: true }).isEnabled(), true);
+	await page.screenshot({ path: "dist/ui-checks/consent-bound.png", fullPage: true });
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.screenshot({ path: "dist/ui-checks/consent-bound-mobile.png", fullPage: true });
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+	await page.route("**/__fixture/consent?bound", async (route) => {
+		const form = new URLSearchParams(route.request().postData());
+		assert.deepEqual(form.getAll("repository"), ["hello"]);
+		await route.fulfill({ body: "Repository confirmed" });
+	});
+	await page.getByRole("button", { name: "Connect", exact: true }).click();
+	await page.getByText("Repository confirmed", { exact: true }).waitFor();
+});

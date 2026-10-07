@@ -1,6 +1,7 @@
 import { type ApprovedConsent, AuthorizationError, type OAuthHelpers, OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { DEFAULT_AGENT_SCOPES, SCOPES, type Scope } from "../core/capabilities.ts";
 import { DomainError as CoordinationError, domainStatus } from "../core/errors.ts";
+import { repositoryConsentTarget } from "../shared/repository-consent.ts";
 import type { ConnectionMetadata } from "./connections.ts";
 import { consentErrorPage, consentPage } from "./consent-page.ts";
 import type { Directory } from "./directory.ts";
@@ -200,13 +201,14 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 				"cache-control": "no-store",
 			},
 		});
-	const choices: { id: string; label: string }[] = [];
+	const choices: { id: string; label: string; namespaceId: string }[] = [];
 	for (const namespace of await directory.namespaces(user.id)) {
 		try {
 			const view = await env.NAMESPACE.getByName(namespace.id).snapshot({
 				actor: { id: user.id, userId: user.id, kind: "human", name: user.name },
 			});
-			for (const repo of view.repositories) choices.push({ id: repo.id, label: `${namespace.handle}/${repo.name}` });
+			for (const repo of view.repositories)
+				choices.push({ id: repo.id, label: `${namespace.handle}/${repo.name}`, namespaceId: namespace.id });
 		} catch {}
 	}
 	const oauth = env.OAUTH_PROVIDER;
@@ -215,6 +217,18 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 		const original = await oauth.parseAuthRequest(request),
 			consent = await oauth.beginConsent(original),
 			description = await oauth.describeConsent(original);
+		let target: ReturnType<typeof repositoryConsentTarget>;
+		try {
+			target = repositoryConsentTarget(original.state);
+		} catch {
+			return consentErrorPage("This repository connection request is invalid. Start again from your tool.", request.url);
+		}
+		const offered = target ? choices.filter((r) => r.id === target.repositoryId && r.namespaceId === target.namespaceId) : choices;
+		if (target && !offered.length)
+			return consentErrorPage(
+				"This repository is unavailable to your account. Check your access and start again from your tool.",
+				request.url,
+			);
 		const requested = original.scope?.filter((s): s is Scope => (SCOPES as readonly string[]).includes(s));
 		const preset = requested?.length ? requested : DEFAULT_AGENT_SCOPES;
 		return consentPage(
@@ -223,7 +237,8 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 				email: identity.email,
 				handle: consent.handle,
 				redirectUri: original.redirectUri,
-				repositories: choices,
+				repositories: offered,
+				boundRepository: !!target,
 				preset,
 			},
 			consent.headers,
@@ -237,10 +252,23 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 		if (!(error instanceof AuthorizationError)) throw error;
 		return consentErrorPage(error.description, request.url);
 	}
+	let target: ReturnType<typeof repositoryConsentTarget>;
+	try {
+		target = repositoryConsentTarget(approved.request.state);
+	} catch {
+		return consentErrorPage("This repository connection request is invalid. Start again from your tool.", request.url);
+	}
+	const offered = target ? choices.filter((r) => r.id === target.repositoryId && r.namespaceId === target.namespaceId) : choices;
+	const selected = form.getAll("repository").map(String);
+	if (target && (offered.length !== 1 || selected.length !== 1 || selected[0] !== target.repositoryId))
+		return consentErrorPage(
+			"Repository access does not match this connection request. Check your access and start again from your tool.",
+			request.url,
+		);
 	const chosen = form.getAll("scope").map(String),
 		scope = SCOPES.filter((s) => s === "cruce:read" || chosen.includes(s)),
 		requested = new Set(form.getAll("repository").map(String)),
-		repositories = choices.filter((r) => requested.has(r.id)),
+		repositories = offered.filter((r) => requested.has(r.id)).map(({ id, label }) => ({ id, label })),
 		connectionId = crypto.randomUUID(),
 		clientName = (await oauth.describeConsent(approved.request)).clientName ?? "Agent",
 		metadata: ConnectionMetadata = { connectionId, clientName, repositories },

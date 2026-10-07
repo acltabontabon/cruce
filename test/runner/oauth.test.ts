@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Credentials } from "../../runner/oauth.ts";
+import { repositoryConsentState, repositoryConsentTarget } from "../../src/shared/repository-consent.ts";
 
 describe("stored OAuth credentials", () => {
 	it("preserves independently updated fields across concurrent private state saves", async () => {
@@ -46,4 +47,35 @@ describe("stored OAuth credentials", () => {
 			await rm(dir, { recursive: true, force: true });
 		}
 	});
+});
+
+it("carries one repository in a fresh OAuth state nonce while keeping generic clients unscoped", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "cruce-consent-"));
+	try {
+		const credentials = new Credentials("https://cruce.example", "codex");
+		credentials.path = join(dir, "credentials.json");
+		credentials.consentTarget = { namespaceId: "namespace", repositoryId: "repository" };
+		const first = await credentials.state(),
+			second = await credentials.state();
+		expect(first).not.toBe(second);
+		expect(repositoryConsentTarget(first)).toEqual(credentials.consentTarget);
+		expect(credentials.data.state).toBe(second);
+		credentials.consentTarget = undefined;
+		expect(repositoryConsentTarget(await credentials.state())).toBeUndefined();
+		expect(() => repositoryConsentTarget("cruce-repository-v1:invalid")).toThrow();
+		expect(() => repositoryConsentState({ namespaceId: "../namespace", repositoryId: "repo" }, "nonce")).toThrow();
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+it("keeps grants for separate repositories in separate credential files", () => {
+	const first = new Credentials("https://cruce.example", "claude", { namespaceId: "ns", repositoryId: "first" });
+	const second = new Credentials("https://cruce.example", "claude", { namespaceId: "ns", repositoryId: "second" });
+	expect(first.path).not.toBe(second.path);
+	expect(new Credentials("https://cruce.example", "git", { namespaceId: "a-b", repositoryId: "c" }).path).not.toBe(
+		new Credentials("https://cruce.example", "git", { namespaceId: "a", repositoryId: "b-c" }).path,
+	);
+	expect(first.clientMetadata.client_name).toBe(second.clientMetadata.client_name);
+	expect(() => new Credentials("https://cruce.example", "git", { namespaceId: "../ns", repositoryId: "repo" })).toThrow();
 });

@@ -25,14 +25,14 @@ const button = form.querySelector('button');
 const count = document.querySelector('#selection');
 const search = document.querySelector('#search');
 const update = () => {
- const selected = repositories.filter(input => input.checked).length;
+ const selected = repositories.filter(input => input.type === 'hidden' || input.checked).length;
  button.disabled = !selected;
- count.textContent = selected ? selected + (selected === 1 ? ' repository selected' : ' repositories selected') : 'Select at least one repository to continue.';
+ if (count) count.textContent = selected ? selected + (selected === 1 ? ' repository selected' : ' repositories selected') : 'Select at least one repository to continue.';
  const enabled = form.querySelectorAll('input[name="scope"]:checked').length;
  document.querySelector('#permission-count').textContent = enabled + ' enabled';
 };
 form.addEventListener('change', update);
-form.addEventListener('submit', event => { if (!repositories.some(input => input.checked)) { event.preventDefault(); repositories[0]?.focus(); } });
+form.addEventListener('submit', event => { if (!repositories.some(input => input.type === 'hidden' || input.checked)) { event.preventDefault(); repositories[0]?.focus(); } });
 if (search) {
  document.querySelector('#search-control').hidden = false;
  search.addEventListener('input', () => {
@@ -65,15 +65,18 @@ export function consentPage(
 		redirectUri: string;
 		repositories: { id: string; label: string }[];
 		preset: readonly Scope[];
+		boundRepository?: boolean;
 	},
 	headers: Headers,
 ) {
-	const { repositories, preset } = input;
+	const { repositories, preset, boundRepository } = input;
 	const choices = repositories
 		.map((repository) => {
 			const separator = repository.label.indexOf("/");
 			const namespace = separator < 0 ? "" : repository.label.slice(0, separator);
 			const name = separator < 0 ? repository.label : repository.label.slice(separator + 1);
+			if (boundRepository)
+				return `<div class="repository"><input type="hidden" name="repository" value="${escapeHtml(repository.id)}"><span><small>${escapeHtml(namespace)}</small><strong>${escapeHtml(name)}</strong></span></div>`;
 			return `<label class="repository"><input type="checkbox" name="repository" value="${escapeHtml(repository.id)}"><span><small>${escapeHtml(namespace)}</small><strong>${escapeHtml(name)}</strong></span></label>`;
 		})
 		.join("");
@@ -82,7 +85,7 @@ export function consentPage(
 			`<label class="permission"><input type="checkbox" name="scope" value="${scope}"${preset.includes(scope) || scope === "cruce:read" ? " checked" : ""}${scope === "cruce:read" ? " disabled" : ""}><span>${permissions[scope]}</span>${scope === "cruce:read" ? "<small>Required</small>" : ""}</label>`,
 	).join("");
 	return page(
-		`<div class="eyebrow">Tool connection</div><h1>Connect to Cruce</h1><p class="intro"><strong>${escapeHtml(input.clientName)}</strong> wants access to your repositories. Choose which ones it can work with.</p><div class="account"><i class="dot" aria-hidden="true"></i><span>Signed in as <strong>${escapeHtml(input.email)}</strong></span></div><form method="post"><input type="hidden" name="handle" value="${escapeHtml(input.handle)}"><fieldset><legend>Choose repositories</legend><p class="hint">Only the repositories you select will be shared with this tool.</p>${repositories.length ? `<div id="search-control" hidden><label class="hint" for="search">Find a repository</label><input class="search" id="search" type="search" placeholder="Search by name or namespace" autocomplete="off"></div><div class="repositories">${choices}<p id="no-results" class="empty" hidden>No repositories match your search.</p></div>` : `<div class="repositories"><p class="empty">You don’t have any repositories available to connect.<br><a href="/">Go to Home to create a repository or check your access</a></p></div>`}<p id="selection" class="selection" role="status">Select at least one repository to continue.</p></fieldset><details><summary>Review permissions <span id="permission-count">${SCOPES.filter((scope) => preset.includes(scope) || scope === "cruce:read").length} enabled</span></summary><p class="hint">Applies to the repositories you select, within your current access. Uncheck anything this tool doesn’t need.</p><fieldset aria-label="Tool permissions" class="permission-list">${options}</fieldset></details><details><summary>Connection details</summary><div class="technical"><p>Tool name is supplied by the client.</p><p>Return address<br><code>${escapeHtml(input.redirectUri)}</code></p><p>Permission identifiers</p><ul>${SCOPES.map((scope) => `<li><code>${scope}</code> — ${escapeHtml(SCOPE_LABELS[scope])}</li>`).join("")}</ul><p>Cloud operations may incur costs and remain subject to namespace resource policy.</p></div></details><div class="guardrail"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6Z"/><path d="m8 12 3 3 5-6"/></svg><p><strong>You stay in control</strong>Promoting changes to canonical Git still requires human approval. You can revoke this connection from Agent connections.</p></div><div class="actions"><a href="/">Cancel</a><button class="primary"${repositories.length ? "" : " disabled"}>Connect</button></div><p class="footer">You’ll return to your tool after connecting.</p></form>`,
+		`<div class="eyebrow">Tool connection</div><h1>Connect to Cruce</h1><p class="intro"><strong>${escapeHtml(input.clientName)}</strong> ${boundRepository ? "wants access to this repository." : "wants access to your repositories. Choose which ones it can work with."}</p><div class="account"><i class="dot" aria-hidden="true"></i><span>Signed in as <strong>${escapeHtml(input.email)}</strong></span></div><form method="post"><input type="hidden" name="handle" value="${escapeHtml(input.handle)}"><fieldset><legend>${boundRepository ? "Repository access" : "Choose repositories"}</legend><p class="hint">${boundRepository ? "Access is limited to this repository." : "Only the repositories you select will be shared with this tool."}</p>${repositories.length ? `${boundRepository ? "" : `<div id="search-control" hidden><label class="hint" for="search">Find a repository</label><input class="search" id="search" type="search" placeholder="Search by name or namespace" autocomplete="off"></div>`}<div class="repositories">${choices}${boundRepository ? "" : `<p id="no-results" class="empty" hidden>No repositories match your search.</p>`}</div>` : `<div class="repositories"><p class="empty">You don’t have any repositories available to connect.<br><a href="/">Go to Home to create a repository or check your access</a></p></div>`}${boundRepository ? "" : `<p id="selection" class="selection" role="status">Select at least one repository to continue.</p>`}</fieldset><details><summary>Review permissions <span id="permission-count">${SCOPES.filter((scope) => preset.includes(scope) || scope === "cruce:read").length} enabled</span></summary><p class="hint">Applies ${boundRepository ? "to this repository" : "to the repositories you select"}, within your current access. Uncheck anything this tool doesn’t need.</p><fieldset aria-label="Tool permissions" class="permission-list">${options}</fieldset></details><details><summary>Connection details</summary><div class="technical"><p>Tool name is supplied by the client.</p><p>Return address<br><code>${escapeHtml(input.redirectUri)}</code></p><p>Permission identifiers</p><ul>${SCOPES.map((scope) => `<li><code>${scope}</code> — ${escapeHtml(SCOPE_LABELS[scope])}</li>`).join("")}</ul><p>Cloud operations may incur costs and remain subject to namespace resource policy.</p></div></details><div class="guardrail"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6Z"/><path d="m8 12 3 3 5-6"/></svg><p><strong>You stay in control</strong>Promoting changes to canonical Git still requires human approval. You can revoke this connection from Agent connections.</p></div><div class="actions"><a href="/">Cancel</a><button class="primary"${repositories.length ? "" : " disabled"}>Connect</button></div><p class="footer">You’ll return to your tool after connecting.</p></form>`,
 		"Connect to Cruce",
 		headers,
 		200,

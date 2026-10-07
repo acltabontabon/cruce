@@ -68,9 +68,9 @@ async function main() {
 		if (origin.username || origin.password || (origin.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(origin.hostname)))
 			throw new Error("Use an HTTPS server URL without credentials");
 		if (![namespaceId, repositoryId].every((id) => /^[a-zA-Z0-9-]+$/.test(id))) throw new Error("Choose namespace and repository IDs");
-		const credentials = new Credentials(origin.origin, "git");
+		const credentials = new Credentials(origin.origin, "git", { namespaceId, repositoryId });
 		await credentials.load();
-		await login(origin.origin, credentials, DEFAULT_AGENT_SCOPES);
+		await login(origin.origin, credentials, DEFAULT_AGENT_SCOPES, { namespaceId, repositoryId });
 		await configureCanonicalCredentials(origin.origin, namespaceId, repositoryId);
 		process.stdout.write("Git authorized. Clone with the command shown in Cruce.\n");
 		return;
@@ -156,11 +156,17 @@ async function main() {
 		throw new Error("Terminal authorization timed out");
 	}
 	const clientName = connection.client,
-		credentials = new Credentials(connection.server, clientName);
+		credentials = new Credentials(connection.server, clientName, {
+			namespaceId: connection.namespaceId,
+			repositoryId: connection.repositoryId,
+		});
 	await credentials.load();
 	if (operation === "connect") {
 		delete connection.humanToken;
-		await login(connection.server, credentials, DEFAULT_AGENT_SCOPES);
+		await login(connection.server, credentials, DEFAULT_AGENT_SCOPES, {
+			namespaceId: connection.namespaceId,
+			repositoryId: connection.repositoryId,
+		});
 	}
 	let remote: Client | undefined;
 	if (!connection.humanToken) {

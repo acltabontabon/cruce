@@ -1,10 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { auth, type OAuthClientProvider, type StoredOAuthClientInformation, type StoredOAuthTokens } from "@modelcontextprotocol/client";
 import type { Scope } from "../src/core/capabilities.ts";
+import { type RepositoryConsentTarget, repositoryConsentState } from "../src/shared/repository-consent.ts";
 import { withStateLock, writeState } from "./state-file.ts";
 
 async function read<T>(path: string, fallback: T) {
@@ -34,10 +35,23 @@ export class Credentials implements OAuthClientProvider {
 	};
 	data: { client?: StoredOAuthClientInformation; tokens?: StoredOAuthTokens; verifier?: string; state?: string } = {};
 	path: string;
-	constructor(server: string, connection = "agent") {
+	consentTarget?: RepositoryConsentTarget;
+	constructor(server: string, connection = "agent", target?: RepositoryConsentTarget) {
 		if (!/^[a-zA-Z0-9-]{1,160}$/.test(connection)) throw new Error("Use a connection name containing only letters, numbers and dashes");
+		if (target) repositoryConsentState(target, "validation");
+		this.consentTarget = target;
 		this.clientMetadata.client_name = `Cruce ${connection} bridge`;
-		this.path = join(homedir(), ".config/cruce", `${Buffer.from(new URL(server).origin).toString("base64url")}-${connection}.json`);
+		this.path = join(
+			homedir(),
+			".config/cruce",
+			`${Buffer.from(new URL(server).origin).toString("base64url")}-${connection}${
+				target
+					? `-${createHash("sha256")
+							.update(JSON.stringify([target.namespaceId, target.repositoryId]))
+							.digest("hex")}`
+					: ""
+			}.json`,
+		);
 	}
 	async load() {
 		this.data = await read(this.path, {});
@@ -69,7 +83,8 @@ export class Credentials implements OAuthClientProvider {
 		return this.data.verifier;
 	}
 	async state() {
-		const state = randomUUID();
+		const nonce = randomUUID();
+		const state = this.consentTarget ? repositoryConsentState(this.consentTarget, nonce) : nonce;
 		this.data = await save(this.path, { state });
 		return state;
 	}
@@ -77,7 +92,8 @@ export class Credentials implements OAuthClientProvider {
 		process.stderr.write(`Open this sign-in link in your browser:\n${url.href}\n`);
 	}
 }
-export async function login(server: string, credentials: Credentials, scopes: Scope[]) {
+export async function login(server: string, credentials: Credentials, scopes: Scope[], target?: RepositoryConsentTarget) {
+	credentials.consentTarget = target;
 	let timeout: ReturnType<typeof setTimeout> | undefined;
 	let complete!: (code: string, iss?: string) => void;
 	const callback = new Promise<{ code: string; iss?: string }>((resolve) => {

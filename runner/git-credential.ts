@@ -12,10 +12,12 @@ async function main() {
 	if (!server || !client || !/^[a-zA-Z0-9-]+$/.test(client)) throw new Error("Choose --server URL and --client NAME");
 	const origin = new URL(server);
 	if (origin.protocol !== "https:" && origin.hostname !== "localhost" && origin.hostname !== "127.0.0.1") throw new Error("Use HTTPS");
-	const credentials = new Credentials(origin.origin, client);
-	await credentials.load();
 	if (args.includes("login")) {
-		await login(origin.origin, credentials, DEFAULT_AGENT_SCOPES);
+		if (!args.includes("--namespace") || !args.includes("--repository")) throw new Error("Choose namespace and repository IDs");
+		const target = { namespaceId: option("namespace"), repositoryId: option("repository") };
+		const credentials = new Credentials(origin.origin, client, target);
+		await credentials.load();
+		await login(origin.origin, credentials, DEFAULT_AGENT_SCOPES, target);
 		return;
 	}
 	const operation = args.at(-1);
@@ -54,6 +56,10 @@ async function main() {
 		process.stdout.write(`username=cruce\npassword=${connection.humanToken}\n\n`);
 		return;
 	}
+	const match = /^mcp\/git\/([a-zA-Z0-9-]{1,160})\/([a-zA-Z0-9-]{1,160})\/[^/]+\.git$/.exec(fields.path);
+	if (!match) return;
+	const credentials = new Credentials(origin.origin, client, { namespaceId: match[1], repositoryId: match[2] });
+	await credentials.load();
 	if (!credentials.tokens()?.refresh_token) throw new Error("Authorize this Git connection with the helper's login action first");
 	// Refresh via the existing OAuth client before handing Git a credential.
 	if ((await auth(credentials, { serverUrl: `${origin.origin}/mcp` })) !== "AUTHORIZED") throw new Error("Git connection needs sign-in");

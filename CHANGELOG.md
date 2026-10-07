@@ -51,6 +51,8 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Fixed
 
+- Keep repository-scoped CLI authorization on the named repository, replacing the multi-repository picker with explicit access confirmation. Validate the original consent target on submission and keep OAuth grants in separate files per repository.
+
 - Let one MCP bridge coordinate multiple isolated workspaces with explicit `workspaceId`, independent retry state and per-workspace reports. `attach_workspace` creates or reuses the local worktree, and CLI continuation/publication becomes visible without restarting MCP. Previously attached workspaces stay attached.
 
 - Supply an installable local client from the Cruce website before clone, checkout attachment or agent setup. Replace source-checkout path placeholders with installed `cruce` commands; `cruce auth` configures repository-scoped Git authentication so cloning uses ordinary `git clone`.

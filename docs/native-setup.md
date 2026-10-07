@@ -42,6 +42,8 @@ cruce connect --server https://YOUR_HOST --namespace NAMESPACE_ID --repository R
 cruce start --title "Improve retries"
 ```
 
+`auth` and `connect` carry the selected namespace/repository into browser consent. Confirm access to that one repository; there is no second repository picker. The updated client keeps OAuth credentials per repository, so authorize each repository once after updating the installed client. Existing grant records are not rewritten.
+
 `connect` authorizes the client, saves local connection state and, as a convenience for `codex`, `claude` or `cursor`, writes client MCP configuration and a participation block. Any MCP-capable tool can connect without it. Choose either the CLI `start` above or let a connected agent call `start_workspace` through MCP. Move the agent to the returned dedicated directory before editing; Cruce does not launch or relocate its process.
 
 The bridge creates a worktree at the exact starting commit and attaches one hosted fork to the workspace. A unique `cruce-WORKSPACE_ID` remote and branch-specific push destination keep other worktrees' destinations and existing `origin` unchanged. Attaching by repository ID is not an import: it never identifies a repository from a matching remote URL or silently uploads unrelated history.
