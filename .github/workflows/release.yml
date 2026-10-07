@@ -15,7 +15,7 @@ env:
 jobs:
   checks:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
         with:
@@ -39,6 +39,16 @@ jobs:
           pnpm release:check "$RELEASE_TAG"
           git merge-base --is-ancestor HEAD origin/main
       - run: pnpm check
+      - name: Install the browser for console tests
+        run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:browser
+      - name: Keep console screenshots from a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-checks
+          path: dist/ui-checks
+          if-no-files-found: ignore
       - run: pnpm verify:scenario
       - name: Build without cloud resources
         run: pnpm exec cf build --mode offline

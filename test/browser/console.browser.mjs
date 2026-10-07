@@ -412,8 +412,10 @@ test("agent connections list what each agent may do and revoke one after confirm
 	await page.getByRole("heading", { name: "Agent connections", level: 1 }).waitFor();
 	assert.equal(new URL(page.url()).search, "?page=connections");
 	assert.equal(await page.title(), "Agent connections · Cruce");
-	assert.match(await page.locator(".kicker").textContent(), /3 connected/);
+	// The heading renders before /api/connections settles; wait for the loaded list before reading it.
+	await page.locator(".kicker", { hasText: "3 connected" }).waitFor();
 	const rows = page.locator(".connection-row");
+	await rows.nth(2).waitFor();
 	assert.deepEqual(await rows.locator("strong").allTextContents(), ["Codex", "release-check script", "Claude Code"]);
 	// Known reported names get their mark; anything else falls back to initials.
 	assert.deepEqual(await rows.locator(".agent-mark").evaluateAll((marks) => marks.map((m) => m.dataset.agent ?? m.textContent)), [
