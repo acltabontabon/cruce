@@ -164,18 +164,6 @@ export function unproposed(view: RepositorySnapshot, w: Workspace) {
 		.sort((a, b) => b.at - a.at)[0];
 }
 
-/** Reported paths grouped by the exact set of workspaces sharing them, so five scaffold files read as one note, not twenty. */
-export function overlapGroups(view: RepositorySnapshot) {
-	const groups = new Map<string, { workspaces: string[]; paths: string[] }>();
-	for (const o of view.overlaps) {
-		const key = [...o.workspaces].sort().join("|");
-		const group = groups.get(key) ?? { workspaces: [...o.workspaces].sort(), paths: [] };
-		group.paths.push(o.surface);
-		groups.set(key, group);
-	}
-	return [...groups.values()].sort((a, b) => b.workspaces.length - a.workspaces.length || b.paths.length - a.paths.length);
-}
-
 /** Other present workspaces touching the same reported paths. Advisory: shared paths are not conflicts. */
 export function overlapsFor(view: RepositorySnapshot, w: Workspace) {
 	return view.overlaps

@@ -1303,11 +1303,9 @@ test("repository pages lead with what needs attention and retired routes resolve
 	// The list itself says what needs a person: no separate summary bar repeats it.
 	assert.equal(await page.getByRole("region", { name: "Needs attention", exact: true }).count(), 0);
 	await page.locator(".change-row").filter({ hasText: "Needs preparation" }).waitFor();
-	await page
-		.locator(".workspace-brief")
-		.getByText(/reported by/)
-		.first()
-		.waitFor();
+	// A shared path is named once, on the row it concerns.
+	await workspaceRow("Implement retry policy").getByText("Shares src/retry.ts with Inspect payment timeout", { exact: true }).waitFor();
+	assert.equal(await page.locator(".workspace-brief").count(), 0);
 	await page.screenshot({ path: "dist/ui-checks/repository.png", fullPage: true });
 	await page.goto(`${root()}#/overview`);
 	await page.locator(".change-row").filter({ hasText: "Bounded retry policy" }).waitFor();
@@ -2103,8 +2101,9 @@ test("published work with no change says so, groups shared scaffold paths once a
 	const brief = page.locator(".workspace-brief");
 	await brief.waitFor();
 	assert.match(await brief.innerText(), /5 published revisions have no change yet/);
-	assert.match(await brief.innerText(), /3 paths are reported by all 5 workspaces/);
-	assert.equal(await page.locator(".workspace-row .overlap-note").first().innerText(), "3 reported paths shared with 4 other workspaces");
+	// Shared paths are said once, on each row they concern, not again in the summary above.
+	assert.doesNotMatch(await brief.innerText(), /reported by/);
+	assert.equal(await page.locator(".workspace-row .overlap-note").first().innerText(), "Shares 3 paths with 4 other workspaces");
 	assert.equal(await page.locator(".workspace-row").getByText("Not proposed", { exact: true }).count(), 5);
 	await page.screenshot({ path: "dist/ui-checks/published-not-proposed.png", fullPage: true });
 	await page.getByRole("button", { name: "Propose all 5 for review" }).click();

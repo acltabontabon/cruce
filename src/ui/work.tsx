@@ -25,7 +25,6 @@ import {
 	ended,
 	GROUP_LABELS,
 	nextStep,
-	overlapGroups,
 	overlapsFor,
 	ownerName,
 	type People,
@@ -79,20 +78,23 @@ function attachmentText(w: Workspace) {
 	return "Waiting for a checkout to attach";
 }
 
-/** One line per row; the paths themselves are listed once above the list and in full on the workspace page. */
+/**
+ * The one place the list mentions shared paths: on the row it concerns, naming the path when there is one. The full
+ * list and its meaning are on the workspace page.
+ */
 function OverlapSummary({ overlaps }: { overlaps: ReturnType<typeof overlapsFor> }) {
 	const others = new Set(overlaps.flatMap((o) => o.others));
 	return (
-		<small className="overlap-note" title={overlaps.map((o) => o.path).join(", ")}>
-			{overlaps.length === 1 ? "1 reported path" : `${overlaps.length} reported paths`} shared with{" "}
+		<small className="overlap-note" title={`${overlaps.map((o) => o.path).join(", ")}. A heads-up, not a conflict.`}>
+			Shares {overlaps.length === 1 ? <code>{overlaps[0].path}</code> : `${overlaps.length} paths`} with{" "}
 			{others.size === 1 ? [...others][0] : `${others.size} other workspaces`}
 		</small>
 	);
 }
 
 /**
- * What the list means as a whole and what to do next: published work waiting for a proposal, and paths several
- * workspaces report. Advisory only; it proposes nothing on its own and never orders or schedules the work.
+ * Published work waiting for a proposal, with a way to propose it. Shared paths are said once, on the rows they concern.
+ * Advisory only; it proposes nothing on its own and never orders or schedules the work.
  */
 function WorkspaceBrief({ view, who, execute }: { view: RepositorySnapshot; who: People; execute: Execute }) {
 	const [error, setError] = useState(""),
@@ -102,8 +104,7 @@ function WorkspaceBrief({ view, who, execute }: { view: RepositorySnapshot; who:
 		return artifact ? [{ w, artifact }] : [];
 	});
 	const mine = view.permissions.write ? waiting.filter(({ w }) => w.ownerId === who.viewerId) : [];
-	const groups = overlapGroups(view);
-	if (!waiting.length && !groups.length) return null;
+	if (!waiting.length) return null;
 	return (
 		<div className="workspace-brief">
 			{waiting.length > 0 && (
@@ -138,17 +139,6 @@ function WorkspaceBrief({ view, who, execute }: { view: RepositorySnapshot; who:
 					{error && <p role="alert">{error}</p>}
 				</section>
 			)}
-			{groups.slice(0, 3).map((group) => (
-				<p key={group.workspaces.join("|")} className="overlap-note">
-					{group.paths.length} {group.paths.length === 1 ? "path is" : "paths are"} reported by{" "}
-					{group.workspaces.length === view.workspaces.filter((w) => !ended(w)).length
-						? `all ${group.workspaces.length} workspaces`
-						: group.workspaces.map((id) => view.workspaces.find((w) => w.id === id)?.title ?? "another workspace").join(", ")}
-					: {group.paths.slice(0, 6).join(", ")}
-					{group.paths.length > 6 ? " and more" : ""}. A heads-up, not a conflict. Whichever change is promoted first moves canonical; the
-					others then take a normal Git update, which is where these paths get merged.
-				</p>
-			))}
 		</div>
 	);
 }
@@ -887,7 +877,10 @@ export function WorkspaceDetail({
 									</small>
 								</span>
 							))}
-							<small className="muted">Shared files are a heads-up, not a conflict.</small>
+							<small className="muted">
+								Shared files are a heads-up, not a conflict. Whichever change is promoted first moves canonical; the others then merge these
+								paths with a normal Git update.
+							</small>
 						</dd>
 					</div>
 				)}

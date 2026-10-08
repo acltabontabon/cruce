@@ -12,7 +12,6 @@ import {
 	changeGroups,
 	changeStatus,
 	nextStep,
-	overlapGroups,
 	overlapsFor,
 	ownerName,
 	settledInMain,
@@ -222,7 +221,6 @@ describe("console status language", () => {
 		expect(unproposed(v, v.workspaces[2])).toBeUndefined();
 		expect(unproposed(v, v.workspaces[3])).toBeUndefined();
 		expect(attention(v).unproposed).toBe(1);
-		expect(overlapGroups(v)).toEqual([{ workspaces: ["a", "b", "c"], paths: ["pom.xml", ".gitignore"] }]);
 	});
 	it("folds only work that is already in canonical and says why", () => {
 		const published = "c".repeat(40);

@@ -25,7 +25,7 @@ Open the loopback URL the server prints. Set `PORT` to choose a fixed port. Rest
 
 ## 2. Open the repository
 
-Click **payment-service**. The header breadcrumb names the repository, and the bar below it holds the tabs and canonical `main` at its exact revision, with **Clone**. Below that, a short note says one path is reported by both workspaces, and the **Needs you** filter carries its count. The **Workspaces** tab lists each workspace once with its open changes under it; **Bounded retry policy #1** hangs off **Implement retry policy**, marked **Needs preparation**, with its exact revision on its review base and "Required tests evidence missing · 1 more blocker". The lane map follows the list.
+Click **payment-service**. The header breadcrumb names the repository, and the bar below it holds the tabs and canonical `main` at its exact revision, with **Clone**. Below that, the **Needs you** filter carries its count, and each workspace row names the path it shares with the other: "Shares src/retry.ts with Inspect payment timeout". The **Workspaces** tab lists each workspace once with its open changes under it; **Bounded retry policy #1** hangs off **Implement retry policy**, marked **Needs preparation**, with its exact revision on its review base and "Required tests evidence missing · 1 more blocker". The lane map follows the list.
 
 ![Repository Workspaces tab: the attention bar, two workspaces with Bounded retry policy #1 nested under Implement retry policy, and the lane map below](images/local-demo/repository.jpg)
 
