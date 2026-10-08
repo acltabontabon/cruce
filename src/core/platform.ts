@@ -201,10 +201,14 @@ export class RepositoryController {
 			overlaps: this.overlaps(),
 			workspaceUpdates: Object.fromEntries(this.state.workspaces.map((s) => [s.id, this.workspaceUpdates(s)])),
 			permissions: {
-				write: a.repositoryRole !== "read",
-				maintain: a.repositoryRole === "maintain",
+				write: a.repositoryRole !== "read" && (!state.repository.lifecycle || state.repository.lifecycle.state === "active"),
+				maintain: a.repositoryRole === "maintain" && (!state.repository.lifecycle || state.repository.lifecycle.state === "active"),
 				human: a.actor.kind === "human",
-				approve: a.actor.kind === "human" && !a.actor.connectionId && a.repositoryRole === "maintain",
+				approve:
+					a.actor.kind === "human" &&
+					!a.actor.connectionId &&
+					a.repositoryRole === "maintain" &&
+					(!state.repository.lifecycle || state.repository.lifecycle.state === "active"),
 			},
 			sourceAvailable: !!this.state.sourceHead || !!this.state.artifacts.find((a) => a.kind === "source"),
 			forkCleanup: Object.fromEntries(this.state.workspaces.map((s) => [s.id, this.forkCleanup(s)])),

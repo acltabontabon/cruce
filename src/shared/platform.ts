@@ -58,7 +58,21 @@ export interface Invitation {
 	expiresAt: number;
 	acceptedBy?: string;
 }
+export interface RepositoryLifecycle {
+	state: "active" | "archived" | "deleting" | "deleted";
+	at: number;
+	actorId: string;
+	operationId: string;
+}
+export interface RepositoryLifecycleView {
+	state: RepositoryLifecycle["state"];
+	owner: boolean;
+	blockers: string[];
+	deletion?: { idempotencyKey: string; reason?: string };
+	transition?: { tool: "archive_repository" | "restore_repository"; idempotencyKey: string };
+}
 export interface Repository {
+	lifecycle?: RepositoryLifecycle;
 	id: string;
 	namespaceId: string;
 	name: string;
@@ -70,6 +84,7 @@ export interface Repository {
 }
 export const RESOURCE_ACTIONS = [
 	"repository.create",
+	"repository.delete",
 	"workspace.fork",
 	"workspace.cleanup",
 	"revision.publish",
@@ -429,6 +444,7 @@ export interface AttentionView {
 	ancestryUnavailable: number;
 }
 export interface RepositorySnapshot extends Omit<RepositoryState, "receipts"> {
+	lifecycle?: RepositoryLifecycleView;
 	reconciliation?: ReconciliationView;
 	attention?: AttentionView;
 	asOf?: number;
@@ -493,6 +509,7 @@ export const ChangeInput = z
 export const CommandInput = z
 	.object({
 		tool: z.string(),
+		confirmation: z.string().max(120).optional(),
 		enabled: z.boolean().optional(),
 		namespaceId: id.optional(),
 		repositoryId: id.optional(),

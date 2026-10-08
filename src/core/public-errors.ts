@@ -1,6 +1,8 @@
 /** Explicit public text, paired with its status. Adding an internal error never publishes its message implicitly. */
 export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 	400: [
+		"Unsupported repository lifecycle input",
+		"Type the repository name to confirm deletion",
 		"Observation enabled flag required",
 
 		"Invalid page limit",
@@ -67,6 +69,7 @@ export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 		"Terminal authorization required",
 	],
 	403: [
+		"Human namespace owner required",
 		"Cleanup recovery authorization unavailable; retry from an authorized connection",
 		"Agent capability denied",
 		"Agent writers require a dedicated Cruce worktree or clone",
@@ -107,6 +110,7 @@ export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 		"Workspace belongs to another user",
 	],
 	404: [
+		"Repository unavailable",
 		"Artifact cache unavailable; inspect the retained artifact source",
 		"Artifact unavailable",
 		"Artifacts repository unavailable",
@@ -125,6 +129,11 @@ export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 	],
 	405: ["GET required", "POST required"],
 	409: [
+		"Repository is read-only",
+		"Repository retirement has blockers",
+		"Repository deletion is already authorized",
+		"Resume the existing repository deletion",
+		"Retry the unfinished repository transition",
 		"Fork parent identity changed",
 		"Observation subscription identity changed",
 		"Observation subscription is disabled",
@@ -254,7 +263,9 @@ export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 		"Cloudflare rejected storage access. Ask the installation administrator to check Artifacts permissions.",
 		"Invalid Artifacts Git remote",
 	],
+	410: ["Repository has been deleted"],
 	503: [
+		"Repository lifecycle unavailable",
 		"Observation installation is not configured",
 		"Observation subscription service unavailable",
 		"Observation subscription inventory is incomplete",

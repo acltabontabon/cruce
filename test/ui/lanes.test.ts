@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { initialRepository } from "../../src/core/platform.ts";
 import { repositorySummary } from "../../src/shared/coordination.ts";
 import type { Actor, Promotion, Proposal, Readiness, Repository, RepositorySnapshot, Workspace } from "../../src/shared/platform.ts";
-import { laneIndex, lanes, trunk } from "../../src/ui/lanes.ts";
+import { laneHistory, laneIndex, lanes, repositoryAxis, timeAxis, trunk } from "../../src/ui/lanes.ts";
 
 const first = "a".repeat(40),
 	second = "b".repeat(40),
@@ -76,21 +76,22 @@ function view(extra: Partial<RepositorySnapshot> = {}): RepositorySnapshot {
 	} as RepositorySnapshot;
 }
 
+const promoted = view({
+	sourceHead: third,
+	workspaces: [
+		workspace("done", 0, { state: "completed" }),
+		workspace("early", 1),
+		workspace("late", 2, { baseRevision: second, publishedRevision: third }),
+		workspace("orphan", 3, { baseRevision: unknown, state: "disconnected" }),
+	],
+	proposals: [
+		proposal("p1", 1, "done", { state: "promoted" }),
+		proposal("p2", 2, "done", { state: "promoted", base: second, revision: third }),
+	],
+	promotions: [promotion("one", "p1", first, second, 10), promotion("two", "p2", second, third, 20)],
+});
+
 describe("lane map model", () => {
-	const promoted = view({
-		sourceHead: third,
-		workspaces: [
-			workspace("done", 0, { state: "completed" }),
-			workspace("early", 1),
-			workspace("late", 2, { baseRevision: second, publishedRevision: third }),
-			workspace("orphan", 3, { baseRevision: unknown, state: "disconnected" }),
-		],
-		proposals: [
-			proposal("p1", 1, "done", { state: "promoted" }),
-			proposal("p2", 2, "done", { state: "promoted", base: second, revision: third }),
-		],
-		promotions: [promotion("one", "p1", first, second, 10), promotion("two", "p2", second, third, 20)],
-	});
 	it("draws canonical as recorded promotions in order, ending at the accepted head", () => {
 		expect(trunk(promoted).map((n) => n.revision)).toEqual([first, second, third]);
 		expect(trunk(promoted)[1]).toMatchObject({ change: 1, lane: 1 });
@@ -140,6 +141,90 @@ describe("lane map model", () => {
 	});
 	it("excludes ended workspaces from the map", () => {
 		expect(lanes(promoted).some((l) => l.id === "done")).toBe(false);
+	});
+	it("times trunk revisions by their recorded promotion and leaves earlier ones untimed", () => {
+		expect(trunk(promoted).map((n) => n.promotion?.at)).toEqual([undefined, 10, 20]);
+	});
+});
+
+describe("lane history and time axis", () => {
+	const minute = 60_000;
+	it("collects reported heads, publications, the latest change and its promotion at their earliest sighting", () => {
+		const w = workspace("w", 0, { headRevision: third, lastReportAt: 9 * minute, lastActivity: 12 * minute });
+		const history = laneHistory(
+			view({
+				workspaces: [w],
+				activity: [
+					{ id: "event-1", actor: codex, kind: "changes_reported", summary: "", ids: ["w", second], at: 2 * minute },
+					{ id: "event-2", actor: codex, kind: "changes_reported", summary: "", ids: ["other", unknown], at: 3 * minute },
+					{ id: "event-3", actor: codex, kind: "changes_reported", summary: "", ids: ["w", first], at: 4 * minute },
+				],
+				artifacts: [
+					{ id: "a", workspaceId: "w", revision: second, kind: "source", at: 5 * minute } as never,
+					{ id: "e", workspaceId: "w", revision: unknown, kind: "evidence", at: 6 * minute } as never,
+				],
+				proposals: [
+					proposal("p", 1, "w", {
+						revision: second,
+						at: 6 * minute,
+						reviews: [
+							{ id: "r", actor: codex, revision: second, outcome: "approve", reason: "", at: 7 * minute },
+							{ id: "s", actor: codex, revision: first, outcome: "approve", reason: "", at: 1 * minute },
+						],
+					}),
+				],
+				promotions: [promotion("x", "p", first, second, 8 * minute)],
+			}),
+			w,
+		);
+		// The baseline is never a lane revision; the head without a report event takes its report time.
+		expect(history.revisions).toEqual([
+			{ revision: second, at: 2 * minute },
+			{ revision: third, at: 9 * minute },
+		]);
+		expect(history.publications).toEqual([{ revision: second, at: 5 * minute }]);
+		expect(history.change).toEqual({
+			number: 1,
+			revision: second,
+			at: 6 * minute,
+			approvedAt: 7 * minute,
+			promotion: { id: "x", to: second, at: 8 * minute },
+		});
+		expect(history.lastSeen).toBe(12 * minute);
+	});
+	it("keeps simultaneous records apart, compresses idle time and marks long gaps", () => {
+		const axis = timeAxis(
+			[{ key: "origin" }, { key: "a", at: 0 }, { key: "b", at: 0 }, { key: "c", at: minute }, { key: "d", at: 3 * 86_400_000 }],
+			3 * 86_400_000 + minute,
+		);
+		const [origin, a, b, c, d] = ["origin", "a", "b", "c", "d"].map((key) => axis.slot(key) ?? Number.NaN);
+		expect(origin).toBe(0);
+		expect(a).toBeLessThan(b);
+		expect(b).toBeLessThan(c);
+		expect(c).toBeLessThan(d);
+		expect(d).toBeLessThan(1);
+		// A three-day gap takes more room than a minute, but far less than linear time would.
+		expect(d - c).toBeGreaterThan(c - b);
+		expect(d - c).toBeLessThan(0.7);
+		expect(axis.breaks).toHaveLength(1);
+		expect(axis.breaks[0].gap).toBe(3 * 86_400_000 - minute);
+		expect(axis.at(0)).toBe(a);
+		expect(axis.at(3 * 86_400_000 + minute)).toBe(1);
+		expect(axis.time(c)).toBe(minute);
+		expect(axis.time(1)).toBe(3 * 86_400_000 + minute);
+		expect(axis.ticks.map((t) => t.at)).toEqual([0, minute, 3 * 86_400_000]);
+	});
+	it("places every live lane and recorded promotion on one repository axis", () => {
+		const axis = repositoryAxis(
+			promoted,
+			lanes(promoted).map((lane) => laneHistory(promoted, promoted.workspaces.find((w) => w.id === lane.id) as Workspace)),
+			30,
+		);
+		expect(axis.slot(`main:${first}`)).toBe(0);
+		expect(axis.slot(`main:${second}`)).toBeLessThan(axis.slot(`main:${third}`) ?? 0);
+		expect(axis.slot("start:early")).toBeDefined();
+		expect(axis.slot(`rev:late:${first}`)).toBeDefined();
+		expect(axis.slot(`rev:late:${third}`)).toBeDefined();
 	});
 });
 

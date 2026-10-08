@@ -3848,6 +3848,139 @@ main[data-screen="settings"] > form {
 	outline: 2px solid var(--tone-accent);
 	outline-offset: -3px;
 }
+/* Now, or the replayed moment: a quiet accent line the lanes grow toward. */
+.lane-now-line {
+	stroke: var(--tone-accent);
+	stroke-opacity: 0.5;
+	stroke-dasharray: 2 4;
+}
+.lane-now rect {
+	fill: color-mix(in srgb, var(--tone-accent) 14%, var(--surface));
+}
+.lane-now text {
+	fill: var(--tone-accent);
+	font-weight: 500;
+}
+/* Revision labels keep a surface halo so fork curves passing behind them never cut the text. */
+.lane-label {
+	paint-order: stroke;
+	stroke: var(--surface);
+	stroke-width: 4px;
+	stroke-linejoin: round;
+}
+.lane-spark {
+	filter: drop-shadow(0 0 4px currentColor);
+}
+/* Replay scrubs recorded events; each mark is one record on the same compressed axis as the map. */
+.lane-replay {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 10px 16px;
+	border-top: 1px solid var(--border-subtle);
+	font-family: var(--font-mono);
+	font-size: 11.5px;
+	font-variant-numeric: tabular-nums;
+	color: var(--text-faint);
+}
+.lane-replay button {
+	padding: 5px 9px;
+	font-family: var(--font-ui);
+	font-size: 12px;
+	white-space: nowrap;
+}
+.lane-replay-track {
+	position: relative;
+	flex: 1;
+	min-width: 80px;
+	height: 26px;
+}
+.lane-replay-track::before {
+	content: "";
+	position: absolute;
+	inset: 12px 0 auto;
+	height: 2px;
+	border-radius: 2px;
+	background: var(--border);
+}
+.lane-replay-fill {
+	position: absolute;
+	top: 12px;
+	left: 0;
+	height: 2px;
+	border-radius: 2px;
+	background: var(--tone-accent);
+}
+.lane-replay-mark {
+	position: absolute;
+	top: 13px;
+	width: 5px;
+	height: 5px;
+	margin: -2.5px 0 0 -2.5px;
+	border-radius: 50%;
+	background: var(--lane);
+	pointer-events: none;
+}
+.lane-replay-mark.publish {
+	width: 8px;
+	height: 8px;
+	margin: -4px 0 0 -4px;
+	border: 1.5px solid var(--lane);
+	background: var(--surface);
+}
+.lane-replay-mark.change {
+	width: 12px;
+	height: 7px;
+	margin: -3.5px 0 0 -6px;
+	border: 1.5px solid var(--lane);
+	border-radius: 4px;
+	background: var(--surface);
+}
+.lane-replay-mark.promote {
+	width: 9px;
+	height: 9px;
+	margin: -4.5px 0 0 -4.5px;
+	border: 2px solid var(--canonical);
+	border-radius: 2px;
+	transform: rotate(45deg);
+}
+.lane-replay-mark,
+.lane-replay-mark.publish,
+.lane-replay-mark.change,
+.lane-replay-mark.promote {
+	box-sizing: border-box;
+}
+.lane-replay-thumb {
+	position: absolute;
+	top: 13px;
+	width: 12px;
+	height: 12px;
+	margin: -6px 0 0 -6px;
+	border-radius: 50%;
+	background: var(--tone-accent);
+	box-shadow: 0 0 0 4px color-mix(in srgb, var(--tone-accent) 22%, transparent);
+	pointer-events: none;
+}
+.lane-replay-track input {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	margin: 0;
+	opacity: 0;
+	cursor: pointer;
+}
+.lane-replay-track:has(input:focus-visible) .lane-replay-thumb {
+	outline: 2px solid var(--tone-accent);
+	outline-offset: 3px;
+}
+.lane-replay-time {
+	min-width: 42px;
+	text-align: right;
+}
+.lane-map[data-replay] .lane-canvas {
+	background-color: color-mix(in srgb, var(--tone-accent) 3%, var(--surface));
+}
 .lane-pagination {
 	justify-content: space-between;
 	padding: 10px 16px;
@@ -4037,4 +4170,20 @@ main[data-screen="settings"] > form {
 }
 .connection-dot.quiet {
 	background: var(--text-faint);
+}
+
+.lifecycle-actions {
+	display: flex;
+	gap: 1rem;
+	align-items: end;
+	flex-wrap: wrap;
+}
+:where(.shell) .danger-button {
+	color: var(--tone-danger);
+	border-color: var(--tone-danger);
+}
+.lifecycle-banner {
+	border-left: 3px solid var(--tone-warning);
+	padding: 0.75rem 1rem;
+	background: var(--surface);
 }

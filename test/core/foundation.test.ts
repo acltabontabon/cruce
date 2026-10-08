@@ -46,6 +46,7 @@ describe("canonical Git product boundary", () => {
 		expect(SCOPE_LABELS).not.toHaveProperty("preview:request");
 		expect(RESOURCE_ACTIONS).toEqual([
 			"repository.create",
+			"repository.delete",
 			"workspace.fork",
 			"workspace.cleanup",
 			"revision.publish",

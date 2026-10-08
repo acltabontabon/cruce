@@ -317,6 +317,13 @@ export async function platformRoute(
 	const repositoryId = parts[4],
 		repo = await namespace.repository(grant, repositoryId);
 	if (parts.length === 5 && request.method === "PATCH") {
+		const snapshot = (await env.CONTROL_TOWER.getByName(repo.id).command(
+			repo,
+			{ tool: "get_repository", namespaceId, repositoryId },
+			grant,
+		)) as import("../shared/platform.ts").RepositorySnapshot;
+		if (snapshot.lifecycle && (snapshot.lifecycle.state !== "active" || snapshot.lifecycle.transition))
+			throw new DomainError(409, "Repository is read-only");
 		const auth = await namespace.authority(grant, repositoryId);
 		if (auth.repositoryRole !== "maintain") throw new DomainError(403, "Repository maintainer required");
 		const body = z

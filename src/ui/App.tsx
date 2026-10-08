@@ -269,10 +269,15 @@ export function App() {
 			(e) => {
 				if (generation.current !== ticket) return;
 				setError(e);
-				if ([401, 403].includes((e as { status?: number }).status ?? 0)) setView(undefined);
+				if ([401, 403, 410].includes((e as { status?: number }).status ?? 0)) setView(undefined);
+				if ((e as { status?: number }).status === 410) {
+					navigate(route.namespaceId);
+					reload();
+					setNotice("Repository deleted.");
+				}
 			},
 		);
-	}, [route.namespaceId, route.repositoryId, refresh]);
+	}, [route.namespaceId, route.repositoryId, refresh, navigate, reload]);
 
 	const mutate = async <T,>(url: string, body: Record<string, unknown>, method = "POST", refreshAfter = true) => {
 		const originRoute = location.href;
@@ -412,6 +417,7 @@ export function App() {
 				) : route.repositoryId ? (
 					view ? (
 						<RepositoryPage
+							leave={() => navigate(route.namespaceId)}
 							view={view}
 							namespace={namespace?.namespace.id === route.namespaceId ? namespace : undefined}
 							tab={route.tab === "work" ? "changes" : route.tab}

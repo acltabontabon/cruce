@@ -652,7 +652,117 @@ function ConnectGuide({ view, initial = "connect" }: { view: RepositorySnapshot;
 	);
 }
 
+function RepositoryLifecycleSettings({ view, execute, leave }: { view: RepositorySnapshot; execute: Execute; leave: () => void }) {
+	const [confirming, setConfirming] = useState(false);
+	const [confirmation, setConfirmation] = useState("");
+	const lifecycle = view.lifecycle;
+	if (!lifecycle) return null;
+	const archived = lifecycle.state === "archived";
+	const deleting = lifecycle.state === "deleting";
+	return (
+		<SettingRow
+			title="Repository lifecycle"
+			detail="Archive preserves source and history. Permanent deletion removes this repository's cloud storage and coordination records."
+		>
+			{lifecycle.transition ? (
+				<>
+					<p role="status">Repository change is awaiting a retry. Writes remain disabled.</p>
+					<Form label="Retry repository change" submit={() => execute(lifecycle.transition!)}>
+						<span>Resumes the same requested change.</span>
+					</Form>
+				</>
+			) : deleting ? (
+				<>
+					<p role="status">Deletion is in progress. This repository is read-only while cloud cleanup finishes.</p>
+					{lifecycle.deletion?.reason && <p role="alert">{lifecycle.deletion.reason}</p>}
+					{lifecycle.owner && lifecycle.deletion && (
+						<Form
+							label="Retry deletion"
+							submit={async () => {
+								const result = (await execute({
+									tool: "delete_repository",
+									confirmation: view.repository.name,
+									idempotencyKey: lifecycle.deletion!.idempotencyKey,
+								})) as { state: string };
+								if (result.state === "deleted") leave();
+							}}
+						>
+							<span>Resumes the same authorized operation.</span>
+						</Form>
+					)}
+				</>
+			) : (
+				<>
+					<p>
+						{archived
+							? "Archived. Source and history remain available; writes are disabled."
+							: "Finish all work before archiving or deleting this repository."}
+					</p>
+					{lifecycle.blockers.length > 0 && (
+						<ul>
+							{lifecycle.blockers.map((blocker) => (
+								<li key={blocker}>{blocker}</li>
+							))}
+						</ul>
+					)}
+					{lifecycle.owner ? (
+						<div className="lifecycle-actions">
+							<Form
+								label={archived ? "Restore repository" : "Archive repository"}
+								disabled={!archived && lifecycle.blockers.length > 0}
+								submit={() => execute({ tool: archived ? "restore_repository" : "archive_repository" })}
+							>
+								<span>{archived ? "Allow new work again." : "Make read-only. You can restore it later."}</span>
+							</Form>
+							<button
+								type="button"
+								className="danger-button"
+								disabled={lifecycle.blockers.length > 0}
+								onClick={() => {
+									setConfirmation("");
+									setConfirming(true);
+								}}
+							>
+								Delete repository…
+							</button>
+						</div>
+					) : (
+						<p>Only the signed-in namespace owner can archive, restore or delete repositories.</p>
+					)}
+				</>
+			)}
+			{confirming && (
+				<Dialog title="Delete repository permanently" close={() => setConfirming(false)}>
+					<p>
+						This permanently deletes <strong>{view.repository.name}</strong>, including canonical Git, workspace forks, published revisions,
+						evidence and coordination history. It cannot be undone.
+					</p>
+					<p>Local checkouts and external upstream repositories remain. This uses installation cloud resources under namespace policy.</p>
+					<Form
+						label="Delete repository permanently"
+						danger
+						primary
+						cancel={() => setConfirming(false)}
+						disabled={confirmation !== view.repository.name}
+						submit={async () => {
+							const result = (await execute({ tool: "delete_repository", confirmation })) as { state: string };
+							setConfirming(false);
+							if (result.state === "deleted") leave();
+						}}
+					>
+						<label>
+							Type {view.repository.name} to confirm
+							<input autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required />
+						</label>
+					</Form>
+				</Dialog>
+			)}
+		</SettingRow>
+	);
+}
+
 function RepositorySettings({
+	leave,
 	execute,
 	view,
 	namespace,
@@ -662,6 +772,7 @@ function RepositorySettings({
 	setup,
 }: {
 	view: RepositorySnapshot;
+	leave: () => void;
 	namespace?: NamespaceView;
 	mutate: Mutate;
 	base: string;
@@ -867,6 +978,7 @@ function RepositorySettings({
 					</SettingRow>
 				</>
 			)}
+			<RepositoryLifecycleSettings view={view} execute={execute} leave={leave} />
 			<SettingRow title="Identifiers" detail="Stable IDs for scripts and support. Names and handles can change; these don't.">
 				<dl className="facts">
 					<dt>Namespace ID</dt>
@@ -886,6 +998,7 @@ function RepositorySettings({
 }
 
 export function RepositoryPage({
+	leave,
 	view,
 	namespace,
 	tab,
@@ -900,6 +1013,7 @@ export function RepositoryPage({
 	onError,
 }: {
 	view: RepositorySnapshot;
+	leave: () => void;
 	namespace?: NamespaceView;
 	tab: string;
 	id: string;
@@ -955,6 +1069,13 @@ export function RepositoryPage({
 					</button>
 				</div>
 			</header>
+			{view.lifecycle && view.lifecycle.state !== "active" && (
+				<p className="lifecycle-banner" role="status">
+					{view.lifecycle.state === "archived"
+						? "Archived · Read-only. Restore this repository in Settings."
+						: "Deletion in progress · Read-only. View progress in Settings."}
+				</p>
+			)}
 			<CanonicalSetup view={view} execute={execute} />
 			<AttentionBar view={view} open={open} />
 			<nav className="tabs" aria-label="Repository navigation">
@@ -986,6 +1107,7 @@ export function RepositoryPage({
 			{tab === "history" && <HistoryScreen key={id} view={view} id={id} execute={execute} open={open} who={who} />}
 			{tab === "settings" && (
 				<RepositorySettings
+					leave={leave}
 					execute={execute}
 					view={view}
 					namespace={namespace}

@@ -4,6 +4,7 @@ import { attentionView } from "../../src/core/attention.ts";
 import { stable } from "../../src/core/errors.ts";
 import { DirectoryController, initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
 import { initialRepository, RepositoryController } from "../../src/core/platform.ts";
+import { repositoryLifecycleView, repositoryOwner } from "../../src/core/repository-lifecycle.ts";
 import { repositorySummary } from "../../src/shared/coordination.ts";
 import type { ArchiveBundle, ObservationStatus } from "../../src/shared/platform.ts";
 import { type Actor, type Command, CommandInput, type Repository } from "../../src/shared/platform.ts";
@@ -39,7 +40,11 @@ export async function fixture() {
 	});
 	const snapshotsFor = async (runtime: RepositoryController, authority: Parameters<RepositoryController["snapshot"]>[0]) => {
 		const snapshot = { ...runtime.snapshot(authority), reconciliation: await readReconciliation(runtime, observation(runtime), git) };
-		return { ...snapshot, attention: attentionView(snapshot, authority.actor.userId) };
+		return {
+			...snapshot,
+			lifecycle: repositoryLifecycleView(runtime.state, authority),
+			attention: attentionView(snapshot, authority.actor.userId),
+		};
 	};
 
 	let counter = 0;
@@ -333,7 +338,9 @@ export async function fixture() {
 					return json(res, w.state.namespace);
 				}
 				const snapshots = await Promise.all(
-					w.state.repositories.map((r) => snapshotsFor(runtimes.get(r.id)!, { ...a, repositoryId: r.id, repositoryRole: "maintain" })),
+					w.state.repositories
+						.filter((r) => r.lifecycle?.state !== "deleted")
+						.map((r) => snapshotsFor(runtimes.get(r.id)!, { ...a, repositoryId: r.id, repositoryRole: "maintain" })),
 				);
 				const repositorySummaries = snapshots.map(repositorySummary);
 				// Mirrors the Worker's namespace view: the newest events across its repositories.
@@ -343,6 +350,7 @@ export async function fixture() {
 					.slice(0, 20);
 				return json(res, {
 					...w.state,
+					repositories: w.state.repositories.filter((r) => r.lifecycle?.state !== "deleted"),
 					repositorySummaries,
 					activity,
 					role: a.role,
@@ -362,7 +370,11 @@ export async function fixture() {
 			}
 			if (parts[3] !== "repositories") return json(res, { error: "Not found" }, 404);
 			if (parts.length === 4) {
-				if (req.method === "GET") return json(res, w.state.repositories);
+				if (req.method === "GET")
+					return json(
+						res,
+						w.state.repositories.filter((r) => r.lifecycle?.state !== "deleted"),
+					);
 				const r: Repository = {
 					...repository,
 					id: body.idempotencyKey,
@@ -382,6 +394,7 @@ export async function fixture() {
 			}
 			const runtime = runtimes.get(parts[4]);
 			if (!runtime) return json(res, { error: "Repository access denied" }, 403);
+			if (runtime.state.repository.lifecycle?.state === "deleted") return json(res, { error: "Repository has been deleted" }, 410);
 			const authority = { ...a, repositoryId: runtime.state.repository.id, repositoryRole: "maintain" as const };
 			if (req.method === "PATCH") {
 				Object.assign(runtime.state.repository, body);
@@ -391,6 +404,27 @@ export async function fixture() {
 			if (req.method === "GET") return json(res, await snapshotsFor(runtime, authority));
 			const cmd = CommandInput.parse({ ...body, namespaceId: w.state.namespace.id, repositoryId: runtime.state.repository.id });
 			calls.push(cmd);
+			if (["archive_repository", "restore_repository", "delete_repository"].includes(cmd.tool)) {
+				repositoryOwner(authority);
+				if (cmd.tool !== "restore_repository" && repositoryLifecycleView(runtime.state, authority).blockers.length)
+					return json(res, { error: "Repository retirement has blockers" }, 409);
+				if (cmd.tool === "delete_repository" && cmd.confirmation !== runtime.state.repository.name)
+					return json(res, { error: "Type the repository name to confirm deletion" }, 400);
+				const lifecycle = {
+					state:
+						cmd.tool === "archive_repository"
+							? ("archived" as const)
+							: cmd.tool === "restore_repository"
+								? ("active" as const)
+								: ("deleted" as const),
+					at: FIXED_TIME,
+					actorId: actor.id,
+					operationId: cmd.idempotencyKey!,
+				};
+				w.lifecycle(authority, lifecycle);
+				runtime.state.repository.lifecycle = lifecycle;
+				return json(res, lifecycle);
+			}
 			if (cmd.tool === "get_reconciliation") return json(res, await readReconciliation(runtime, observation(runtime), git));
 			if (cmd.tool === "get_activity") return json(res, { items: runtime.state.activity, cursor: undefined });
 			if (cmd.tool === "get_archive") {

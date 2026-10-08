@@ -8,6 +8,10 @@ import { activityText, ago } from "./status.ts";
 import type { NamespaceView } from "./types.ts";
 
 const actionLabels: Record<string, { label: string; detail: string }> = {
+	"repository.delete": {
+		label: "Delete repositories",
+		detail: "Permanently removes canonical Git, forks and retained source after owner confirmation.",
+	},
 	"repository.create": { label: "Create repositories", detail: "Creates canonical Git storage." },
 	"workspace.fork": { label: "Create workspace forks", detail: "One fork per writer workspace." },
 	"revision.publish": { label: "Push and publish revisions", detail: "Pushes to forks and retained source." },

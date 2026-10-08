@@ -16,4 +16,6 @@ Focused records of consequential decisions whose rationale is larger than its ow
 | [0008 — Remove the namespace daily operation budget](0008-remove-daily-operation-budget.md) | Accepted 2026-10-08 | Drop the daily operation count and limit; keep reservations for retry identity and per-action resource policy. Supersedes the budget parts of 0003 and 0004 |
 | [0009 — Replaceable observations and archived finished work](0009-replaceable-observations-and-archived-finished-work.md) | Accepted 2026-10-08 | Presence and reports keep one replaceable record per workspace; change reports are coalesced; finished work moves to immutable archive bundles so limits bound live work. Amends 0005 |
 
+| [0010 — Repository archive and permanent deletion](0010-repository-archive-and-permanent-deletion.md) | Accepted 2026-10-08 | Owner-only reversible archive and explicit permanent deletion, with durable cleanup, namespace-gated retries and minimal tombstones. Amends retention in 0005 and 0009 |
+
 Add a record only for a decision that changes the product boundary, the domain model, authority or a core dependency. Number records sequentially, and never rewrite an accepted record's decision. Supersede it with a new one.

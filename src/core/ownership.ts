@@ -157,14 +157,35 @@ export class NamespaceController {
 	repository(a: Authority, repository: Repository) {
 		namespaceMaintain(a);
 		if (repository.namespaceId !== this.state.namespace.id) throw new DomainError(403, "Namespace mismatch");
-		if (this.state.repositories.some((r) => r.id !== repository.id && r.name === repository.name))
+		if (this.state.repositories.some((r) => r.id !== repository.id && r.lifecycle?.state !== "deleted" && r.name === repository.name))
 			throw new DomainError(409, "Repository name already used");
 		for (const g of repository.grants)
 			if (g.subject === "user" ? !this.state.members[g.id] : !this.state.teams.some((t) => t.id === g.id))
 				throw new DomainError(400, "Grant requires a namespace member or team");
 		const i = this.state.repositories.findIndex((r) => r.id === repository.id);
 		if (i < 0) this.state.repositories.push(repository);
-		else this.state.repositories[i] = repository;
+		else {
+			const old = this.state.repositories[i];
+			if (old.lifecycle && old.lifecycle.state !== "active") throw new DomainError(409, "Repository is read-only");
+			this.state.repositories[i] = { ...repository, lifecycle: old.lifecycle };
+		}
+		this.state.version++;
+	}
+	lifecycle(a: Authority, lifecycle: NonNullable<Repository["lifecycle"]>) {
+		if (a.actor.kind !== "human" || a.actor.connectionId || a.role !== "owner")
+			throw new DomainError(403, "Human namespace owner required");
+		const repo = this.state.repositories.find((r) => r.id === a.repositoryId);
+		if (!repo) throw new DomainError(404, "Repository unavailable");
+		if (
+			["deleting", "deleted"].includes(repo.lifecycle?.state ?? "") &&
+			(repo.lifecycle?.operationId !== lifecycle.operationId || !["deleting", "deleted"].includes(lifecycle.state))
+		)
+			throw new DomainError(409, "Repository deletion is already authorized");
+		repo.lifecycle = lifecycle;
+		if (lifecycle.state === "deleted") {
+			repo.grants = [];
+			repo.policy = { protectedPaths: [], requiredEvidence: [], resourceRules: {} };
+		}
 		this.state.version++;
 	}
 	setPolicy(a: Authority, policy: ResourcePolicy) {
@@ -173,9 +194,18 @@ export class NamespaceController {
 		this.state.version++;
 	}
 	reserve(a: Authority, id: string, fingerprint: string, action: ResourceAction, workspaceId?: string) {
+		if (action === "repository.delete" && (a.actor.kind !== "human" || a.actor.connectionId || a.role !== "owner"))
+			throw new DomainError(403, "Human namespace owner required");
 		const repo = this.state.repositories.find((r) => r.id === a.repositoryId);
 		if (!repo || !a.repositoryRole || (a.repositoryRole === "read" && action !== "source.read"))
 			throw new DomainError(403, "Repository write permission required");
+		if (
+			repo.lifecycle?.state &&
+			repo.lifecycle.state !== "active" &&
+			!(repo.lifecycle.state === "archived" && action === "source.read") &&
+			action !== "repository.delete"
+		)
+			throw new DomainError(409, "Repository is read-only");
 		const key = `${a.actor.id}:${id}`,
 			full = stable({ fingerprint, action, repositoryId: repo.id, workspaceId });
 		const rules = [this.state.policy.rules[action], repo.policy.resourceRules[action]];

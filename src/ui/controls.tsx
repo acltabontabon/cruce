@@ -9,6 +9,8 @@ export function Form({
 	primary = false,
 	cancel,
 	className,
+	disabled = false,
+	danger = false,
 }: {
 	submit: (data: FormData) => Promise<unknown>;
 	label: string;
@@ -17,11 +19,13 @@ export function Form({
 	primary?: boolean;
 	cancel?: () => void;
 	className?: string;
+	disabled?: boolean;
+	danger?: boolean;
 }) {
 	const [busy, setBusy] = useState(false),
 		[error, setError] = useState("");
 	const button = (
-		<button disabled={busy} type="submit" className={primary ? "primary" : undefined}>
+		<button disabled={busy || disabled} type="submit" className={danger ? "danger-button" : primary ? "primary" : undefined}>
 			{busy ? "Saving…" : label}
 		</button>
 	);

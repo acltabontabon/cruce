@@ -103,6 +103,11 @@ export function convergenceRuntime(namespace: string) {
 			settle: (id, state) => {
 				controller.state.reservations.find((r) => r.id === id)!.state = state;
 			},
+			lifecycle: (g, id, lifecycle) => controller.lifecycle(controller.authority(g.actor, id, g.scopes, g.repositories), lifecycle),
+			lifecycleReservations: (_g, id, operationId) =>
+				controller.state.reservations.some(
+					(r) => r.repositoryId === id && r.id !== operationId && ["reserved", "uncertain"].includes(r.state),
+				),
 			resourceConfiguration: () => ({ namespace, binding: undefined, legacyAccount: false, policy: controller.state.policy }),
 		},
 		env,

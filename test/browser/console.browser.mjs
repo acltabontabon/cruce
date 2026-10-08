@@ -2394,3 +2394,83 @@ test("repository-scoped consent confirms one known repository without a picker",
 	await page.getByRole("button", { name: "Connect", exact: true }).click();
 	await page.getByText("Repository confirmed", { exact: true }).waitFor();
 });
+
+test("repository retirement shows blockers and requires exact confirmation after reversible archive", async () => {
+	await openRepo();
+	await page.getByRole("button", { name: "Settings", exact: true }).click();
+	assert.equal(await page.getByRole("button", { name: "Archive repository", exact: true }).isDisabled(), true);
+	assert.equal(await page.getByRole("button", { name: "Delete repository…", exact: true }).isDisabled(), true);
+	await page.getByText("End all workspaces, including disconnected work.", { exact: true }).waitFor();
+	await page.goto(`${server.origin}/?namespace=fernloop`);
+	await page.getByRole("button", { name: "New repository", exact: true }).click();
+	await page.getByLabel("Repository name", { exact: true }).fill("retirement-test");
+	await page.getByRole("button", { name: "Add repository", exact: true }).click();
+	await page.getByRole("heading", { name: "retirement-test", exact: true }).waitFor();
+	await page.getByRole("button", { name: "Settings", exact: true }).click();
+	await page.getByRole("button", { name: "Archive repository", exact: true }).click();
+	await page.getByRole("button", { name: "Restore repository", exact: true }).waitFor();
+	await page.getByText("Archived · Read-only. Restore this repository in Settings.", { exact: true }).waitFor();
+	await page.getByRole("button", { name: "Restore repository", exact: true }).click();
+	await page.getByRole("button", { name: "Archive repository", exact: true }).waitFor();
+	await page.getByRole("button", { name: "Delete repository…", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "Delete repository permanently", exact: true });
+	const confirm = dialog.getByRole("button", { name: "Delete repository permanently", exact: true });
+	assert.equal(await confirm.isDisabled(), true);
+	await dialog.getByLabel("Type retirement-test to confirm", { exact: true }).fill("wrong-name");
+	assert.equal(await confirm.isDisabled(), true);
+	await dialog.getByLabel("Type retirement-test to confirm", { exact: true }).fill("retirement-test");
+	await page.screenshot({ path: "dist/ui-checks/delete-repository.png", fullPage: true });
+	await confirm.click();
+	await page.getByRole("heading", { name: "Fernloop", exact: true }).waitFor();
+	assert.equal(await page.getByRole("heading", { name: "retirement-test", exact: true }).count(), 0);
+	await page.getByRole("button").filter({ hasText: "retirement-test" }).waitFor({ state: "detached" });
+});
+
+test("partial repository deletion shows its reason and retries the original operation", async () => {
+	await page.request.post(`${server.origin}/api/namespaces/fernloop/repositories`, {
+		data: { name: "retry-deletion", defaultBranch: "main", idempotencyKey: "retry-deletion" },
+	});
+	let pending = false;
+	const commands = [];
+	await page.route("**/api/namespaces/fernloop/repositories/retry-deletion", async (route) => {
+		const response = await route.fetch();
+		const snapshot = await response.json();
+		if (pending) {
+			snapshot.lifecycle = {
+				state: "deleting",
+				owner: true,
+				blockers: [],
+				deletion: {
+					idempotencyKey: commands[0].idempotencyKey,
+					reason: "Cloudflare is rate limiting requests. Retry the same operation shortly.",
+				},
+			};
+			snapshot.permissions.write = false;
+			snapshot.permissions.maintain = false;
+			snapshot.permissions.approve = false;
+		}
+		await route.fulfill({ response, json: snapshot });
+	});
+	await page.route("**/api/namespaces/fernloop/repositories/retry-deletion/command", async (route) => {
+		const command = route.request().postDataJSON();
+		if (command.tool !== "delete_repository") return route.continue();
+		commands.push(command);
+		if (commands.length === 1) {
+			pending = true;
+			return route.fulfill({ json: { state: "deleting" } });
+		}
+		pending = false;
+		return route.continue();
+	});
+	await page.goto(`${server.origin}/?namespace=fernloop&repository=retry-deletion#/settings`);
+	await page.getByRole("button", { name: "Delete repository…", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "Delete repository permanently", exact: true });
+	await dialog.getByLabel("Type retry-deletion to confirm", { exact: true }).fill("retry-deletion");
+	await dialog.getByRole("button", { name: "Delete repository permanently", exact: true }).click();
+	await page.getByRole("alert").filter({ hasText: "Cloudflare is rate limiting requests" }).waitFor();
+	await page.getByRole("button", { name: "Retry deletion", exact: true }).click();
+	await page.getByRole("heading", { name: "Fernloop", exact: true }).waitFor();
+	assert.equal(commands.length, 2);
+	assert.equal(commands[0].idempotencyKey, commands[1].idempotencyKey);
+	await page.getByRole("button").filter({ hasText: "retry-deletion" }).waitFor({ state: "detached" });
+});

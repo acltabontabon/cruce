@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { DEFAULT_RESOURCE_POLICY } from "../core/capabilities.ts";
 import { DomainError, stable } from "../core/errors.ts";
 import { initialNamespace, NamespaceController } from "../core/ownership.ts";
 import { assertNamespaceCapacity } from "../core/state-limits.ts";
@@ -16,7 +17,7 @@ import type {
 	User,
 } from "../shared/platform.ts";
 import { ResourceBoundary, type StorageEnv } from "./artifacts.ts";
-import { hash, sqlStore } from "./store.ts";
+import { hash, someRecord, sqlStore } from "./store.ts";
 export type ContinuationAuthorization =
 	| { kind: "console" }
 	| { kind: "oauth"; key: string; propsHash: string }
@@ -29,9 +30,13 @@ export interface ConnectionGrant {
 }
 export class NamespaceRuntime extends DurableObject<StorageEnv> {
 	private store = sqlStore(this.ctx.storage.sql, (run) => this.ctx.storage.transactionSync(run));
-	private controller() {
+	private controller(repositoryId?: string) {
 		const state = this.store.get<NamespaceState>("namespace");
 		if (!state) throw new DomainError(404, "Namespace unavailable");
+		if (repositoryId && !state.repositories.some((r) => r.id === repositoryId)) {
+			const deleted = this.store.get<Repository>(`deleted-repository:${repositoryId}`);
+			if (deleted) state.repositories.push(deleted);
+		}
 		state.reservations = state.reservations.map(
 			(reservation) => this.store.get<ResourceReservation>(this.reservationKey(reservation.id)) ?? reservation,
 		);
@@ -49,12 +54,19 @@ export class NamespaceRuntime extends DurableObject<StorageEnv> {
 		this.save(c);
 	}
 	private save(c: NamespaceController) {
-		assertNamespaceCapacity({ ...c.state, reservations: [] });
+		const repositories = c.state.repositories.filter((r) => r.lifecycle?.state !== "deleted");
+		assertNamespaceCapacity({ ...c.state, repositories, reservations: [] });
 		const entries: { key: string; value: unknown }[] = c.state.reservations.map((reservation) => ({
 			key: this.reservationKey(reservation.id),
 			value: reservation,
 		}));
-		this.store.batch([...entries, { key: "namespace", value: { ...c.state, reservations: [] } }]);
+		this.store.batch([
+			...entries,
+			...c.state.repositories
+				.filter((r) => r.lifecycle?.state === "deleted")
+				.map((value) => ({ key: `deleted-repository:${value.id}`, value })),
+			{ key: "namespace", value: { ...c.state, repositories, reservations: [] } },
+		]);
 	}
 	private reservationKey(id: string) {
 		return `reservation:${id}`;
@@ -76,13 +88,14 @@ export class NamespaceRuntime extends DurableObject<StorageEnv> {
 		};
 	}
 	authority(grant: ConnectionGrant, repositoryId?: string) {
-		return this.controller().authority(grant.actor, repositoryId, grant.scopes, grant.repositories);
+		return this.controller(repositoryId).authority(grant.actor, repositoryId, grant.scopes, grant.repositories);
 	}
 	snapshot(grant: ConnectionGrant) {
 		const c = this.controller(),
 			a = c.authority(grant.actor),
 			maintain = a.actor.kind === "human" && ["owner", "maintainer"].includes(a.role);
 		const repositories = c.state.repositories.filter((r) => {
+			if (r.lifecycle?.state === "deleted") return false;
 			try {
 				c.authority(grant.actor, r.id, grant.scopes, grant.repositories);
 				return true;
@@ -96,7 +109,7 @@ export class NamespaceRuntime extends DurableObject<StorageEnv> {
 			repositories,
 			members: maintain ? c.state.members : {},
 			teams: maintain ? c.state.teams : [],
-			policy: c.state.policy,
+			policy: { rules: { ...DEFAULT_RESOURCE_POLICY.rules, ...c.state.policy.rules } },
 			storage: new ResourceBoundary(this.store, this.env, { namespace: c.state.namespace.id }).storage(),
 			reservations: maintain ? this.reservations(grant).items : [],
 			capacity: { ...this.store.usage(), limits: STATE_LIMITS },
@@ -104,15 +117,27 @@ export class NamespaceRuntime extends DurableObject<StorageEnv> {
 		};
 	}
 	repository(grant: ConnectionGrant, repositoryId: string) {
-		const c = this.controller();
+		const c = this.controller(repositoryId);
 		c.authority(grant.actor, repositoryId, grant.scopes, grant.repositories);
 		return c.state.repositories.find((r) => r.id === repositoryId)!;
 	}
 	saveRepository(grant: ConnectionGrant, repository: Repository) {
-		const c = this.controller();
+		const c = this.controller(repository.id);
 		c.repository(c.authority(grant.actor), repository);
 		this.save(c);
 		return repository;
+	}
+	lifecycle(grant: ConnectionGrant, repositoryId: string, lifecycle: NonNullable<Repository["lifecycle"]>) {
+		const c = this.controller(repositoryId);
+		c.lifecycle(c.authority(grant.actor, repositoryId, grant.scopes, grant.repositories), lifecycle);
+		this.save(c);
+	}
+	lifecycleReservations(grant: ConnectionGrant, repositoryId: string, operationId?: string) {
+		const c = this.controller(repositoryId);
+		c.authority(grant.actor, repositoryId, grant.scopes, grant.repositories);
+		const pending = (r: ResourceReservation) =>
+			r.repositoryId === repositoryId && r.id !== operationId && ["reserved", "uncertain"].includes(r.state);
+		return c.state.reservations.some(pending) || someRecord<ResourceReservation>(this.store, "reservation:", pending);
 	}
 	member(grant: ConnectionGrant, userId: string, role?: NamespaceRole) {
 		const c = this.controller();
@@ -146,9 +171,10 @@ export class NamespaceRuntime extends DurableObject<StorageEnv> {
 		fingerprint: string,
 		action: ResourceAction,
 		workspaceId?: string,
+		storageRequired = true,
 	) {
 		const compactFingerprint = await hash(fingerprint);
-		const c = this.controller(),
+		const c = this.controller(repositoryId),
 			a = c.authority(grant.actor, repositoryId, grant.scopes, grant.repositories);
 		const previous =
 			this.store.get<ResourceReservation>(this.reservationKey(`${a.actor.id}:${id}`)) ??
@@ -162,7 +188,7 @@ export class NamespaceRuntime extends DurableObject<StorageEnv> {
 				previous.fingerprint = stable({ fingerprint: compactFingerprint, action, repositoryId, workspaceId });
 		}
 		const reservation = c.reserve(a, id, compactFingerprint, action, workspaceId);
-		new ResourceBoundary(this.store, this.env, { namespace: c.state.namespace.id }).bind();
+		if (storageRequired) new ResourceBoundary(this.store, this.env, { namespace: c.state.namespace.id }).bind();
 		this.save(c);
 		return reservation;
 	}

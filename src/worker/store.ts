@@ -124,6 +124,11 @@ export function sqlStore(sql: SqlStorage, atomic: <T>(run: () => T) => T = (run)
 			if (!available()) return [];
 			if (!Number.isInteger(limit) || limit < 1 || limit > STATE_LIMITS.namespaceCandidates + 1)
 				throw new DomainError(400, "Invalid page limit");
+			if (!prefix)
+				return sql
+					.exec<{ key: string; body: string }>("SELECT key, body FROM records WHERE key > ? ORDER BY key LIMIT ?", after, limit)
+					.toArray()
+					.map(({ key, body }) => ({ key, value: JSON.parse(body) as T }));
 			return sql
 				.exec<{ key: string; body: string }>(
 					"SELECT key, body FROM records WHERE key >= ? AND key < ? AND key > ? ORDER BY key LIMIT ?",
@@ -192,4 +197,16 @@ export async function hash(text: string) {
 	return [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))]
 		.map((x) => x.toString(16).padStart(2, "0"))
 		.join("");
+}
+
+/** Read-only paged existence check within the supported retained-record envelope. */
+export function someRecord<T>(store: Store, prefix: string, predicate: (value: T) => boolean) {
+	let cursor: string | undefined;
+	for (let offset = 0; offset <= STATE_LIMITS.storeRecords; offset += STATE_LIMITS.pageSize) {
+		const rows = store.scan<T>(prefix, cursor, STATE_LIMITS.pageSize);
+		if (rows.some(({ value }) => predicate(value))) return true;
+		if (rows.length < STATE_LIMITS.pageSize) return false;
+		cursor = rows.at(-1)!.key;
+	}
+	throw new DomainError(409, "Coordination storage capacity reached; inspect retained records before adding work");
 }

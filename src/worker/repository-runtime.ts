@@ -27,6 +27,7 @@ import type { ConnectionGrant, NamespaceRuntime } from "./namespace-runtime.ts";
 import { Observation, type ObservationRoute, type PushSignal } from "./observation.ts";
 import { ProviderIdentity, ProviderIdentityError } from "./provider-identity.ts";
 import { readReconciliation } from "./reconciliation.ts";
+import { RepositoryLifecycleRuntime } from "./repository-lifecycle.ts";
 import { SourceInspection } from "./source-inspection.ts";
 import { hash, jsonBytes, memoryStore, Serial, type Store } from "./store.ts";
 
@@ -73,7 +74,7 @@ interface PublicationIntent {
 	counted?: boolean;
 }
 type NamespacePort = {
-	[K in "authority" | "repository" | "reserve" | "settle" | "resourceConfiguration"]: (
+	[K in "authority" | "repository" | "reserve" | "settle" | "resourceConfiguration" | "lifecycle" | "lifecycleReservations"]: (
 		...args: Parameters<NamespaceRuntime[K]>
 	) => Awaited<ReturnType<NamespaceRuntime[K]>> | Promise<Awaited<ReturnType<NamespaceRuntime[K]>>>;
 };
@@ -89,6 +90,32 @@ export class RepositoryRuntime {
 		readonly recovery?: RecoveryPort,
 		readonly observationRoute?: (subscription: string, route: ObservationRoute) => Promise<void>,
 	) {}
+	private lifecycle() {
+		return new RepositoryLifecycleRuntime(
+			this.store,
+			{
+				authority: (grant, id) => this.namespace.authority(grant, id),
+				lifecycle: (grant, id, lifecycle) => this.namespace.lifecycle(grant, id, lifecycle),
+				lifecycleReservations: async (grant, id, operationId) => this.namespace.lifecycleReservations(grant, id, operationId),
+				reserve: async (grant, id, key, fingerprint, action, storageRequired) =>
+					this.namespace.reserve(grant, id, key, fingerprint, action, undefined, storageRequired),
+				settle: (id, state) => this.namespace.settle(id, state),
+				host: async () => (await this.resources()).host(),
+				schedule: async (at) => {
+					if (!this.recovery) throw new DomainError(503, "Repository lifecycle unavailable");
+					await this.recovery.schedule(at);
+				},
+				resetCache: () => this.git.resetCache(),
+			},
+			this.now,
+		);
+	}
+	recoverDeletion() {
+		return this.serial.run(() => this.lifecycle().recover(this.state().repository));
+	}
+	private retiring() {
+		return Boolean(this.store.get("repository-deletion"));
+	}
 	private observation() {
 		return new Observation(this.store, this.env, this.git, this.now, {
 			authority: async (grant) => this.namespace.authority(grant, this.state().repository.id),
@@ -112,10 +139,16 @@ export class RepositoryRuntime {
 		});
 	}
 	ingestObservation(messageId: string, signal: PushSignal, route: ObservationRoute, failed = false) {
-		return this.serial.run(() => this.observation().ingest(this.state(), messageId, signal, route, failed));
+		return this.serial.run(() => {
+			if (this.retiring() || this.state().repository.lifecycle?.state === "archived") return;
+			return this.observation().ingest(this.state(), messageId, signal, route, failed);
+		});
 	}
 	recoverObservation() {
-		return this.serial.run(() => this.observation().recover(this.state()));
+		return this.serial.run(() => {
+			if (this.retiring() || this.state().repository.lifecycle?.state === "archived") return;
+			return this.observation().recover(this.state());
+		});
 	}
 
 	initialize(repository: Repository) {
@@ -344,6 +377,16 @@ export class RepositoryRuntime {
 		)
 			throw new DomainError(400, "Unsupported Git request");
 		const write = service === "git-receive-pack";
+		const currentRepository = await this.namespace.repository(grant, route.repositoryId);
+		if (
+			this.retiring() ||
+			currentRepository.lifecycle?.state === "deleted" ||
+			(write &&
+				(this.store.get("repository-transition") ||
+					currentRepository.lifecycle?.state === "archived" ||
+					state.repository.lifecycle?.state === "archived"))
+		)
+			throw new DomainError(409, "Repository is read-only");
 		if (a.actor.kind === "human" && a.actor.connectionId && route.workspaceId) {
 			const bound = this.store.get<string>(`human-workspace:${a.actor.connectionId}`);
 			if (bound && bound !== route.workspaceId) throw new DomainError(403, "Terminal Git scope denied");
@@ -422,7 +465,18 @@ export class RepositoryRuntime {
 		// An interrupted registration can still be inspected and retried from the console.
 		// This empty projection is not persisted until explicit canonical setup.
 		const state = archiveLayout(stored ? structuredClone(stored) : initialRepository(repository));
-		state.repository = repository;
+		state.repository = { ...repository, lifecycle: stored?.repository.lifecycle ?? repository.lifecycle };
+		if (["archive_repository", "restore_repository", "delete_repository"].includes(cmd.tool))
+			return this.lifecycle().command(repository, cmd, grant);
+		if (state.repository.lifecycle?.state === "deleted") throw new DomainError(410, "Repository has been deleted");
+		const lifecycleMutation = HUMAN_TOOLS.has(cmd.tool) || toolByName(cmd.tool)?.mutation || cmd.tool === "provision_repository";
+		if (
+			lifecycleMutation &&
+			(this.retiring() || this.store.get("repository-transition") || state.repository.lifecycle?.state === "archived") &&
+			!(state.repository.lifecycle?.state === "archived" && ["inspect_source", "recover_source"].includes(cmd.tool))
+		)
+			throw new DomainError(409, "Repository is read-only");
+		if (this.retiring() && !["get_repository", "get_activity"].includes(cmd.tool)) throw new DomainError(409, "Repository is read-only");
 		if (cmd.tool === "retry_repository_setup") {
 			// Replay the original provisioning intent so a failed creation reuses its operation identity
 			// and charged reservation. Repositories created before intent was recorded use a stable key.
@@ -769,6 +823,13 @@ export class RepositoryRuntime {
 			}
 			if (cmd.tool === "get_repository") {
 				const snapshot = result as import("../shared/platform.ts").RepositorySnapshot;
+				snapshot.lifecycle = await this.lifecycle().view(state.repository, grant, a);
+				if (snapshot.lifecycle.state !== "active" || this.store.get("repository-transition")) {
+					snapshot.permissions.write = false;
+					snapshot.permissions.maintain = false;
+					snapshot.permissions.approve = false;
+					snapshot.canonicalSetup.retry = false;
+				}
 				snapshot.reconciliation = await readReconciliation(c, this.observation().status(state), this.git);
 				// Reconciliation adds published ancestry, so attention is derived again from the completed snapshot.
 				snapshot.attention = attentionView(snapshot, a.actor.userId);
@@ -1213,7 +1274,7 @@ export class RepositoryRuntime {
 	recoverCleanup() {
 		return this.serial.run(async () => {
 			const state = this.store.get<RepositoryState>("repository");
-			if (!state) return;
+			if (!state || this.retiring() || state.repository.lifecycle?.state === "archived") return;
 			const due = state.workspaces
 				.filter((w) => w.cleanup?.state === "pending" && (w.cleanup.nextAttempt ?? 0) <= this.now())
 				.slice(0, STATE_LIMITS.recoveryBatch);
@@ -1415,6 +1476,7 @@ export class RepositoryRuntime {
 					await correlate({ namespaceId: state.repository.namespaceId, repositoryId: state.repository.id });
 					diagnose("operation_started");
 					await this.namespace.authority(grant, state.repository.id);
+					if (this.retiring()) throw new DomainError(409, "Repository is read-only");
 					await this.known(new RepositoryController(state, this.now(), () => "read"), revision);
 					const pack = await this.git.exportPack(revision);
 					diagnose("operation_completed");

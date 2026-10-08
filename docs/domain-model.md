@@ -46,6 +46,14 @@ Namespace → Repository → Workspace
 
 Terms deliberately **not** used as durable domain objects: *session*, *run*, *mission*, *agent task*, *swarm*, *execution* (as work identity). A Claude, Codex or Cursor session is never a Cruce concept.
 
+## Repository lifecycle
+
+Repositories are active, archived, deleting or deleted. Only the authenticated console namespace Owner can archive, restore or permanently delete a repository. Archive preserves source and history and disables writes; restore enables work again. Archived repositories remain listed with an explicit label.
+
+Archive and deletion require ended workspaces, closed changes, settled promotions/resource operations and completed push-observation subscription cleanup. A disconnected workspace still blocks retirement. Deletion requires typing the current repository name, freezes the repository before cloud effects, and cannot be cancelled after durable authorization. Cleanup confirms the recorded provider identities and absence, removes canonical last, then purges coordination history and the derived source cache. Interrupted effects reuse the same operation and namespace reservation; current authority/policy/identity remain mandatory.
+
+Permanent deletion is the explicit exception to source and provenance retention. It leaves local checkouts and external upstream repositories untouched, retains a minimal tombstone/receipt and the namespace resource ledger, and frees the repository name and live namespace capacity for a new stable ID. Old IDs and creation keys cannot resurrect deleted work. [ADR 0010](decisions/0010-repository-archive-and-permanent-deletion.md) owns this exception and its recovery ordering.
+
 ## Workspace identity
 
 ```text
@@ -219,4 +227,4 @@ Effective agent authority is the intersection of its user's current authority, t
 - The local Git cache is disposable. Eviction preserves retained source and provenance; explicit identity-checked recovery restores exact source without requiring the workspace fork. Cache-only coordination reads may show source or ancestry as unavailable. Provider first-parent history does not establish complete Git ancestry.
 - Presence expiry, disconnection and detachment are never cleanup triggers. Cleanup is always an explicit, authorized operation.
 
-Coordination capacity is finite and inspectable. A full current-state or retained-record envelope rejects new work before resource I/O while preserving records and recovery headroom. Activity windows are views over retained history; receipts and charged uncertainty never expire into permission to repeat an effect. Presence and change reports are observations: each workspace keeps only its latest heartbeat and report, and repeated change reports are coalesced in activity. Finished work (an ended workspace whose fork is gone, with every change closed and every promotion settled) moves out of the live repository view into an immutable archive bundle. It is retained and readable, never deleted, and no longer counts toward live limits. [ADR 0005](decisions/0005-bounded-state-and-authorized-cleanup-recovery.md) and [ADR 0009](decisions/0009-replaceable-observations-and-archived-finished-work.md) record this policy.
+Coordination capacity is finite and inspectable. A full current-state or retained-record envelope rejects new work before resource I/O while preserving records and recovery headroom. Activity windows are views over retained history; receipts and charged uncertainty never expire into permission to repeat an effect. Presence and change reports are observations: each workspace keeps only its latest heartbeat and report, and repeated change reports are coalesced in activity. Finished work (an ended workspace whose fork is gone, with every change closed and every promotion settled) moves out of the live repository view into an immutable archive bundle. It is retained and readable, never deleted by workspace cleanup or expiry, and no longer counts toward live limits. [ADR 0005](decisions/0005-bounded-state-and-authorized-cleanup-recovery.md) and [ADR 0009](decisions/0009-replaceable-observations-and-archived-finished-work.md) record this policy.

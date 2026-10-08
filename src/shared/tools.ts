@@ -182,6 +182,9 @@ export const CRUCE_TOOLS: Tool[] = [
 	write("request_promotion", "Request human review and source promotion.", ["workspaceId", "proposalId"], "promotion:request"),
 ];
 export const HUMAN_TOOLS = new Set([
+	"archive_repository",
+	"restore_repository",
+	"delete_repository",
 	"resolve_review",
 	"reject_proposal",
 	"promote_proposal",

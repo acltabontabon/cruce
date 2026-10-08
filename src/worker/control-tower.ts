@@ -44,6 +44,7 @@ export class ControlTower extends DurableObject<Env> {
 		const state = this.store.get<RepositoryState>("repository");
 		if (state) {
 			try {
+				await this.open(state.repository).recoverDeletion();
 				await this.open(state.repository).recoverCleanup();
 			} finally {
 				await this.open(state.repository).recoverObservation();

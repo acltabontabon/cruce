@@ -105,6 +105,10 @@ async function fixture(_hosted = true) {
 			settle: (id: string, state: "complete" | "uncertain" | "released") => {
 				w.state.reservations.find((r) => r.id === id)!.state = state;
 			},
+			lifecycle: (g: typeof grant, id: string, lifecycle: NonNullable<Repository["lifecycle"]>) =>
+				w.lifecycle(w.authority(g.actor, id, g.scopes, g.repositories), lifecycle),
+			lifecycleReservations: (_g: typeof grant, id: string, operationId?: string) =>
+				w.state.reservations.some((r) => r.repositoryId === id && r.id !== operationId && ["reserved", "uncertain"].includes(r.state)),
 			resourceConfiguration: () => ({ namespace: "namespace", binding: undefined, legacyAccount: false, policy: w.state.policy }),
 		};
 	const runtime = new RepositoryRuntime(store, git, port, {}, () => 1000);
@@ -1914,5 +1918,46 @@ describe("archived finished work", () => {
 			cursor = page.cursor;
 		} while (cursor);
 		expect(seen).toBe(STATE_LIMITS.workspaces + 44);
+	});
+});
+
+describe("repository retirement through the command and Git boundaries", () => {
+	it("enforces archived permissions, preserves source reads and allows explicit restore", async () => {
+		const f = await fixture();
+		const human = { actor: owner };
+		await expect(f.call("archive_repository", {}, human)).rejects.toThrow("Repository retirement has blockers");
+		await f.call("end_workspace", { workspaceId: f.workspace.id });
+		await f.call("archive_repository", {}, human);
+		const snapshot = (await f.call("get_repository", {}, human)) as RepositorySnapshot;
+		expect(snapshot.permissions.write).toBe(false);
+		expect(snapshot.permissions.approve).toBe(false);
+		expect(snapshot.lifecycle?.state).toBe("archived");
+		expect(await f.call("get_source", { revision: f.base }, human)).toBeDefined();
+		await expect(f.call("start_workspace", { title: "New" })).rejects.toThrow("Repository is read-only");
+		await f.call("restore_repository", {}, human);
+		expect(((await f.call("get_repository", {}, human)) as RepositorySnapshot).permissions.write).toBe(true);
+	});
+	it("freezes all writes, Git and exports while deletion awaits provider absence", async () => {
+		const f = await fixture();
+		await f.call("end_workspace", { workspaceId: f.workspace.id });
+		f.host.remove = vi.fn(async () => false);
+		const runtime = new RepositoryRuntime(f.store, f.git, f.port, {}, () => 1000, { schedule: vi.fn(), authorize: async (g) => g });
+		const command = {
+			tool: "delete_repository",
+			namespaceId: repo.namespaceId,
+			repositoryId: repo.id,
+			confirmation: repo.name,
+			idempotencyKey: "delete",
+		};
+		expect(await runtime.command(command, { actor: owner })).toEqual({ state: "deleting" });
+		await expect(f.call("start_workspace", { title: "New" })).rejects.toThrow("Repository is read-only");
+		await expect(runtime.exportSource(f.base, { actor: owner })).rejects.toThrow("Repository is read-only");
+		await expect(
+			runtime.gitRequest(
+				new Request(`https://cruce.test/mcp/git/${repo.namespaceId}/${repo.id}/canonical.git/info/refs?service=git-upload-pack`),
+				grant,
+			),
+		).rejects.toThrow("Repository is read-only");
+		expect(((await f.call("get_repository", {}, { actor: owner })) as RepositorySnapshot).lifecycle?.state).toBe("deleting");
 	});
 });

@@ -27,6 +27,7 @@ export const COST_LABELS: Record<CostClass, string> = {
 export const DEFAULT_RESOURCE_POLICY: ResourcePolicy = {
 	rules: {
 		"repository.create": "allow",
+		"repository.delete": "approval",
 		"workspace.fork": "allow",
 		"workspace.cleanup": "allow",
 		"revision.publish": "allow",

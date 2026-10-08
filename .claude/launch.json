@@ -1,0 +1,12 @@
+{
+	"version": "0.0.1",
+	"configurations": [
+		{
+			"name": "fixture",
+			"runtimeExecutable": "pnpm",
+			"runtimeArgs": ["dev:fixture"],
+			"port": 5199,
+			"autoPort": true
+		}
+	]
+}

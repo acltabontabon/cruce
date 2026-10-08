@@ -49,7 +49,13 @@ export function RepositoryRow({
 				</small>
 			</span>
 			{summary?.lanes && <MiniLanes lanes={summary.lanes} />}
-			<AttentionPills summary={summary} />
+			{repository.lifecycle?.state === "archived" ? (
+				<Pill tone="neutral">Archived</Pill>
+			) : repository.lifecycle?.state === "deleting" ? (
+				<Pill tone="danger">Deleting</Pill>
+			) : (
+				<AttentionPills summary={summary} />
+			)}
 			<Icon name="arrow" className="row-arrow" />
 		</button>
 	);
@@ -155,7 +161,9 @@ function order(a: AttentionItem, b: AttentionItem) {
 
 /** Decisions this viewer can make now across repositories, then visible work waiting on its owner or a maintainer. */
 function Decisions({ rows, open, partial }: { rows: Row[]; open: Open; partial: boolean }) {
-	const all = rows.flatMap((row) => (row.summary?.items ?? []).map((item) => ({ row, item })));
+	const all = rows
+		.filter((row) => !row.repository.lifecycle || row.repository.lifecycle.state === "active")
+		.flatMap((row) => (row.summary?.items ?? []).map((item) => ({ row, item })));
 	const mine = all.filter(({ item }) => item.mine).sort((a, b) => order(a.item, b.item)),
 		others = all.filter(({ item }) => !item.mine).sort((a, b) => order(a.item, b.item));
 	const mineTotal = rows.reduce((n, row) => n + (row.summary?.attention.mine ?? 0), 0),

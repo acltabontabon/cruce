@@ -23,7 +23,7 @@ Read these before changing domain behavior: [product](docs/product.md) (thesis, 
 - Review, evidence, approval and promotion each name one exact revision. Canonical promotion requires authenticated human approval, controller readiness and a non-forced Git update validated against the approved base. Continuing writers reconcile explicitly with Git, verify and obtain fresh review. Fetching or acknowledging proves nothing.
 - Keep reported heads, observed fork refs, published revisions and accepted canonical revisions distinct. Publication proves retention, not correctness. Events and observations never approve or promote.
 - Namespace resource reservations are atomic across repositories. Retries reuse operation identity and reservation, and uncertain outcomes stay reserved until reconciled. The deployment Artifacts binding is explicit storage authority, never a credential fallback; recorded storage identity cannot be changed implicitly. Repository policy only narrows namespace policy.
-- Credentials stay sealed server-side. Git uses 60-second tokens revoked after use. Never expose credentials in source, remotes, configuration, logs or frontend responses. Retain source referenced by published revisions; cleanup is explicit and conservative.
+- Credentials stay sealed server-side. Git uses 60-second tokens revoked after use. Never expose credentials in source, remotes, configuration, logs or frontend responses. Retain source referenced by published revisions; cleanup is explicit and conservative. Only authenticated console namespace Owner retirement, confirmed by the exact repository name, permits permanent repository deletion ([ADR 0010](docs/decisions/0010-repository-archive-and-permanent-deletion.md)); archive preserves history.
 
 ## Implementation
 

@@ -11,6 +11,7 @@ import { SqlFs } from "../../src/worker/git/sql-fs.ts";
 import { GitWorkspace } from "../../src/worker/git/workspace.ts";
 import { NamespaceRuntime } from "../../src/worker/namespace-runtime.ts";
 import { type PlatformEnv, platformRoute } from "../../src/worker/platform-router.ts";
+import { RepositoryLifecycleRuntime } from "../../src/worker/repository-lifecycle.ts";
 import { RepositoryRuntime } from "../../src/worker/repository-runtime.ts";
 import { sqlStore } from "../../src/worker/store.ts";
 
@@ -574,4 +575,72 @@ describe("pure coordination reads through persisted adapters", () => {
 		expect(db.snapshot()).toEqual(before);
 		db.assertReads();
 	});
+});
+
+describe("repository lifecycle with persisted Namespace and SQL adapters", () => {
+	it.each([true, false])(
+		"purges records and source cache, preserves an indexed tombstone and frees its name (resources: %s)",
+		async (initialized) => {
+			const f = await fixture(initialized);
+			const state = f.store.get<import("../../src/shared/platform.ts").RepositoryState>("repository");
+			if (state) {
+				state.workspaces.forEach((workspace) => {
+					workspace.state = "completed";
+				});
+				state.proposals.forEach((proposal) => {
+					proposal.state = "rejected";
+				});
+				f.store.put("repository", state);
+			}
+			const remove = vi.fn(async () => true);
+			const runtime = new RepositoryLifecycleRuntime(
+				f.store,
+				{
+					authority: (grant, id) => f.namespace().authority(grant, id),
+					lifecycle: (grant, id, lifecycle) => f.namespace().lifecycle(grant, id, lifecycle),
+					lifecycleReservations: (grant, id, op) => f.namespace().lifecycleReservations(grant, id, op),
+					reserve: (grant, id, key, fingerprint, action, storageRequired) =>
+						f.namespace().reserve(grant, id, key, fingerprint, action, undefined, storageRequired),
+					settle: (id, state) => f.namespace().settle(id, state),
+					host: async () => ({ remove }) as never,
+					schedule: vi.fn(),
+					resetCache: () => f.git.resetCache(),
+				},
+				() => 1000,
+			);
+			const command = {
+				tool: "delete_repository",
+				namespaceId: f.personal.id,
+				repositoryId: f.repository.id,
+				idempotencyKey: "delete",
+				confirmation: f.repository.name,
+			};
+			await runtime.command(f.repository, command, f.grant);
+			await runtime.command(f.repository, command, f.grant);
+			expect(f.store.scan("").map((row) => row.key)).toEqual(["repository", "repository-deletion"]);
+			expect(await f.git.hasCompleteSource(f.base)).toBe(false);
+			expect(f.namespace().snapshot(f.grant).repositories).toHaveLength(0);
+			expect(f.namespace().repository(f.grant, f.repository.id).lifecycle?.state).toBe("deleted");
+			if (!initialized) {
+				expect(remove).not.toHaveBeenCalled();
+				expect(sqlStore(f.n.sql).get("storage-binding")).toBeUndefined();
+			}
+			expect(() => f.namespace().saveRepository(f.grant, f.repository)).toThrow("Repository is read-only");
+			f.namespace().saveRepository(f.grant, { ...f.repository, id: "new-repository", storageName: "repo-new" });
+			expect(
+				f
+					.namespace()
+					.snapshot(f.grant)
+					.repositories.map((r) => r.id),
+			).toEqual(["new-repository"]);
+			f.freeze();
+			const before = f.snapshot();
+			f.restart();
+			await expect(f.call(f.path)).rejects.toThrow("Repository has been deleted");
+			expect(f.snapshot()).toEqual(before);
+			f.n.assertReads();
+			f.r.assertReads();
+			expect(f.provider).not.toHaveBeenCalled();
+		},
+	);
 });

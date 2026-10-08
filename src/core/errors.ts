@@ -28,7 +28,7 @@ export function stable(value: unknown): string {
 /** Preserve intentional HTTP status across Durable Object RPC error serialization. */
 export function domainStatus(error: unknown): number | undefined {
 	if (error instanceof DomainError) return error.status;
-	if (error instanceof Error && /^CruceError(400|401|403|404|405|409|413|415|429|502|503)$/.test(error.name))
+	if (error instanceof Error && /^CruceError(400|401|403|404|405|409|410|413|415|429|502|503)$/.test(error.name))
 		return Number(error.name.slice(10));
 	return undefined;
 }
@@ -36,6 +36,8 @@ export function domainStatus(error: unknown): number | undefined {
 /** Field names are schema vocabulary, never unknown keys or validation/provider text. */
 const PUBLIC_FIELDS = new Set([
 	"tool",
+	"confirmation",
+	"repository.delete",
 	"namespaceId",
 	"repositoryId",
 	"workspaceId",
