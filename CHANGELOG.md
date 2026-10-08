@@ -38,6 +38,7 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Changed
 
+- The repository page no longer repeats its name below the header. The header breadcrumb names the namespace and repository. One bar below it holds the tabs and a **main · revision · Clone** control, which opens the clone and existing-checkout commands. The separate **Set up locally** button and its Settings entry are gone. The Changes rail lists promotions only, since the bar already shows the canonical revision.
 - Bridge agents now merge canonical into the workspaces attached to them just before publishing and proposing, and update other behind workspaces only when the user asks. The leading sentence now starts with `Cruce:` and separates attached workspaces from the rest; each coordination instruction is stated once, and identical coordination state is replaced by a one-line "unchanged" notice on later responses (a busy repository's block went from about 22 KB to 15 KB, and to one line when nothing changed).
 
 - Installed clients need `cruce login` and `cruce connect` once per machine; earlier per-repository credentials are no longer read. Revoke old per-repository connections from Local setup, and delete project-level `cruce` entries in `.mcp.json`, `.cursor/mcp.json` or `.codex/config.toml` and the Cruce participation blocks in `CLAUDE.md`, `AGENTS.md` or `.cursor/rules/cruce.mdc`; participation guidance now travels as MCP server instructions.

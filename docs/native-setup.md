@@ -28,7 +28,7 @@ Both consents default to **all repositories you can access**, which follows your
 
 ## Clone or attach a repository
 
-The repository's **Set up locally** guide shows the canonical remote with stable IDs:
+The repository's **Clone** guide, next to its canonical revision, shows the canonical remote with stable IDs:
 
 ```sh
 git clone https://YOUR_HOST/mcp/git/NAMESPACE_ID/REPOSITORY_ID/canonical.git
@@ -116,7 +116,7 @@ Hosted fork cleanup is a separate `cleanup_workspace` operation or console actio
 
 ## Human terminals
 
-`cruce human --server URL --namespace ID --repository ID` requests browser-approved terminal participation for one checkout; the Existing checkout tab of **Set up locally** shows it with the IDs filled in. Then use `start` from the existing checkout. Human terminals can attach that checkout but cannot approve canonical source promotion.
+`cruce human --server URL --namespace ID --repository ID` requests browser-approved terminal participation for one checkout; the Existing checkout tab of the **Clone** guide shows it with the IDs filled in. Then use `start` from the existing checkout. Human terminals can attach that checkout but cannot approve canonical source promotion.
 
 The credential helper can use `--human-file /absolute/path/to/git-metadata/cruce/connection.json` with `credential.useHttpPath=true`, scoped to that repository. Use the fork URL from `get_git_access` for explicit `git push FORK_URL HEAD:BRANCH`; existing remotes remain unchanged. Renew terminal authorization from its checkout when it expires. Agent MCP must use its own OAuth connection, never human terminal credentials.
 

@@ -57,7 +57,7 @@ The **History** tab shows canonical promotions as a timeline, published revision
 
 ## 6. Connect an agent
 
-**Local setup** (in the avatar menu) holds the once-per-machine commands: install the client, authorize Git with `cruce login`, connect Claude Code, Codex or Cursor with `cruce connect`, and the sentence to give your tool. Its connections list shows what each approved tool reaches. **Set up locally** in a repository's header then only clones it or attaches an existing checkout. Cruce doesn't run agents; each tool runs on your machine and works in its own Cruce workspace. Each workspace creates a fork in the installation's Cloudflare storage and uses namespace resource operations. Namespace **Settings** shows inherited Git storage and who may run each storage operation; users do not connect Cloudflare accounts.
+**Local setup** (in the avatar menu) holds the once-per-machine commands: install the client, authorize Git with `cruce login`, connect Claude Code, Codex or Cursor with `cruce connect`, and the sentence to give your tool. Its connections list shows what each approved tool reaches. **Clone**, next to a repository's canonical revision, then only clones it or attaches an existing checkout. Cruce doesn't run agents; each tool runs on your machine and works in its own Cruce workspace. Each workspace creates a fork in the installation's Cloudflare storage and uses namespace resource operations. Namespace **Settings** shows inherited Git storage and who may run each storage operation; users do not connect Cloudflare accounts.
 
 ![Local setup page with copyable install, login and connect commands and the connections list](images/local-demo/connect.jpg)
 
