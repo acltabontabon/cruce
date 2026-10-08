@@ -27,6 +27,8 @@ export interface RepositoryHost {
 }
 
 const API = "https://api.cloudflare.com/client/v4";
+/** Artifacts source reads resolve a branch, tag or commit ID; a fully qualified branch ref resolves to nothing. */
+export const providerRef = (ref: string) => (ref.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : ref);
 type Send = typeof fetch;
 
 /**
@@ -90,13 +92,16 @@ export class ArtifactsRestHost implements RepositoryHost {
 			readTree: (oid) => json<ArtifactsTreeEntry[]>(`tree/${oid}`),
 			log: async (opts) =>
 				(await json<ArtifactsCommitMetadata[]>(
-					`log?${new URLSearchParams({ ref: opts?.ref ?? "HEAD", limit: String(opts?.limit ?? 30), offset: String(opts?.offset ?? 0) })}`,
+					`log?${new URLSearchParams({ ref: providerRef(opts?.ref ?? "HEAD"), limit: String(opts?.limit ?? 30), offset: String(opts?.offset ?? 0) })}`,
 				)) ?? [],
 			readFile: async ({ ref, path }) => {
-				const response = await this.send(`${API}${this.path(`/repos/${name}/file?${new URLSearchParams({ ref, path })}`)}`, {
-					headers: { authorization: `Bearer ${this.token}` },
-					redirect: "manual",
-				});
+				const response = await this.send(
+					`${API}${this.path(`/repos/${name}/file?${new URLSearchParams({ ref: providerRef(ref), path })}`)}`,
+					{
+						headers: { authorization: `Bearer ${this.token}` },
+						redirect: "manual",
+					},
+				);
 				if (response.status === 404) {
 					await response.body?.cancel();
 					return null;
@@ -455,8 +460,8 @@ export class ArtifactsBindingHost implements RepositoryHost {
 			return run({
 				readCommit: (oid) => this.provider(() => repo.readCommit(oid)),
 				readTree: (oid) => this.provider(() => repo.readTree(oid)),
-				readFile: (args) => this.provider(() => repo.readFile(args)),
-				log: (opts) => this.provider(() => repo.log(opts)),
+				readFile: (args) => this.provider(() => repo.readFile({ ...args, ref: providerRef(args.ref) })),
+				log: (opts) => this.provider(() => repo.log(opts?.ref ? { ...opts, ref: providerRef(opts.ref) } : opts)),
 			});
 		});
 	}

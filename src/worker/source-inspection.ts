@@ -71,15 +71,20 @@ export class SourceInspection {
 	async locate(revision: string): Promise<Location> {
 		const candidates = this.candidates();
 		const exact = candidates.filter((s) => s.revision === revision);
+		// A moved retained ref proves nothing itself, but never hides proof held by another retained ref.
+		let moved: DomainError | undefined;
 		for (const location of exact.length ? exact : candidates.reverse()) {
 			const found = await this.source(location, async (source) => {
 				const tip = await this.call(() => source.log({ ref: location.ref, limit: 1 }));
-				if (tip[0]?.hash !== location.revision) throw new DomainError(409, "Retained source ref differs from the recorded revision");
+				if (tip[0]?.hash !== location.revision) {
+					moved = new DomainError(409, "Retained source ref differs from the recorded revision");
+					return false;
+				}
 				return this.ancestor(source, revision, location.revision);
 			});
 			if (found) return location;
 		}
-		throw new DomainError(404, "Source unavailable; publish committed source first");
+		throw moved ?? new DomainError(404, "Source unavailable; publish committed source first");
 	}
 	private async files(source: SourceReader, revision: string) {
 		const root = (await this.commit(source, revision)).treeHash;

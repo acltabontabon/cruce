@@ -22,6 +22,18 @@ describe("resource boundary", () => {
 			}),
 		).toBe("source");
 		expect(vi.mocked(send).mock.calls.map(([u]) => String(u))).toContainEqual(expect.stringContaining("path=src%2Fa+b.txt"));
+		// Artifacts resolves "main" but returns nothing for "refs/heads/main".
+		await host.withSource("repo", "stable", async (source) => {
+			await source.log({ ref: "refs/heads/artifact-source", limit: 1 });
+			await source.readFile({ ref: "refs/heads/main", path: "README.md" });
+		});
+		const urls = vi.mocked(send).mock.calls.map(([u]) => new URL(String(u)));
+		expect(urls.filter((u) => /\/(log|file)$/.test(u.pathname)).map((u) => u.searchParams.get("ref"))).toEqual([
+			"a".repeat(40),
+			"a".repeat(40),
+			"artifact-source",
+			"main",
+		]);
 		await expect(host.withSource("repo", "replacement", (source) => source.log())).rejects.toThrow("identity changed");
 	});
 	it("uses 60-second repository tokens through the REST API and revokes them", async () => {

@@ -78,6 +78,18 @@ describe("Artifacts binding host", () => {
 		);
 		expect(p.readFile).toHaveBeenCalledTimes(1);
 	});
+	it("names retained branches the way Artifacts resolves them", async () => {
+		const p = provider(),
+			host = new ArtifactsBindingHost(p.artifacts, ACCOUNT, "cruce", "team", new ProviderIdentity(memory().store));
+		const info = await host.ensure("repo", "owned");
+		await host.withSource("repo", info.id, async (source) => {
+			await source.log({ ref: "refs/heads/main", limit: 1 });
+			await source.log();
+			await source.readFile({ ref: "refs/heads/artifact-source", path: "README.md" });
+		});
+		expect(p.log.mock.calls.map(([, opts]) => opts)).toEqual([{ ref: "main", limit: 1 }, undefined]);
+		expect(p.readFile).toHaveBeenCalledWith("ns-team-repo", { ref: "artifact-source", path: "README.md" });
+	});
 	it("isolates identical logical names across application namespaces and revokes creation tokens", async () => {
 		const p = provider();
 		for (const ns of ["team-a", "team-b"]) {

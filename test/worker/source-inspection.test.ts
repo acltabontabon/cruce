@@ -217,6 +217,13 @@ describe("bounded provider source inspection", () => {
 		Reflect.deleteProperty(f.artifact.storage, "providerId");
 		await expect(f.call({ revision: f.head })).rejects.toThrow("identity unavailable");
 	});
+	it("keeps proving from another retained ref when one has moved", async () => {
+		const f = await fixture();
+		f.state.artifacts.push({ ...f.artifact, id: "copy", storage: { ...f.artifact.storage, ref: "refs/heads/artifact-copy" } });
+		f.refs.set("refs/heads/artifact-copy", f.head);
+		f.refs.set(f.artifact.storage.ref!, f.left);
+		await expect(f.inspect().locate(f.head)).resolves.toMatchObject({ ref: "refs/heads/artifact-copy" });
+	});
 });
 
 describe("recoverable SQL Git cache", () => {
