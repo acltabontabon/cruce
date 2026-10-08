@@ -430,7 +430,7 @@ export function ChangeDetail({
 			: [];
 	return (
 		<article className="change-page detail-page">
-			<BackLink label="Changes" onClick={() => open("changes")} />
+			<BackLink label="Workspaces" onClick={() => open("workspaces")} />
 			<header className="page-header change-header">
 				<div className="page-title">
 					<p className="kicker">

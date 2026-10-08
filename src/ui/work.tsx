@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { reportFreshness } from "../core/reconciliation.ts";
 import { gitRemotePath } from "../shared/git-access.ts";
-import type { RepositorySnapshot, Workspace } from "../shared/platform.ts";
+import type { AttentionGroup, Proposal, RepositorySnapshot, Workspace } from "../shared/platform.ts";
 import { Form } from "./controls.tsx";
 import { BackLink, CopyCommand, Dialog, Icon, Pill, Section } from "./design.tsx";
 import { WorkspaceUpdateInspection } from "./inspect.tsx";
@@ -19,8 +19,10 @@ import {
 	blockerText,
 	canonicalRelation,
 	canonicalTarget,
+	changeGroups,
 	changeStatus,
 	ended,
+	GROUP_LABELS,
 	nextStep,
 	overlapGroups,
 	overlapsFor,
@@ -171,7 +173,6 @@ function WorkspaceRow({
 		waiting = unproposed(view, w),
 		item = attentionItem(view, w.id),
 		change = view.proposals.filter((p) => p.workspaceId === w.id).sort((a, b) => b.number - a.number)[0];
-	const changeLabel = change && changeStatus(view, change);
 	return (
 		<button
 			type="button"
@@ -208,10 +209,87 @@ function WorkspaceRow({
 				<Pill tone={status.tone}>{status.label}</Pill>
 				{!ended(w) && <Pill tone={relation.tone}>{relation.label}</Pill>}
 				{waiting && !change && <Pill tone="accent">Not proposed</Pill>}
-				{change && changeLabel && <Pill tone={changeLabel.tone}>{`#${change.number} ${changeLabel.label}`}</Pill>}
 			</span>
 			<Icon name="arrow" className="row-arrow" />
 		</button>
+	);
+}
+
+/**
+ * A change row leads with the accountable owner, the exact revision and what blocks it. Nested under its workspace it drops
+ * the owner and workspace, and a title that only repeats the workspace's stays for screen readers alone.
+ */
+export function ChangeRow({
+	view,
+	p,
+	open,
+	who,
+	nested,
+}: {
+	view: RepositorySnapshot;
+	p: Proposal;
+	open: Open;
+	who: People;
+	nested?: boolean;
+}) {
+	const s = changeStatus(view, p),
+		item = attentionItem(view, p.id),
+		workspace = view.workspaces.find((w) => w.id === p.workspaceId),
+		repeated = nested && workspace?.title.trim() === p.title.trim();
+	return (
+		<button type="button" className={`change-row${nested ? " nested" : ""}`} onClick={() => open("changes", p.id)}>
+			{!nested && <LaneTrack lane={laneIndex(view).get(p.workspaceId)} done={s.key === "promoted"} />}
+			<span className="row-number">#{p.number}</span>
+			<span className="row-main">
+				<strong className={repeated ? "sr-only" : undefined}>{p.title}</strong>
+				<small className="row-meta">
+					{workspace && !nested && <span className="owner">Owner: {ownerName(workspace.ownerId, who)}</span>}
+					<span>
+						<code title={p.revision}>{short(p.revision)}</code> on review base <code title={p.base}>{short(p.base)}</code>
+					</span>
+					{workspace && !nested && <span>{workspace.title}</span>}
+				</small>
+				{item && (
+					<small className="row-blocker">
+						{blockerSummary(item)}
+						{" · "}
+						<span className={item.mine ? "next-mine" : undefined}>{item.mine ? ACTION_LABELS[item.actions[0]] : waitingOn(item)}</span>
+					</small>
+				)}
+			</span>
+			<Pill tone={s.tone}>{s.label}</Pill>
+			<Icon name="arrow" className="row-arrow" />
+		</button>
+	);
+}
+
+function CloseSuperseded({ view, execute }: { view: RepositorySnapshot; execute: Execute }) {
+	const [working, setWorking] = useState(false),
+		[error, setError] = useState("");
+	const superseded = view.proposals.map((p) => ({ p, status: changeStatus(view, p) })).filter(({ status }) => status.key === "superseded");
+	if (!superseded.length || !view.permissions.maintain || !view.permissions.human) return null;
+	return (
+		<div className="group-actions">
+			<button
+				type="button"
+				disabled={working}
+				onClick={() => {
+					setWorking(true);
+					setError("");
+					// One reasoned rejection per change; each keeps its own operation identity.
+					void superseded
+						.reduce<Promise<unknown>>(
+							(chain, { p, status }) => chain.then(() => execute({ tool: "reject_proposal", proposalId: p.id, reason: status.label })),
+							Promise.resolve(),
+						)
+						.catch((e) => setError((e as Error).message))
+						.finally(() => setWorking(false));
+				}}
+			>
+				{working ? "Closing…" : `Close ${superseded.length === 1 ? "1 superseded change" : `${superseded.length} superseded changes`}`}
+			</button>
+			{error && <p role="alert">{error}</p>}
+		</div>
 	);
 }
 
@@ -315,6 +393,13 @@ function matches(view: RepositorySnapshot, w: Workspace, filter: string, viewerI
 	return true;
 }
 
+/** Attention groups a change can be filtered by; the attention strip links to them. */
+const groupFilters: readonly string[] = ["recovery", "promote", "review", "preparation", "reconciliation"] satisfies AttentionGroup[];
+
+/**
+ * The repository's work in one list: each workspace once, with its open changes nested under it in attention order.
+ * Workspaces with something to decide come first. Open changes whose workspace has ended keep their own section.
+ */
 export function WorkspaceList({
 	view,
 	open,
@@ -330,24 +415,59 @@ export function WorkspaceList({
 }) {
 	const [focus, setFocus] = useState<string>();
 	const owners = [...new Set(view.workspaces.map((w) => w.ownerId))];
+	const group = groupFilters.includes(filter) ? (filter as AttentionGroup) : undefined;
 	const active =
+		filter === "needs-you" ||
 		filter === "mine" ||
 		filter === "reconcile" ||
 		filter === "unproposed" ||
+		group ||
 		(filter.startsWith("owner:") && owners.includes(filter.slice(6)))
 			? filter
 			: "";
+	const groups = changeGroups(view);
+	const proposal = (id: string) => view.proposals.find((p) => p.id === id);
+	const openItems = groups.attention.flatMap(({ items }) => items).filter((item) => proposal(item.id));
+	const shownItems = openItems.filter((item) => (active === "needs-you" ? item.mine : group ? item.group === group : true));
+	const changesOf = (w: Workspace) =>
+		shownItems.filter((item) => proposal(item.id)?.workspaceId === w.id).map((item) => proposal(item.id)!);
+	const rank = (w: Workspace) => {
+		const items = openItems.filter((item) => proposal(item.id)?.workspaceId === w.id);
+		return items.some((item) => item.mine) ? 0 : items.length ? 1 : 2;
+	};
+	const visible = (w: Workspace) =>
+		active === "needs-you"
+			? changesOf(w).length > 0 || !!attentionItem(view, w.id)?.mine
+			: group
+				? changesOf(w).length > 0 || (group === "reconciliation" && attentionItem(view, w.id)?.group === group)
+				: matches(view, w, active, who.viewerId);
 	const sorted = [...view.workspaces]
-		.filter((w) => matches(view, w, active, who.viewerId))
-		.sort((a, b) => b.lastActivity - a.lastActivity || a.id.localeCompare(b.id));
+		.filter(visible)
+		.sort((a, b) => rank(a) - rank(b) || b.lastActivity - a.lastActivity || a.id.localeCompare(b.id));
 	const live = sorted.filter((w) => !ended(w)),
 		done = sorted.filter(ended),
-		detached = live.filter((w) => w.state === "detached"),
-		settled = live.filter((w) => w.state !== "detached" && settledInMain(view, w)),
-		attached = live.filter((w) => w.state !== "detached" && !settledInMain(view, w));
+		// A workspace with an open change never folds away; its decision stays in the main list.
+		folds = (w: Workspace) => !changesOf(w).length,
+		detached = live.filter((w) => w.state === "detached" && folds(w)),
+		settled = live.filter((w) => w.state !== "detached" && settledInMain(view, w) && folds(w)),
+		attached = live.filter((w) => !detached.includes(w) && !settled.includes(w));
+	const liveIds = new Set(view.workspaces.filter((w) => !ended(w)).map((w) => w.id));
+	const orphans = shownItems
+		.map((item) => proposal(item.id)!)
+		.filter((p) => !liveIds.has(p.workspaceId))
+		.filter((p) => {
+			if (!active || active === "needs-you" || group) return true;
+			const w = view.workspaces.find((x) => x.id === p.workspaceId);
+			return !!w && matches(view, w, active, who.viewerId);
+		});
+	const degraded = view.reconciliation?.observation.state === "degraded";
+	const filterButton = (value: string, label: string) => (
+		<button type="button" aria-pressed={active === value} onClick={() => open("workspaces", undefined, value || undefined)}>
+			{label}
+		</button>
+	);
 	return (
 		<>
-			<LaneMap view={view} focus={focus} setFocus={setFocus} open={(id) => open("workspaces", id)} who={who} />
 			<section className="panel workspaces-screen">
 				<div className="panel-head">
 					<h2>{active ? "Matching workspaces" : "Active workspaces"}</h2>
@@ -357,18 +477,16 @@ export function WorkspaceList({
 				<WorkspaceBrief view={view} who={who} execute={execute} />
 				<div className="list-filters">
 					<nav className="segmented filters" aria-label="Filter workspaces">
-						<button type="button" aria-pressed={!active} onClick={() => open("workspaces")}>
-							All
-						</button>
-						<button type="button" aria-pressed={active === "mine"} onClick={() => open("workspaces", undefined, "mine")}>
-							Mine
-						</button>
-						<button type="button" aria-pressed={active === "reconcile"} onClick={() => open("workspaces", undefined, "reconcile")}>
-							Needs Git update
-						</button>
-						<button type="button" aria-pressed={active === "unproposed"} onClick={() => open("workspaces", undefined, "unproposed")}>
-							Not proposed
-						</button>
+						{filterButton("", "All")}
+						{filterButton("needs-you", "Needs you")}
+						{filterButton("mine", "Mine")}
+						{filterButton("reconcile", "Needs Git update")}
+						{filterButton("unproposed", "Not proposed")}
+						{group && (
+							<button type="button" aria-pressed="true" onClick={() => open("workspaces")}>
+								{GROUP_LABELS[group].label} · show all
+							</button>
+						)}
 					</nav>
 					{owners.length > 1 && (
 						<label className="owner-filter">
@@ -387,18 +505,46 @@ export function WorkspaceList({
 						</label>
 					)}
 				</div>
-				{live.length ? (
+				{(active === "needs-you" || group) && (
+					<p className="panel-note" role="status">
+						Showing {shownItems.length} of {openItems.length} open {openItems.length === 1 ? "change" : "changes"}.
+					</p>
+				)}
+				{attached.length ? (
 					<div className="rows">
 						{attached.map((w) => (
-							<WorkspaceRow key={w.id} view={view} w={w} open={open} who={who} focused={focus === w.id} setFocus={setFocus} />
+							<div className="workspace-item" key={w.id}>
+								<WorkspaceRow view={view} w={w} open={open} who={who} focused={focus === w.id} setFocus={setFocus} />
+								{changesOf(w).length > 0 && (
+									<div className={`nested-changes lane-${laneIndex(view).get(w.id) ?? 1}`}>
+										{changesOf(w).map((p) => (
+											<ChangeRow key={p.id} view={view} p={p} open={open} who={who} nested />
+										))}
+									</div>
+								)}
+							</div>
 						))}
 					</div>
 				) : (
 					<p className="panel-note">
-						{active
-							? "No active workspaces match this filter."
-							: "No active workspaces. One appears when you or an agent starts work through Cruce. Use Clone next to the canonical revision to begin."}
+						{active === "needs-you"
+							? "Nothing here needs you right now."
+							: active
+								? "No active workspaces match this filter."
+								: "No active workspaces. One appears when you or an agent starts work through Cruce. Use Clone next to the canonical revision to begin."}
 					</p>
+				)}
+				{orphans.length > 0 && (
+					<section className="ended-changes" aria-label="Open changes from ended workspaces">
+						<h3>
+							Open changes from ended workspaces <span className="panel-count">{orphans.length}</span>
+						</h3>
+						<div className="rows">
+							{orphans.map((p) => (
+								<ChangeRow key={p.id} view={view} p={p} open={open} who={who} />
+							))}
+						</div>
+					</section>
 				)}
 				{settled.length > 0 && (
 					<details className="group settled-workspaces" open={active ? true : undefined}>
@@ -438,8 +584,41 @@ export function WorkspaceList({
 						</div>
 					</details>
 				)}
+				{!active && groups.inactive.length > 0 && (
+					<details className="group">
+						<summary>
+							{groups.inactive.length} superseded {groups.inactive.length === 1 ? "change" : "changes"}
+						</summary>
+						<CloseSuperseded view={view} execute={execute} />
+						<div className="rows">
+							{groups.inactive.map((p) => (
+								<ChangeRow key={p.id} view={view} p={p} open={open} who={who} />
+							))}
+						</div>
+					</details>
+				)}
+				{!active && groups.done.length > 0 && (
+					<details className="group">
+						<summary>
+							{groups.done.length} promoted or closed {groups.done.length === 1 ? "change" : "changes"}
+						</summary>
+						<div className="rows">
+							{groups.done.map((p) => (
+								<ChangeRow key={p.id} view={view} p={p} open={open} who={who} />
+							))}
+						</div>
+					</details>
+				)}
 			</section>
-			<Reconciliation view={view} open={open} />
+			<LaneMap view={view} focus={focus} setFocus={setFocus} open={(id) => open("workspaces", id)} who={who} />
+			{view.reconciliation && (
+				<details className="group reconciliation-details" open={degraded || active === "reconcile" ? true : undefined}>
+					<summary>
+						Reconciliation<span className="muted"> · observation {view.reconciliation.observation.state}</span>
+					</summary>
+					<Reconciliation view={view} open={open} />
+				</details>
+			)}
 		</>
 	);
 }

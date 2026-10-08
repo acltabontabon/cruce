@@ -25,7 +25,7 @@ Open the loopback URL the server prints. Set `PORT` to choose a fixed port. Rest
 
 ## 2. Open the repository
 
-Click **payment-service**. The header shows canonical `main` and its exact revision. Below it, the attention bar says in plain words what needs someone: **1 change needs preparation** and **1 path reported by more than one workspace**. Each item opens its filtered list. The **Changes** tab groups changes by next action; **Bounded retry policy #1** sits under **Needs preparation** with its owner, exact revision on its review base, workspace and "Required tests evidence missing · 1 more blocker".
+Click **payment-service**. The header shows canonical `main` and its exact revision. Below it, the attention bar says in plain words what needs someone: **1 change needs preparation** and **1 path reported by more than one workspace**. Each item opens its filtered list. The **Workspaces** tab lists each workspace once with its open changes under it; **Bounded retry policy #1** hangs off **Implement retry policy**, marked **Needs preparation**, with its exact revision on its review base and "Required tests evidence missing · 1 more blocker". The lane map follows the list.
 
 ![Repository Changes tab with the attention bar and one change marked Needs review](images/local-demo/changes.jpg)
 

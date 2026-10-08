@@ -15,9 +15,10 @@ import type { NamespaceView } from "./types.ts";
 import "./styles.css";
 
 const namespaceTabs = namespaceViews;
-const tabs: readonly string[] = repositoryTabs;
+/** `changes` remains a route: `changes/<id>` opens a review, and a bare `changes` link opens the merged Workspaces list. */
+const tabs: readonly string[] = [...repositoryTabs, "changes"];
 /** Retired repository routes resolve to their new homes so saved links keep working. */
-const legacyTabs: Record<string, string> = { overview: "changes", code: "history", artifacts: "history" };
+const legacyTabs: Record<string, string> = { overview: "workspaces", code: "history", artifacts: "history" };
 function readRoute() {
 	const query = new URLSearchParams(location.search),
 		[tab, id] = location.hash.replace(/^#\/?/, "").split("/");
@@ -33,7 +34,7 @@ function readRoute() {
 			screen === "namespace" && query.get("repository")
 				? tab === "work"
 					? tab
-					: (legacyTabs[tab] ?? (tabs.includes(tab) ? tab : "changes"))
+					: (legacyTabs[tab] ?? (tabs.includes(tab) ? tab : "workspaces"))
 				: namespaceTabs.includes(tab)
 					? tab
 					: "repositories",
@@ -77,7 +78,7 @@ export function App() {
 	const navigate = useCallback((namespaceId: string, repositoryId = "", tab = "", id = "", filter = "") => {
 		navigationVersion.current++;
 		pendingActions.current = 0;
-		tab ||= repositoryId ? "changes" : "repositories";
+		tab ||= repositoryId ? "workspaces" : "repositories";
 		const url = new URL(location.href);
 		url.pathname = "/";
 		url.search = "";
@@ -129,7 +130,7 @@ export function App() {
 				? "workspaces"
 				: view.artifacts.some((a) => a.id === route.id)
 					? "history"
-					: "changes";
+					: "workspaces";
 		const url = new URL(location.href);
 		const known = tab !== "changes" || view.proposals.some((p) => p.id === route.id);
 		url.hash = `/${tab}${route.id && known ? `/${route.id}` : ""}`;

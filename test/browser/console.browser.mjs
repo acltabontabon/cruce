@@ -799,15 +799,14 @@ test("prefixed form fields align with ordinary inputs in creation dialogs", asyn
 		await page.keyboard.press("Escape");
 	}
 });
-test("a new repository opens on Changes with a way to start local work", async () => {
+test("a new repository opens on Workspaces with a way to start local work", async () => {
 	await page.goto(`${server.origin}/?namespace=fernloop`);
 	await page.getByRole("button", { name: "New repository", exact: true }).click();
 	await page.getByLabel("Repository name", { exact: true }).fill("local-tools");
 	await page.getByRole("button", { name: "Add repository", exact: true }).click();
 	await page.getByRole("heading", { name: "local-tools", exact: true }).waitFor();
-	await page.getByRole("heading", { name: "No changes yet", exact: true }).waitFor();
 	await page.getByText("Nothing needs attention right now.", { exact: true }).waitFor();
-	await page.locator(".changes-screen").getByText("Use Clone above to start.", { exact: false }).waitFor();
+	await page.locator(".workspaces-screen").getByText("Use Clone next to the canonical revision to begin.", { exact: false }).waitFor();
 	assert.equal(await page.locator(".canonical-chip").count(), 1);
 	await page.locator(".canonical-chip").click();
 	const dialog = page.getByRole("region", { name: "Clone or attach", exact: true });
@@ -1245,7 +1244,7 @@ test("repository pages lead with what needs attention and retired routes resolve
 	await openRepo();
 	assert.deepEqual(
 		(await repoNav().getByRole("button").allTextContents()).map((text) => text.replace(/\d+$/, "").trim()),
-		["Changes", "Workspaces", "History", "Settings"],
+		["Workspaces", "History", "Settings"],
 	);
 	await page.getByRole("button", { name: "1 change needs preparation", exact: true }).waitFor();
 	await page.getByRole("button", { name: "1 path reported by more than one workspace", exact: true }).click();
@@ -1275,20 +1274,13 @@ test("header search accepts typing directly and supports keyboard selection and 
 	assert.ok(await search.getAttribute("aria-activedescendant"));
 	await page.keyboard.press("Enter");
 	assert.equal(await page.getByRole("region", { name: "Repository search", exact: true }).count(), 0);
-	await repoNav()
-		.getByRole("button", { name: /^Workspaces/ })
-		.click();
-	assert.equal(
-		await repoNav()
-			.getByRole("button", { name: /^Workspaces/ })
-			.getAttribute("aria-current"),
-		"page",
-	);
+	await repoNav().getByRole("button", { name: "History", exact: true }).click();
+	assert.equal(await repoNav().getByRole("button", { name: "History", exact: true }).getAttribute("aria-current"), "page");
 	await page.goBack();
 	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
 	assert.equal(
 		await repoNav()
-			.getByRole("button", { name: /^Changes/ })
+			.getByRole("button", { name: /^Workspaces/ })
 			.getAttribute("aria-current"),
 		"page",
 	);
@@ -1893,13 +1885,10 @@ test("many workspaces, long paths and read-only authority stay usable on a phone
 	await repoNav()
 		.getByRole("button", { name: /^Workspaces/ })
 		.click();
-	assert.equal(await page.locator(".workspaces-screen > .rows > .workspace-row").count(), 8);
+	assert.equal(await page.locator(".workspaces-screen > .rows > .workspace-item").count(), 8);
 	await page.getByText("1 ended workspace", { exact: true }).waitFor();
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
 	await page.screenshot({ path: "dist/ui-checks/many-writers-mobile.png", fullPage: true });
-	await repoNav()
-		.getByRole("button", { name: /^Changes/ })
-		.click();
 	await page.locator(".change-row").filter({ hasText: "Bounded retry policy" }).click();
 	assert.equal(await page.getByRole("button", { name: "Approve", exact: true }).count(), 0);
 	assert.equal(await page.getByRole("button", { name: "Promote to main", exact: true }).count(), 0);
@@ -2234,24 +2223,25 @@ test("Home separates decisions you can make from work waiting on others and says
 	await waiting.getByText("Showing 5 of 8 in payment-service.", { exact: false }).waitFor();
 	await page.screenshot({ path: "dist/ui-checks/home-team.png", fullPage: true });
 	await waiting.getByRole("button", { name: "Open the full list", exact: true }).click();
-	await page.getByRole("heading", { name: "Needs preparation", exact: true }).waitFor();
+	await page.locator(".nested-changes .change-row").first().waitFor();
 	assert.equal(await page.locator(".change-row").filter({ hasText: "Session renewal" }).count(), 10);
 	// The Needs you filter lives in the URL and Back restores the full list.
 	await page.getByRole("button", { name: "Needs you", exact: true }).click();
-	assert.equal(new URL(page.url()).searchParams.get("filter"), "mine");
+	assert.equal(new URL(page.url()).searchParams.get("filter"), "needs-you");
 	await page.getByText("Showing 3 of 11 open changes.", { exact: true }).waitFor();
 	assert.equal(await page.locator(".change-row").count(), 3);
 	await page.reload();
 	await page.getByText("Showing 3 of 11 open changes.", { exact: true }).waitFor();
 	await page.goBack();
-	await page.getByRole("button", { name: "All open", exact: true, pressed: true }).waitFor();
+	await page.getByRole("button", { name: "All", exact: true, pressed: true }).waitFor();
 	assert.equal(await page.locator(".change-row").count(), 11);
 });
 test("another owner's change leads with its owner and connection, and evidence wording follows its trust", async () => {
 	await page.request.post(`${server.origin}/__fixture/scenario`, { data: { name: "team" } });
+	// Retired Changes list links open the merged Workspaces list with the same filter.
 	await page.goto(`${root()}&filter=review#/changes`);
-	await page.getByRole("heading", { name: "Needs human review", exact: true }).waitFor();
-	assert.equal(await page.getByRole("heading", { name: "Needs preparation", exact: true }).count(), 0);
+	await page.getByRole("button", { name: "Needs human review · show all", exact: true, pressed: true }).waitFor();
+	assert.equal(await page.locator(".change-row").filter({ hasText: "Needs preparation" }).count(), 0);
 	await page.locator(".change-row").filter({ hasText: "Session renewal 1" }).click();
 	const meta = page.locator(".change-meta");
 	await meta.getByText("Owner: Maya Reyes", { exact: true }).waitFor();

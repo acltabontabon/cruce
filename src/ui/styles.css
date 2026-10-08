@@ -1845,6 +1845,44 @@ body {
 .mini-lanes {
 	flex-shrink: 0;
 }
+/* In the merged list each workspace is its own lane: the line starts at its circle and runs on only into its changes. */
+.workspace-item > .workspace-row > .lane-track::before {
+	top: 50%;
+	bottom: 50%;
+}
+.workspace-item:has(> .nested-changes) > .workspace-row > .lane-track::before {
+	bottom: 0;
+}
+/* A workspace's open changes hang off its lane, the way commits hang off a branch in git log --graph. */
+.nested-changes {
+	display: grid;
+	gap: 6px;
+	margin: -6px 0 14px 17px;
+	padding: 2px 0 2px 21px;
+	border-left: 2px solid color-mix(in oklab, var(--lane) 60%, transparent);
+}
+:where(.shell) .change-row.nested {
+	padding: 10px 12px;
+	border: 1px solid var(--border-subtle);
+	background: var(--surface);
+}
+.change-row.nested .row-number {
+	min-width: 0;
+}
+.ended-changes {
+	margin-top: 24px;
+}
+:where(.shell) .ended-changes h3 {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 0 0 8px;
+	color: var(--text-muted);
+	font-size: 13px;
+}
+.reconciliation-details {
+	margin-top: 24px;
+}
 .workspace-row.is-focus {
 	background: var(--surface-2);
 }

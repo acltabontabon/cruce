@@ -145,7 +145,7 @@ function Truncated({ rows, mine, open }: { rows: Row[]; mine: boolean; open: Ope
 					<button
 						type="button"
 						className="text-button"
-						onClick={() => open(row.namespace.id, row.repository.id, "changes", "", mine ? "mine" : "")}
+						onClick={() => open(row.namespace.id, row.repository.id, "workspaces", "", mine ? "needs-you" : "")}
 					>
 						Open the full list
 					</button>
