@@ -1,6 +1,7 @@
 import { DomainError, domainStatus, publicError, stable } from "../core/errors.ts";
 import { initialRepository } from "../core/platform.ts";
 import { repositoryLifecycleView, repositoryOwner } from "../core/repository-lifecycle.ts";
+import { STATE_LIMITS } from "../shared/limits.ts";
 import type { Authority, Command, Repository, RepositoryState, ResourceReservation, ResourceStorage } from "../shared/platform.ts";
 import type { RepositoryHost } from "./artifacts.ts";
 import type { ConnectionGrant } from "./namespace-runtime.ts";
@@ -344,8 +345,15 @@ export class RepositoryLifecycleRuntime {
 	/** Every provider repository this repository is known to hold: current state plus identities recorded earlier. */
 	private inventory(identities: { name: string; id?: string }[]) {
 		const all = new Map(identities.map((identity) => [identity.name, identity]));
-		for (const row of this.store.scan<string>("provider-repository:", undefined, 2048))
-			all.set(row.key.slice("provider-repository:".length), { name: row.key.slice("provider-repository:".length), id: row.value });
+		// Store reads are bounded per page; walk recorded identities a page at a time.
+		let cursor: string | undefined;
+		for (let page = 0; page < 2048 / STATE_LIMITS.pageSize; page++) {
+			const rows = this.store.scan<string>("provider-repository:", cursor, STATE_LIMITS.pageSize);
+			for (const row of rows)
+				all.set(row.key.slice("provider-repository:".length), { name: row.key.slice("provider-repository:".length), id: row.value });
+			if (rows.length < STATE_LIMITS.pageSize) break;
+			cursor = rows.at(-1)!.key;
+		}
 		return [...all.values()].toSorted((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).slice(0, 2048);
 	}
 	private pending(deletion: Deletion) {

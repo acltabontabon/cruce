@@ -171,12 +171,16 @@ export function memoryStore(values = new Map<string, unknown>()): Store {
 		delete: (key) => {
 			values.delete(key);
 		},
-		scan: <T>(prefix: string, after = prefix, limit = STATE_LIMITS.pageSize) =>
-			[...values]
+		scan: <T>(prefix: string, after = prefix, limit = STATE_LIMITS.pageSize) => {
+			// The same page bound as SQLite, so fixtures catch reads production would refuse.
+			if (!Number.isInteger(limit) || limit < 1 || limit > STATE_LIMITS.namespaceCandidates + 1)
+				throw new DomainError(400, "Invalid page limit");
+			return [...values]
 				.filter(([key]) => key.startsWith(prefix) && key > after)
 				.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
 				.slice(0, limit)
-				.map(([key, value]) => ({ key, value: structuredClone(value) as T })),
+				.map(([key, value]) => ({ key, value: structuredClone(value) as T }));
+		},
 		usage,
 		admit(bytes = STATE_LIMITS.recordBytes, records = 4) {
 			const current = usage();

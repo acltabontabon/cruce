@@ -283,6 +283,23 @@ describe("repository lifecycle", () => {
 		// A no-storage reservation still carries the operation identity and settles complete.
 		expect(f.namespace.state.reservations.map((r) => [r.action, r.state])).toEqual([["repository.delete", "complete"]]);
 	});
+	it("keeps an inventory larger than one storage page when forgetting legacy storage", async () => {
+		const f = fixture();
+		f.setStorage({ mode: "deployment", ready: false, reason: "legacy", legacy: true });
+		for (let i = 0; i < 250; i++) f.store.put(`provider-repository:retained-${String(i).padStart(3, "0")}`, `id-${i}`);
+		const forget = { ...f.command("delete_repository", "forget"), forgetStorage: true as const };
+		expect(await f.runtime.command(f.repository(), forget, { actor: owner })).toEqual({ state: "deleting" });
+		// The purge is bounded per attempt; its alarm finishes it.
+		for (let i = 0; i < 5 && f.repository().lifecycle?.state !== "deleted"; i++) {
+			f.advance();
+			await f.runtime.recover(f.repository());
+		}
+		expect(f.repository().lifecycle?.state).toBe("deleted");
+		const forgotten = f.store.get<{ forgotten: { name: string }[] }>("repository-deletion")?.forgotten ?? [];
+		expect(forgotten).toHaveLength(253);
+		expect(forgotten.map((r) => r.name)).toContain("retained-249");
+		expect(f.remove).not.toHaveBeenCalled();
+	});
 	it("waits for storage that can be restored, and never forgets reachable storage", async () => {
 		const f = fixture();
 		f.setStorage({ mode: "deployment", ready: false, reason: "Installation storage is unavailable; contact the administrator" });
