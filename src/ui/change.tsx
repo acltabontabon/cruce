@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode, useState } from "react";
+import { type CSSProperties, Fragment, type ReactNode, useState } from "react";
 import type { Proposal, RepositorySnapshot } from "../shared/platform.ts";
 import { BackLink, Pill, Section } from "./design.tsx";
 import { laneIndex } from "./lanes.ts";
@@ -9,7 +9,9 @@ import {
 	actorLabel,
 	ago,
 	attentionItem,
+	behindCanonical,
 	blockerText,
+	canonicalTarget,
 	changeStatus,
 	nextStep,
 	ownerName,
@@ -18,6 +20,7 @@ import {
 	short,
 	throughConnection,
 } from "./status.ts";
+import { UpdateHandoff } from "./work.tsx";
 
 type Open = (tab: string, id?: string) => void;
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -130,6 +133,10 @@ function ReviewChecklist({ view, p, execute, busy }: { view: RepositorySnapshot;
 		.find((r) => checks.reviewIds.includes(r.id) && r.outcome === "approve" && r.approvalAuthority === "human-maintainer");
 	const item = attentionItem(view, p.id);
 	const next = item ? nextStep(item) : "Readiness for this change is unavailable";
+	const workspace = view.workspaces.find((w) => w.id === p.workspaceId);
+	// A revision on a stale base can never be promoted, so its review waits for the updated revision: review happens
+	// once, on what would land. Concerns stay open as early feedback.
+	const reviewable = checks.current;
 	return (
 		<section
 			className="review-panel"
@@ -163,10 +170,14 @@ function ReviewChecklist({ view, p, execute, busy }: { view: RepositorySnapshot;
 						) : (
 							<>
 								This change is based on <code>{short(p.base)}</code>, but canonical is now <code>{short(checks.canonical)}</code>. Its
-								workspace has to merge canonical and publish a new revision. This one can't be promoted.
+								workspace has to merge canonical and publish a new revision. This one can't be promoted, so review the updated revision
+								instead.
 							</>
 						)}
 					</p>
+					{!checks.current && workspace && item?.actions.includes("reconcile_with_git") && (
+						<UpdateHandoff w={workspace} canonical={canonicalTarget(item) ?? checks.canonical} />
+					)}
 				</Check>
 				{checks.evidence.map((e) => {
 					const reports = verificationFor(e.kind);
@@ -196,7 +207,7 @@ function ReviewChecklist({ view, p, execute, busy }: { view: RepositorySnapshot;
 											? `${actorLabel(reported.actor)} reported a pass: “${reported.summary}”. Inspect the evidence; repository policy needs a human maintainer to attest it.`
 											: `No ${e.kind} result is recorded for this exact revision. The owner's tools can report one, or a maintainer can record a result they checked.`}
 							</p>
-							{view.permissions.approve && checks.open && (
+							{view.permissions.approve && checks.open && reviewable && (
 								<div className="check-actions">
 									<NoteAction
 										label={
@@ -260,17 +271,22 @@ function ReviewChecklist({ view, p, execute, busy }: { view: RepositorySnapshot;
 						)}
 					</Check>
 				)}
-				<Check done={checks.approved} title={checks.approved ? "Approved" : "Approve this exact revision"}>
+				<Check
+					done={checks.approved}
+					title={checks.approved ? "Approved" : reviewable ? "Approve this exact revision" : "Approve the updated revision"}
+				>
 					<p>
 						{checks.approved
 							? `Approved by ${actorLabel(approval?.actor)}.`
-							: `Approval covers ${short(p.revision)} only. A new revision needs a new review.`}
+							: reviewable
+								? `Approval covers ${short(p.revision)} only. A new revision needs a new review.`
+								: "Approval waits for the updated revision; this one can't be promoted."}
 					</p>
 				</Check>
 			</ol>
 			{checks.open && view.permissions.write && view.permissions.human && (
 				<div className="check-actions">
-					{view.permissions.approve && (
+					{view.permissions.approve && reviewable && (
 						<NoteAction
 							label={checks.approved ? "Approve again" : "Approve"}
 							immediate
@@ -324,6 +340,58 @@ function ReviewChecklist({ view, p, execute, busy }: { view: RepositorySnapshot;
 	);
 }
 
+/**
+ * The latest earlier change from the same workspace that someone reviewed. When canonical moved during review, its
+ * owner publishes a merged revision; reviewing only what changed since then avoids reviewing the same work twice.
+ */
+function reviewedEarlier(view: RepositorySnapshot, p: Proposal) {
+	return view.proposals
+		.filter(
+			(o) =>
+				o.workspaceId === p.workspaceId &&
+				o.number < p.number &&
+				o.revision !== p.revision &&
+				o.reviews.some((r) => r.revision === o.revision),
+		)
+		.toSorted((a, b) => b.number - a.number)[0];
+}
+
+function FilesChanged({ view, p, execute }: { view: RepositorySnapshot; p: Proposal; execute: Execute }) {
+	const earlier = reviewedEarlier(view, p);
+	const [mode, setMode] = useState<"since" | "full">(earlier ? "since" : "full");
+	if (!earlier) return <ChangeDiff base={p.base} revision={p.revision} execute={execute} />;
+	return (
+		<>
+			<nav className="segmented" aria-label="Compare with">
+				<button type="button" aria-pressed={mode === "since"} onClick={() => setMode("since")}>
+					Since reviewed #{earlier.number}
+				</button>
+				<button type="button" aria-pressed={mode === "full"} onClick={() => setMode("full")}>
+					Full change
+				</button>
+			</nav>
+			{mode === "since" ? (
+				<>
+					<p className="muted">
+						Changes from <code title={earlier.revision}>{short(earlier.revision)}</code>, reviewed in #{earlier.number}, to{" "}
+						<code title={p.revision}>{short(p.revision)}</code>. Files that now match canonical and were never part of this workspace's work
+						are grouped separately.
+					</p>
+					<ChangeDiff
+						key="since"
+						base={earlier.revision}
+						revision={p.revision}
+						execute={execute}
+						ownWork={{ current: { base: p.base, revision: p.revision }, earlier: { base: earlier.base, revision: earlier.revision } }}
+					/>
+				</>
+			) : (
+				<ChangeDiff key="full" base={p.base} revision={p.revision} execute={execute} />
+			)}
+		</>
+	);
+}
+
 export function ChangeDetail({
 	view,
 	id,
@@ -354,6 +422,12 @@ export function ChangeDetail({
 			(a.workspaceId === p.workspaceId || verifications.some((v) => v.artifactId === a.id)),
 	);
 	const decision = p.state === "open" || (["promoting", "promoted"].includes(p.state) && recovery);
+	// While this promotion is still canonical, name the work it left behind. Information only: each workspace is
+	// updated when its owner decides, just before its own review.
+	const leftBehind =
+		p.state === "promoted" && view.promotions.some((x) => x.proposalId === p.id && x.state === "complete" && x.to === view.sourceHead)
+			? behindCanonical(view).filter((w) => w.id !== p.workspaceId)
+			: [];
 	return (
 		<article className="change-page detail-page">
 			<BackLink label="Changes" onClick={() => open("changes")} />
@@ -382,6 +456,20 @@ export function ChangeDetail({
 						{artifact && <span>{`published ${throughConnection(artifact.actor, who)} · ${ago(artifact.at)}`}</span>}
 					</p>
 					{["stale", "superseded", "promoted", "rejected"].includes(status.key) && <p className="status-detail">{status.detail}</p>}
+					{leftBehind.length > 0 && (
+						<p className="status-detail">
+							{"Now behind canonical: "}
+							{leftBehind.map((w, i) => (
+								<Fragment key={w.id}>
+									{i > 0 && ", "}
+									<button type="button" className="text-button" onClick={() => open("workspaces", w.id)}>
+										{w.title}
+									</button>
+								</Fragment>
+							))}
+							. {leftBehind.length === 1 ? "It needs" : "Each needs"} an update from canonical before its review.
+						</p>
+					)}
 				</div>
 			</header>
 			<div className={decision ? "review-layout" : "review-layout single"}>
@@ -416,7 +504,7 @@ export function ChangeDetail({
 				)}
 				<div className="review-main">
 					<Section title="Files changed">
-						<ChangeDiff base={p.base} revision={p.revision} execute={execute} />
+						<FilesChanged view={view} p={p} execute={execute} />
 					</Section>
 					<Section title="Evidence and reviews">
 						<ul className="timeline">

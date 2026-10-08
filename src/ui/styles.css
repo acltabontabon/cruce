@@ -2801,6 +2801,27 @@ details.group[open] > summary::before {
 	color: var(--text);
 	box-shadow: inset 2px 0 var(--accent);
 }
+:where(.shell) .source-browser .canonical-files {
+	display: grid;
+	gap: 2px;
+	margin: 6px 0 0;
+	padding: 6px 0 0;
+	border: 0;
+	border-top: 1px solid var(--border-subtle);
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+.source-browser .canonical-files summary {
+	padding: 4px 10px;
+	color: var(--text-faint);
+	font-size: 12px;
+	cursor: pointer;
+}
+.diff-view + .segmented,
+.segmented + .muted {
+	margin-bottom: 8px;
+}
 .source-browser section {
 	min-width: 0;
 	padding: 0;
@@ -2949,6 +2970,12 @@ details.group[open] > summary::before {
 .copy-label {
 	color: var(--text-faint);
 	font-size: 12px;
+}
+.update-handoff {
+	margin-top: 10px;
+}
+.update-handoff .copy-label {
+	margin: 8px 0 0;
 }
 .segmented {
 	display: inline-flex;

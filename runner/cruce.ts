@@ -12,7 +12,7 @@ import { CRUCE_INSTRUCTIONS, CRUCE_TOOLS, toolByName, toolInputShape } from "../
 import { CRUCE_VERSION } from "../src/shared/version.ts";
 import { type CheckoutAddress, resolveCheckout } from "./checkout.ts";
 import { bridgeCommand, configureClient, KNOWN_CLIENTS, type KnownClient } from "./client-config.ts";
-import { coordinationContext, coordinationResource } from "./coordination.ts";
+import { coordinationContext, coordinationDetail, coordinationResource } from "./coordination.ts";
 import {
 	cleanupExecution,
 	context,
@@ -499,6 +499,7 @@ async function main() {
 					namespaceId: connection.namespaceId,
 					repositoryId: connection.repositoryId,
 				})) as RepositorySnapshot,
+				tracked,
 			);
 			if (context.available && context.summary) process.stdout.write(`Cruce: ${context.summary}\n`);
 			return;
@@ -570,8 +571,10 @@ async function main() {
 							namespaceId: repositoryConnection.namespaceId,
 							repositoryId: repositoryConnection.repositoryId,
 						})) as RepositorySnapshot,
+						tracked,
 					),
 			);
+			const detail = coordinationDetail();
 			for (const tool of CRUCE_TOOLS) {
 				server.registerTool(
 					tool.name,
@@ -580,12 +583,12 @@ async function main() {
 						inputSchema: bridgeShape(tool),
 					},
 					async (values) => {
-						// Needed reconciliation leads the response, so a coordinating agent sees it before the result.
+						// Workspaces behind canonical lead the response, so a coordinating agent sees them before the result.
 						const current = async () => {
 							const context = await coordination.refresh();
 							return {
-								lead: context.available && context.summary ? [{ type: "text" as const, text: `Action needed: ${context.summary}` }] : [],
-								detail: { type: "text" as const, text: `Current coordination: ${JSON.stringify(context)}` },
+								lead: context.available && context.summary ? [{ type: "text" as const, text: `Cruce: ${context.summary}` }] : [],
+								detail: { type: "text" as const, text: detail(context) },
 							};
 						};
 						try {

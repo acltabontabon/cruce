@@ -1336,6 +1336,56 @@ test("workspaces behind canonical say so and show canonical changes without movi
 	await page.goBack();
 	await page.getByRole("heading", { name: "Matching workspaces", exact: true }).waitFor();
 });
+test("a change on a stale base waits for its updated revision before review, and its owner can hand the update over", async () => {
+	await page.request.post(`${server.origin}/__fixture/upstream`);
+	await openChange();
+	const checklist = page.locator(".checklist");
+	await checklist.getByText(/Canonical has moved$/).waitFor();
+	await checklist.getByText(/Approve the updated revision$/).waitFor();
+	await checklist.getByText("Approval waits for the updated revision; this one can't be promoted.", { exact: true }).waitFor();
+	// Approving or attesting a revision that can never land would be review spent twice; concerns stay open.
+	assert.equal(await page.getByRole("button", { name: "Approve", exact: true }).count(), 0);
+	assert.equal(await page.getByRole("button", { name: "Record checked tests pass", exact: true }).count(), 0);
+	await page.getByRole("button", { name: "Raise concern", exact: true }).waitFor();
+	const handoff = checklist.locator(".update-handoff");
+	await handoff
+		.getByText(/^Continue Cruce workspace "Implement retry policy" \(.+\): attach it with attach_workspace, merge canonical \w{40} into it/)
+		.waitFor();
+	await handoff.getByText(/^cruce resume --server .* --workspace /).waitFor();
+	await page
+		.locator(".review-panel")
+		.getByText(/^Next: Merge canonical \w{8} with Git/)
+		.waitFor();
+	// The workspace page offers the same handoff once it is behind.
+	await page.getByRole("button", { name: "Implement retry policy", exact: true }).click();
+	await page.getByRole("heading", { name: "Implement retry policy", exact: true, level: 1 }).waitFor();
+	await page
+		.locator(".facts .update-handoff")
+		.getByText(/^Continue Cruce workspace "Implement retry policy"/)
+		.waitFor();
+});
+test("a reconciled change shows what changed since its last review, with canonical's files set aside", async () => {
+	await page.request.post(`${server.origin}/__fixture/reconciled`);
+	await openRepo();
+	await page.locator(".change-row").filter({ hasText: "Bounded retry policy with jitter" }).click();
+	await page.getByRole("heading", { name: /Bounded retry policy with jitter/, level: 1 }).waitFor();
+	const compare = page.getByRole("navigation", { name: "Compare with" });
+	assert.equal(await compare.getByRole("button", { name: "Since reviewed #1", exact: true }).getAttribute("aria-pressed"), "true");
+	const files = page.getByRole("navigation", { name: "Changed files" });
+	// The workspace's own edit since review is in front; canonical's file is grouped and closed.
+	await files.getByRole("button", { name: /^src\/retry\.ts/ }).waitFor();
+	await page.locator(".patch").getByText("+export const jitter = true;", { exact: true }).waitFor();
+	const canonical = files.locator(".canonical-files");
+	await canonical.getByText("1 file from canonical, already reviewed there", { exact: true }).waitFor();
+	assert.equal(await canonical.getAttribute("open"), null);
+	await canonical.locator("summary").click();
+	await canonical.getByRole("button", { name: /^src\/timeout\.ts/ }).waitFor();
+	// The full change against the current canonical base is one click away.
+	await compare.getByRole("button", { name: "Full change", exact: true }).click();
+	await files.getByRole("button", { name: /^src\/retry\.ts/ }).waitFor();
+	assert.equal(await files.locator(".canonical-files").count(), 0);
+	assert.equal(await files.getByRole("button", { name: /^src\/timeout\.ts/ }).count(), 0);
+});
 test("review is a checklist: confirm checks, approve the exact revision, then promote to main", async () => {
 	await openChange();
 	const promote = page.getByRole("button", { name: "Promote to main", exact: true });
@@ -1352,6 +1402,11 @@ test("review is a checklist: confirm checks, approve the exact revision, then pr
 	await page.locator(".change-header").getByText("Promoted", { exact: true }).waitFor();
 	await page.locator(".canonical-line").getByText(/main/).waitFor();
 	await page.getByRole("button", { name: "1 workspace needs a Git update", exact: true }).waitFor();
+	// The promotion names the work it left behind, without asking anyone to update it now.
+	const behind = page.locator(".change-header .status-detail").filter({ hasText: "Now behind canonical" });
+	await behind.getByText(/It needs an update from canonical before its review\.$/).waitFor();
+	await behind.getByRole("button", { name: "Inspect payment timeout", exact: true }).click();
+	await page.getByRole("heading", { name: "Inspect payment timeout", exact: true, level: 1 }).waitFor();
 });
 test("concerns and failures ask for a reason and block promotion until resolved", async () => {
 	await openChange();

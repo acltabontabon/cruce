@@ -278,11 +278,31 @@ export function nextStep(item: AttentionItem) {
 			if (item.blockers.some((b) => b.kind === "canonical_relation" && b.relation === "unrelated"))
 				return "Inspect the unrelated Git histories in the workspace before choosing how to reconcile them";
 			return item.subject === "change"
-				? `Merge canonical ${short(item.blockers.flatMap((b) => (b.kind === "base_stale" ? [b.canonical] : []))[0])} with Git in the workspace, verify, push, publish and propose the new revision`
+				? `Merge canonical ${short(canonicalTarget(item))} with Git in the workspace, verify, push, publish and propose the new revision`
 				: "Merge canonical with Git in the workspace, verify, push and publish for fresh review";
 		default:
 			return waitingOn(item);
 	}
+}
+/** The accepted canonical revision a reconciliation item would merge, when the controller named one. */
+export function canonicalTarget(item: AttentionItem) {
+	return item.blockers.flatMap((b) => (b.kind === "base_stale" || b.kind === "canonical_relation" ? [b.canonical] : []))[0];
+}
+/**
+ * Plain words the owner can give any agent session to update a workspace from canonical. Generated from current
+ * controller state for the clipboard; Cruce never stores or sends it.
+ */
+export function updateHandoff(w: Pick<Workspace, "id" | "title">, canonical?: string) {
+	return `Continue Cruce workspace "${w.title}" (${w.id}): attach it with attach_workspace, merge canonical${canonical ? ` ${canonical}` : ""} into it with Git, verify, push, publish and propose the new revision. Ask me about conflicts or failing checks.`;
+}
+/** Unended workspaces whose work canonical has moved past, from the controller's attention projection. */
+export function behindCanonical(view: RepositorySnapshot) {
+	const ids = new Set(
+		(view.attention?.items ?? [])
+			.filter((item) => item.blockers.some((b) => b.kind === "base_stale" || b.kind === "canonical_relation"))
+			.map((item) => item.workspaceId),
+	);
+	return view.workspaces.filter((w) => ids.has(w.id));
 }
 export function attentionItem(view: RepositorySnapshot, subjectId: string) {
 	return view.attention?.items.find((item) => item.id === subjectId);

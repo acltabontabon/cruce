@@ -1,7 +1,7 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
 import { expect, it } from "vitest";
-import { coordinationContext, coordinationResource } from "../../runner/coordination.ts";
+import { coordinationContext, coordinationDetail, coordinationResource } from "../../runner/coordination.ts";
 import type { AttentionItem, Workspace } from "../../src/shared/platform.ts";
 
 const item: AttentionItem = {
@@ -192,9 +192,117 @@ it("names every owned workspace behind canonical in one plain sentence, publishe
 	});
 	if (!result.available) throw new Error("Missing context");
 	expect(result.behind.map((b) => b.workspaceId)).toEqual(["juniper", "orion"]);
-	expect(result.summary).toMatch(
-		/^Canonical moved to 66be05f\. 2 of your workspaces are behind it: Juniper: HelloController \(juniper\), Orion/,
+	expect(result.summary).toBe(
+		"Canonical moved to 66be05f. Your workspaces behind it, not attached here: Juniper: HelloController (juniper), Orion: PingController (orion). Update one only when the user asks: attach_workspace, then merge canonical before proposing.",
 	);
 	const quiet = context();
 	expect(quiet.available && "summary" in quiet).toBe(false);
+});
+
+it("asks to merge canonical only into attached workspaces, and leaves the others to the user", () => {
+	const row = (workspaceId: string) =>
+		({ workspaceId, relation: "behind", basis: "baseline", revision: `${workspaceId}-rev`, canonicalRevision: "66be05f0000" }) as never;
+	const workspaces = [
+		{ id: "here", title: "Here", ownerId: "user", state: "active" },
+		{ id: "finished", title: "Finished agent", ownerId: "user", state: "detached" },
+	] as Workspace[];
+	const snapshot = {
+		sourceHead: "66be05f0000",
+		attention: {
+			asOf: 0,
+			viewerId: "user",
+			items: [{ ...item, subject: "workspace" as const, id: "finished", workspaceId: "finished" }],
+			ancestryUnavailable: 0,
+		},
+		workspaces,
+		reconciliation: { workspaces: [row("here"), row("finished")] } as never,
+	};
+	const result = coordinationContext(snapshot, new Set(["here"]));
+	if (!result.available) throw new Error("Missing context");
+	expect(result.summary).toBe(
+		"Canonical moved to 66be05f. Attached here and behind it: Here (here). Before publishing or proposing, merge canonical into it with Git in its directory, verify, push, publish and propose the new revision; ask the user only for conflicts or failing checks. Also behind, not attached here: Finished agent (finished). Update it only when the user asks: attach_workspace, then merge canonical before proposing.",
+	);
+	expect(result.behind.map((b) => [b.workspaceId, b.attached])).toEqual([
+		["here", true],
+		["finished", false],
+	]);
+	expect(result.reconciliation).toEqual([expect.objectContaining({ workspaceId: "finished", attached: false })]);
+	expect(result.instructions.some((text) => text.includes("only when the user asks"))).toBe(true);
+});
+
+it("states each instruction once and stays bounded on a busy repository", () => {
+	const rev = (c: string) => c.repeat(40);
+	const workspaces = Array.from(
+		{ length: 10 },
+		(_, i) =>
+			({
+				id: `workspace-${i}`,
+				title: `Workspace ${i}`,
+				ownerId: "user",
+				state: "active",
+				headRevision: rev("a"),
+				publishedRevision: rev("b"),
+				lastReportAt: 99000,
+			}) as Workspace,
+	);
+	const result = coordinationContext({
+		asOf: 100000,
+		sourceHead: rev("d"),
+		workspaces,
+		attention: {
+			asOf: 100000,
+			viewerId: "user",
+			ancestryUnavailable: 0,
+			items: workspaces.slice(0, 8).map((w, i) => ({
+				...item,
+				id: `proposal-${i}`,
+				workspaceId: w.id,
+				revision: rev("b"),
+				base: rev("c"),
+				blockers: [{ kind: "base_stale" as const, base: rev("c"), canonical: rev("d") }],
+			})),
+		},
+		overlaps: Array.from({ length: 20 }, (_, i) => ({
+			id: `overlap-${i}`,
+			kind: "file" as const,
+			surface: `src/module-${i}/file.ts`,
+			workspaces: [workspaces[i % 10].id, workspaces[(i + 1) % 10].id],
+			evidence: "reported" as const,
+		})),
+		workspaceUpdates: Object.fromEntries(
+			workspaces.map((w) => [
+				w.id,
+				{ baselineRevision: rev("c"), revision: rev("d"), status: "available" as const, trust: "accepted" as const },
+			]),
+		),
+		reconciliation: {
+			workspaces: workspaces.slice(0, 8).map((w) => ({
+				workspaceId: w.id,
+				relation: "diverged",
+				basis: "published",
+				revision: rev("b"),
+				canonicalRevision: rev("d"),
+			})),
+		} as never,
+	});
+	if (!result.available) throw new Error("Missing context");
+	expect(result.overlaps).toHaveLength(16);
+	expect(result.overlapsTruncated).toBe(true);
+	const text = JSON.stringify(result);
+	expect(text.split("not a conflict verdict")).toHaveLength(2);
+	expect(text.split("Human approval is still required")).toHaveLength(2);
+	expect(text.length).toBeLessThan(16000);
+});
+
+it("repeats full coordination detail only when it changed", () => {
+	const detail = coordinationDetail();
+	const behind = context([item], "new-base");
+	expect(detail(context())).toMatch(/^Current coordination: \{/);
+	expect(detail(context())).toBe(
+		"Current coordination: unchanged since the previous Cruce response. Read the repository_coordination resource for full detail.",
+	);
+	expect(detail(behind)).toContain('"canonicalRevision":"new-base"');
+	const unavailable = coordinationContext({});
+	expect(detail(unavailable)).toContain('"available":false');
+	expect(detail(unavailable)).toContain('"available":false');
 });

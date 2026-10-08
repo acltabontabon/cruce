@@ -125,9 +125,41 @@ const patchLine = (line: string) =>
 					? "del"
 					: "";
 
-/** Files changed between a change's exact base and revision, loaded as soon as the review opens. */
-export function ChangeDiff({ base, revision, execute }: { base: string; revision: string; execute: Execute }) {
+type Range = { base: string; revision: string };
+function FileButton({ file, selected, onClick }: { file: ChangesResponse["files"][number]; selected: boolean; onClick: () => void }) {
+	return (
+		<button type="button" className={selected ? "selected" : ""} onClick={onClick}>
+			{file.path}
+			<small>
+				{file.status}
+				{file.binary ? " · binary" : ` · +${file.additions ?? "?"} −${file.deletions ?? "?"}`}
+			</small>
+		</button>
+	);
+}
+const changedPaths = async (execute: Execute, range: Range) =>
+	new Set(
+		((await execute({ tool: "get_diff", baseRevision: range.base, revision: range.revision })) as ChangesResponse).files.map((f) => f.path),
+	);
+
+/**
+ * Files changed between two exact retained revisions, loaded as soon as the review opens. With `ownWork` (a diff from an earlier reviewed revision), files whose
+ * content now equals canonical and that were never part of either revision's own work are grouped as canonical's:
+ * already reviewed there. Everything else, including own edits that were dropped, stays in front of the reviewer.
+ */
+export function ChangeDiff({
+	base,
+	revision,
+	execute,
+	ownWork,
+}: {
+	base: string;
+	revision: string;
+	execute: Execute;
+	ownWork?: { current: Range; earlier: Range };
+}) {
 	const [diff, setDiff] = useState<ChangesResponse>(),
+		[fromCanonical, setFromCanonical] = useState<Set<string>>(new Set()),
 		[error, setError] = useState(""),
 		[loading, setLoading] = useState(false);
 	const [stored, setStored] = useState(false);
@@ -137,18 +169,28 @@ export function ChangeDiff({ base, revision, execute }: { base: string; revision
 		setLoading(true);
 		setError("");
 		try {
-			const result = (await execute({
-				tool: fromStorage ? "inspect_source" : "get_diff",
-				...(fromStorage ? { sourceView: "diff" as const } : {}),
-				baseRevision: base,
-				revision,
-				path,
-			})) as ChangesResponse;
+			const [result, own] = await Promise.all([
+				execute({
+					tool: fromStorage ? "inspect_source" : "get_diff",
+					...(fromStorage ? { sourceView: "diff" as const } : {}),
+					baseRevision: base,
+					revision,
+					path,
+				}) as Promise<ChangesResponse>,
+				// Grouping reads the bounded local cache only; a stored diff is shown ungrouped rather than spend more operations.
+				!path && ownWork && !fromStorage
+					? Promise.all([changedPaths(execute, ownWork.current), changedPaths(execute, ownWork.earlier)])
+					: undefined,
+			]);
 			if (current !== ticket.current) return;
 			setDiff(result);
 			setStored(fromStorage);
+			// A file request keeps the grouping its file list was loaded with.
+			const canonical = new Set(own ? result.files.filter((f) => !own[0].has(f.path) && !own[1].has(f.path)).map((f) => f.path) : []);
+			if (!path) setFromCanonical(canonical);
 			// Open the first changed file straight away rather than asking for a click.
-			if (!path && !result.file && result.files[0]) void load(result.files[0].path, fromStorage);
+			const first = result.files.find((f) => !canonical.has(f.path)) ?? result.files[0];
+			if (!path && !result.file && first) void load(first.path, fromStorage);
 		} catch (e) {
 			if (current === ticket.current) setError((e as Error).message);
 		} finally {
@@ -181,15 +223,23 @@ export function ChangeDiff({ base, revision, execute }: { base: string; revision
 			{diff && (
 				<div className="source-browser">
 					<nav aria-label="Changed files">
-						{diff.files.map((f) => (
-							<button type="button" key={f.path} className={diff.file?.path === f.path ? "selected" : ""} onClick={() => void load(f.path)}>
-								{f.path}
-								<small>
-									{f.status}
-									{f.binary ? " · binary" : ` · +${f.additions ?? "?"} −${f.deletions ?? "?"}`}
-								</small>
-							</button>
-						))}
+						{diff.files
+							.filter((f) => !fromCanonical.has(f.path))
+							.map((f) => (
+								<FileButton key={f.path} file={f} selected={diff.file?.path === f.path} onClick={() => void load(f.path)} />
+							))}
+						{fromCanonical.size > 0 && (
+							<details className="canonical-files">
+								<summary>
+									{fromCanonical.size === 1 ? "1 file" : `${fromCanonical.size} files`} from canonical, already reviewed there
+								</summary>
+								{diff.files
+									.filter((f) => fromCanonical.has(f.path))
+									.map((f) => (
+										<FileButton key={f.path} file={f} selected={diff.file?.path === f.path} onClick={() => void load(f.path)} />
+									))}
+							</details>
+						)}
 						{!diff.files.length && <p className="muted">No file changes.</p>}
 					</nav>
 					<section>

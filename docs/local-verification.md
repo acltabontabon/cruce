@@ -4,6 +4,17 @@
 
 Use separate evidence for pure decisions, local integration, real provider behavior and real participant behavior. Passing one layer does not establish another. **Proposed** means a candidate design; **implemented** means code exists; **locally verified** means named local checks passed; **provider-tested** identifies a real-provider check with its stated harness/authority; **deployed** requires evidence through the deployed Worker and authentication boundary. Describe a result as live verified only with its specific environment, revision and authority scope. Generated client configuration does not prove heterogeneous-agent interoperability. These capability claims are separate from artifact/evidence [trust labels](architecture.md#publication-review-and-retention).
 
+## Reconciling just before review
+
+On **2026-10-08**, these changes passed typecheck, lint, **397 unit/integration tests**, **93 browser journeys**, deterministic scenario verification and the offline cf build.
+
+What the tests cover:
+
+- **Bridge guidance** ([coordination tests](../test/runner/coordination.test.ts), [bridge tests](../test/runner/parallel.test.ts)). Attached behind workspaces are asked to merge canonical before publishing or proposing; other behind workspaces, including detached ones whose agents finished, are named for the user only. The live bridge leads with `Cruce:`. Each instruction appears once. A fixture with 8 behind workspaces and 20 overlaps stays under 16 KB (it was about 22 KB), and the next response with identical state carries a one-line "unchanged" notice instead of the block.
+- **Browser.** A change on a stale base shows no Approve or attestation actions, keeps Raise concern, and gives its owner the agent handoff and `cruce resume` on the change and workspace pages. A reconciled change opens on **Since reviewed #1**, with the own edit in front and canonical's file grouped and collapsed; **Full change** shows only the change against current canonical. After a promotion, the change names the workspace it left behind.
+
+Not yet verified: an agent session acting on the handoff text, or on the new `Cruce:` wording, against the hosted test environment.
+
 ## Account-level connections and local setup
 
 On **2026-10-08**, [ADR 0011](decisions/0011-account-level-connections-and-local-setup.md) passed typecheck, lint, **394 unit/integration tests**, **91 browser journeys**, deterministic scenario verification and the offline cf build.

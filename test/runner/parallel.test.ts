@@ -197,11 +197,18 @@ it("targets independent workspaces through one running bridge and sees CLI state
 		// A human promotion that left this workspace behind leads the response, before the result itself.
 		expect(proposal.content![0]).toMatchObject({
 			type: "text",
-			text: expect.stringMatching(/^Action needed: Canonical moved to accepte\. 1 of your workspaces is behind it/),
+			text: expect.stringMatching(/^Cruce: Canonical moved to accepte\. Attached here and behind it: .*\(workspace-2\)/),
 		});
 		const notice = proposal.content!.find((part) => part.type === "text" && part.text.startsWith("Current coordination:"));
 		expect(notice).toMatchObject({ type: "text", text: expect.stringContaining('"canonicalRevision":"accepted-new-head"') });
 		expect(notice).toMatchObject({ type: "text", text: expect.stringContaining('"workspaceId":"workspace-2"') });
+		// Identical state is not repeated on the next response; the behind sentence still leads it.
+		const repeated = await client.callTool({ name: "inspect_overlap", arguments: {} });
+		expect(repeated.content![0]).toMatchObject({ type: "text", text: expect.stringMatching(/^Cruce: Canonical moved/) });
+		expect(repeated.content!.at(-1)).toMatchObject({
+			type: "text",
+			text: expect.stringMatching(/^Current coordination: unchanged since the previous Cruce response/),
+		});
 		expect(proposal.structuredContent).toEqual({ id: second.id });
 		expect(coordinationReads).toBeGreaterThan(0);
 		await client.ping();

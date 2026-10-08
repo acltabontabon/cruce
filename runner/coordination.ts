@@ -6,6 +6,8 @@ import type { RepositorySnapshot } from "../src/shared/platform.ts";
 export function coordinationContext(
 	snapshot: Pick<RepositorySnapshot, "attention" | "sourceHead"> &
 		Partial<Pick<RepositorySnapshot, "workspaces" | "overlaps" | "asOf" | "workspaceUpdates" | "reconciliation">>,
+	/** Workspaces attached through this bridge or checkout; only these are asked to merge canonical without the user. */
+	attached: ReadonlySet<string> = new Set(),
 ) {
 	if (!snapshot.attention) return { available: false as const, instruction: "Read get_repository to inspect current coordination state." };
 	const workspaces = snapshot.workspaces ?? [];
@@ -17,22 +19,60 @@ export function coordinationContext(
 		.flatMap((row) => {
 			const w = workspaces.find((w) => w.id === row.workspaceId);
 			return w && owned.has(w.id) && !["completed", "cancelled"].includes(w.state)
-				? [{ workspaceId: w.id, title: w.title, revision: row.revision, basis: row.basis, canonicalRevision: row.canonicalRevision }]
+				? [
+						{
+							workspaceId: w.id,
+							title: w.title,
+							attached: attached.has(w.id),
+							revision: row.revision,
+							basis: row.basis,
+							canonicalRevision: row.canonicalRevision,
+						},
+					]
 				: [];
 		});
 	const canonical = (behind[0]?.canonicalRevision ?? snapshot.sourceHead ?? "").slice(0, 7);
-	// One plain sentence an agent cannot miss, ahead of the structured detail.
+	const named = (list: typeof behind) =>
+		`${list
+			.slice(0, 8)
+			.map((b) => `${b.title} (${b.workspaceId})`)
+			.join(", ")}${list.length > 8 ? ` and ${list.length - 8} more` : ""}`;
+	const here = behind.filter((b) => b.attached),
+		elsewhere = behind.filter((b) => !b.attached);
+	// Plain sentences an agent cannot miss, ahead of the structured detail. Work is updated just before it is
+	// proposed, so review happens once on the revision that would land; other workspaces wait for the user.
 	const summary = behind.length
-		? `Canonical moved to ${canonical}. ${behind.length === 1 ? "1 of your workspaces is" : `${behind.length} of your workspaces are`} behind it: ${behind
-				.slice(0, 8)
-				.map((b) => `${b.title} (${b.workspaceId})`)
-				.join(
-					", ",
-				)}${behind.length > 8 ? ` and ${behind.length - 8} more` : ""}. Reconcile each now, within your task: in its directory merge canonical with Git, verify, push, publish and propose the new revision. Ask the user only for conflicts or failing checks.`
+		? [
+				`Canonical moved to ${canonical}.`,
+				here.length &&
+					`Attached here and behind it: ${named(here)}. Before publishing or proposing, merge canonical into ${here.length === 1 ? "it" : "each"} with Git in its directory, verify, push, publish and propose the new revision; ask the user only for conflicts or failing checks.`,
+				elsewhere.length &&
+					`${here.length ? "Also behind" : "Your workspaces behind it"}, not attached here: ${named(elsewhere)}. Update ${elsewhere.length === 1 ? "it" : "one"} only when the user asks: attach_workspace, then merge canonical before proposing.`,
+			]
+				.filter(Boolean)
+				.join(" ")
 		: undefined;
 	const overlaps = (snapshot.overlaps ?? [])
 		.filter((o) => o.workspaces.some((id) => owned.has(id)))
 		.toSorted((a, b) => a.surface.localeCompare(b.surface) || a.id.localeCompare(b.id));
+	const canonicalUpdates = Object.entries(snapshot.workspaceUpdates ?? {})
+		.filter(([id, update]) => owned.has(id) && update.status === "available")
+		.map(([workspaceId, update]) => ({ workspaceId, revision: update.revision, trust: update.trust }));
+	const reconciliation = snapshot.attention.items
+		.filter((item) => item.actions.includes("reconcile_with_git"))
+		.map((item) => ({
+			workspaceId: item.workspaceId,
+			attached: attached.has(item.workspaceId),
+			...(item.subject === "change" ? { proposalId: item.id } : {}),
+			revision: item.revision,
+			base: item.base,
+			blockers: item.blockers,
+			action: "reconcile_with_git" as const,
+			...(item.blockers.some((b) => b.kind === "canonical_relation" && b.relation === "unrelated")
+				? { note: "Inspect the unrelated histories before choosing how to reconcile them." }
+				: {}),
+		}));
+	// Each instruction is stated once, and only when its subject is present: this block rides on every tool response.
 	return {
 		available: true as const,
 		...(summary ? { summary } : {}),
@@ -54,38 +94,32 @@ export function coordinationContext(
 					report: snapshot.asOf === undefined ? "unknown" : reportFreshness(w?.lastReportAt, snapshot.asOf).state,
 				};
 			}),
-			instruction:
-				"Reported shared paths are an early warning, not a conflict verdict. Inspect the other workspace's exact changes and report freshness before adapting your authorized work.",
 		})),
-		canonicalUpdates: Object.entries(snapshot.workspaceUpdates ?? {})
-			.filter(([id, update]) => owned.has(id) && update.status === "available")
-			.map(([workspaceId, update]) => ({
-				workspaceId,
-				revision: update.revision,
-				trust: update.trust,
-				instruction: "Inspect get_workspace_updates for exact canonical changes and reported path overlap.",
-			})),
-		reconciliation: snapshot.attention.items
-			.filter((item) => item.actions.includes("reconcile_with_git"))
-			.map((item) => ({
-				workspaceId: item.workspaceId,
-				...(item.subject === "change" ? { proposalId: item.id } : {}),
-				revision: item.revision,
-				base: item.base,
-				blockers: item.blockers,
-				action: "reconcile_with_git" as const,
-				continuation: {
-					tool: "attach_workspace",
-					workspaceId: item.workspaceId,
-					instruction:
-						"Continue through the owner's authorized connection in the existing attached execution, or explicitly detach before replacing it.",
-				},
-				instruction: item.blockers.some((b) => b.kind === "canonical_relation" && b.relation === "unrelated")
-					? "Inspect the unrelated histories before choosing how to reconcile them."
-					: "Within the user's authorized task, preserve working changes, fetch and merge canonical in this workspace, verify, push, publish and propose the new exact revision with fresh evidence. Ask for judgment if needed. Human approval is still required before promotion.",
-			})),
-		instruction:
-			"These are current reconciliation needs on your owner's authorized workspaces. Handle those within your task before reporting readiness; leave the exact workspace and revision as a continuation handoff if work remains. Divergence is not proof of conflicts. Unavailable ancestry needs inspection before claiming readiness. Cruce does not execute or wake agents.",
+		canonicalUpdates,
+		reconciliation,
+		instructions: [
+			overlaps.length &&
+				"Reported shared paths are an early warning, not a conflict verdict. Inspect the other workspace's exact changes and report freshness before adapting your authorized work.",
+			canonicalUpdates.length && "Inspect get_workspace_updates for exact canonical changes and reported path overlap.",
+			reconciliation.length &&
+				"Merge canonical into an attached workspace before publishing or proposing it: preserve working changes, fetch and merge canonical with Git, verify, push, publish and propose the new exact revision with fresh evidence. Update a workspace that is not attached here only when the user asks, through attach_workspace in the owner's existing execution or after an explicit detach. Human approval is still required before promotion.",
+			"Divergence is not proof of conflicts. Unavailable ancestry needs inspection before claiming readiness. If work remains when you stop, name the exact workspace and revision for continuation. Cruce does not execute or wake agents.",
+		].filter((text): text is string => !!text),
+	};
+}
+
+/**
+ * Full coordination detail when it changed since the last tool response on this connection, otherwise one line.
+ * The bridge appends this to every response; repeating identical state only spends the agent's context.
+ */
+export function coordinationDetail() {
+	let previous: string | undefined;
+	return (context: ReturnType<typeof coordinationContext>) => {
+		const text = JSON.stringify(context);
+		if (context.available && text === previous)
+			return "Current coordination: unchanged since the previous Cruce response. Read the repository_coordination resource for full detail.";
+		previous = text;
+		return `Current coordination: ${text}`;
 	};
 }
 

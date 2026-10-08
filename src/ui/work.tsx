@@ -18,6 +18,7 @@ import {
 	blockerSummary,
 	blockerText,
 	canonicalRelation,
+	canonicalTarget,
 	changeStatus,
 	ended,
 	nextStep,
@@ -29,10 +30,26 @@ import {
 	settledInMain,
 	short,
 	unproposed,
+	updateHandoff,
 	waitingOn,
 	workedBy,
 	workspaceStatus,
 } from "./status.ts";
+
+/**
+ * How the owner updates a behind workspace when they decide to: words for any agent session, or a terminal command.
+ * Nothing runs until the owner hands it over; Cruce wakes and messages no one.
+ */
+export function UpdateHandoff({ w, canonical }: { w: Pick<Workspace, "id" | "title">; canonical?: string }) {
+	return (
+		<div className="update-handoff">
+			<p className="copy-label">When you want it updated, give this to any agent session:</p>
+			<CopyCommand text={updateHandoff(w, canonical)} />
+			<p className="copy-label">Or attach it in a terminal:</p>
+			<CopyCommand text={`cruce resume --server ${location.origin} --workspace ${w.id}`} />
+		</div>
+	);
+}
 
 function ReportAge({ at, now }: { at?: number; now: number }) {
 	const report = reportFreshness(at, now);
@@ -584,6 +601,7 @@ export function WorkspaceDetail({
 							<dt>Decision state</dt>
 							<dd>
 								{blockerSummary(item)}. {nextStep(item)}.{item.group === "reconciliation" && ` ${RECONCILIATION_GUIDANCE}`}
+								{item.actions.includes("reconcile_with_git") && <UpdateHandoff w={w} canonical={canonicalTarget(item)} />}
 							</dd>
 						</>
 					)}

@@ -326,6 +326,43 @@ export async function fixture() {
 				c.state.sourceHead = head;
 				return json(res, { updated: true });
 			}
+			if (url.pathname === "/__fixture/reconciled" && req.method === "POST") {
+				// Canonical moved while change #1 was in review; its workspace merged canonical, added jitter and proposed again.
+				const reviewed = c.state.proposals[0];
+				run("review_proposal", { proposalId: reviewed.id, revision: head, outcome: "concern", reason: "Add jitter" });
+				const canonical = await git.commit({
+					ref: "refs/heads/main",
+					parent: base,
+					files: { "src/timeout.ts": "export const timeoutMs = 5000;\n" },
+					message: "Bound timeouts",
+					author,
+				});
+				const merged = await git.commit({
+					ref: "refs/heads/retry",
+					parent: head,
+					extraParents: [canonical],
+					files: {
+						"src/timeout.ts": "export const timeoutMs = 5000;\n",
+						"src/retry.ts": "export const retries = 3;\nexport const jitter = true;\n",
+					},
+					message: "Merge canonical and add jitter",
+					author,
+				});
+				c.state.sourceHead = canonical;
+				const w = c.state.workspaces[1];
+				c.addArtifact({
+					...c.artifact("source"),
+					id: "source-reconciled",
+					revision: merged,
+					baseRevision: canonical,
+					title: "Bounded retry policy with jitter",
+					storage: { repository: "fixture-source", providerId: "fixture-source", revision: merged },
+				});
+				w.publishedRevision = merged;
+				w.integratedRevision = canonical;
+				run("create_proposal", { artifactId: "source-reconciled" }, agent);
+				return json(res, { canonical, merged });
+			}
 			if (url.pathname === "/api/me") return json(res, { user, namespaces: directory.state.namespaces });
 			if (url.pathname === "/api/connections" && req.method === "GET") return json(res, connections);
 			if (parts[1] === "connections" && parts[2] && req.method === "DELETE") {
