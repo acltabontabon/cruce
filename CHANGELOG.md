@@ -6,6 +6,10 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Added
 
+- Show published revisions that no change proposes yet: an attention item, a "Not proposed" filter and pill, a lane-map label, and a one-click "Propose for review" for the owner (single or all). Shared reported paths are summarized once above the workspace list instead of repeated on every row. Agent instructions now say that `publish_revision` does not request review and to propose the revision when the task's work is done.
+- Add an explicit local `preview_reconciliation` / `cruce preview` check against accepted canonical, with exact commits, conflict paths/types and honest unavailable/unrelated results. Scratch Git objects are isolated and working changes are preserved.
+- Deliver bounded reported-overlap warnings, canonical update hints and continuation workspace IDs through bridge coordination context; add a read-only `cruce watch --coordination` JSON feed for external hosts.
+- Deliver fresh, exact-revision reconciliation context with local bridge tool results and expose a subscribable MCP coordination resource. Connected subscribers receive changed-state notifications; reads recheck authority and never execute Git or wake agents.
 - Add opt-in pushed-ref observation with policy-gated subscriptions, idempotent Queue ingestion, bounded gap recovery and visible degraded state. Observations never publish or approve source.
 - Add a repository reconciliation view and `get_reconciliation` MCP read based on exact published Git ancestry, with proposal blockers and explicit unknown results.
 - Show report freshness independently of presence throughout workspace and reconciliation views.
@@ -16,12 +20,13 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 - Add a read-only attention projection to repository snapshots (and the `get_repository` MCP read). Each current change, and each live workspace that needs reconciliation, carries its responsible owner, exact revision and comparison basis, one group (Operation needs attention, Ready to promote, Needs human review, Needs preparation or Needs reconciliation), every structured blocker in order, and the next actions available to the viewer under current authority. It writes nothing, reads no source and assigns nothing.
 - Filter repository Changes by **Needs you** or by attention group, and Workspaces by **Mine**, **Needs reconciliation** or owner. Filters live in the URL, so links, reloads and Back keep them.
 - Add **Continue this workspace** to workspace pages: what travels (only pushed commits), the reported head against the observed fork branch and last publication, and the existing detach and `cruce resume` steps. Other users are told that only the owner can attach it and that ownership transfer is unsupported.
-- Add a Cruce sign-in page at `/sign-in`. The homepage's **Sign in** opens it, and signed-out repository links, invitations and expired sessions show it in place with what signing in will open. Its button still hands off to Cloudflare Access; an optional `CRUCE_SIGN_IN_PROVIDER` label (for example GitHub) names the Access identity provider on the button.
 - Add **Earlier work** to repository History and the `get_archive` MCP read. An ended workspace whose fork is cleaned up moves there with its closed changes, publications, evidence and settled promotions, and stays readable by any of its IDs or revisions. Links to archived changes, workspaces and records open a read-only record instead of "unavailable".
 - Add an [operator runbook](docs/operations.md) for uncertain operations, storage identity mismatches, cleanup blockers, cache loss, observation delivery failures and coordination-state restoration. It states which procedures have not been rehearsed.
 - Document interface compatibility for the MCP catalog, console API and bridge in [releases](docs/releases.md#interface-compatibility).
 
 ### Changed
+
+- Label stale work as **Needs Git update**, distinguish agent-capable reconciliation from human approval, and guide agents to reconcile within their authorized task before proposing or requesting promotion. Divergence is not presented as proof of merge conflicts.
 
 - Replace the three overlapping repository setup buttons with one **Set up locally** guide containing Clone, Existing checkout and Connect an agent.
 - Animate connected workspace presence and highlight newly reported heads or publications, with Pause motion and reduced-motion support. Fold detached lanes and rows into counted disclosures, and keep large lane maps bounded and paginated without dropping workspaces.
@@ -56,6 +61,10 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 - Let one MCP bridge coordinate multiple isolated workspaces with explicit `workspaceId`, independent retry state and per-workspace reports. `attach_workspace` creates or reuses the local worktree, and CLI continuation/publication becomes visible without restarting MCP. Previously attached workspaces stay attached.
 
 - Supply an installable local client from the Cruce website before clone, checkout attachment or agent setup. Replace source-checkout path placeholders with installed `cruce` commands; `cruce auth` configures repository-scoped Git authentication so cloning uses ordinary `git clone`.
+
+- Align repository sketches, attention summaries and arrows across Home and namespace lists. Give namespace metadata clean lines, keep shared row metadata together when it wraps, and align prefixed form controls with ordinary inputs.
+
+- Avoid flashing a loading screen during fast sign-in checks and keep the homepage background consistent from first paint. Sign in goes directly to Cloudflare Access; private links and expired sessions retain their destination without an extra Cruce sign-in page.
 
 - Complete an interrupted promotion whose update already reached canonical, even if evidence or policy changed afterwards. Record evidence only for open changes.
 - Limit terminal bridge discovery to its approved namespace and repository.

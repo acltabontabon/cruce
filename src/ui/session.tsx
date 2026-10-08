@@ -2,15 +2,20 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { BRAND } from "./brand.tsx";
 import { Landing } from "./landing.tsx";
 import { request } from "./request.ts";
-import { SignIn } from "./sign-in.tsx";
-import { rememberSignInDestination, restoreSignInDestination, signInReason } from "./sign-in-destination.ts";
+import { rememberSignInDestination, requiresSignIn, restoreSignInDestination } from "./sign-in-destination.ts";
 
 const Console = lazy(() => import("./App.tsx").then((module) => ({ default: module.App })));
 
 function SessionStatus({ error, retry }: { error?: string; retry?: () => void }) {
+	const [visible, setVisible] = useState(false);
+	useEffect(() => {
+		// Fast session checks should not flash a separate loading screen.
+		const timer = setTimeout(() => setVisible(true), 300);
+		return () => clearTimeout(timer);
+	}, []);
 	return (
 		<main className="session-status" aria-busy={!error}>
-			<img src={BRAND.wordmarkInk} alt={BRAND.name} />
+			{(visible || error) && <img src={BRAND.wordmarkInk} alt={BRAND.name} />}
 			{error ? (
 				<>
 					<h1>Connection unavailable.</h1>
@@ -22,32 +27,36 @@ function SessionStatus({ error, retry }: { error?: string; retry?: () => void })
 						Sign in
 					</a>
 				</>
-			) : (
-				<p role="status">Finding your common ground…</p>
-			)}
+			) : visible ? (
+				<p role="status">Checking sign-in…</p>
+			) : null}
 		</main>
 	);
 }
 
 export function SessionBoundary() {
 	const [state, setState] = useState<"loading" | "public" | "expired" | "console" | "error">("loading"),
-		[provider, setProvider] = useState<string>(),
 		[error, setError] = useState(""),
 		[attempt, setAttempt] = useState(0);
 	useEffect(() => {
 		void attempt;
 		const controller = new AbortController();
 		setState("loading");
+		const signIn = () => {
+			rememberSignInDestination();
+			location.replace("/auth/login");
+		};
 		const expire = () => {
 			controller.abort();
 			setState("expired");
+			signIn();
 		};
 		const restored = (event: PageTransitionEvent) => {
 			if (event.persisted) setAttempt((value) => value + 1);
 		};
 		window.addEventListener("cruce:session-expired", expire);
 		window.addEventListener("pageshow", restored);
-		void request<{ authenticated: boolean; provider?: string }>(
+		void request<{ authenticated: boolean }>(
 			"/auth/session",
 			undefined,
 			"GET",
@@ -55,10 +64,13 @@ export function SessionBoundary() {
 		)
 			.then((result) => {
 				if (!controller.signal.aborted) {
-					setProvider(result.provider);
 					if (result.authenticated) {
 						if (location.pathname === "/sign-in") history.replaceState(null, "", "/");
 						restoreSignInDestination();
+					}
+					if (!result.authenticated && requiresSignIn()) {
+						signIn();
+						return;
 					}
 					setState(result.authenticated ? "console" : "public");
 				}
@@ -75,15 +87,12 @@ export function SessionBoundary() {
 			window.removeEventListener("pageshow", restored);
 		};
 	}, [attempt]);
-	if (state === "public" || state === "expired") {
-		const reason = state === "expired" ? "expired" : signInReason();
-		return reason ? <SignIn reason={reason} provider={provider} /> : <Landing />;
-	}
+	if (state === "public") return <Landing />;
 	if (state === "console")
 		return (
 			<Suspense fallback={<SessionStatus />}>
 				<Console />
 			</Suspense>
 		);
-	return <SessionStatus error={state === "error" ? error : undefined} retry={() => setAttempt((value) => value + 1)} />;
+	return <SessionStatus key={attempt} error={state === "error" ? error : undefined} retry={() => setAttempt((value) => value + 1)} />;
 }

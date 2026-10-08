@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join, resolve } from "node:path";
@@ -17,6 +17,11 @@ it("targets independent workspaces through one running bridge and sees CLI state
 	const published: Record<string, string> = {};
 	const calls: Record<string, unknown>[] = [];
 	let failPublication = true;
+	let canonical = "initial";
+	let initialRevision = "";
+	let previewAllowed = true;
+	let observedDiscrepancy = false;
+	let coordinationReads = 0;
 	const hosted = createServer(async (request, response) => {
 		if (request.method !== "POST") {
 			response.writeHead(405).end();
@@ -35,9 +40,34 @@ it("targets independent workspaces through one running bridge and sees CLI state
 			result = { protocolVersion: body.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "fixture", version: "1" } };
 		else if (body.method === "tools/call") {
 			const command = { ...body.params.arguments, tool: body.params.name };
-			calls.push(command);
+			if (command.tool !== "get_repository") calls.push(command);
 			let data: Record<string, unknown>;
-			if (command.tool === "start_workspace") {
+			if (command.tool === "get_repository") {
+				coordinationReads++;
+				data = {
+					sourceHead: canonical === "initial" ? initialRevision : canonical,
+					workspaces: [...workspaces.values()].map((w) => ({ ...w, ownerId: "user" })),
+					permissions: { write: previewAllowed },
+					...(observedDiscrepancy ? { observedCanonical: { deleted: true } } : {}),
+					attention: {
+						viewerId: "user",
+						items:
+							canonical === "initial"
+								? []
+								: [
+										{
+											id: "proposal-second",
+											subject: "change",
+											workspaceId: "workspace-2",
+											revision: published["workspace-2"],
+											base: "initial",
+											blockers: [{ kind: "base_stale", base: "initial", canonical }],
+											actions: ["reconcile_with_git"],
+										},
+									],
+					},
+				};
+			} else if (command.tool === "start_workspace") {
 				data = { id: `workspace-${workspaces.size + 1}`, baseRevision: command.baseRevision };
 				workspaces.set(String(data.id), data);
 			} else if (command.tool === "get_workspace") data = workspaces.get(command.workspaceId)!;
@@ -67,6 +97,7 @@ it("targets independent workspaces through one running bridge and sees CLI state
 		fixture.run(["add", "."]);
 		fixture.run(["commit", "-qm", "Base"]);
 		const base = fixture.run(["rev-parse", "HEAD"]);
+		initialRevision = base;
 		await new Promise<void>((done) => hosted.listen(0, "127.0.0.1", done));
 		const address = hosted.address();
 		if (!address || typeof address === "string") throw new Error("Missing fixture address");
@@ -88,6 +119,43 @@ it("targets independent workspaces through one running bridge and sees CLI state
 		const second = (await client.callTool({ name: "start_workspace", arguments: { title: "Two", baseRevision: base } }))
 			.structuredContent as Record<string, unknown>;
 		expect(first.directory).not.toBe(second.directory);
+		const preview = await client.callTool({ name: "preview_reconciliation", arguments: { workspaceId: first.id } });
+		expect(preview.structuredContent).toMatchObject({
+			workspaceId: first.id,
+			status: "clean",
+			workspaceRevision: base,
+			canonicalRevision: base,
+		});
+		expect(calls.some((call) => call.tool === "preview_reconciliation")).toBe(false);
+		previewAllowed = false;
+		expect((await client.callTool({ name: "preview_reconciliation", arguments: { workspaceId: first.id } })).isError).toBe(true);
+		previewAllowed = true;
+		observedDiscrepancy = true;
+		expect(
+			(await client.callTool({ name: "preview_reconciliation", arguments: { workspaceId: first.id } })).structuredContent,
+		).toMatchObject({ status: "unavailable", reason: expect.stringContaining("Maintainer reconciliation") });
+		observedDiscrepancy = false;
+		const watchedCalls = calls.length;
+		const watcher = spawn(process.execPath, [resolve("runner/cruce.mjs"), "watch", "--coordination", "--cwd", fixture.root], {
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		try {
+			const line = await new Promise<string>((done, reject) => {
+				let output = "";
+				watcher.stdout.on("data", (chunk) => {
+					output += chunk;
+					if (output.includes("\n")) done(output.split("\n")[0]);
+				});
+				watcher.on("error", reject);
+				watcher.on("exit", () => reject(new Error("Watcher exited before its first coordination result")));
+			});
+			expect(JSON.parse(line)).toMatchObject({ namespaceId: "ns", repositoryId: "repo", available: true, canonicalRevision: base });
+			expect(calls).toHaveLength(watchedCalls);
+		} finally {
+			watcher.kill("SIGTERM");
+			await new Promise<void>((done) => watcher.once("exit", () => done()));
+		}
+
 		for (const workspace of [first, second]) {
 			const directory = String(workspace.directory);
 			await writeFile(join(directory, "change.txt"), String(workspace.id));
@@ -104,11 +172,27 @@ it("targets independent workspaces through one running bridge and sees CLI state
 			arguments: { workspaceId: second.id, revision: published[String(second.id)], content: "Reported tests passed" },
 		});
 		expect(evidence.isError).not.toBe(true);
+		const resources = await client.listResources();
+		const coordinationUri = resources.resources[0].uri;
+		const notifications: string[] = [];
+		client.setNotificationHandler("notifications/resources/updated", (notification) => {
+			notifications.push(notification.params.uri);
+		});
+		await client.subscribeResource({ uri: coordinationUri });
+		canonical = "accepted-new-head";
 		const proposal = await client.callTool({
 			name: "create_proposal",
 			arguments: { workspaceId: second.id, artifactId: "artifact-second", title: "Second change" },
 		});
 		expect(proposal.isError).not.toBe(true);
+		const notice = proposal.content!.find((part) => part.type === "text" && part.text.startsWith("Current coordination:"));
+		expect(notice).toMatchObject({ type: "text", text: expect.stringContaining('"canonicalRevision":"accepted-new-head"') });
+		expect(notice).toMatchObject({ type: "text", text: expect.stringContaining('"workspaceId":"workspace-2"') });
+		expect(proposal.structuredContent).toEqual({ id: second.id });
+		expect(coordinationReads).toBeGreaterThan(0);
+		await client.ping();
+		expect(notifications).toEqual([coordinationUri]);
+		await client.unsubscribeResource({ uri: coordinationUri });
 		await promisify(execFile)(process.execPath, [resolve("runner/cruce.mjs"), "publish", "--cwd", String(first.directory)], {
 			timeout: 15000,
 		});

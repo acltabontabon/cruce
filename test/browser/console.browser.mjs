@@ -265,7 +265,7 @@ test("public homepage leads with context, then shows how it works, without reque
 	assert.equal(await page.getByRole("link", { name: /GitHub|Docs/ }).count(), 0);
 	const signIn = page.getByRole("link", { name: "Sign in", exact: true });
 	assert.equal(await signIn.count(), 1);
-	assert.equal(await signIn.getAttribute("href"), "/sign-in");
+	assert.equal(await signIn.getAttribute("href"), "/auth/login");
 	assert.equal(await page.getByRole("link", { name: /Sign up|Get started/ }).count(), 0);
 	await page.getByText("Cruce is in early development.", { exact: true }).waitFor();
 	assert.equal(await page.locator("main > section").count(), 3);
@@ -353,7 +353,6 @@ test("sign-out hands off to Access, and returning home keeps the Cruce console s
 	// to verify the console navigation without simulating revocation as evidence.
 	await openHomepage();
 	await page.getByRole("link", { name: "Sign in", exact: true }).first().click();
-	await page.getByRole("link", { name: "Continue with GitHub", exact: true }).click();
 	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
 	await page.getByRole("button", { name: "Your account", exact: true }).click();
 	await page.getByRole("link", { name: "Sign out", exact: true }).click();
@@ -368,51 +367,44 @@ test("sign-out hands off to Access, and returning home keeps the Cruce console s
 test("sign-in preserves a saved repository revision and invitation fragment without changing the login URL", async () => {
 	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false } });
 	await page.goto(`${server.origin}/?namespace=fernloop&repository=payments#/code/source`);
-	await page.getByRole("heading", { name: "Sign in to Cruce", level: 1 }).waitFor();
-	await page.getByText("Sign in to open this repository.", { exact: true }).waitFor();
-	await page.getByRole("link", { name: "Continue with GitHub", exact: true }).click();
 	await page.getByRole("heading", { name: "Bounded retry policy", exact: true }).waitFor();
 	assert.equal(new URL(page.url()).hash, "#/code/source");
 	assert.equal(new URL(page.url()).search, "?namespace=fernloop&repository=payments");
 	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false } });
 	await page.goto(`${server.origin}/invite/fernloop#fixture-invitation`);
-	await page.getByText("Sign in to accept this namespace invitation.", { exact: true }).waitFor();
-	await page.getByRole("link", { name: "Continue with GitHub", exact: true }).click();
 	await page.getByRole("heading", { name: "Join namespace", exact: true }).waitFor();
 	assert.equal(new URL(page.url()).pathname, "/invite/fernloop");
 	assert.equal(new URL(page.url()).hash, "#fixture-invitation");
 });
-test("the sign-in page names the configured provider and hands off to the unchanged login route", async () => {
+test("sign-in goes directly to Access and saved sign-in links skip the removed page", async () => {
 	await openHomepage();
-	await page.getByRole("link", { name: "Sign in", exact: true }).click();
-	await page.getByRole("heading", { name: "Sign in to Cruce", level: 1 }).waitFor();
-	assert.equal(new URL(page.url()).pathname, "/sign-in");
-	assert.equal(await page.title(), "Sign in · Cruce");
-	assert.equal(await page.getByRole("link", { name: "Continue with GitHub", exact: true }).getAttribute("href"), "/auth/login");
-	assert.equal(await page.getByRole("link", { name: "Cruce home", exact: true }).getAttribute("href"), "/");
-	assert.equal(await page.locator(".sign-in-continue").evaluate((e) => getComputedStyle(e).height), "32px");
-	await page.goBack();
-	await page.getByRole("heading", { name: "Code is written in parallel now. The decision is still yours.", level: 1 }).waitFor();
-	// Without a configured provider the button stays neutral.
-	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false, provider: null } });
-	await page.goto(`${server.origin}/sign-in`);
-	await page.getByRole("link", { name: "Sign in", exact: true }).waitFor();
-	assert.equal(await page.getByRole("link", { name: /Continue with/ }).count(), 0);
-	await page.request.post(`${server.origin}/__fixture/session`, { data: { provider: "GitHub" } });
-	// A signed-in visitor never sees the sign-in page.
+	assert.equal(await page.getByRole("link", { name: "Sign in", exact: true }).getAttribute("href"), "/auth/login");
 	await page.getByRole("link", { name: "Sign in", exact: true }).click();
 	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
+	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false } });
 	await page.goto(`${server.origin}/sign-in`);
 	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
 	assert.equal(new URL(page.url()).pathname, "/");
-	for (const width of [1440, 320]) {
-		await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false } });
-		await page.setViewportSize({ width, height: 800 });
-		await page.goto(`${server.origin}/sign-in`);
-		await page.getByRole("heading", { name: "Sign in to Cruce", level: 1 }).waitFor();
-		assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-	}
-	await page.setViewportSize({ width: 1440, height: 1000 });
+	assert.equal(await page.locator(".sign-in").count(), 0);
+});
+test("fast session checks do not flash loading content; slow checks remain visible", async () => {
+	await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+	await page.addInitScript(() => {
+		window.loadingMessages = [];
+		new MutationObserver(() => {
+			const status = document.querySelector(".session-status [role=status]");
+			if (status) window.loadingMessages.push(status.textContent);
+		}).observe(document, { childList: true, subtree: true });
+	});
+	await openHomepage();
+	assert.deepEqual(await page.evaluate(() => window.loadingMessages), []);
+	assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(245, 245, 239)");
+	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false, delay: 900 } });
+	await page.goto(server.origin);
+	await page.getByRole("status").filter({ hasText: "Checking sign-in…" }).waitFor();
+	assert.equal(await page.locator(".session-status").evaluate((element) => element.getBoundingClientRect().height <= innerHeight), true);
+	assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(245, 245, 239)");
+	await page.getByRole("heading", { name: "Code is written in parallel now. The decision is still yours.", level: 1 }).waitFor();
 });
 test("agent connections list what each agent may do and revoke one after confirmation", async () => {
 	await page.goto(server.origin);
@@ -465,12 +457,15 @@ test("session failures retain a retry state and stale confirmation cannot remoun
 	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false } });
 	await page.getByRole("button", { name: "Try again", exact: true }).click();
 	await page.getByRole("heading", { name: "Code is written in parallel now. The decision is still yours.", level: 1 }).waitFor();
-	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: true, delay: 500 } });
+	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: true, delay: 2000 } });
 	await page.goto(server.origin);
 	await page.getByRole("status").waitFor();
+	await page.route("**/auth/login", (route) =>
+		route.fulfill({ contentType: "text/html", body: "<h1>Fixture Access sign-in boundary</h1>" }),
+	);
 	await page.evaluate(() => window.dispatchEvent(new Event("cruce:session-expired")));
-	await page.getByRole("heading", { name: "Your session ended", level: 1 }).waitFor();
-	await page.waitForTimeout(650);
+	await page.getByRole("heading", { name: "Fixture Access sign-in boundary", level: 1 }).waitFor();
+	await page.waitForTimeout(2200);
 	assert.equal(await page.getByRole("heading", { name: "Your repositories", exact: true }).count(), 0);
 });
 test("expired console requests clear private views and public anchors do not rewrite console deep links", async () => {
@@ -478,6 +473,9 @@ test("expired console requests clear private views and public anchors do not rew
 	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false } });
 	await page.getByRole("button", { name: "Your account", exact: true }).click();
 	await page.getByRole("button", { name: "Switch namespace", exact: true }).click();
+	await page.route("**/auth/login", (route) =>
+		route.fulfill({ contentType: "text/html", body: "<h1>Fixture Access sign-in boundary</h1>" }),
+	);
 	// Trigger a normal console read after revocation without waiting for the polling interval.
 	await page.evaluate(async () => {
 		const { request } = await import("/src/ui/request.ts");
@@ -485,9 +483,11 @@ test("expired console requests clear private views and public anchors do not rew
 			await request("/api/me");
 		} catch {}
 	});
-	await page.getByRole("heading", { name: "Your session ended", level: 1 }).waitFor();
+	await page.getByRole("heading", { name: "Fixture Access sign-in boundary", level: 1 }).waitFor();
 	assert.equal(await page.locator(".shell").count(), 0);
-	assert.equal(new URL(page.url()).search, "?namespace=fernloop&repository=payments");
+	assert.equal(new URL(page.url()).pathname, "/auth/login");
+	assert.equal(await page.evaluate(() => sessionStorage.getItem("cruce:sign-in-destination")), "/?namespace=fernloop&repository=payments");
+	await page.unroute("**/auth/login");
 	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: true } });
 	await page.reload();
 	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
@@ -753,6 +753,27 @@ test("empty namespaces inherit installation storage and creation dialogs keep fo
 	await page.getByRole("button", { name: "Switch namespace" }).filter({ hasText: "Design team" }).waitFor();
 	await page.getByRole("heading", { name: "People", exact: true }).waitFor();
 	await page.getByRole("heading", { name: "Teams", exact: true }).waitFor();
+});
+test("prefixed form fields align with ordinary inputs in creation dialogs", async () => {
+	for (const width of [1440, 1024, 390, 320]) {
+		await page.setViewportSize({ width, height: 1000 });
+		await page.goto(`${server.origin}/?namespace=fernloop`);
+		await page.getByRole("button", { name: "New repository", exact: true }).click();
+		const dialog = page.getByRole("dialog", { name: "New repository", exact: true });
+		await dialog.getByLabel("Default branch").waitFor();
+		await page.evaluate(() => document.fonts.ready);
+		if (width >= 720) {
+			const boxes = await dialog.evaluate((element) => {
+				const prefixed = element.querySelector(".prefixed").getBoundingClientRect();
+				const branch = element.querySelector('[name="branch"]').getBoundingClientRect();
+				return { top: Math.abs(prefixed.top - branch.top), height: Math.abs(prefixed.height - branch.height) };
+			});
+			assert.ok(boxes.top < 1 && boxes.height < 1, `Form control alignment at ${width}: ${JSON.stringify(boxes)}`);
+		}
+		assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+		await page.screenshot({ path: `dist/ui-checks/aligned-form-${width}.png`, fullPage: true });
+		await page.keyboard.press("Escape");
+	}
 });
 test("a new repository opens on Changes with a way to connect an agent", async () => {
 	await page.goto(`${server.origin}/?namespace=fernloop`);
@@ -1283,14 +1304,14 @@ test("workspaces behind canonical say so and show canonical changes without movi
 	await page.request.post(`${server.origin}/__fixture/upstream`);
 	await openRepo();
 	// The stale change and the workspace behind canonical are both reconciliation work, counted separately.
-	await page.getByRole("button", { name: "1 change needs reconciliation", exact: true }).waitFor();
-	await page.getByRole("button", { name: "1 workspace needs reconciliation", exact: true }).click();
+	await page.getByRole("button", { name: "1 change needs a Git update", exact: true }).waitFor();
+	await page.getByRole("button", { name: "1 workspace needs a Git update", exact: true }).click();
 	assert.equal(new URL(page.url()).searchParams.get("filter"), "reconcile");
 	await page.getByRole("heading", { name: "Matching workspaces", exact: true }).waitFor();
 	assert.equal(await page.locator(".workspace-row").count(), 1);
 	const row = workspaceRow("Inspect payment timeout");
 	await row.getByText("Behind canonical", { exact: true }).waitFor();
-	await row.getByText(/^Canonical moved to \w{8} since this baseline · Reconcile with Git$/).waitFor();
+	await row.getByText(/^Canonical moved to \w{8} since this baseline · Update from canonical$/).waitFor();
 	await row.click();
 	const start = await page.locator(".facts dd").nth(2).textContent();
 	await page
@@ -1319,7 +1340,7 @@ test("review is a checklist: confirm checks, approve the exact revision, then pr
 	await promote.click();
 	await page.locator(".change-header").getByText("Promoted", { exact: true }).waitFor();
 	await page.locator(".canonical-line").getByText(/main/).waitFor();
-	await page.getByRole("button", { name: "1 workspace needs reconciliation", exact: true }).waitFor();
+	await page.getByRole("button", { name: "1 workspace needs a Git update", exact: true }).waitFor();
 });
 test("concerns and failures ask for a reason and block promotion until resolved", async () => {
 	await openChange();
@@ -1802,6 +1823,79 @@ test("many workspaces, long paths and read-only authority stay usable on a phone
 	assert.equal(await page.getByRole("button", { name: "Approve", exact: true }).count(), 0);
 	assert.equal(await page.getByRole("button", { name: "Promote to main", exact: true }).count(), 0);
 	await page.getByText("A human repository maintainer attests evidence, approves and promotes.", { exact: true }).waitFor();
+});
+
+test("published work with no change says so, groups shared scaffold paths once and offers one-click proposals", async () => {
+	const proposed = [];
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		const data = await (await route.fetch()).json();
+		const original = data.workspaces[0];
+		const names = ["ProductController", "WarehouseController", "StockLevelController", "SupplierController", "PurchaseOrderController"];
+		const revision = (i) => `${i}`.repeat(40);
+		data.workspaces = names.map((title, i) => ({
+			...original,
+			id: `scaffold-${i}`,
+			title,
+			startedAt: i,
+			publishedRevision: revision(i + 1),
+		}));
+		data.proposals = [];
+		data.artifacts = names.map((title, i) => ({
+			id: `artifact-${i}`,
+			workspaceId: `scaffold-${i}`,
+			revision: revision(i + 1),
+			kind: "source",
+			title,
+			at: i,
+			actor: original.createdBy,
+		}));
+		data.overlaps = [".gitignore", "pom.xml", "src/main/java/InventoryApplication.java"].map((surface) => ({
+			id: `file:${surface}`,
+			kind: "file",
+			surface,
+			workspaces: names.map((_, i) => `scaffold-${i}`),
+			evidence: "reported",
+			observedAt: 1,
+		}));
+		data.reconciliation = {
+			...data.reconciliation,
+			workspaces: names.map((_, i) => ({
+				workspaceId: `scaffold-${i}`,
+				revision: revision(i + 1),
+				basis: "published",
+				canonicalRevision: data.sourceHead,
+				relation: "ahead",
+				report: { state: "fresh" },
+				incorporationCounts: { present: 0, missing: 0, unknown: 0 },
+				incorporationTruncated: false,
+				incorporation: [],
+			})),
+			proposals: [],
+		};
+		data.attention = { ...data.attention, items: [], ancestryUnavailable: 0 };
+		await route.fulfill({ json: data });
+	});
+	await page.route("**/command", (route) => {
+		const body = route.request().postDataJSON();
+		if (body.tool !== "create_proposal") return route.continue();
+		proposed.push(body.artifactId);
+		return route.fulfill({ json: { id: body.artifactId } });
+	});
+	await openRepo();
+	await page.getByRole("button", { name: "5 workspaces published, not proposed" }).waitFor();
+	await repoNav()
+		.getByRole("button", { name: /^Workspaces/ })
+		.click();
+	const brief = page.locator(".workspace-brief");
+	await brief.waitFor();
+	assert.match(await brief.innerText(), /5 published revisions have no change yet/);
+	assert.match(await brief.innerText(), /3 paths are reported by all 5 workspaces/);
+	assert.equal(await page.locator(".workspace-row .overlap-note").first().innerText(), "3 reported paths shared with 4 other workspaces");
+	assert.equal(await page.locator(".workspace-row").getByText("Not proposed", { exact: true }).count(), 5);
+	await page.screenshot({ path: "dist/ui-checks/published-not-proposed.png", fullPage: true });
+	await page.getByRole("button", { name: "Propose all 5 for review" }).click();
+	await page.waitForFunction(() => !document.querySelector(".workspace-brief button:disabled"));
+	assert.equal(proposed.length, 5);
 });
 
 test("retention inspection discloses cloud cost and shows exact unpublished refs without deleting", async () => {

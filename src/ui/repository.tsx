@@ -78,7 +78,7 @@ function CanonicalSetup({ view, execute }: { view: RepositorySnapshot; execute: 
 	);
 }
 
-/** One item per thing that needs a person; each count opens the filtered list behind it. Missing knowledge stays separate. */
+/** One item per thing that needs attention; each count opens the filtered list behind it. Missing knowledge stays separate. */
 function AttentionBar({ view, open }: { view: RepositorySnapshot; open: Open }) {
 	const a = attention(view);
 	const items: { count?: number; label: string; tab: string; filter?: string; tone: string }[] = [];
@@ -89,8 +89,9 @@ function AttentionBar({ view, open }: { view: RepositorySnapshot; open: Open }) 
 	counted(a.promote, "change ready to promote", "changes ready to promote", "changes", "success", "promote");
 	counted(a.review, "change needs human review", "changes need human review", "changes", "accent", "review");
 	counted(a.preparation, "change needs preparation", "changes need preparation", "changes", "warning", "preparation");
-	counted(a.reconcileChanges, "change needs reconciliation", "changes need reconciliation", "changes", "warning", "reconciliation");
-	counted(a.reconcileWorkspaces, "workspace needs reconciliation", "workspaces need reconciliation", "workspaces", "warning", "reconcile");
+	counted(a.reconcileChanges, "change needs a Git update", "changes need Git updates", "changes", "warning", "reconciliation");
+	counted(a.reconcileWorkspaces, "workspace needs a Git update", "workspaces need Git updates", "workspaces", "warning", "reconcile");
+	counted(a.unproposed, "workspace published, not proposed", "workspaces published, not proposed", "workspaces", "accent", "unproposed");
 	counted(a.overlaps, "path reported by more than one workspace", "paths reported by more than one workspace", "workspaces", "warning");
 	if (view.reconciliation?.observation.state === "degraded")
 		items.push({ label: "Observation degraded", tab: "workspaces", tone: "warning" });
@@ -980,7 +981,7 @@ export function RepositoryPage({
 				(id ? (
 					<WorkspaceDetail key={id} view={view} id={id} execute={execute} open={open} who={who} />
 				) : (
-					<WorkspaceList view={view} open={open} who={who} filter={filter} />
+					<WorkspaceList view={view} open={open} who={who} execute={execute} filter={filter} />
 				))}
 			{tab === "history" && <HistoryScreen key={id} view={view} id={id} execute={execute} open={open} who={who} />}
 			{tab === "settings" && (

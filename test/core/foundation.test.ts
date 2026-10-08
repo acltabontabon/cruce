@@ -358,6 +358,8 @@ describe("actor-neutral workspaces", () => {
 	});
 	it("does not expose heartbeat as a pure MCP read or allow human-only machine actions", () => {
 		expect(CRUCE_TOOLS.find((t) => t.name === "heartbeat")?.mutation).toBe(true);
+		expect(toolByName("preview_reconciliation")).toMatchObject({ bridgeOnly: true, mutation: true, cost: "none", scope: "cruce:read" });
+		expect(() => authorizeMachine(authority(agent), cmd("preview_reconciliation"))).toThrow("denied");
 		expect(() => authorizeMachine(authority(agent), cmd("promote_proposal"))).toThrow("denied");
 		expect(() => authorizeMachine(authority(agent), cmd("record_verification", { humanAttested: true }))).toThrow();
 	});

@@ -11,6 +11,7 @@ import {
 	rev,
 	sharedPath,
 } from "./landing-example.ts";
+import { rememberSignInDestination } from "./sign-in-destination.ts";
 import "./landing.css";
 
 const base = rev(exampleBaseline);
@@ -725,7 +726,7 @@ export function Landing() {
 				<nav aria-label="Homepage navigation">
 					{BRAND.docsUrl && <a href={BRAND.docsUrl}>Docs</a>}
 					{BRAND.sourceUrl && <a href={BRAND.sourceUrl}>GitHub</a>}
-					<a className="landing-signin" href="/sign-in">
+					<a className="landing-signin" href="/auth/login" onClick={rememberSignInDestination}>
 						Sign in
 					</a>
 				</nav>

@@ -131,6 +131,31 @@ export function canonicalRelation(view: RepositorySnapshot, w: Workspace): Statu
 	return { key: "current", label: "Up to date", tone: "success", detail: "Built on the current canonical revision." };
 }
 
+/**
+ * The exact published source revision of a live workspace that no change proposes yet. Publishing retains work; only a
+ * proposal asks for review, so this is the gap between "finished" and "waiting on a human".
+ */
+export function unproposed(view: RepositorySnapshot, w: Workspace) {
+	if (ended(w) || !w.publishedRevision) return undefined;
+	if (!["ahead", "diverged", "unknown"].includes(canonicalRelation(view, w).key)) return undefined;
+	if (view.proposals.some((p) => p.workspaceId === w.id && p.revision === w.publishedRevision)) return undefined;
+	return view.artifacts
+		.filter((a) => a.workspaceId === w.id && a.kind === "source" && a.revision === w.publishedRevision)
+		.sort((a, b) => b.at - a.at)[0];
+}
+
+/** Reported paths grouped by the exact set of workspaces sharing them, so five scaffold files read as one note, not twenty. */
+export function overlapGroups(view: RepositorySnapshot) {
+	const groups = new Map<string, { workspaces: string[]; paths: string[] }>();
+	for (const o of view.overlaps) {
+		const key = [...o.workspaces].sort().join("|");
+		const group = groups.get(key) ?? { workspaces: [...o.workspaces].sort(), paths: [] };
+		group.paths.push(o.surface);
+		groups.set(key, group);
+	}
+	return [...groups.values()].sort((a, b) => b.workspaces.length - a.workspaces.length || b.paths.length - a.paths.length);
+}
+
 /** Other present workspaces touching the same reported paths. Advisory: shared paths are not conflicts. */
 export function overlapsFor(view: RepositorySnapshot, w: Workspace) {
 	return view.overlaps
@@ -148,8 +173,10 @@ export const GROUP_LABELS: Record<AttentionGroup, Status> = {
 	promote: { key: "promote", label: "Ready to promote", tone: "success" },
 	review: { key: "review", label: "Needs human review", tone: "accent" },
 	preparation: { key: "preparation", label: "Needs preparation", tone: "warning" },
-	reconciliation: { key: "reconciliation", label: "Needs reconciliation", tone: "warning" },
+	reconciliation: { key: "reconciliation", label: "Needs Git update", tone: "warning" },
 };
+export const RECONCILIATION_GUIDANCE =
+	"An authorized agent or the owner can update the workspace with Git, verify the result and publish it for fresh review. Human approval is required before promotion. This status does not establish merge conflicts.";
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** Plain wording for one structured blocker; exact revisions stay inspectable through `title` attributes in the views. */
@@ -198,7 +225,7 @@ export const ACTION_LABELS: Record<AttentionAction, string> = {
 	resolve_concern: "Resolve concern",
 	approve: "Approve",
 	prepare_revision: "Prepare revision",
-	reconcile_with_git: "Reconcile with Git",
+	reconcile_with_git: "Update from canonical",
 	inspect: "Inspect",
 };
 /** Who an item is waiting on when the viewer has no eligible action: an authority class, never an assigned person. */
@@ -207,7 +234,8 @@ export function waitingOn(item: AttentionItem) {
 		return "Waiting on the maintainer who promoted it";
 	if (item.blockers[0]?.kind === "canonical_discrepancy" || item.blockers[0]?.kind === "promotion_pending")
 		return "Waiting on canonical reconciliation";
-	return item.group === "preparation" || item.group === "reconciliation" ? "Waiting on the owner" : "Waiting on a maintainer";
+	if (item.group === "reconciliation") return "Waiting on the owner or their authorized agent";
+	return item.group === "preparation" ? "Waiting on the owner" : "Waiting on a maintainer";
 }
 /** The sentence that says what happens next for this viewer, from the item's eligible actions. */
 export function nextStep(item: AttentionItem) {
@@ -227,9 +255,11 @@ export function nextStep(item: AttentionItem) {
 				? "Fix the failure in your tools, publish a repaired revision and propose it"
 				: "Record the required evidence through your tools, or publish a repaired revision";
 		case "reconcile_with_git":
+			if (item.blockers.some((b) => b.kind === "canonical_relation" && b.relation === "unrelated"))
+				return "Inspect the unrelated Git histories in the workspace before choosing how to reconcile them";
 			return item.subject === "change"
-				? `Merge canonical ${short(item.blockers.flatMap((b) => (b.kind === "base_stale" ? [b.canonical] : []))[0])} with Git, publish and propose the new revision`
-				: "Merge canonical with Git, then publish for fresh review";
+				? `Merge canonical ${short(item.blockers.flatMap((b) => (b.kind === "base_stale" ? [b.canonical] : []))[0])} with Git in the workspace, verify, push, publish and propose the new revision`
+				: "Merge canonical with Git in the workspace, verify, push and publish for fresh review";
 		default:
 			return waitingOn(item);
 	}
@@ -300,6 +330,7 @@ export function attention(view: RepositorySnapshot) {
 		mine: items.filter((item) => item.mine).length,
 		ancestryUnavailable: view.attention?.ancestryUnavailable ?? 0,
 		overlaps: view.overlaps.length,
+		unproposed: live.filter((w) => unproposed(view, w)).length,
 		quiet: live.filter((w) => w.state === "disconnected").length,
 	};
 }

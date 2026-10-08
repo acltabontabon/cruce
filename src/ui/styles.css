@@ -226,6 +226,7 @@ body {
 	background: var(--surface);
 	color: var(--text);
 	font-size: 13px;
+	line-height: 1.4;
 }
 :where(.shell, .welcome) input::placeholder,
 :where(.shell, .welcome) textarea::placeholder {
@@ -1497,16 +1498,51 @@ body {
 	overflow-wrap: anywhere;
 }
 .row-meta {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: baseline;
+	display: block;
+	line-height: 1.6;
 	color: var(--text-muted);
 	font-size: 12.5px;
 }
 .row-meta > * + *::before {
-	content: "·";
-	margin: 0 7px;
+	content: "\00a0·\00a0";
 	color: var(--border-strong);
+}
+.row-meta > * {
+	display: inline;
+}
+/* Repository columns stay aligned even when names or attention summaries wrap. */
+:where(.shell) .repo-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 150px minmax(0, 180px) 16px;
+	gap: 16px;
+}
+.repo-row .row-main {
+	grid-column: 1;
+}
+.repo-row .mini-lanes {
+	grid-column: 2;
+}
+.repo-row > :is(.row-pills, .row-quiet) {
+	grid-column: 3;
+}
+.repo-row .row-arrow {
+	grid-column: 4;
+}
+.namespace-meta {
+	display: grid;
+	gap: 2px;
+	color: var(--text-muted);
+	font-size: 12.5px;
+	line-height: 1.6;
+}
+.namespace-storage {
+	color: var(--tone-warning);
+}
+:where(.shell) .namespace-link {
+	align-items: start;
+}
+.namespace-link :is(.initials, .row-arrow) {
+	margin-top: 2px;
 }
 .row-meta code {
 	color: var(--accent);
@@ -1571,6 +1607,28 @@ body {
 .row-meta .owner {
 	color: var(--text);
 	font-weight: 550;
+}
+/* One summary above the workspace list: what is waiting for a proposal and which paths several workspaces report. */
+.workspace-brief {
+	display: grid;
+	gap: 10px;
+	margin: 0 0 14px;
+	padding: 12px 14px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--surface);
+	font-size: 13.5px;
+}
+.workspace-brief p {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+.workspace-brief section {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px 14px;
 }
 .row-blocker {
 	color: var(--text-muted);
@@ -2973,14 +3031,19 @@ details.group[open] > summary::before {
 }
 .form-fields {
 	display: grid;
-	grid-template-columns: 1fr 1fr;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	align-items: start;
 	gap: 16px;
 }
 .repository-fields {
 	grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
 }
 .field {
+	min-width: 0;
 	margin: 0 0 18px;
+}
+:where(.shell, .welcome) .field > label {
+	margin: 0;
 }
 .prefixed {
 	display: flex;
@@ -3325,6 +3388,20 @@ main[data-screen="settings"] > form {
 		padding-inline: 24px;
 	}
 }
+@container console (min-width: 720px) and (max-width: 1279px) {
+	:where(.shell) .repo-row {
+		grid-template-columns: minmax(0, 1fr) minmax(0, 180px) 16px;
+	}
+	.repo-row .mini-lanes {
+		display: none;
+	}
+	.repo-row > :is(.row-pills, .row-quiet) {
+		grid-column: 2;
+	}
+	.repo-row .row-arrow {
+		grid-column: 3;
+	}
+}
 @container console (max-width: 1023px) {
 	.overview,
 	.review-layout {
@@ -3484,11 +3561,25 @@ main[data-screen="settings"] > form {
 		order: 4;
 		margin-left: 30px;
 	}
-	.workspace-row .row-pills,
-	.repo-row .row-pills {
+	.workspace-row .row-pills {
 		flex-basis: 100%;
 		order: 4;
 		padding-left: 30px;
+	}
+	:where(.shell) .repo-row {
+		grid-template-columns: minmax(0, 1fr) 16px;
+		gap: 6px 14px;
+	}
+	.repo-row .row-arrow {
+		grid-column: 2;
+		grid-row: 1;
+		align-self: start;
+		margin-top: 2px;
+	}
+	.repo-row > :is(.row-pills, .row-quiet) {
+		grid-column: 1;
+		grid-row: 2;
+		justify-content: flex-start;
 	}
 	.repo-row .mini-lanes {
 		display: none;
@@ -3500,10 +3591,23 @@ main[data-screen="settings"] > form {
 		border-top: 0;
 	}
 	:where(.shell) .decision-row {
-		flex-wrap: wrap;
+		display: grid;
+		grid-template-columns: 4px minmax(0, 1fr);
+		gap: 10px 14px;
+	}
+	.decision-edge {
+		grid-column: 1;
+		grid-row: 1 / span 2;
+	}
+	.decision-row .row-main {
+		grid-column: 2;
+		grid-row: 1;
 	}
 	.decision-action {
-		margin-left: 18px;
+		grid-column: 2;
+		grid-row: 2;
+		justify-self: start;
+		margin-left: 0;
 	}
 	.facts {
 		grid-template-columns: minmax(0, 1fr);
@@ -3543,81 +3647,6 @@ main[data-screen="settings"] > form {
 	}
 	.change-meta > span:not(.pill, .lane-bullet) {
 		flex-basis: 100%;
-	}
-}
-/* ---------- sign-in ---------- */
-.sign-in {
-	display: grid;
-	grid-template-rows: auto 1fr;
-	min-height: 100dvh;
-	padding: 6px 32px;
-	background: var(--bg);
-	color: var(--text);
-}
-.sign-in > header {
-	display: flex;
-	align-items: center;
-	min-height: var(--head-h);
-}
-.sign-in .brand-name {
-	display: inline;
-}
-.sign-in-panel {
-	align-self: center;
-	justify-self: center;
-	width: min(100%, 360px);
-	padding: 24px 0 18vh;
-}
-.sign-in h1 {
-	margin: 0 0 8px;
-	font-size: 24px;
-	font-weight: 600;
-	letter-spacing: -0.015em;
-	line-height: 1.25;
-}
-.sign-in-lead {
-	margin: 0 0 24px;
-	color: var(--text-muted);
-	font-size: 14px;
-	line-height: 1.5;
-}
-.sign-in-continue {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	min-height: 32px;
-	padding: 5px 12px;
-	border: 1px solid var(--accent);
-	border-radius: var(--r-md);
-	background: var(--accent);
-	color: var(--on-accent);
-	font-size: 13px;
-	font-weight: 550;
-	line-height: 1.4;
-	text-decoration: none;
-	transition:
-		background-color var(--fast) var(--ease),
-		border-color var(--fast) var(--ease);
-}
-.sign-in-continue:hover {
-	border-color: var(--accent-hover);
-	background: var(--accent-hover);
-}
-.sign-in a:focus-visible {
-	outline: 2px solid var(--focus);
-	outline-offset: 2px;
-}
-.sign-in-note {
-	margin: 20px 0 0;
-	padding-top: 16px;
-	border-top: 1px solid var(--border-subtle);
-	color: var(--text-faint);
-	font-size: 12px;
-	line-height: 1.5;
-}
-@media (max-width: 600px) {
-	.sign-in {
-		padding: 6px 16px;
 	}
 }
 /* ---------- agent connections ---------- */
@@ -3697,8 +3726,7 @@ main[data-screen="settings"] > form {
 	font-size: 12px;
 }
 .connection-abilities li + li::before {
-	content: "·";
-	margin: 0 7px;
+	content: "\00a0·\00a0";
 	color: var(--border-strong);
 }
 :where(.shell) .connection-dates {

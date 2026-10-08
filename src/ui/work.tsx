@@ -2,6 +2,7 @@ import { useState } from "react";
 import { reportFreshness } from "../core/reconciliation.ts";
 import { gitRemotePath } from "../shared/git-access.ts";
 import type { RepositorySnapshot, Workspace } from "../shared/platform.ts";
+import { Form } from "./controls.tsx";
 import { BackLink, CopyCommand, Icon, Pill, Section } from "./design.tsx";
 import { WorkspaceUpdateInspection } from "./inspect.tsx";
 import { laneIndex } from "./lanes.ts";
@@ -20,10 +21,13 @@ import {
 	changeStatus,
 	ended,
 	nextStep,
+	overlapGroups,
 	overlapsFor,
 	ownerName,
 	type People,
+	RECONCILIATION_GUIDANCE,
 	short,
+	unproposed,
 	waitingOn,
 	workedBy,
 	workspaceStatus,
@@ -54,6 +58,80 @@ function attachmentText(w: Workspace) {
 	return "Waiting for a checkout to attach";
 }
 
+/** One line per row; the paths themselves are listed once above the list and in full on the workspace page. */
+function OverlapSummary({ overlaps }: { overlaps: ReturnType<typeof overlapsFor> }) {
+	const others = new Set(overlaps.flatMap((o) => o.others));
+	return (
+		<small className="overlap-note" title={overlaps.map((o) => o.path).join(", ")}>
+			{overlaps.length === 1 ? "1 reported path" : `${overlaps.length} reported paths`} shared with{" "}
+			{others.size === 1 ? [...others][0] : `${others.size} other workspaces`}
+		</small>
+	);
+}
+
+/**
+ * What the list means as a whole and what to do next: published work waiting for a proposal, and paths several
+ * workspaces report. Advisory only; it proposes nothing on its own and never orders or schedules the work.
+ */
+function WorkspaceBrief({ view, who, execute }: { view: RepositorySnapshot; who: People; execute: Execute }) {
+	const [error, setError] = useState(""),
+		[busy, setBusy] = useState(false);
+	const waiting = view.workspaces.flatMap((w) => {
+		const artifact = unproposed(view, w);
+		return artifact ? [{ w, artifact }] : [];
+	});
+	const mine = view.permissions.write ? waiting.filter(({ w }) => w.ownerId === who.viewerId) : [];
+	const groups = overlapGroups(view);
+	if (!waiting.length && !groups.length) return null;
+	return (
+		<div className="workspace-brief">
+			{waiting.length > 0 && (
+				<section aria-label="Published work not yet proposed">
+					<p>
+						<strong>
+							{waiting.length} published {waiting.length === 1 ? "revision has" : "revisions have"} no change yet.
+						</strong>{" "}
+						Publishing retains the exact revision; a human can only review it once it is proposed as a change. Ask the agent to propose it,
+						or propose it here.
+					</p>
+					{mine.length > 0 && (
+						<button
+							type="button"
+							disabled={busy}
+							onClick={async () => {
+								setBusy(true);
+								setError("");
+								try {
+									for (const { artifact } of mine)
+										await execute({ tool: "create_proposal", artifactId: artifact.id, title: artifact.title });
+								} catch (e) {
+									setError((e as Error).message);
+								} finally {
+									setBusy(false);
+								}
+							}}
+						>
+							{busy ? "Proposing…" : `Propose ${mine.length === 1 ? "this revision" : `all ${mine.length} for review`}`}
+						</button>
+					)}
+					{error && <p role="alert">{error}</p>}
+				</section>
+			)}
+			{groups.slice(0, 3).map((group) => (
+				<p key={group.workspaces.join("|")} className="overlap-note">
+					{group.paths.length} {group.paths.length === 1 ? "path is" : "paths are"} reported by{" "}
+					{group.workspaces.length === view.workspaces.filter((w) => !ended(w)).length
+						? `all ${group.workspaces.length} workspaces`
+						: group.workspaces.map((id) => view.workspaces.find((w) => w.id === id)?.title ?? "another workspace").join(", ")}
+					: {group.paths.slice(0, 6).join(", ")}
+					{group.paths.length > 6 ? " and more" : ""}. A heads-up, not a conflict. Whichever change is promoted first moves canonical; the
+					others then take a normal Git update, which is where these paths get merged.
+				</p>
+			))}
+		</div>
+	);
+}
+
 function WorkspaceRow({
 	view,
 	w,
@@ -72,6 +150,7 @@ function WorkspaceRow({
 	const status = workspaceStatus(w),
 		relation = canonicalRelation(view, w),
 		overlaps = overlapsFor(view, w),
+		waiting = unproposed(view, w),
 		item = attentionItem(view, w.id),
 		change = view.proposals.filter((p) => p.workspaceId === w.id).sort((a, b) => b.number - a.number)[0];
 	const changeLabel = change && changeStatus(view, change);
@@ -100,15 +179,17 @@ function WorkspaceRow({
 						{blockerSummary(item)} · {item.mine ? ACTION_LABELS[item.actions[0]] : waitingOn(item)}
 					</small>
 				)}
-				{overlaps.length > 0 && (
-					<small className="overlap-note">
-						Shares reported paths {overlaps.map((o) => o.path).join(", ")} with {[...new Set(overlaps.flatMap((o) => o.others))].join(", ")}
+				{waiting && !item && (
+					<small className="row-blocker">
+						Published {short(waiting.revision)} · no change yet · <span className="next-mine">Propose it for review</span>
 					</small>
 				)}
+				{overlaps.length > 0 && <OverlapSummary overlaps={overlaps} />}
 			</span>
 			<span className="row-pills">
 				<Pill tone={status.tone}>{status.label}</Pill>
 				{!ended(w) && <Pill tone={relation.tone}>{relation.label}</Pill>}
+				{waiting && !change && <Pill tone="accent">Not proposed</Pill>}
 				{change && changeLabel && <Pill tone={changeLabel.tone}>{`#${change.number} ${changeLabel.label}`}</Pill>}
 			</span>
 			<Icon name="arrow" className="row-arrow" />
@@ -211,15 +292,33 @@ function Reconciliation({ view, open }: { view: RepositorySnapshot; open: Open }
 function matches(view: RepositorySnapshot, w: Workspace, filter: string, viewerId?: string) {
 	if (filter === "mine") return w.ownerId === viewerId;
 	if (filter === "reconcile") return attentionItem(view, w.id)?.group === "reconciliation";
+	if (filter === "unproposed") return !!unproposed(view, w);
 	if (filter.startsWith("owner:")) return w.ownerId === filter.slice(6);
 	return true;
 }
 
-export function WorkspaceList({ view, open, who, filter = "" }: { view: RepositorySnapshot; open: Open; who: People; filter?: string }) {
+export function WorkspaceList({
+	view,
+	open,
+	who,
+	execute,
+	filter = "",
+}: {
+	view: RepositorySnapshot;
+	open: Open;
+	who: People;
+	execute: Execute;
+	filter?: string;
+}) {
 	const [focus, setFocus] = useState<string>();
 	const owners = [...new Set(view.workspaces.map((w) => w.ownerId))];
 	const active =
-		filter === "mine" || filter === "reconcile" || (filter.startsWith("owner:") && owners.includes(filter.slice(6))) ? filter : "";
+		filter === "mine" ||
+		filter === "reconcile" ||
+		filter === "unproposed" ||
+		(filter.startsWith("owner:") && owners.includes(filter.slice(6)))
+			? filter
+			: "";
 	const sorted = [...view.workspaces]
 		.filter((w) => matches(view, w, active, who.viewerId))
 		.sort((a, b) => b.lastActivity - a.lastActivity || a.id.localeCompare(b.id));
@@ -235,6 +334,8 @@ export function WorkspaceList({ view, open, who, filter = "" }: { view: Reposito
 					<h2>{active ? "Matching workspaces" : "Active workspaces"}</h2>
 					<span className="panel-count">{live.length}</span>
 				</div>
+				{view.attention?.items.some((item) => item.group === "reconciliation") && <p className="panel-note">{RECONCILIATION_GUIDANCE}</p>}
+				<WorkspaceBrief view={view} who={who} execute={execute} />
 				<div className="list-filters">
 					<nav className="segmented filters" aria-label="Filter workspaces">
 						<button type="button" aria-pressed={!active} onClick={() => open("workspaces")}>
@@ -244,7 +345,10 @@ export function WorkspaceList({ view, open, who, filter = "" }: { view: Reposito
 							Mine
 						</button>
 						<button type="button" aria-pressed={active === "reconcile"} onClick={() => open("workspaces", undefined, "reconcile")}>
-							Needs reconciliation
+							Needs Git update
+						</button>
+						<button type="button" aria-pressed={active === "unproposed"} onClick={() => open("workspaces", undefined, "unproposed")}>
+							Not proposed
 						</button>
 					</nav>
 					{owners.length > 1 && (
@@ -389,6 +493,7 @@ export function WorkspaceDetail({
 		cleanup = view.forkCleanup[w.id],
 		changes = view.proposals.filter((p) => p.workspaceId === w.id).sort((a, b) => b.number - a.number),
 		published = view.artifacts.filter((a) => a.workspaceId === w.id && a.kind === "source"),
+		waiting = view.permissions.write && w.ownerId === who.viewerId ? unproposed(view, w) : undefined,
 		activity = view.activity
 			.filter((e) => e.ids.includes(w.id))
 			.slice(-12)
@@ -462,7 +567,7 @@ export function WorkspaceDetail({
 						<>
 							<dt>Decision state</dt>
 							<dd>
-								{blockerSummary(item)}. {nextStep(item)}.
+								{blockerSummary(item)}. {nextStep(item)}.{item.group === "reconciliation" && ` ${RECONCILIATION_GUIDANCE}`}
 							</dd>
 						</>
 					)}
@@ -552,6 +657,23 @@ export function WorkspaceDetail({
 									? "Published, but not proposed for review yet."
 									: "Nothing published yet. Push commits, then publish a revision."}
 							</p>
+						)}
+						{waiting && (
+							<Form
+								label="Propose for review"
+								submit={(d) =>
+									execute({ tool: "create_proposal", artifactId: waiting.id, title: String(d.get("title") ?? "").trim() || waiting.title })
+								}
+							>
+								<label>
+									Change title
+									<input name="title" defaultValue={w.title} required />
+								</label>
+								<small className="muted">
+									Proposes exactly <code title={waiting.revision}>{short(waiting.revision)}</code>. Nothing is promoted until a maintainer
+									approves it.
+								</small>
+							</Form>
 						)}
 					</Section>
 					{w.changes.length > 0 && (

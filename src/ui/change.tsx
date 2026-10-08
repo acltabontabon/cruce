@@ -14,6 +14,7 @@ import {
 	nextStep,
 	ownerName,
 	type People,
+	RECONCILIATION_GUIDANCE,
 	short,
 	throughConnection,
 } from "./status.ts";
@@ -139,6 +140,7 @@ function ReviewChecklist({ view, p, execute, busy }: { view: RepositorySnapshot;
 			<p className="next-action" role="status">
 				Next: {next}
 			</p>
+			{item?.group === "reconciliation" && <p className="panel-note">{RECONCILIATION_GUIDANCE}</p>}
 			{item && item.blockers.length > 0 && (
 				<p className="review-blockers">
 					{item.blockers.length === 1 ? "1 blocker" : `${item.blockers.length} blockers`}: {item.blockers.map(blockerText).join(" · ")}

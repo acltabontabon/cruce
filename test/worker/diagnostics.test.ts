@@ -133,6 +133,7 @@ describe("MCP scope filtering", () => {
 		expect(names).toContain("get_source");
 		expect(names).not.toContain("publish_revision");
 		expect(names).not.toContain("start_workspace");
+		expect(listed.tools.some((tool) => tool.name === "preview_reconciliation")).toBe(false);
 		const call = { method: "tools/call", params: { name: "publish_revision", arguments: { unexpected: secret } } };
 		expect(await mcp(execute, {}, ["cruce:read"], call)).toEqual({
 			isError: true,

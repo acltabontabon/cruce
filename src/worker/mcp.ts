@@ -19,7 +19,7 @@ export function cruceServer(execute: (command: MachineCommand) => Promise<unknow
 	const dispatch = async (name: string, arguments_: unknown) =>
 		withDiagnostics({ tool: name }, async () => {
 			try {
-				const tool = CRUCE_TOOLS.find((t) => t.name === name && (!scopes || scopes.includes(t.scope)));
+				const tool = CRUCE_TOOLS.find((t) => t.name === name && !t.bridgeOnly && (!scopes || scopes.includes(t.scope)));
 				if (!tool) throw new DomainError(403, "Agent capability denied");
 				const args = z.object(toolInputShape(tool)).parse(arguments_ ?? {});
 				await correlate(args);
@@ -38,7 +38,7 @@ export function cruceServer(execute: (command: MachineCommand) => Promise<unknow
 			}
 		});
 	for (const tool of CRUCE_TOOLS) {
-		if (scopes && !scopes.includes(tool.scope)) continue;
+		if (tool.bridgeOnly || (scopes && !scopes.includes(tool.scope))) continue;
 		const cost =
 			tool.class === "resource" ? ` Resource action: ${COST_LABELS[tool.cost]}; subject to namespace and repository policy.` : "";
 		server.registerTool(

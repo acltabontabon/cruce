@@ -2,8 +2,10 @@ import type { Scope } from "../core/capabilities.ts";
 import { DomainError } from "../core/errors.ts";
 import { type Authority, type Command, CommandInput, type CostClass, type ResourceAction } from "./platform.ts";
 export const CRUCE_INSTRUCTIONS =
-	"Cruce is the durable Git coordination plane for this repository: Namespace → Repository → Workspace. A workspace is a durable stream of Git work owned by a user, not by this session; it has an immutable baseline and its own fork, and may be continued later from another session, tool or machine. Start a workspace at an exact Git revision and work only in the dedicated directory the bridge returns. For parallel work, keep each workspace attached in its own directory and pass workspaceId on workspace tools; one bridge can coordinate several workspaces. To continue existing work, call attach_workspace with its workspaceId through the bridge; it returns the local directory without requiring a CLI handoff or MCP restart. Omitted workspaceId uses the bridge's current workspace. Use normal Git to commit and push to the workspace fork; publish_revision retains an exact pushed revision for review. Inspect list_active_workspaces, inspect_overlap and get_workspace_updates at the start and when scope changes: overlap is advisory, not a conflict verdict, and canonical movement means you must fetch, merge, verify and publish a reconciled revision. Propose exact revisions and record evidence for them; reported evidence is not verification. Canonical promotion is a human decision. Cruce does not run, schedule or message agents, and its responsibility ends at canonical Git; CI, release, deployment and runtime management are external. Never discard working changes to refresh a workspace.";
+	"Cruce is the durable Git coordination plane for this repository: Namespace → Repository → Workspace. A workspace is a durable stream of Git work owned by a user, not by this session; it has an immutable baseline and its own fork, and may be continued later from another session, tool or machine. Start a workspace at an exact Git revision and work only in the dedicated directory the bridge returns. For parallel work, keep each workspace attached in its own directory and pass workspaceId on workspace tools; one bridge can coordinate several workspaces. To continue existing work, call attach_workspace with its workspaceId through the bridge; it returns the local directory without requiring a CLI handoff or MCP restart. Omitted workspaceId uses the bridge's current workspace. Use normal Git to commit and push to the workspace fork; publish_revision retains an exact pushed revision but does not request review: when your task's work is done, propose that revision with create_proposal (unless the user asked you to hold it) so a human can review it. Inspect list_active_workspaces, inspect_overlap and get_workspace_updates at the start and when scope changes: overlap is advisory, not a conflict verdict, and inspect updates again before proposing or requesting promotion. When canonical moves, handle routine reconciliation in your own authorized workspace within the user's task scope: preserve working changes, fetch canonical, merge with Git, verify, push, publish and propose the new exact revision with fresh evidence. Use preview_reconciliation through the local bridge for an explicit exact-commit Git merge check; missing source requires a normal Git fetch, and a clean preview still needs verification. Reported shared paths are advisory, including stale or unknown reports. An external host can consume changed repository state from cruce watch --coordination; the host owns agent continuation. The local bridge appends current coordination state to tool responses and exposes a subscribable repository_coordination resource. Inspect it when notified; handle reconciliation within your authorized task before reporting readiness. If work remains when you stop, identify the exact workspace and revision for continuation. Reconciliation does not require human intervention by itself. Ask the user when unresolved conflicts, ambiguous intent or failing checks require their judgment; never infer conflicts from divergence or correctness from a clean merge. Propose exact revisions and record evidence for them; reported evidence is not verification. Canonical promotion is a human decision. Cruce does not run, schedule or message agents, and its responsibility ends at canonical Git; CI, release, deployment and runtime management are external. Never discard working changes to refresh a workspace.";
 export interface Tool {
+	/** Local computation in the bridge; never dispatched to hosted controllers. */
+	bridgeOnly?: boolean;
 	name: string;
 	description: string;
 	scope: Scope;
@@ -39,6 +41,15 @@ const write = (
 	action,
 });
 export const CRUCE_TOOLS: Tool[] = [
+	{
+		...write(
+			"preview_reconciliation",
+			"Explicit local Git merge preview of committed workspace HEAD against accepted canonical. Uses disposable local objects; no provider cost, fetch, checkout/index/ref change, verification or approval. Missing local source is unavailable; fetch with ordinary Git before retrying. Local bridge only.",
+			["workspaceId"],
+			"cruce:read",
+		),
+		bridgeOnly: true,
+	},
 	read("list_namespaces", "List your authorized namespaces."),
 	read("list_repositories", "List repositories authorized for this connection.", ["namespaceId"]),
 	read("get_activity", "Read retained activity in bounded pages; pass the returned cursor for the next page.", ["cursor"]),
@@ -195,6 +206,6 @@ export function toInternalCommand(tool: Tool, args: Record<string, unknown>): Co
 export function authorizeMachine(a: Authority, cmd: Command) {
 	if (a.actor.kind !== "agent") return;
 	const tool = toolByName(cmd.tool);
-	if (!tool || !a.scopes?.includes(tool.scope)) throw new DomainError(403, "Agent capability denied");
+	if (!tool || tool.bridgeOnly || !a.scopes?.includes(tool.scope)) throw new DomainError(403, "Agent capability denied");
 	if (cmd.humanAttested) throw new DomainError(403, "Agents cannot attest human verification");
 }

@@ -7,10 +7,11 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { McpServer } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { DEFAULT_AGENT_SCOPES } from "../src/core/capabilities.ts";
-import type { Command, ExecutionContext, Workspace } from "../src/shared/platform.ts";
+import type { Command, ExecutionContext, RepositorySnapshot, Workspace } from "../src/shared/platform.ts";
 import { CRUCE_INSTRUCTIONS, CRUCE_TOOLS, toolByName, toolInputShape } from "../src/shared/tools.ts";
 import { CRUCE_VERSION } from "../src/shared/version.ts";
 import { configureClient } from "./client-config.ts";
+import { coordinationContext, coordinationResource } from "./coordination.ts";
 import {
 	cleanupExecution,
 	context,
@@ -23,6 +24,7 @@ import {
 import { configureCanonicalCredentials } from "./git-auth.ts";
 import { configureFork, continueFromFork } from "./git-remotes.ts";
 import { git } from "./local-git.ts";
+import { previewReconciliation } from "./merge-preview.ts";
 import { Credentials, login } from "./oauth.ts";
 import { withStateLock, writeState } from "./state-file.ts";
 import { findWorkspaceState, registerWorkspaceState } from "./workspace-state.ts";
@@ -55,7 +57,7 @@ async function main() {
 	const operation = args[0] ?? "help";
 	if (operation === "help" || args.includes("--help")) {
 		process.stdout.write(
-			"Cruce — Git coordination for parallel agentic development\n\ncruce auth --server URL --namespace ID --repository ID   authorize Git\ncruce connect --namespace ID --repository ID --server URL [--client codex|claude|cursor]\ncruce human --namespace ID --repository ID --server URL\ncruce start --title TEXT\ncruce mcp [--client TOOL]\ncruce watch\ncruce publish [--title TEXT]\ncruce detach                   release this checkout; the workspace continues elsewhere\ncruce resume [--workspace ID]  reattach, or continue a workspace here from its pushed head\ncruce end [--cleanup]\n",
+			"Cruce — Git coordination for parallel agentic development\n\ncruce auth --server URL --namespace ID --repository ID   authorize Git\ncruce connect --namespace ID --repository ID --server URL [--client codex|claude|cursor]\ncruce human --namespace ID --repository ID --server URL\ncruce start --title TEXT\ncruce mcp [--client TOOL]\ncruce watch [--coordination]   emit changed coordination state for an external host\ncruce preview [--workspace ID]  check an exact-commit Git merge locally\ncruce publish [--title TEXT]\ncruce detach                   release this checkout; the workspace continues elsewhere\ncruce resume [--workspace ID]  reattach, or continue a workspace here from its pushed head\ncruce end [--cleanup]\n",
 		);
 		return;
 	}
@@ -249,7 +251,15 @@ async function main() {
 				}
 			}
 			const requested = raw.workspaceId ?? option("workspace");
-			const localTools = ["heartbeat", "report_change", "publish_revision", "detach_workspace", "end_workspace", "attach_workspace"];
+			const localTools = [
+				"heartbeat",
+				"report_change",
+				"publish_revision",
+				"detach_workspace",
+				"end_workspace",
+				"attach_workspace",
+				"preview_reconciliation",
+			];
 			if (requested && (localTools.includes(raw.tool) || toolByName(raw.tool)?.mutation)) {
 				const current = (await readFile(defaultConfigFile, "utf8")
 					.then(JSON.parse)
@@ -324,6 +334,30 @@ async function main() {
 					};
 				}
 				const directory = connection.directory ?? root;
+				if (raw.tool === "preview_reconciliation") {
+					if (!connection.workspaceId || !connection.directory) throw new Error("Attach a workspace before previewing reconciliation");
+					const snapshot = (await call({
+						tool: "get_repository",
+						namespaceId: connection.namespaceId,
+						repositoryId: connection.repositoryId,
+					})) as RepositorySnapshot;
+					const workspace = snapshot.workspaces.find((w) => w.id === connection.workspaceId);
+					if (!workspace || workspace.ownerId !== snapshot.attention?.viewerId || !snapshot.permissions.write)
+						throw new Error("Preview requires your own currently authorized workspace");
+					if (
+						snapshot.observedCanonical &&
+						(snapshot.observedCanonical.deleted || snapshot.observedCanonical.revision !== snapshot.sourceHead)
+					)
+						return {
+							workspaceId: workspace.id,
+							status: "unavailable",
+							reason:
+								"Observed canonical differs from accepted history. Maintainer reconciliation is required before previewing canonical.",
+						};
+
+					return { workspaceId: workspace.id, ...(await previewReconciliation(directory, snapshot.sourceHead)) };
+				}
+
 				if (["heartbeat", "report_change", "attach_workspace"].includes(raw.tool)) {
 					if (!connection.execution) throw new Error("No execution is attached here; run cruce resume");
 					command.execution = connection.execution;
@@ -477,6 +511,18 @@ async function main() {
 		if (operation === "mcp") {
 			if (connection.humanToken) throw new Error("Agent MCP cannot use human terminal credentials; connect the agent separately");
 			const server = new McpServer({ name: "Cruce local bridge", version: CRUCE_VERSION }, { instructions: CRUCE_INSTRUCTIONS });
+			const coordination = coordinationResource(
+				server,
+				`cruce://coordination/${encodeURIComponent(repositoryConnection.namespaceId)}/${encodeURIComponent(repositoryConnection.repositoryId)}`,
+				async () =>
+					coordinationContext(
+						(await call({
+							tool: "get_repository",
+							namespaceId: repositoryConnection.namespaceId,
+							repositoryId: repositoryConnection.repositoryId,
+						})) as RepositorySnapshot,
+					),
+			);
 			for (const tool of CRUCE_TOOLS) {
 				// The bridge supplies identities and the attached execution from local state.
 				const { namespaceId: _, repositoryId: __, idempotencyKey: ____, execution: _____, ...shape } = toolInputShape(tool);
@@ -489,14 +535,29 @@ async function main() {
 					async (values) => {
 						try {
 							const result = await execute({ ...values, tool: tool.name });
-							return { content: [{ type: "text" as const, text: JSON.stringify(result) }], structuredContent: result };
+							return {
+								content: [
+									{ type: "text" as const, text: JSON.stringify(result) },
+									{ type: "text" as const, text: `Current coordination: ${JSON.stringify(await coordination.refresh())}` },
+								],
+								structuredContent: result,
+							};
 						} catch (e) {
-							return { isError: true, content: [{ type: "text" as const, text: (e as Error).message }] };
+							return {
+								isError: true,
+								content: [
+									{ type: "text" as const, text: (e as Error).message },
+									{ type: "text" as const, text: `Current coordination: ${JSON.stringify(await coordination.refresh())}` },
+								],
+							};
 						}
 					},
 				);
 			}
-			const timer = setInterval(heartbeat, 30000);
+			const timer = setInterval(() => {
+				heartbeat();
+				void coordination.poll().catch((e) => process.stderr.write(`${(e as Error).message}\n`));
+			}, 30000);
 			timer.unref();
 			await server.connect(new StdioServerTransport());
 			await new Promise<void>((done) => {
@@ -510,6 +571,50 @@ async function main() {
 				});
 			});
 			await server.close();
+			return;
+		}
+		if (operation === "watch" && args.includes("--coordination")) {
+			let previous: string | undefined;
+			let checking = false;
+			const poll = async () => {
+				if (checking) return;
+				checking = true;
+				try {
+					let context: ReturnType<typeof coordinationContext>;
+					try {
+						context = coordinationContext(
+							(await call({
+								tool: "get_repository",
+								namespaceId: repositoryConnection.namespaceId,
+								repositoryId: repositoryConnection.repositoryId,
+							})) as RepositorySnapshot,
+						);
+					} catch {
+						context = { available: false, instruction: "Coordination state unavailable; recheck access before continuing work." };
+					}
+					const next = JSON.stringify({
+						namespaceId: repositoryConnection.namespaceId,
+						repositoryId: repositoryConnection.repositoryId,
+						...context,
+					});
+					if (next !== previous) process.stdout.write(`${next}\n`);
+					previous = next;
+				} finally {
+					checking = false;
+				}
+			};
+			await poll();
+			const timer = setInterval(() => {
+				void poll();
+			}, 30000);
+			await new Promise<void>((done) => {
+				const stop = () => {
+					clearInterval(timer);
+					done();
+				};
+				process.once("SIGINT", stop);
+				process.once("SIGTERM", stop);
+			});
 			return;
 		}
 		if (operation === "watch") {
@@ -527,6 +632,7 @@ async function main() {
 			{
 				start: "start_workspace",
 				publish: "publish_revision",
+				preview: "preview_reconciliation",
 				detach: "detach_workspace",
 				end: "end_workspace",
 				check: "get_repository",

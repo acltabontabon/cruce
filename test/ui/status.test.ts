@@ -12,9 +12,11 @@ import {
 	changeGroups,
 	changeStatus,
 	nextStep,
+	overlapGroups,
 	overlapsFor,
 	ownerName,
 	throughConnection,
+	unproposed,
 	waitingOn,
 	workedBy,
 } from "../../src/ui/status.ts";
@@ -94,7 +96,7 @@ describe("console status language", () => {
 		expect(workedBy(continued)).toBe("Started through Claude Code · attached through Codex");
 		expect(workedBy(workspace("b"))).toBe("Started through Claude Code");
 	});
-	it("classifies changes by what a person should do", () => {
+	it("classifies changes by the next action", () => {
 		const v = view({
 			sourceHead: base,
 			workspaces: [workspace("w1"), workspace("w2"), workspace("w3")],
@@ -114,7 +116,17 @@ describe("console status language", () => {
 		});
 		expect(changeStatus(v, v.proposals[0])).toMatchObject({ key: "superseded", label: "Superseded by #3" });
 		expect(changeStatus(v, v.proposals[1])).toMatchObject({ key: "review", label: "Needs human review" });
-		expect(changeStatus(v, v.proposals[2])).toMatchObject({ key: "reconciliation", detail: expect.stringContaining("bbbbbbbb") });
+		expect(changeStatus(v, v.proposals[2])).toMatchObject({
+			key: "reconciliation",
+			label: "Needs Git update",
+			detail: expect.stringContaining("bbbbbbbb"),
+		});
+		const stale = v.attention!.items.find((item) => item.id === "stale")!;
+		expect(nextStep(stale)).toContain("verify, push, publish and propose the new revision");
+		expect(waitingOn(stale)).toBe("Waiting on the owner or their authorized agent");
+		expect(nextStep({ ...stale, blockers: [{ kind: "canonical_relation", relation: "unrelated", canonical: moved }] })).toBe(
+			"Inspect the unrelated Git histories in the workspace before choosing how to reconcile them",
+		);
 		// A later change from the same workspace supersedes; a promoted later change does too.
 		expect(changeStatus(v, v.proposals[3])).toMatchObject({ key: "superseded", label: "Superseded by #5" });
 		expect(changeStatus(v, v.proposals[4])).toMatchObject({ key: "promoted" });
@@ -146,6 +158,60 @@ describe("console status language", () => {
 		expect(canonicalRelation(v, v.workspaces[1])).toMatchObject({ key: "current" });
 		expect(overlapsFor(v, v.workspaces[0])).toEqual([{ path: "README.md", others: ["Timeouts"], observedAt: 0 }]);
 		expect(attention(v)).toMatchObject({ review: 1, promote: 0, reconcileChanges: 0, reconcileWorkspaces: 0, overlaps: 1 });
+	});
+	it("flags published work that no change proposes and groups shared paths once", () => {
+		const published = "c".repeat(40);
+		const source = (workspaceId: string, revision: string) =>
+			({
+				id: `a-${workspaceId}`,
+				workspaceId,
+				revision,
+				kind: "source",
+				title: workspaceId,
+				at: 1,
+			}) as unknown as RepositorySnapshot["artifacts"][number];
+		const ahead = (workspaceId: string) => ({
+			workspaceId,
+			revision: published,
+			basis: "published" as const,
+			canonicalRevision: base,
+			relation: "ahead" as const,
+			report: { state: "fresh" } as never,
+			incorporationCounts: { present: 0, missing: 0, unknown: 0 },
+			incorporationTruncated: false,
+			incorporation: [],
+		});
+		const v = view({
+			sourceHead: base,
+			workspaces: [
+				workspace("a", { publishedRevision: published }),
+				workspace("b", { publishedRevision: published }),
+				workspace("c"),
+				workspace("done", { publishedRevision: published, state: "completed" }),
+			],
+			artifacts: [source("a", published), source("b", published), source("done", published)],
+			proposals: [proposal("p", 1, "b", { revision: published })],
+			reconciliation: {
+				asOf: 0,
+				observation: { state: "current" } as never,
+				workspaces: [ahead("a"), ahead("b"), ahead("done")],
+				proposals: [],
+			},
+			overlaps: ["pom.xml", ".gitignore"].map((surface) => ({
+				id: `file:${surface}`,
+				kind: "file" as const,
+				surface,
+				workspaces: ["a", "b", "c"],
+				evidence: "reported" as const,
+				observedAt: 0,
+			})),
+		});
+		expect(unproposed(v, v.workspaces[0])?.id).toBe("a-a");
+		expect(unproposed(v, v.workspaces[1])).toBeUndefined();
+		expect(unproposed(v, v.workspaces[2])).toBeUndefined();
+		expect(unproposed(v, v.workspaces[3])).toBeUndefined();
+		expect(attention(v).unproposed).toBe(1);
+		expect(overlapGroups(v)).toEqual([{ workspaces: ["a", "b", "c"], paths: ["pom.xml", ".gitignore"] }]);
 	});
 	it("describes elapsed time plainly", () => {
 		expect(ago(1000, 2000)).toBe("just now");

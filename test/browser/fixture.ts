@@ -259,7 +259,6 @@ export async function fixture() {
 		},
 	];
 	let authenticated = true,
-		signInProvider: string | undefined = "GitHub",
 		sessionFailure = false,
 		sessionDelay = 0;
 	const json = (res: ServerResponse, data: unknown, status = 200) => {
@@ -287,13 +286,12 @@ export async function fixture() {
 			}
 			if (url.pathname === "/__fixture/session" && req.method === "POST") {
 				if (typeof body.authenticated === "boolean") authenticated = body.authenticated;
-				if ("provider" in body) signInProvider = body.provider ?? undefined;
 				sessionFailure = body.failure ?? false;
 				sessionDelay = body.delay ?? 0;
 				return json(res, { configured: true });
 			}
 			if (url.pathname === "/auth/session") {
-				const state = { authenticated, provider: signInProvider },
+				const state = { authenticated },
 					failure = sessionFailure;
 				if (sessionDelay) await new Promise((resolve) => setTimeout(resolve, sessionDelay));
 				res.setHeader("cache-control", "no-store");

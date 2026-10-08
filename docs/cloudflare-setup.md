@@ -38,11 +38,9 @@ Sign out expires the Cruce cookie and redirects to `/cdn-cgi/access/logout`, end
 
 Agent OAuth connections and paired terminals do not depend on the browser's Access session. They last for their own grant or terminal authorization, and every request still rechecks membership, repository grants, approved repositories and scopes. Removing someone from the Access policy stops their browser sign-in only; to cut off their agents, remove their namespace membership, or have them revoke the connections under **Agent connections** in the avatar menu.
 
-### Cruce sign-in page
+### Browser sign-in
 
-Cruce's own sign-in page (`/sign-in`) sits in front of Access and links to `/auth/login`. It is public under the reviewed homepage configuration, which bypasses Access for every path outside the protected application. To skip Cloudflare's login screen entirely, give the Access application exactly one identity provider (for example GitHub, added under **Zero Trust → Settings → Authentication**) and enable **Instant Auth** on the application. The sign-in button then goes straight to that provider. With the one-time PIN or several providers, Access still shows its own page after the button.
-
-Set the optional `CRUCE_SIGN_IN_PROVIDER` to that provider's display name (for example `GitHub`) to label the button **Continue with GitHub**. It is a label only; Access decides how people sign in. Left empty, the button reads **Sign in**.
+The homepage's **Sign in** goes directly to `/auth/login` and Cloudflare Access. Signed-out private links and expired sessions use the same route, retaining their same-origin destination through sign-in. Cruce does not add a separate sign-in form. To skip Cloudflare's provider-selection screen, configure exactly one identity provider and enable **Instant Auth** on the Access application. With one-time PIN or several providers, Access presents its own page.
 
 ### Access login branding
 

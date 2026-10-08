@@ -131,6 +131,7 @@ export function LaneMap({
 			.filter(Boolean)
 			.join(", "),
 	].join(": ");
+	const notProposed = all.filter((l) => l.published && !l.change && ["ahead", "diverged"].includes(l.relation.key)).length;
 	return (
 		<figure
 			ref={mapRef}
@@ -334,7 +335,7 @@ export function LaneMap({
 				</nav>
 			)}
 			<figcaption>
-				{caption}.
+				{caption}.{notProposed > 0 && ` ${notProposed} published, not yet proposed for review.`}
 				{view.overlaps.length > 0 &&
 					` Shared ${view.overlaps.length === 1 ? "path" : "paths"}: ${view.overlaps
 						.slice(0, 3)
@@ -482,6 +483,20 @@ function LanePath({
 						{clip(lane.change.status.label.toLowerCase(), 18)}
 					</text>
 				</>
+			)}
+			{lane.published && !lane.change && ["ahead", "diverged"].includes(lane.relation.key) && (
+				<text
+					x={COL.chg}
+					y={y + 4}
+					textAnchor="middle"
+					fontSize="11"
+					fill="var(--text-muted)"
+					stroke="var(--surface)"
+					strokeWidth="6"
+					paintOrder="stroke"
+				>
+					not proposed
+				</text>
 			)}
 			<text className="lane-title" x={COL.rel} y={y + 1} fontSize="12.5" fontWeight="600" fill={tone(lane.relation.key)}>
 				{clip(lane.relation.label.toLowerCase(), 22)}
@@ -642,9 +657,10 @@ export function LaneStrip({ view, workspace, lane }: { view: RepositorySnapshot;
 
 /** Home's small sketch of a repository: canonical and one short branch per live workspace. */
 export function MiniLanes({ lanes }: { lanes: RepositorySummary["lanes"] }) {
-	const rows = lanes.slice(0, 3);
+	const rows = lanes.slice(0, 3),
+		height = rows.length ? 15 + rows.length * 9 : 16;
 	return (
-		<svg className="mini-lanes" width="150" height="42" viewBox="0 0 150 42" aria-hidden="true">
+		<svg className="mini-lanes" width="150" height={height} viewBox={`0 0 150 ${height}`} aria-hidden="true">
 			<path d="M6 8 H128" stroke="var(--canonical)" strokeWidth="3" strokeLinecap="round" />
 			<circle cx="132" cy="8" r="4.5" fill="var(--bg)" stroke="var(--canonical)" strokeWidth="2.5" />
 			{rows.map((lane, i) => {

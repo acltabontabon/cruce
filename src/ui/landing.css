@@ -1,5 +1,10 @@
 @import "@fontsource-variable/inter";
 
+html:not(:has(.shell, .welcome)),
+body:not(:has(.shell, .welcome)) {
+	background: #f5f5ef;
+}
+
 /* The public homepage and the session screen keep the original paper palette and element styles, whatever the console appearance. */
 :where(.landing, .session-status) {
 	color-scheme: light;
@@ -1005,8 +1010,8 @@
 }
 .session-status {
 	max-width: 520px;
-	margin: 14vh auto;
-	padding: 24px;
+	margin: 0 auto;
+	padding: calc(14vh + 24px) 24px 24px;
 }
 .session-status > img {
 	width: 120px;

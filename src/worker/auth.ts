@@ -19,7 +19,6 @@ export interface AuthEnv {
 	CRUCE_PUBLIC_ORIGIN?: string;
 	CRUCE_ACCESS_ISSUER?: string;
 	CRUCE_ACCESS_AUD?: string;
-	CRUCE_SIGN_IN_PROVIDER?: string;
 }
 export interface Identity {
 	developerId: string;
@@ -144,11 +143,6 @@ export async function consoleIdentity(request: Request, env: AuthEnv): Promise<S
 	const raw = cookie(request, "__Host-cruce");
 	return raw ? validateSession(await unseal<SessionIdentity>(env, raw), env) : requestIdentity(request, env);
 }
-/** The Access identity provider's display name for Cruce's sign-in button. A label only: Access decides how people sign in. */
-export function signInProvider(env: AuthEnv): { provider?: string } {
-	const name = env.CRUCE_SIGN_IN_PROVIDER?.trim();
-	return name && /^[\p{L}\p{N}][\p{L}\p{N} .&'-]{0,39}$/u.test(name) ? { provider: name } : {};
-}
 export async function authRoute(request: Request, env: AuthEnv): Promise<Response | undefined> {
 	const url = new URL(request.url);
 	if (!["/authorize", "/auth/login", "/auth/logout", "/auth/session"].includes(url.pathname)) return;
@@ -158,7 +152,7 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 		const headers = { "cache-control": "no-store" };
 		if (request.method !== "GET") return Response.json({ error: "GET required" }, { status: 405, headers: { ...headers, allow: "GET" } });
 		const raw = cookie(request, "__Host-cruce");
-		if (!raw) return Response.json({ authenticated: false, ...signInProvider(env) }, { headers });
+		if (!raw) return Response.json({ authenticated: false }, { headers });
 		if (!env.CRUCE_SECRET) throw new CoordinationError(503, "Identity encryption not configured");
 		try {
 			const identity = await unseal<SessionIdentity>(env, raw);
@@ -170,10 +164,10 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 			)
 				throw new CoordinationError(401, "Session invalid");
 			await validateSession(identity, env);
-			return Response.json({ authenticated: true, ...signInProvider(env) }, { headers });
+			return Response.json({ authenticated: true }, { headers });
 		} catch (error) {
 			if (![401, 403].includes(domainStatus(error) ?? 500)) throw error;
-			return Response.json({ authenticated: false, ...signInProvider(env) }, { headers });
+			return Response.json({ authenticated: false }, { headers });
 		}
 	}
 	if (url.pathname === "/auth/logout")

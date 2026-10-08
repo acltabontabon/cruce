@@ -18,9 +18,6 @@ export function installationConfig(env, requireLive = false) {
 	}
 	if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.pathname !== "/" || url.search || url.hash)
 		throw new Error("CRUCE_PUBLIC_ORIGIN must be an HTTP(S) origin without credentials, a path or a query");
-	const signInProvider = env.CRUCE_SIGN_IN_PROVIDER?.trim();
-	if (signInProvider && !/^[\p{L}\p{N}][\p{L}\p{N} .&'-]{0,39}$/u.test(signInProvider))
-		throw new Error("CRUCE_SIGN_IN_PROVIDER must be a short display name such as GitHub");
 	if (requireLive) {
 		if (!accountId) throw new Error("Set CLOUDFLARE_ACCOUNT_ID once for this installation");
 		if (!env.CRUCE_PUBLIC_ORIGIN || url.protocol !== "https:" || ["localhost", "127.0.0.1"].includes(url.hostname))

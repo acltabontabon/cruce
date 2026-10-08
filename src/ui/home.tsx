@@ -409,11 +409,13 @@ export function NamespaceHome({
 											<Initials name={w.name} className={w.kind} />
 											<span className="row-main">
 												<strong>{w.name}</strong>
-												<small className="row-meta">
-													<span>{w.kind === "personal" ? "Personal" : "Shared"}</span>
-													{data && <span>{data.role}</span>}
+												<small className="namespace-meta">
+													<span>
+														{w.kind === "personal" ? "Personal" : "Shared"}
+														{data && ` · ${data.role[0].toUpperCase()}${data.role.slice(1)}`}
+													</span>
 													{data && <span>{plural(data.repositories.length, "repository", "repositories")}</span>}
-													{data && !data.storage.ready && <span>Installation storage unavailable</span>}
+													{data && !data.storage.ready && <span className="namespace-storage">Installation storage unavailable</span>}
 												</small>
 											</span>
 											<Icon name="arrow" className="row-arrow" />

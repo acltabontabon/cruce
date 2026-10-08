@@ -58,6 +58,12 @@ cruce watch
 
 `start` alone is not a background monitor. Heartbeats run every 30 seconds; presence shows disconnected after 90 seconds without activity, but the attachment and checkout ownership remain. `resume` reattaches a prepared workspace after an interrupted first attachment. A display label is not an authority boundary; the workspace belongs to its owner, whichever tool connects.
 
+## Reconciliation checks and external continuation
+
+When canonical advances, inspect `get_workspace_updates` for exact changes and reported overlap. Use the bridge's `preview_reconciliation` tool or run `cruce preview --workspace ID` to check committed workspace HEAD against accepted canonical with local Git defaults. The explicit preview leaves the checkout/index/refs untouched, excludes working changes, and reports missing source as unavailable. Fetch canonical with ordinary Git if needed, then retry. A clean preview still needs an actual merge, verification, publication and fresh review. See [preview semantics](mcp.md#explicit-local-git-merge-preview).
+
+An external host can consume `cruce watch --coordination` from the connected repository as a JSON line feed. It emits initial state and meaningful changes, including reported overlap, exact reconciliation needs and continuation workspace IDs. This mode performs coordination reads only; it does not renew presence or run agents. The host supplies continuation behavior and the user's authorization. An idle agent is not automatically resumed by a live bridge or by receiving an MCP resource update.
+
 ## Commit, push and publish
 
 Inside the returned worktree, stage the intended files and use Git:

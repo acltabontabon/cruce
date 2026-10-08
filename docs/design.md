@@ -72,7 +72,7 @@ The avatar opens a compact profile card with name, email, the Appearance control
 
 Retired routes (`overview`, `code`, `work`, `artifacts`) resolve to Changes, Workspaces or History with history replacement, so saved links keep working. Deep links, Back, retries and late-response protection are preserved.
 
-Layout breakpoints use the root container width, including reflow at 200% zoom and at 320px. Rows wrap their status pills on narrow screens; tabs stay visible. Creation forms use dialogs with focus containment. Reduced-motion preference disables animation and transitions.
+Layout breakpoints use the root container width, including reflow at 200% zoom and at 320px. Repository rows use aligned name, sketch, attention and arrow columns; the sketch contracts to its drawn content when there are no workspaces and hides before it would crowd text. On phones, repository attention sits below the title with the same left edge, and decision actions sit below their copy instead of squeezing it into a narrow column. Namespace rows align initials and arrows with the title, followed by separate role, repository-count and storage-status lines. Shared row metadata wraps as inline text with joined separators. Prefixed and ordinary form controls share label spacing and line height. Rows wrap their status pills on narrow screens; tabs stay visible. Creation forms use dialogs with focus containment. Reduced-motion preference disables animation and transitions.
 
 ## Verification
 

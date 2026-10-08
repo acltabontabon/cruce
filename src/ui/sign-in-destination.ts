@@ -6,14 +6,10 @@ function privateDestination(url: URL) {
 	);
 }
 
-export type SignInReason = "requested" | "repository" | "invitation" | "expired";
-
-/** Signed-out visitors see the sign-in page when they asked for it or opened a private link; everyone else sees the homepage. */
-export function signInReason(): SignInReason | undefined {
+/** Private links and explicit sign-in go directly to Access; the public homepage stays public. */
+export function requiresSignIn(): boolean {
 	const url = new URL(location.href);
-	if (url.pathname === "/sign-in") return "requested";
-	if (!privateDestination(url)) return;
-	return url.pathname.startsWith("/invite/") ? "invitation" : "repository";
+	return url.pathname === "/sign-in" || privateDestination(url);
 }
 
 // Keep the existing /auth/login link and redirect. Store only same-origin console navigation,
