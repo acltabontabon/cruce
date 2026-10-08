@@ -39,7 +39,7 @@ async function record(check: string, details: unknown) {
 	console.log(JSON.stringify({ check }));
 }
 const token = () => {
-	const value = credentials.tokens()?.access_token;
+	const value = credentials.data.tokens?.access_token;
 	assert.ok(value, "Authorize this test connection first");
 	return value;
 };
@@ -234,7 +234,7 @@ async function main() {
 		throw new Error("Cleanup remains pending; preserve the operation identity and retained source");
 	}
 	if (action === "revoke") {
-		const tokens = credentials.tokens()!;
+		const tokens = credentials.data.tokens!;
 		const discovery = (await fetch(`${origin}/.well-known/oauth-authorization-server`).then((r) => r.json())) as {
 			revocation_endpoint: string;
 		};
@@ -292,14 +292,14 @@ async function main() {
 				method: "POST",
 				body: new URLSearchParams({
 					grant_type: "refresh_token",
-					refresh_token: credentials.tokens()!.refresh_token!,
+					refresh_token: credentials.data.tokens!.refresh_token!,
 					client_id: credentials.clientInformation()!.client_id,
 					scope,
 					resource: `${origin}/mcp`,
 				}),
 			});
 			assert.equal(response.status, 200, "Test connection refresh must succeed");
-			const tokens = (await response.json()) as NonNullable<ReturnType<Credentials["tokens"]>>;
+			const tokens = (await response.json()) as NonNullable<Credentials["data"]["tokens"]>;
 			await credentials.saveTokens(tokens);
 			return tokens;
 		};

@@ -94,7 +94,7 @@ const promoted = view({
 describe("lane map model", () => {
 	it("draws canonical as recorded promotions in order, ending at the accepted head", () => {
 		expect(trunk(promoted).map((n) => n.revision)).toEqual([first, second, third]);
-		expect(trunk(promoted)[1]).toMatchObject({ change: 1, lane: 1 });
+		expect(trunk(promoted)[1]).toMatchObject({ change: 1, lane: 1, title: expect.any(String) });
 	});
 	it("keeps a stable colour per workspace by start order, including ended work", () => {
 		const colours = laneIndex(promoted);

@@ -64,6 +64,10 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Fixed
 
+- Fix Git pushes failing with "Invalid refresh token" when several agents push at once. Workspace forks, the bridge and the Git credential helper share one OAuth connection whose refresh token rotates on every use, and each helper process spent it independently. Refreshes now happen under the connection's file lock after re-reading it, so one process spends each refresh token and the others reuse its still-current access token.
+- When Git authentication fails, the credential helper now prints the exact command for the connection it reads (`cruce connect … --client NAME` for workspace forks, `cruce auth …` for canonical) with the real server, namespace and repository, and the cause.
+- Publishing from a workspace whose baseline is ahead of canonical (for example a published skeleton not yet promoted) now reviews against that baseline instead of failing with "Integrate the review base with Git before publishing" and requiring an explicit `baseRevision`.
+- Lane map: promoted revisions on main are labelled with the workspace that produced them, the caption names the work folded into main instead of only counting it, and revisions reported before a lane's baseline reached main are joined to the lane by a dotted lead-in instead of floating loose.
 - Keep repository-scoped CLI authorization on the named repository, replacing the multi-repository picker with explicit access confirmation. Validate the original consent target on submission and keep OAuth grants in separate files per repository.
 
 - Let one MCP bridge coordinate multiple isolated workspaces with explicit `workspaceId`, independent retry state and per-workspace reports. `attach_workspace` creates or reuses the local worktree, and CLI continuation/publication becomes visible without restarting MCP. Previously attached workspaces stay attached.

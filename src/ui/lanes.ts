@@ -10,6 +10,8 @@ export interface TrunkNode {
 	change?: number;
 	/** Lane of the workspace the promoted change came from. */
 	lane?: number;
+	/** Title of that workspace, so promoted work stays named after its lane folds into main. */
+	title?: string;
 	/** The recorded promotion that produced this revision; revisions that predate Cruce's records have none. */
 	promotion?: { id: string; at: number };
 }
@@ -60,6 +62,7 @@ export function trunk(view: RepositorySnapshot): TrunkNode[] {
 			revision: promotion.to,
 			change: proposal?.number,
 			lane: proposal && lanes.get(proposal.workspaceId),
+			title: proposal && view.workspaces.find((w) => w.id === proposal.workspaceId)?.title,
 			promotion: { id: promotion.id, at: promotion.at },
 		});
 	}

@@ -27,6 +27,8 @@ export function LaneBullet({ lane }: { lane?: number }) {
 }
 
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+const names = (titles: string[]) =>
+	titles.length > 3 ? `${titles.slice(0, 3).join(", ")} and ${titles.length - 3} more` : titles.join(", ");
 const MAX_LANES = 12;
 /** Return rails beyond this many promoted lanes keep the filled capsule without a drawn return. */
 const MAX_RETURNS = 6;
@@ -396,6 +398,7 @@ export function LaneMap({
 							age = replaying && !reduce && node.promotion ? clamp01((limit - nodePos(node)) / 0.05) : 1;
 						return (
 							<g key={node.revision}>
+								{node.change && <title>{`#${node.change} ${node.title ?? ""} promoted as ${short(node.revision)}`}</title>}
 								{age < 1 && (
 									<circle
 										cx={x}
@@ -425,6 +428,7 @@ export function LaneMap({
 										{node.change && (
 											<text x={x} y={TY - 31} textAnchor="middle" fontSize="10.5" fontWeight="600" fill={`var(--lane-${node.lane ?? 1})`}>
 												#{node.change}
+												{node.title && ` ${clip(node.title, 9)}`}
 											</text>
 										)}
 									</>
@@ -553,7 +557,7 @@ export function LaneMap({
 						{caption}.{notProposed > 0 && ` ${notProposed} published, not yet proposed for review.`}
 						{settled.length > 0 &&
 							!showSettled &&
-							` ${settled.length} already in ${view.repository.defaultBranch} ${settled.length === 1 ? "is" : "are"} folded into the main line${settled.some((lane) => lane.settled === "other") ? " (some arrived through another workspace's promotion)" : ""}.`}
+							` Already in ${view.repository.defaultBranch}, folded into the main line: ${names(settled.map((lane) => lane.title))}${settled.some((lane) => lane.settled === "other") ? " (some arrived through another workspace's promotion)" : ""}.`}
 						{promoted > 0 && showSettled && ` ${promoted} promoted into ${view.repository.defaultBranch} by a recorded human approval.`}
 						{view.overlaps.length > 0 &&
 							` Shared ${view.overlaps.length === 1 ? "path" : "paths"}: ${view.overlaps
@@ -641,6 +645,8 @@ function LanePath({
 		.filter((r) => r.pos <= limit);
 	const head = revs[revs.length - 1];
 	const revPos = (revision?: string) => revs.find((r) => r.revision === revision)?.pos;
+	// Revisions reported before the baseline reached main sit left of its junction; a dotted lead-in keeps them on the lane.
+	const leadX = placed && revs.length ? Math.min(...revs.map((r) => X(r.pos))) : undefined;
 	const pub = replaying
 		? hist.publications
 				.map((p) => ({ revision: p.revision, pos: Math.max(axis.at(p.at), revPos(p.revision) ?? 0) }))
@@ -759,6 +765,9 @@ function LanePath({
 						) : (
 							<path d={`M${xs} ${y} H${tipX}`} stroke={colour} strokeWidth="2.5" strokeLinecap="round" />
 						))}
+					{grow === 1 && leadX !== undefined && leadX < xs - 4 && (
+						<path d={`M${leadX} ${y} H${xs}`} stroke={colour} strokeWidth="2.5" strokeDasharray="1 6" strokeLinecap="round" />
+					)}
 					{back &&
 						(replaying ? (
 							backProgress > 0 && (

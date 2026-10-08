@@ -956,10 +956,15 @@ export class RepositoryRuntime {
 					if ((await this.git.mergeBase(s.publishedRevision ?? s.baseRevision, revision)) !== (s.publishedRevision ?? s.baseRevision))
 						throw new DomainError(409, "Published commits must descend from the workspace baseline and previous publication");
 					const upstream = c.upstream();
+					// Review against upstream only once it carries the baseline; a baseline ahead of canonical stays the base.
 					baseRevision =
 						this.store.get<string>(`publication-base:${op}`) ??
 						cmd.baseRevision ??
-						(upstream && (await this.git.mergeBase(upstream, revision)) === upstream ? upstream : (s.integratedRevision ?? s.baseRevision));
+						(upstream &&
+						(await this.git.mergeBase(upstream, revision)) === upstream &&
+						(await this.git.mergeBase(s.baseRevision, upstream)) === s.baseRevision
+							? upstream
+							: (s.integratedRevision ?? s.baseRevision));
 					if (
 						baseRevision !== s.baseRevision &&
 						baseRevision !== s.integratedRevision &&

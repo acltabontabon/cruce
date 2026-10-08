@@ -645,6 +645,30 @@ describe("repository runtime", () => {
 		expect(f.w.state.reservations.filter((r) => r.action === "revision.publish")).toHaveLength(1);
 		expect(everyWorkspace(f.runtime, f.store).find((w) => w.id === f.workspace.id)?.baseRevision).toBe(f.base);
 	});
+	it("reviews against a workspace baseline that canonical does not carry yet instead of requiring an explicit base", async () => {
+		const f = await fixture();
+		vi.spyOn(f.git, "remoteRefs").mockResolvedValue([]);
+		// A published skeleton, not yet promoted, becomes the baseline of further workspaces.
+		await f.call("publish_revision", { workspaceId: f.workspace.id, revision: f.head, pack: f.pack });
+		const work = await f.git.commit({
+			ref: "refs/heads/ahead",
+			parent: f.head,
+			files: { "hello.txt": "hello" },
+			message: "Hello",
+			author: { name: "Agent", email: "agent@local", timestamp: 12346 },
+		});
+		const s = (await f.call("start_workspace", { title: "Ahead of canonical", baseRevision: f.head })) as Workspace;
+		await f.call("attach_workspace", {
+			workspaceId: s.id,
+			execution: { id: s.id, checkoutId: "ahead", machineId: "machine", kind: "worktree", owned: true },
+		});
+		const pack = Buffer.from(await f.git.exportPack(work)).toString("base64");
+		expect(f.runtime.state().sourceHead).toBe(f.base);
+		expect(await f.call("publish_revision", { workspaceId: s.id, revision: work, pack })).toMatchObject({
+			revision: work,
+			baseRevision: f.head,
+		});
+	});
 	it("gives hosted writers distinct forks and reconciles uncertain attachment without another reservation", async () => {
 		const f = await fixture(true);
 		const other = { ...grant, actor: { ...agent, id: "other-agent", connectionId: "other-oauth" } };

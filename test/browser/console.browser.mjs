@@ -2049,7 +2049,7 @@ test("work already in main folds into one pill on the main line and unfolds on r
 	assert.equal(await map.locator(".lane-fold").count(), 1);
 	assert.match(
 		await map.locator(".lane-map figcaption, figcaption").innerText(),
-		/2 already in main are folded into the main line \(some arrived through another workspace's promotion\)/,
+		/Already in main, folded into the main line: ProductController, WarehouseController \(some arrived through another workspace's promotion\)/,
 	);
 	assert.equal(await page.locator(".settled-workspaces .workspace-row").count(), 2);
 	assert.equal(await page.locator(".settled-workspaces").evaluate((e) => e.open), false);

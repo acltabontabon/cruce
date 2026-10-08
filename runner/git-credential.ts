@@ -1,6 +1,5 @@
 /** Standard Git credential helper. Stores no Artifacts credentials or secrets in Git config. */
 import { readFile } from "node:fs/promises";
-import { auth } from "@modelcontextprotocol/client";
 import { DEFAULT_AGENT_SCOPES } from "../src/core/capabilities.ts";
 import { Credentials, login } from "./oauth.ts";
 
@@ -8,6 +7,8 @@ const args = process.argv.slice(2);
 const option = (key: string) => args[args.indexOf(`--${key}`) + 1];
 const server = args.includes("--server") ? option("server") : undefined;
 const client = args.includes("--client") ? option("client") : "git";
+/** The command that re-authorizes the connection this helper reads; the bridge's connection for workspace forks. */
+let recovery = "cruce auth --server URL --namespace ID --repository ID";
 async function main() {
 	if (!server || !client || !/^[a-zA-Z0-9-]+$/.test(client)) throw new Error("Choose --server URL and --client NAME");
 	const origin = new URL(server);
@@ -58,16 +59,17 @@ async function main() {
 	}
 	const match = /^mcp\/git\/([a-zA-Z0-9-]{1,160})\/([a-zA-Z0-9-]{1,160})\/[^/]+\.git$/.exec(fields.path);
 	if (!match) return;
+	const target = `--server ${origin.origin} --namespace ${match[1]} --repository ${match[2]}`;
+	recovery = client === "git" ? `cruce auth ${target}` : `cruce connect ${target} --client ${client}`;
 	const credentials = new Credentials(origin.origin, client, { namespaceId: match[1], repositoryId: match[2] });
-	await credentials.load();
-	if (!credentials.tokens()?.refresh_token) throw new Error("Authorize this Git connection with the helper's login action first");
-	// Refresh via the existing OAuth client before handing Git a credential.
-	if ((await auth(credentials, { serverUrl: `${origin.origin}/mcp` })) !== "AUTHORIZED") throw new Error("Git connection needs sign-in");
-	const token = credentials.tokens()?.access_token;
+	// Concurrent pushes share one rotating refresh token; reuse current tokens and refresh under the shared lock.
+	if (!(await credentials.refresh())) throw new Error("Git connection needs sign-in");
+	const token = credentials.data.tokens?.access_token;
 	if (!token || /[\r\n]/.test(token)) throw new Error("Git connection needs sign-in");
 	process.stdout.write(`username=cruce\npassword=${token}\n\n`);
 }
-main().catch(() => {
-	process.stderr.write("Cruce Git authentication failed. Run cruce auth --server URL --namespace ID --repository ID to authorize Git.\n");
+main().catch((error) => {
+	const cause = error instanceof Error ? ` (${error.message.replace(/\s+/g, " ").slice(0, 200)})` : "";
+	process.stderr.write(`Cruce Git authentication failed${cause}. Run ${recovery} to authorize Git.\n`);
 	process.exitCode = 1;
 });

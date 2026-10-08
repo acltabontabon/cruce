@@ -1,11 +1,50 @@
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { setTimeout } from "node:timers/promises";
+import { auth } from "@modelcontextprotocol/client";
+import { describe, expect, it, vi } from "vitest";
 import { Credentials } from "../../runner/oauth.ts";
 import { repositoryConsentState, repositoryConsentTarget } from "../../src/shared/repository-consent.ts";
 
+vi.mock("@modelcontextprotocol/client", async (original) => ({ ...(await original<object>()), auth: vi.fn() }));
+
 describe("stored OAuth credentials", () => {
+	it("spends a rotating refresh token once when concurrent Git pushes and the bridge all need a token", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "cruce-oauth-"));
+		try {
+			const path = join(dir, "claude.json");
+			await writeFile(
+				path,
+				JSON.stringify({ tokens: { access_token: "a0", refresh_token: "r0", token_type: "Bearer", expires_in: 3600 }, tokensAt: 0 }),
+			);
+			// A server that rotates refresh tokens and rejects a spent one, as the deployed OAuth provider does.
+			let current = "r0",
+				issued = 0;
+			vi.mocked(auth).mockImplementation(async (provider) => {
+				const spent = (await provider.tokens())?.refresh_token;
+				await setTimeout(20);
+				if (spent !== current) return "REDIRECT";
+				current = `r${++issued}`;
+				await provider.saveTokens({ access_token: `a${issued}`, refresh_token: current, token_type: "Bearer", expires_in: 3600 });
+				return "AUTHORIZED";
+			});
+			const processes = Array.from({ length: 6 }, () => {
+				const credentials = new Credentials("https://cruce.example", "claude");
+				credentials.path = path;
+				return credentials;
+			});
+			expect(await Promise.all(processes.map((c) => c.refresh()))).toEqual(Array(6).fill(true));
+			expect(auth).toHaveBeenCalledTimes(1);
+			expect(processes.map((c) => c.data.tokens?.access_token)).toEqual(Array(6).fill("a1"));
+			// A later read reuses the current token without spending the refresh token again.
+			expect((await processes[0].tokens())?.access_token).toBe("a1");
+			expect(auth).toHaveBeenCalledTimes(1);
+		} finally {
+			vi.mocked(auth).mockReset();
+			await rm(dir, { recursive: true, force: true });
+		}
+	});
 	it("preserves independently updated fields across concurrent private state saves", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "cruce-oauth-"));
 		try {

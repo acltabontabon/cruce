@@ -16,14 +16,13 @@ async function read<T>(path: string, fallback: T) {
 		return fallback;
 	}
 }
-async function save(path: string, value: Partial<Credentials["data"]>): Promise<Credentials["data"]> {
-	return withStateLock(path, async () => {
-		const current = await read<Credentials["data"]>(path, {});
-		const merged = { ...current, ...value };
-		await writeState(path, merged);
-		return merged;
-	});
+async function merge(path: string, value: Partial<Credentials["data"]>): Promise<Credentials["data"]> {
+	const merged = { ...(await read<Credentials["data"]>(path, {})), ...value };
+	await writeState(path, merged);
+	return merged;
 }
+/** Refresh this long before expiry, so a token handed to Git or the bridge outlives the request that carries it. */
+const EXPIRY_MARGIN_MS = 120_000;
 export class Credentials implements OAuthClientProvider {
 	redirectUrl: string | undefined;
 	clientMetadata = {
@@ -33,10 +32,23 @@ export class Credentials implements OAuthClientProvider {
 		response_types: ["code"],
 		token_endpoint_auth_method: "none" as const,
 	};
-	data: { client?: StoredOAuthClientInformation; tokens?: StoredOAuthTokens; verifier?: string; state?: string } = {};
+	data: {
+		client?: StoredOAuthClientInformation;
+		tokens?: StoredOAuthTokens;
+		/** When the stored tokens were issued, so every process sharing this file agrees whether they are current. */
+		tokensAt?: number;
+		verifier?: string;
+		state?: string;
+	} = {};
 	path: string;
 	consentTarget?: RepositoryConsentTarget;
+	server: string;
+	/** This process holds the file lock, so saves write directly. */
+	private locked = false;
+	/** This process is driving an authorization, so the SDK reads exactly what is stored. */
+	authorizing = false;
 	constructor(server: string, connection = "agent", target?: RepositoryConsentTarget) {
+		this.server = server;
 		if (!/^[a-zA-Z0-9-]{1,160}$/.test(connection)) throw new Error("Use a connection name containing only letters, numbers and dashes");
 		if (target) repositoryConsentState(target, "validation");
 		this.consentTarget = target;
@@ -66,17 +78,47 @@ export class Credentials implements OAuthClientProvider {
 	clientInformation() {
 		return this.data.client;
 	}
-	async saveClientInformation(client: StoredOAuthClientInformation) {
-		this.data = await save(this.path, { client });
+	private save(value: Partial<Credentials["data"]>) {
+		return this.locked ? merge(this.path, value) : withStateLock(this.path, () => merge(this.path, value));
 	}
-	tokens() {
+	async saveClientInformation(client: StoredOAuthClientInformation) {
+		this.data = await this.save({ client });
+	}
+	/** The bridge transport reads tokens before every request; outside an authorization it gets current ones. */
+	async tokens() {
+		if (!this.authorizing) await this.refresh();
 		return this.data.tokens;
 	}
 	async saveTokens(tokens: StoredOAuthTokens) {
-		this.data = await save(this.path, { tokens });
+		this.data = await this.save({ tokens, tokensAt: Date.now() });
+	}
+	current() {
+		const { tokens, tokensAt } = this.data;
+		if (!tokens?.access_token || tokensAt === undefined || tokens.expires_in === undefined) return false;
+		return Date.now() < tokensAt + tokens.expires_in * 1000 - EXPIRY_MARGIN_MS;
+	}
+	/**
+	 * The server rotates refresh tokens and rejects a spent one, and the bridge and every Git helper for this connection
+	 * share this file. Refresh only under the file lock and after re-reading it, so exactly one process spends each
+	 * refresh token and the others reuse what it stored. Returns whether current tokens are stored.
+	 */
+	async refresh() {
+		await this.load();
+		if (this.current()) return true;
+		if (!this.data.tokens?.refresh_token) return false;
+		return withStateLock(this.path, async () => {
+			this.locked = this.authorizing = true;
+			try {
+				await this.load();
+				if (this.current()) return true;
+				return (await auth(this, { serverUrl: `${this.server}/mcp` })) === "AUTHORIZED";
+			} finally {
+				this.locked = this.authorizing = false;
+			}
+		});
 	}
 	async saveCodeVerifier(verifier: string) {
-		this.data = await save(this.path, { verifier });
+		this.data = await this.save({ verifier });
 	}
 	codeVerifier() {
 		if (!this.data.verifier) throw new Error("No pending authorization");
@@ -85,7 +127,7 @@ export class Credentials implements OAuthClientProvider {
 	async state() {
 		const nonce = randomUUID();
 		const state = this.consentTarget ? repositoryConsentState(this.consentTarget, nonce) : nonce;
-		this.data = await save(this.path, { state });
+		this.data = await this.save({ state });
 		return state;
 	}
 	redirectToAuthorization(url: URL) {
@@ -116,6 +158,7 @@ export async function login(server: string, credentials: Credentials, scopes: Sc
 	credentials.clientMetadata.redirect_uris = [credentials.redirectUrl];
 	// Registration binds the exact callback. Re-register when an ephemeral callback changes.
 	credentials.data.client = undefined;
+	credentials.authorizing = true;
 	try {
 		const result = await auth(credentials, {
 			serverUrl: `${server}/mcp`,
@@ -132,6 +175,7 @@ export async function login(server: string, credentials: Credentials, scopes: Sc
 			await auth(credentials, { serverUrl: `${server}/mcp`, authorizationCode: code, iss });
 		}
 	} finally {
+		credentials.authorizing = false;
 		clearTimeout(timeout);
 		listener.close();
 	}
