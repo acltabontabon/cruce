@@ -1,6 +1,6 @@
 # Roadmap
 
-[Documentation map](README.md#documentation-map) · [Product](docs/product.md) · [Domain model](docs/domain-model.md) · [Architecture audit](docs/architecture.md#implementation-audit)
+[Documentation map](docs/README.md) · [Product](docs/product.md) · [Domain model](docs/domain-model.md) · [Architecture audit](docs/architecture.md#current-limitations)
 
 Cruce is the durable Git coordination plane for parallel agentic development. This roadmap orders work by that thesis: trustworthy foundations and exact-revision reconciliation first, then coordination signals, then broader collaboration and ecosystem reach. Intelligence comes last.
 
@@ -10,125 +10,87 @@ These are candidates, not commitments, dates or work instructions. Current behav
 
 Releases stay alpha until these gates are met. Each needs recorded evidence in [verification](docs/local-verification.md), not only local tests.
 
-- **Hosted journey on the current storage binding.** Run the full authenticated D2 journey against the release build and deployment-managed Artifacts binding: interruption and response loss, revocation, fork cleanup, retained-source retrieval and continuation from a second physical machine.
+- **Hosted journey on the current storage binding.** Finish D2 against the release build and deployment-managed Artifacts binding: response loss, membership and grant revocation (M1), and continuation from a second physical machine. Hosted fork cleanup and retained-source proof passed on 2026-10-09.
 - **Sustained capacity in a hosted installation.** Repeat the declared [`verify:limits`](docs/architecture.md#bounded-coordination-state-and-retention-recovery) workload against a deployed Worker and record Worker CPU, memory and alarm behavior.
 - **Rehearsed recovery.** Run the [operations](docs/operations.md) procedures as timed drills, including a coordination-state restoration, and record what was restored and lost.
 - **One supported onboarding path for existing teams.** D4, with an explicit path between Cruce and the team's forge review (E1 or a documented manual flow).
 - **An external pilot.** A small group using its existing workflow, with the improvement that counts (reconstruction time, rework, false alarms) and the acceptable added burden declared before it starts.
 
-## Foundation
-
-Canonical lifecycle, the namespace/repository/workspace model, fork lifecycle, exact baselines, credentials and durable state.
+## Open
 
 | ID | Item | Priority | Status |
 | --- | --- | --- | --- |
-| F1 | Promotion against the exact approved base | Now | **Done**, locally verified ([evidence](docs/local-verification.md#exact-base-promotion-verification)); hosted validation in D2 |
-| F2 | Durable provider ownership and identity | Now | **Done**, locally verified ([evidence](docs/local-verification.md#durable-provider-identity-verification-f2)); hosted validation in D2 |
-| F3 | Pure coordination reads | Now | **Done**, locally verified ([evidence](docs/local-verification.md#pure-coordination-read-verification-f3)); hosted acceptance remains unverified |
-| F4 | Bounded source inspection and recoverable cache | Next | **Done**, locally verified ([evidence](docs/local-verification.md#bounded-source-inspection-and-cache-recovery-f4)); hosted acceptance remains unverified |
-| F5 | Diagnosable operations and safe errors | Next | **Done**, locally verified ([evidence](docs/local-verification.md#diagnosable-operations-and-safe-errors-f5)); hosted log acceptance remains unverified |
-| F6 | Bounded state, transfers and explicit retention operations | Later | **Done**, locally verified ([evidence](docs/local-verification.md#bounded-state-and-authorized-retention-recovery-f6)); hosted alarm and memory acceptance remain unverified |
-
-**F2 — Durable provider ownership and identity.** *Done locally:* deployment storage pins its account and physical namespace; the Repository DO journals canonical, fork, source-retention and evidence-retention provider IDs before token cleanup or Git access. Resource operations validate recorded IDs and addresses, including fork parents, publication checkpoints and promotion recovery. Recreated or missing recorded repositories fail closed; names and descriptions cannot establish an unrecorded identity. Restoring the original installation binding and repository identities reuses provenance, operations and reservations. Fault tests cover recreation after interruption, unknown creation responses and restoration. Hosted binding acceptance remains in D2; publication receipt/settlement recovery is R3.
-
-**F3 — Pure coordination reads.** *Done locally:* HTTP, MCP and terminal coordination routes resolve established identities without login writes. Explicit sign-in/authorization initializes identities and personal namespaces; canonical setup or setup retry initializes repository state. Cold Durable Object and SQLite/Git-cache reads create no schema or metadata and make no Artifacts call. Current repository metadata and permissions are projected from Namespace authority without saving them. Interrupted registration remains inspectable with an authorized setup retry; missing source stays unavailable rather than triggering repair. SQL-backed route tests exercise every catalog read, the actual MCP handler, restarts, missing state and revoked access. Hosted acceptance remains unverified; cache recovery is F4.
-
-**F4 — Bounded source inspection and recoverable cache.** *Done locally:* explicit namespace-gated `inspect_source` uses Artifacts commit/tree/file/history APIs for bounded listings, selected files, evidence and labelled first-parent history. `recover_source` restores exact retained Git source after cache loss without requiring a workspace fork. SQLite writes and retained cache generations have byte/entry limits; refs, indexes and packs are evicted together while metadata and remote retention survive. Clean staging, exact provider/ref checks and complete all-parent object/checksum validation prevent partial caches or first-parent logs from proving ancestry. Attachment, publication, cleanup and promotion handle missing cached source within their existing resource operations; interrupted promotion recovery never repeats an attempted push. Cache-only coordination reads remain pure. [ADR 0004](docs/decisions/0004-bounded-source-inspection-and-cache.md) records limits and tradeoffs. Hosted binding acceptance and peak-memory measurement remain unverified; publication receipt/settlement parity is locally covered by R3; hosted acceptance remains separate.
-
-**F5 — Diagnosable operations and safe errors.** *Done locally:* HTTP and MCP use one explicit status/message allowlist, including serialized Durable Object errors. Validation names only known schema fields; unexpected errors, unknown keys and raw provider/validation text stay private. MCP validates inside the safe dispatcher while preserving catalog schemas and scope filtering. Structured diagnostics carry typed SHA-256 correlation of namespace, repository, workspace, proposal, promotion, revision, operation and reservation, plus fixed phases, outcomes and latency. Evidence-publication and promotion fault tests preserve correlation through uncertainty, restart, settlement and completed replay; independent asynchronous contexts stay isolated. Provider paths, account IDs, raw error names/messages, credentials, OAuth payloads and source are excluded from application logs. Hosted Workers log/trace acceptance remains unverified; publication recovery ordering is locally covered by R3; hosted acceptance remains separate.
-
-**F6 — Bounded state and retention operations.** *Done locally:* indexed Directory identity/address lookup and bounded per-user discovery candidates replace global scans. Receipts, full activity and namespace reservations live in indexed records with bounded pages; current state and total coordination storage have enforced byte/count limits with recovery headroom. [ADR 0009](docs/decisions/0009-replaceable-observations-and-archived-finished-work.md) replaces per-call heartbeat/report receipts with one replaceable record per workspace, coalesces change-report activity and archives finished work, so limits bound live work. A repeatable local measurement of ten workspaces reporting every 30 seconds with worst-case churn adds no receipts and 960 activity records a day, about 207 days to the record ceiling, and archives and pages 1,000 finished workspaces. Explicit retention inspection records exact unretained refs and incomplete inventories. Fork cleanup journals authorization, deletion and confirmation, then uses bounded DO alarms to recover the same operation/reservation after interruption, with current membership, scopes, policy and provider identity checks. Confirmation survives lost settlement without repeating deletion. Expiry never creates deletion authority; no source, receipts or provenance are automatically pruned. Activity is still lifetime history. [ADR 0005](docs/decisions/0005-bounded-state-and-authorized-cleanup-recovery.md) defines the supported envelope. The 32 MiB gateway ceiling remains explicit and locally measured; hosted alarm delivery, revocation propagation and Worker peak memory require acceptance. Publication recovery is locally covered by R3; hosted acceptance remains separate.
-
-## Developer workflow
-
-Workspace creation, Git-native onboarding, CLI, MCP, existing repositories, worktree ergonomics and revision publication.
-
-| ID | Item | Priority | Status |
-| --- | --- | --- | --- |
-| D1 | Continue a workspace across sessions, tools and machines | Now | **Done** locally ([ADR 0002](docs/decisions/0002-workspace-ownership-and-execution-attachment.md)); hosted check in D2 |
-| D2 | Deployed multi-tool, multi-session participation proof | Now | **Journey verified** 2026-10-06 with Claude Code and Codex ([evidence](docs/local-verification.md#deployed-multi-tool-participation-d2)); fork cleanup, response loss and a second physical machine remain |
-| D4 | Existing-repository onboarding | Next | Open; depends on E1 for history import |
-
-**D2 — Deployed participation proof.** The core journey passed on 2026-10-06: Claude Code and Codex in separate workspaces, detach and continuation in another checkout by another tool, stale detection, reconciliation and two human promotions, all judged by a read-only auditor. *Remaining:* fork cleanup with retained-source retrieval, response loss, M1 revocation cases and a physically separate machine. Earlier deployed evidence covers one owner-approved OAuth test writer through native Git, publication, console reconciliation, scope reduction and revocation. *Target:* through the deployed Worker, two actual tools (for example Codex and Claude Code) work in separate workspaces. One workspace is detached and continued from a second checkout or machine. Canonical moves while the other works. The stale proposal is detected, reconciled, reviewed by a human and promoted, and provenance is retrieved after fork cleanup. Include response loss, membership and grant revocation, and independently checked canonical and retained refs. Client labels alone do not count as tool participation.
-
-**D4 — Existing-repository onboarding.** A developer's `~/projects/app` with `origin → GitHub` should gain a Cruce workspace remote and worktrees without changing `origin`, and without the developer having to "move development into Cruce." Attaching today requires a checkout that contains the canonical baseline. History import from a forge is E1.
-
-## Coordination intelligence
-
-Canonical divergence, concurrent workspace awareness, path overlap, staleness and reconciliation readiness, kept boring and honest.
-
-| ID | Item | Priority | Status |
-| --- | --- | --- | --- |
-| C1 | Observed pushed revisions and canonical movement | Next | Implemented; verification below |
-| C2 | Staleness and reconciliation view | Next | Implemented; verification below |
-| C3 | Report freshness separate from presence | Next | Done locally |
-| C4 | Relationship hints beyond paths | Later | Evidence-gated |
-
-**C1 — Observed pushed revisions.** Implemented: explicit human-maintainer opt-in, Artifacts push subscriptions → Queues → private idempotent Repository DO ingestion, identity-checked current-ref inspection, and bounded 15-minute reconciliation. Reported heads, observed refs, retained publications and accepted canonical remain distinct. Rewinds/deleted refs remain visible without rewriting accepted history; duplicates, reordering and truncated event payloads cannot assign heads. Namespace policy, current authority and charged reservations govern retries. Degraded observations and recurring cost are visible. No event starts an agent or promotes code. See [ADR 0007](docs/decisions/0007-observed-refs-and-reconciliation.md) and [verification](docs/local-verification.md#coordination-observation-and-reconciliation-c1c3).
-
-**C2 — Staleness and reconciliation view.** Implemented: the Workspaces view and `get_reconciliation` expose published-ancestry relations, accepted-revision incorporation and every open proposal's controller-derived blockers. Before publication the comparison is explicitly baseline-only; incorporation remains unverified. Complete all-parent cached Git traversal proves ancestry; missing objects and traversal limits stay unknown. Reads neither fetch nor mutate. Observed canonical movement never becomes accepted provenance. Verification is linked above.
-
-**C3 — Report freshness.** Explicit server report time remains separate from presence. Shared freshness is fresh below 90 seconds, stale at or above 90 seconds, and unknown without a timestamp. Workspace, reconciliation and overlap views label the distinction. Hosted acceptance is recorded separately in verification.
-
-**C4 — Relationship hints.** Remains evidence-gated. After C1–C3 are operational, require **two independently reviewed, reproducible real interactions missed by path overlap**, identifying exact revisions, disjoint paths and consequences. Measure observation delay, unknown comparisons, coordination effort, false alarms and misses. Synthetic examples alone cannot unlock the gate. Those cases determine the smallest symbol, module or dependency hint in a subsequent implementation plan; no analyzer ships in this stage. Hints never grant authority or claim compatibility.
-
-## Review and reconciliation
-
-Immutable proposal revisions, comparison against baseline and canonical, reconciliation, human approval, promotion and provenance.
-
-| ID | Item | Priority | Status |
-| --- | --- | --- | --- |
-| R1 | Proposal comparison against baseline and current canonical | Next | Open |
-| R2 | Reconciliation provenance | Next | Open |
-| R3 | Publication recovery parity with promotion | Next | Done locally |
-
-**R1 — Comparisons.** For a proposal, show the diff against its pinned base, the diff against current canonical when it differs, and which accepted revisions landed in between.
-
-**R2 — Reconciliation provenance.** When a workspace publishes a revision that merges accepted canonical source, record which accepted revisions it incorporated (from Git ancestry). Lineage then answers "what did this reconciliation include?"
-
-**R3 — Publication recovery.** Implemented locally: exact retention journals, artifact/activity/receipt before settlement, exact-ref recovery and no regression of newer workspace state. Hosted binding acceptance remains separate.
-
-## Multi-user collaboration
-
-Namespace permissions, workspace ownership, reviewer roles, team visibility and shared coordination.
-
-| ID | Item | Priority | Status |
-| --- | --- | --- | --- |
+| D2 | Deployed multi-tool, multi-session participation proof | Now | Core journey and hosted fork cleanup verified; response loss, revocation and a second physical machine remain |
 | M1 | Authority changes during operations | Now (with D2) | Open |
+| D4 | Existing-repository onboarding | Next | Open; depends on E1 for history import |
+| R1 | Name the accepted revisions a proposal is missing | Next | Open |
+| R2 | Reconciliation provenance | Next | Open |
+| E2 | Stable, documented MCP/HTTP contract | Next | Compatibility rules documented; error semantics and idempotency remain |
+| C4 | Relationship hints beyond paths | Later | Evidence-gated |
 | M2 | Workspace hand-off between developers | Later | Open |
 | M3 | Review requests and reviewer roles | Later | Evidence-gated |
 | M4 | Namespace-wide view of concurrent work | Later | Evidence-gated |
 | M5 | Caps on live namespace resources | Later | Evidence-gated |
-
-**M1 — Authority changes.** Verify and define behavior for membership, grant and scope revocation between steps and during an in-flight provider operation.
-
-**M2 — Hand-off.** Transfer workspace ownership to another developer with an explicit, recorded, authorized transfer. ADR 0002 deliberately excludes this for now.
-
-**M3, M4.** Request review from specific humans. See concurrent work across a namespace's repositories. Add these only when shared-namespace use shows the need.
-
-**M5 — Live resource caps.** [ADR 0008](docs/decisions/0008-remove-daily-operation-budget.md) removed the daily operation budget. If unbounded growth becomes a real problem, cap live repositories or workspace forks per namespace instead of daily activity. Add this only when real use shows the need.
-
-## Ecosystem
-
-Agent-agnostic MCP/API, upstream forge integration, external orchestrators and downstream provenance.
-
-| ID | Item | Priority | Status |
-| --- | --- | --- | --- |
 | E1 | GitHub/GitLab upstream: explicit import, divergence, publication of approved revisions | Later (Next if D4 shows adoption needs it) | Open |
-| E2 | Stable, documented MCP/HTTP contract | Next | Open |
 | E3 | Use from external orchestrators | Later | Open |
 | E4 | Downstream revision provenance for CI/release systems | Later | Open |
 | E5 | Push-based console updates | Later | Measured need only |
 
+### Developer workflow
+
+**D2 — Deployed participation proof.** The core journey passed on 2026-10-06: Claude Code and Codex in separate workspaces, detach and continuation in another checkout by another tool, stale detection, reconciliation and two human promotions, judged by a read-only auditor ([evidence](docs/local-verification.md#deployed-multi-tool-participation-d2)). Fork cleanup with retained-source proof passed on the hosted binding on 2026-10-09 ([evidence](docs/local-verification.md#retained-source-proof-on-cloudflare-artifacts)). *Remaining:* response loss, membership and grant revocation (M1), and a physically separate machine. Client labels alone do not count as tool participation.
+
+**D4 — Existing-repository onboarding.** A developer's `~/projects/app` with `origin → GitHub` should gain a Cruce remote and workspaces without changing `origin`, and without having to "move development into Cruce." Attaching today requires a checkout that contains the canonical baseline. History import from a forge is E1.
+
+### Coordination
+
+**C4 — Relationship hints.** Evidence-gated. Require **two independently reviewed, reproducible real interactions missed by path overlap**, identifying exact revisions, disjoint paths and consequences, and measure observation delay, unknown comparisons, coordination effort, false alarms and misses. Synthetic examples alone cannot unlock the gate. Those cases determine the smallest symbol, module or dependency hint worth building. Hints never grant authority or claim compatibility.
+
+### Review and reconciliation
+
+**R1 — Missing accepted revisions.** Review already compares a change since its last review and against current canonical, with canonical's files set apart. Also name the accepted revisions that landed between the proposal's base and current canonical.
+
+**R2 — Reconciliation provenance.** When a workspace publishes a revision that merges accepted canonical source, record which accepted revisions it incorporated, from Git ancestry, so lineage answers "what did this reconciliation include?"
+
+### Multi-user collaboration
+
+**M1 — Authority changes.** Verify and define behavior for membership, grant and scope revocation between steps and during an in-flight provider operation.
+
+**M2 — Hand-off.** Transfer workspace ownership to another developer with an explicit, recorded, authorized transfer. [ADR 0002](docs/decisions/0002-workspace-ownership-and-execution-attachment.md) deliberately excludes this for now.
+
+**M3, M4.** Review notes let any repository writer raise concerns on exact lines ([ADR 0014](docs/decisions/0014-review-notes-on-exact-revisions.md)); requesting review from specific humans, and seeing concurrent work across a namespace's repositories, wait until shared-namespace use shows the need.
+
+**M5 — Live resource caps.** [ADR 0008](docs/decisions/0008-remove-daily-operation-budget.md) removed the daily operation budget. If unbounded growth becomes a real problem, cap live repositories or workspace forks per namespace instead of daily activity.
+
+### Ecosystem
+
 **E1 — Upstream forges.** Explicit import (Artifacts public-HTTPS import; private repositories need a separately validated GitHub App installation transport), external divergence inspection, reconciliation, and publication of exact approved revisions or PR links. One canonical authority inside Cruce. No silent bidirectional sync. Stable external identity. Tokens never in persistent remotes.
 
-**E2 — Contract stability.** Version the MCP catalog and HTTP routes, and document error semantics and idempotency, so tools and orchestrators can depend on them without special cases.
+**E2 — Contract stability.** [Interface compatibility](docs/releases.md#interface-compatibility) defines versioning and breaking changes for the MCP catalog, console API and bridge. Still to document: error semantics and idempotency, so tools and orchestrators can depend on them without special cases.
 
 **E3 — Orchestrators.** Show an orchestrator (for example a relay or agent framework) creating, continuing and publishing workspaces through MCP/API with no Cruce-side special casing.
 
 **E4 — Downstream provenance.** A read API, or portable Git notes if justified, that lets CI/release systems ask which proposal, reviews and human approval produced a canonical revision. Cruce never runs those systems.
 
 **E5 — Live updates.** The console polls snapshots every 15 s. Use hibernating WebSockets only if measured latency or fan-out justifies them. Delivery never implies attention.
+
+## Done
+
+Finished items stay listed so their IDs keep their meaning. What each covers and how it was verified lives in [verification](docs/local-verification.md) and the [architecture](docs/architecture.md); hosted acceptance that is still missing is part of the readiness gates above.
+
+| ID | Item |
+| --- | --- |
+| F1 | Promotion against the exact approved base |
+| F2 | Durable provider ownership and identity |
+| F3 | Pure coordination reads |
+| F4 | Bounded source inspection and recoverable cache |
+| F5 | Diagnosable operations and safe errors |
+| F6 | Bounded state, transfers and explicit retention operations |
+| D1 | Continue a workspace across sessions, tools and machines |
+| C1 | Observed pushed revisions and canonical movement |
+| C2 | Staleness and reconciliation view |
+| C3 | Report freshness separate from presence |
+| R3 | Publication recovery parity with promotion |
 
 ## Removed from the roadmap
 

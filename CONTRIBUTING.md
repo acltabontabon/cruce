@@ -57,7 +57,7 @@ See [verification](docs/local-verification.md) for what each layer proves, provi
 
 ## Keep the documentation authoritative
 
-The [README documentation map](README.md#documentation-map) is the entry point. Each kind of information has one home:
+The [documentation map](docs/README.md) is the entry point. Each kind of information has one home:
 
 | Information | Authoritative document |
 | --- | --- |

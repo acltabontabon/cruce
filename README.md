@@ -1,66 +1,107 @@
-# Cruce
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="public/brand/wordmark-white.svg">
+    <img src="public/brand/wordmark.svg" alt="Cruce" height="56">
+  </picture>
+</p>
 
-**Git coordination for parallel agentic development.**
+<h3 align="center">Git coordination for parallel agentic development.</h3>
 
-Cruce is the durable coordination plane for Git work produced by many independent actors: Claude Code, Codex, Cursor, other agents, scripts, orchestrators and human developers. It lets them work in parallel without Git itself becoming the coordination problem.
+<p align="center">
+  Runs no agents · Replaces no Git · Lands nothing without a human
+</p>
 
-Agents, sessions, terminals, worktrees and machines are transient, and agent vendors are interchangeable. The work is not. Cruce gives each stream of work a durable **workspace** with an exact baseline, its own Git fork, pushed and published revisions, and provenance. It shows how concurrent workspaces relate (overlap, divergence, staleness) and carries exact revisions through review and human approval into canonical Git.
+<p align="center">
+  <a href="docs/product.md">Product</a> ·
+  <a href="docs/domain-model.md">Concepts</a> ·
+  <a href="docs/native-setup.md">Set up</a> ·
+  <a href="docs/mcp.md">Agent integration</a> ·
+  <a href="docs/local-demo.md">Console walkthrough</a> ·
+  <a href="docs/README.md">All docs</a>
+</p>
 
-> Cruce coordinates durable concurrent Git work; other systems execute the work.
+<p align="center">
+  <img src="docs/images/readme/hero.jpg" alt="Code is written in parallel now. The decision is still yours. Software went from written, to assisted, to agentic; as many agents write at once, Cruce sits between them and canonical Git." width="880">
+</p>
 
-```mermaid
-flowchart TB
-    X[Any tool or human: Claude Code, Codex, Cursor, scripts, orchestrators] -->|normal Git and MCP/API| WA[Workspace A: baseline, fork, revisions]
-    X -->|normal Git and MCP/API| WB[Workspace B: baseline, fork, revisions]
-    WA --> C[Cruce: overlap, divergence, proposals, provenance]
-    WB --> C
-    C -->|exact revision, human approval, non-forced update| G[Canonical Git in Cloudflare Artifacts]
-    G -. explicit import / publication, roadmap .-> U[GitHub / GitLab upstream]
-```
+## Why Cruce exists
+
+Cruce began as a figment of my imagination: a picture of how developers will work once software reaches its third generation. Code was first written by hand, then with one assistant at a time. Next, individual contributors work hand in hand with many AI agents that write, commit and push in parallel, across tools and machines. And not alone: several people, each with their own set of agents, share one repository and build it together, while the people stay in charge of what lands.
+
+In that picture, the human job moves from writing every line to understanding, reconciling and authorizing. The developer sets the intent, reviews exact revisions, answers and resolves the agents' work, and decides what becomes canonical. Cruce is my attempt to build the ground that way of working stands on: plain Git underneath, any agent on top, and a durable record in between of where every piece of work began, how it crossed others and who approved it.
+
+## Many paths. One history.
+
+<p align="center">
+  <img src="docs/images/readme/story.gif" alt="Animated story: three workspaces branch from baseline c3d8a90, work in Claude Code, Codex and Cursor, overlap on one path, auth is reviewed and promoted, billing reconciles with plain Git and is promoted next while deps keeps working." width="720">
+  <br><sub>Seven steps, from the public homepage</sub>
+</p>
+
+1. **Baseline.** Every workspace starts from a known canonical revision, and that baseline never changes.
+2. **Work.** Each tool commits locally and pushes to its own workspace fork. Nobody waits on anybody.
+3. **Overlap.** Shared paths show up early, as advisory context, never as a conflict verdict.
+4. **Review.** A human approves one exact revision, not a branch that can move underneath it.
+5. **Promote.** Canonical advances with a non-forced Git update to exactly what was reviewed.
+6. **Reconcile.** Work left behind merges the new canonical with plain Git, verifies and asks for fresh review.
+7. **Continue.** One promotion at a time; everyone else keeps working.
+
+## What you get
+
+### Every workstream on one lane map
+
+<p align="center">
+  <img src="docs/images/readme/lane-map.gif" alt="The console lane map replaying a repository's history: main at 4906343f, two workspaces branching from it, change #1 published on Implement retry policy, then promoted back into main." width="880">
+  <br><sub>The console's lane map, replaying a promotion</sub>
+</p>
+
+The repository's **Workspaces** tab lists each workspace once, with its open changes nested under it, and draws them as lanes off `main`:
+
+- **Where each piece of work began.** Baselines are immutable, so "3 behind canonical" means something exact.
+- **Who is attached, and where.** A workspace belongs to its owner, not to the session that started it. Close the laptop, switch from Claude Code to Codex, pick it up tomorrow on another machine: the baseline, pushed revisions and history are still there. Presence comes from 30-second heartbeats, and disconnecting never releases or cleans anything up.
+- **Where paths cross.** Two workspaces touching `src/retry.ts` are flagged on both rows as a heads-up, not a blocker.
+- **What already landed.** Promoted work rejoins main, and **Replay history** plays the recorded events back.
+
+### A whole team, each with their own agents
+
+Cruce is built for more than one person's agents. In a shared namespace, teammates join as Owner, Maintainer, Developer or Viewer, and repository grants (Read, Write, Maintain) narrow what each can do. Everyone works in the same repository at the same time, each with whichever agents they prefer:
+
+- **Every workspace has one human owner.** Alex's Codex and Sam's Claude Code push only to their own person's workspaces. No agent writes into someone else's work, and nobody pushes to canonical directly.
+- **Agents act as their person, never more.** A connection can do only what its user's role, repository grants and approved repositories allow, rechecked on every request.
+- **Everyone sees the same picture.** The lane map names each workspace's owner, and a path that Alex's and Sam's work both touch shows on both rows long before review.
+- **Review crosses people and agents.** Sam leaves a concern on Alex's change, Alex's agent answers it, and a human with Maintain resolves it and approves the exact revision. That is the loop below.
+- **The record says who did what.** Every revision, note, approval and promotion names its human and the connection it came through.
+
+### Review with your agent, on the exact revision
+
+<p align="center">
+  <img src="docs/images/readme/review-notes.gif" alt="Alex opens change #2, where teammate Sam left two line concerns. Alex's Codex agent answered one, citing revision ea0ddcca; Alex checks it, resolves it with a reason, then hands the remaining concern back to the agent." width="880">
+  <br><sub>Sam's concern, answered by Alex's agent, resolved by a human</sub>
+</p>
+
+Review is a loop between the people who decide and the agents that write, held in one durable place instead of a chat transcript:
+
+1. **You or a teammate leave a note on a line.** A *concern* blocks promotion; a *comment* never does. Each note names the exact revision under review.
+2. **Your agent picks it up.** The next time it checks in, it learns a note is waiting and reads exactly what was asked, on which line and revision. Cruce never messages, wakes or schedules the agent; it only keeps the note where the agent will find it.
+3. **The agent fixes and answers.** It changes the code with Git, proposes the new revision and replies on the note, pointing at the revision that addresses it.
+4. **You check, then resolve.** Only an authenticated human can resolve a concern, and they give a reason. Agents can add notes and reply, but never resolve.
+5. **Nothing slips through a republish.** Unresolved concerns follow the change to its newest revision until a human resolves them.
+
+Every change opens with one next step and a compact checklist (on main, concerns, tests, approval, promote). Its files read as one page: likely review targets first, tests and docs folded, notes beside their lines.
+
+### What you approve is what lands
+
+Review, evidence, approval and promotion each name **one exact revision**. Canonical advances only after an authenticated human approves that revision, every concern is resolved and a non-forced Git update validates against the approved base. If `main` moved first, the workspace merges it with plain Git, verifies and gets fresh review. Fetching or acknowledging proves nothing. Publication proves which source was retained for review, not that it is correct.
 
 ## What Cruce is not
 
-One developer running a few agents on one machine is already well served by Git worktrees and local agent tools; Cruce does not compete there. Its value grows with agents × developers × machines × concurrent workstreams × duration.
+One developer running a few agents on one machine is already well served by Git worktrees and local agent tools; Cruce doesn't compete there. Its value grows with agents × developers × machines × concurrent workstreams × duration.
 
-Cruce is **not** an agent runtime, agent scheduler, conversation manager, multi-agent messaging bus, IDE, Git replacement, GitHub/GitLab replacement, CI/CD system, cloud development environment or agent vendor platform. Orchestrators and relays can sit above it and use it through MCP or the API. See [product boundaries](docs/product.md#non-goals-and-product-boundaries).
-
-## Git stays Git
-
-Keep using `git clone`, `fetch`, `pull`, `push`, `commit`, `branch`, `merge`, `diff` and `log`. The hierarchy is **Namespace → Repository → Workspace**. Every repository has a canonical Git repository in Cloudflare Artifacts. Each writer workspace owns one reusable direct fork of it and an immutable baseline. A workspace is owned by a user, not by an agent session. Its local worktree or checkout is a replaceable execution attachment, so the same workspace can be continued in another session, tool or machine. Attaching a checkout never rewrites existing remotes such as `origin` and never uploads history implicitly.
-
-Writers push to their fork. Publication retains an exact pushed revision for review; it proves which source was retained, not that it is correct. Canonical advances only through an authenticated human approval of an exact revision and a non-forced Git update against the approved base. See the [domain model](docs/domain-model.md).
-
-## Try the local console
-
-Use Git, Node 22.18+ and pnpm (CI uses Node 24 and pnpm 12.4.2):
-
-```sh
-pnpm install --frozen-lockfile
-pnpm dev:fixture
-```
-
-Open the printed loopback URL. The fixed-clock fixture uses the real console and controllers with deterministic Git source; identity and provider behavior are simulated, and it consumes no cloud resources. The [local console walkthrough](docs/local-demo.md) has screenshots. To use real repositories, follow [Git and bridge setup](docs/native-setup.md). Hosted storage is configured once by the installation administrator; developers and agents do not need Cloudflare accounts. See [installation setup](docs/cloudflare-setup.md#installation-configuration). Cloud hosting of Git does not mean cloud execution of agents.
+Cruce is **not** an agent runtime, agent scheduler, conversation manager, multi-agent messaging bus, IDE, Git replacement, GitHub/GitLab replacement, CI/CD system, cloud development environment or agent vendor platform. It never launches, pauses, messages or schedules agents, and never stores prompts or conversations. Git stays Git: there is no `cruce push`, and clone, commit, merge and push work as they always have. Any agent or script takes part through [MCP](docs/mcp.md) or the API, and orchestrators can sit above it the same way. See [product boundaries](docs/product.md#non-goals-and-product-boundaries).
 
 ## Status
 
-Cruce is early, experimental software, and its name is provisional. The current alpha is **0.1.0-alpha.3**; interfaces may change. Local checks cover controllers, native Git, bridge recovery and console journeys. Earlier deployed checks demonstrated two coding tools, cross-connection continuation and human-approved promotion on one machine. The current storage binding and recovery changes still require hosted acceptance. See [verification](docs/local-verification.md), the [architecture audit](docs/architecture.md#implementation-audit) and [releases](docs/releases.md) for evidence and limits.
+Cruce is early, experimental software. Expect interfaces to change.
 
-## Documentation map
+## License
 
-| I want to… | Read |
-| --- | --- |
-| Understand what Cruce is, why, and what it will not do | [Product](docs/product.md) |
-| Learn the concepts: workspace, baseline, revisions, lifecycle, authority | [Domain model](docs/domain-model.md) |
-| Make or review a design decision | [Principles and guardrails](docs/principles.md), [decision records](docs/decisions/README.md) |
-| Understand the implementation, its gaps and Cloudflare fit | [Architecture and audit](docs/architecture.md) |
-| See what comes next | [Roadmap](ROADMAP.md) |
-| Connect a checkout and participate | [Git and bridge setup](docs/native-setup.md) |
-| Integrate an agent, orchestrator or script | [MCP participation](docs/mcp.md) |
-| Explore the console | [Local console walkthrough](docs/local-demo.md), [design guide](docs/design.md) |
-| Develop and verify a contribution | [Contributing](CONTRIBUTING.md), [verification](docs/local-verification.md) |
-| Configure hosted resources | [Cloudflare setup](docs/cloudflare-setup.md), [test environment](docs/test-environment.md) |
-| Recover a blocked or failed installation | [Operations](docs/operations.md) |
-| Work as a coding agent in this repository | [AGENTS.md](AGENTS.md) |
-| Inspect change history or release procedures | [Changelog](CHANGELOG.md), [releases](docs/releases.md) |
-
-Each kind of information has one home: product and boundaries in the product document, concepts in the domain model, constraints in the principles, the current design in the architecture, future candidates in the roadmap, evidence in verification and changes in the changelog. A historical success or a future plan is not evidence of a current capability.
+Cruce is open source under the [Apache License 2.0](LICENSE).
