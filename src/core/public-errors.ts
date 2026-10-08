@@ -1,6 +1,12 @@
 /** Explicit public text, paired with its status. Adding an internal error never publishes its message implicitly. */
 export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 	400: [
+		"Note kind must be concern or comment",
+		"Anchor revision required",
+		"Anchor line required",
+		"Note text required",
+		"Reply text required",
+		"Note required",
 		"Choose the operation to release",
 		"Unsupported repository lifecycle input",
 		"Type the repository name to confirm deletion",
@@ -112,6 +118,8 @@ export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 		"Workspace belongs to another user",
 	],
 	404: [
+		"This workspace has no open change",
+		"Review note unavailable",
 		"Repository unavailable",
 		"Artifact cache unavailable; inspect the retained artifact source",
 		"Artifact unavailable",
@@ -131,6 +139,12 @@ export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 	],
 	405: ["GET required", "POST required"],
 	409: [
+		"A note must name the open change's exact revision",
+		"This change has reached its review note limit; resolve notes or propose a new change",
+		"Anchor a note to a revision of this change or its review base",
+		"This note has reached its reply limit",
+		"Cite a published revision of this workspace",
+		"Note is already resolved",
 		"Repository is read-only",
 		"Repository retirement has blockers",
 		"Namespace deletion has blockers",

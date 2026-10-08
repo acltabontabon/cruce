@@ -15,6 +15,9 @@ export const STATE_LIMITS = {
 	proposals: 512,
 	verifications: 2048,
 	promotions: 512,
+	/** Review notes across one change thread, and replies on one note. */
+	reviewNotes: 200,
+	reviewReplies: 20,
 	/** Newest complete promotions kept hot so reconciliation always sees the accepted chain's tip. */
 	recentPromotions: 16,
 	archivePage: 20,

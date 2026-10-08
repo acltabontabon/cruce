@@ -68,6 +68,8 @@ const humanBridgeTools = new Set([
 	"get_diff",
 	"read_artifact",
 	"get_lineage",
+	"get_review_notes",
+	"reply_review_note",
 	"start_workspace",
 	"attach_workspace",
 	"heartbeat",

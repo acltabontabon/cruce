@@ -40,6 +40,7 @@ Namespace → Repository → Workspace
 | **Evidence** | Revision-linked claims or results such as reported test runs or a human attestation (`Artifact` with `kind: "evidence"`, `Verification`) | Cruce-executed CI |
 | **Proposal** (product term: *change*) | An exact published revision offered for review against a pinned base | A pull request on a moving branch |
 | **Review / approval** | A participant's reasoned evaluation of one exact revision. Only an authenticated human Maintain approval, recorded with its authority, satisfies promotion | Approval of a workspace or a branch |
+| **Review note** | A writer's concern or comment on an open change, naming its exact revision and optionally one line (path, line and the exact revision that line belongs to). Concerns block promotion until a human Maintain resolves them with a reason, and follow the change to the changes that supersede it | A conversation; a correctness verdict; an edit to the source |
 | **Reconciliation** | Explicitly combining a workspace's work with accepted canonical source using Git, verifying the result, and publishing it as a new revision for fresh review | Fetching; receiving an update |
 | **Promotion** | The human-authorized, controller-gated, non-forced Git update that advances canonical from the approved base to the approved revision | Approval alone; local merge |
 | **Provenance / lineage** | The durable record linking workspace, owner, actors, baseline, revisions, evidence, reviews and promotions | Agent conversations or prompts |
@@ -179,7 +180,7 @@ Overlap is not a Git conflict, a semantic conflict, a reason to stop, or schedul
 ## Reconciliation model
 
 1. A proposal binds one published revision to its pinned base.
-2. Reviews and evidence refer to that exact revision. Any change to the source means a new revision, a new proposal, fresh evidence and fresh review. A stale proposal cannot be made current by rewriting its base.
+2. Reviews and evidence refer to that exact revision. Any change to the source means a new revision, a new proposal, fresh evidence and fresh review. A stale proposal cannot be made current by rewriting its base. Review notes name the revision they were written on; when a workspace proposes a newer revision, its unresolved notes move with the change thread, and a concern keeps blocking until a human resolves it ([ADR 0014](decisions/0014-review-notes-on-exact-revisions.md)).
 3. If canonical has advanced past the proposal's base, the proposal is not ready. The workspace explicitly fetches canonical, merges with Git, verifies, pushes, publishes, and proposes the reconciled revision.
 4. Readiness is derived by the controller: open proposal, base equal to current canonical, human approval of the exact revision, reasoned resolution of concerns, and required trusted evidence without failures.
 5. Promotion is a non-forced Git update of canonical from the approved base to the approved revision, validated at the remote ref update. An unexpected base fails closed.
@@ -195,7 +196,8 @@ These facts must survive sessions, detaches, fork cleanup and machine loss:
 | Activity | Actor, kind and subjects for start, attach, detach, change reports, publication, proposal, review, verification, promotion and cleanup |
 | Published revision | Workspace, producing actor, revision, review base, content hash, storage repository/ref/revision, trust |
 | Evidence and verification | Exact revision, kind, outcome, trust (`reported` or `human_attested`), actor, optional stored content |
-| Proposal and reviews | Exact base and revision; each review's actor, outcome, reason and any human resolution |
+| Proposal and reviews | Exact base and revision; each review's actor, outcome, reason and any human resolution; the change that superseded it |
+| Review notes | Change and exact revision written on, kind, anchor (path, line, exact revision, line text), actor, replies with any cited revision, and any human resolution |
 | Promotion | Proposal, expected base, promoted revision, human actor, operation identity, phase and outcome |
 
 Provenance never includes agent prompts, conversations or reasoning. Git authors, branch names and client labels are recorded as data, never as identity or authority.
@@ -216,8 +218,8 @@ Authority is derived on every request, including retries, from the authenticated
 | Push to canonical directly | Nobody. Canonical advances only through promotion |
 | Publish revisions or evidence | The workspace owner, with the matching publish scope |
 | Propose a published revision | The workspace owner |
-| Review, record reported evidence, request promotion | Repository writers, humans or agents (`change:write`, `promotion:request`) |
-| Approve for promotion, attest evidence, resolve concerns, reject, promote | Authenticated human with Maintain; never an agent and never a paired terminal |
+| Review, add or reply to review notes, record reported evidence, request promotion | Repository writers, humans or agents (`change:write`, `promotion:request`) |
+| Approve for promotion, attest evidence, resolve concerns and review notes, reject, promote | Authenticated human with Maintain; never an agent and never a paired terminal |
 | Clean up a workspace fork | The workspace owner, through any authorized connection, or a human with Maintain; only after the workspace ends and every ref is retained |
 
 Promotion approval is stamped server-side with the human maintainer authority exercised for that exact revision. Unmarked historical reviews remain visible, but open changes require fresh qualified approval. Completed canonical promotions remain unchanged. Qualified approvals are historical decisions; the current promoter must still be authorized. See [ADR 0006](decisions/0006-qualified-approval-and-publication-recovery.md).

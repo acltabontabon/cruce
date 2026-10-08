@@ -389,6 +389,7 @@ export function activityText(e: Pick<ActivityEvent, "kind" | "summary" | "actor"
 		case "source_promoted":
 			return `${who} promoted ${summary} to canonical`;
 		case "review_resolved":
+		case "review_note_resolved":
 			return `${who} resolved a concern: ${summary}`;
 		case "change_rejected":
 			return `${who} closed a change: ${summary}`;

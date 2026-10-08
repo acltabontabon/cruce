@@ -199,6 +199,67 @@ it("names every owned workspace behind canonical in one plain sentence, publishe
 	expect(quiet.available && "summary" in quiet).toBe(false);
 });
 
+it("names owned changes whose review notes wait for the owner, and only those", () => {
+	const reviewer = { id: "sam", userId: "sam", name: "Sam", kind: "human" as const };
+	const agent = { id: "codex", userId: "user", name: "Codex", kind: "agent" as const, connectionId: "oauth" };
+	const note = (id: string, kind: "concern" | "comment", replies: { actor: typeof reviewer | typeof agent }[] = [], resolved = false) => ({
+		id,
+		actor: reviewer,
+		revision: "r2",
+		kind,
+		body: id,
+		replies: replies.map((r, i) => ({ id: `${id}-${i}`, body: "ok", at: 1, ...r })),
+		...(resolved ? { resolution: { actor: reviewer, reason: "ok", at: 2 } } : {}),
+		at: 1,
+	});
+	const change = (id: string, workspaceId: string, number: number, notes: ReturnType<typeof note>[], extra = {}) =>
+		({
+			id,
+			workspaceId,
+			number,
+			title: `Change ${number}`,
+			state: "open",
+			revision: "r2",
+			base: "b",
+			reviews: [],
+			notes,
+			at: 0,
+			...extra,
+		}) as never;
+	const workspaces = [
+		{ id: "here", title: "Here", ownerId: "user", state: "active" },
+		{ id: "away", title: "Away", ownerId: "user", state: "detached" },
+		{ id: "theirs", title: "Theirs", ownerId: "other", state: "active" },
+	] as Workspace[];
+	const result = coordinationContext(
+		{
+			sourceHead: "base",
+			attention: { asOf: 0, viewerId: "user", items: [], ancestryUnavailable: 0 },
+			workspaces,
+			proposals: [
+				// Inherited through supersession: the earlier change's open concern still waits.
+				change("old", "here", 1, [note("cap", "concern")], { state: "rejected", supersededBy: "now" }),
+				change("now", "here", 2, [
+					note("answered", "concern", [{ actor: agent }]),
+					note("name", "comment"),
+					note("done", "concern", [], true),
+				]),
+				change("other", "away", 3, [note("later", "concern", [{ actor: agent }, { actor: reviewer }])]),
+				change("foreign", "theirs", 4, [note("theirs", "concern")]),
+			],
+		},
+		new Set(["here"]),
+	);
+	if (!result.available) throw new Error("Missing context");
+	expect(result.reviewNotes.map((n) => [n.number, n.attached, n.awaiting, n.concerns])).toEqual([
+		[2, true, 2, 1],
+		[3, false, 1, 1],
+	]);
+	expect(result.summary).toBe(
+		"Review notes wait for you: 2 review notes (1 concern) on change #2 Change 2 (here). Read them with get_review_notes, address them in the workspace directory, publish and propose the new revision, then reply_review_note on each citing it; reply with your reasoning where you disagree. A human resolves them. Also waiting, not attached here: 1 review note (1 concern) on change #3 Change 3 (away). Address it only when the user asks, through attach_workspace first.",
+	);
+});
+
 it("asks to merge canonical only into attached workspaces, and leaves the others to the user", () => {
 	const row = (workspaceId: string) =>
 		({ workspaceId, relation: "behind", basis: "baseline", revision: `${workspaceId}-rev`, canonicalRevision: "66be05f0000" }) as never;

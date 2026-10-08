@@ -1,11 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { reportFreshness } from "../src/core/reconciliation.ts";
+import { reviewNoteState, threadNotes } from "../src/core/review-notes.ts";
 import type { RepositorySnapshot } from "../src/shared/platform.ts";
 
 /** Current controller state, not an assignment, acknowledgement or agent conversation. */
 export function coordinationContext(
 	snapshot: Pick<RepositorySnapshot, "attention" | "sourceHead"> &
-		Partial<Pick<RepositorySnapshot, "workspaces" | "overlaps" | "asOf" | "workspaceUpdates" | "reconciliation">>,
+		Partial<Pick<RepositorySnapshot, "workspaces" | "overlaps" | "asOf" | "workspaceUpdates" | "reconciliation" | "proposals">>,
 	/** Workspaces attached through this bridge or checkout; only these are asked to merge canonical without the user. */
 	attached: ReadonlySet<string> = new Set(),
 ) {
@@ -41,6 +42,39 @@ export function coordinationContext(
 		elsewhere = behind.filter((b) => !b.attached);
 	// Plain sentences an agent cannot miss, ahead of the structured detail. Work is updated just before it is
 	// proposed, so review happens once on the revision that would land; other workspaces wait for the user.
+	// Notes on the caller's own open changes that wait for the owner's answer. The agent learns of them on its own next
+	// call or the user's next prompt; Cruce never pushes them anywhere.
+	const proposals = snapshot.proposals ?? [];
+	const reviewNotes = proposals
+		.filter((p) => p.state === "open" && owned.has(p.workspaceId))
+		.flatMap((p) => {
+			const ownerId = workspaces.find((w) => w.id === p.workspaceId)?.ownerId ?? "";
+			const waiting = threadNotes(proposals, p).filter(({ note }) => reviewNoteState(note, ownerId) === "awaiting_owner");
+			return waiting.length
+				? [
+						{
+							proposalId: p.id,
+							number: p.number,
+							title: p.title,
+							workspaceId: p.workspaceId,
+							attached: attached.has(p.workspaceId),
+							revision: p.revision,
+							awaiting: waiting.length,
+							concerns: waiting.filter(({ note }) => note.kind === "concern").length,
+						},
+					]
+				: [];
+		});
+	const noteCount = (n: (typeof reviewNotes)[number]) =>
+		`${n.awaiting} review ${n.awaiting === 1 ? "note" : "notes"}${n.concerns ? ` (${n.concerns} ${n.concerns === 1 ? "concern" : "concerns"})` : ""} on change #${n.number} ${n.title} (${n.workspaceId})`;
+	const notesHere = reviewNotes.filter((n) => n.attached),
+		notesElsewhere = reviewNotes.filter((n) => !n.attached);
+	const noteSummary = [
+		notesHere.length &&
+			`Review notes wait for you: ${notesHere.map(noteCount).join("; ")}. Read them with get_review_notes, address them in the workspace directory, publish and propose the new revision, then reply_review_note on each citing it; reply with your reasoning where you disagree. A human resolves them.`,
+		notesElsewhere.length &&
+			`${notesHere.length ? "Also waiting" : "Review notes wait for you"}, not attached here: ${notesElsewhere.map(noteCount).join("; ")}. Address ${notesElsewhere.length === 1 ? "it" : "them"} only when the user asks, through attach_workspace first.`,
+	].filter((text): text is string => !!text);
 	const summary = behind.length
 		? [
 				`Canonical moved to ${canonical}.`,
@@ -48,10 +82,11 @@ export function coordinationContext(
 					`Attached here and behind it: ${named(here)}. Before publishing or proposing, merge canonical into ${here.length === 1 ? "it" : "each"} with Git in its directory, verify, push, publish and propose the new revision; ask the user only for conflicts or failing checks.`,
 				elsewhere.length &&
 					`${here.length ? "Also behind" : "Your workspaces behind it"}, not attached here: ${named(elsewhere)}. Update ${elsewhere.length === 1 ? "it" : "one"} only when the user asks: attach_workspace, then merge canonical before proposing.`,
+				...noteSummary,
 			]
 				.filter(Boolean)
 				.join(" ")
-		: undefined;
+		: noteSummary.join(" ") || undefined;
 	const overlaps = (snapshot.overlaps ?? [])
 		.filter((o) => o.workspaces.some((id) => owned.has(id)))
 		.toSorted((a, b) => a.surface.localeCompare(b.surface) || a.id.localeCompare(b.id));
@@ -97,6 +132,7 @@ export function coordinationContext(
 		})),
 		canonicalUpdates,
 		reconciliation,
+		reviewNotes,
 		instructions: [
 			overlaps.length &&
 				"Reported shared paths are an early warning, not a conflict verdict. Inspect the other workspace's exact changes and report freshness before adapting your authorized work.",

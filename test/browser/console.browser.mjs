@@ -151,16 +151,23 @@ test("repository setup only clones or attaches, and links one-time machine setup
 });
 test("review remains usable after approval and after a failed evidence result", async () => {
 	await openChange();
-	await page.getByRole("button", { name: "Approve", exact: true }).click();
-	await page.getByRole("button", { name: "Approve again", exact: true }).waitFor();
-	assert.equal(await page.getByRole("button", { name: "Raise concern", exact: true }).isVisible(), true);
-	await page.getByRole("button", { name: "Record failure", exact: true }).click();
+	// Approval is reachable from its step while evidence is the page's next step.
+	await openStep(/Approval/);
+	await stepDetail().getByRole("button", { name: "Approve", exact: true }).click();
+	await stepDetail().getByRole("button", { name: "Approve again", exact: true }).waitFor();
+	await page.getByRole("button", { name: "Add a note on the whole change", exact: true }).waitFor();
+	await page.getByRole("button", { name: "Record result", exact: true }).click();
+	await stepDetail().getByRole("button", { name: "Record failure", exact: true }).click();
 	await page.getByLabel("Record failure note", { exact: true }).fill("Check needs another run");
 	await page.locator(".note-action").getByRole("button", { name: "Record failure", exact: true }).click();
-	await page.locator(".checklist").getByText("Tests failing", { exact: false }).waitFor();
-	await page.getByRole("button", { name: "Record updated tests pass", exact: true }).click();
-	await page.locator(".checklist").getByText("Tests attested", { exact: false }).waitFor();
-	assert.equal(await page.getByRole("button", { name: "Promote to main", exact: true }).isEnabled(), true);
+	await stepDetail().getByText("Tests failing", { exact: false }).waitFor();
+	await page
+		.getByRole("status")
+		.getByText(/^Tests failing on \w{8}\.$/)
+		.waitFor();
+	await stepDetail().getByRole("button", { name: "Record updated tests pass", exact: true }).click();
+	await stepDetail().getByText("Tests attested", { exact: false }).waitFor();
+	await page.getByRole("button", { name: "Promote to main", exact: true }).waitFor();
 	await page.screenshot({ path: "dist/ui-checks/review-completed-checks.png", fullPage: true });
 });
 test("historical approvals require a fresh decision and Developers cannot approve", async () => {
@@ -181,8 +188,12 @@ test("historical approvals require a fresh decision and Developers cannot approv
 	});
 	await openChange();
 	assert.equal(await page.getByRole("button", { name: "Approve", exact: true }).count(), 0);
-	assert.equal(await page.getByRole("button", { name: "Raise concern", exact: true }).isVisible(), true);
-	await page.getByText("A human repository maintainer attests evidence, approves and promotes.", { exact: true }).waitFor();
+	assert.equal(await page.getByRole("button", { name: "Record result", exact: true }).count(), 0);
+	await page.getByRole("button", { name: "Add a note on the whole change", exact: true }).waitFor();
+	await openStep(/Approval/);
+	assert.equal(await stepDetail().getByRole("button", { name: "Approve", exact: true }).count(), 0);
+	await openStep(/Promote/);
+	await stepDetail().getByText("A human repository maintainer attests evidence, approves and promotes.", { exact: true }).waitFor();
 });
 test("copy failures provide a manual-copy alternative", async () => {
 	await openRepo();
@@ -223,8 +234,12 @@ test("metadata-only Git changes remain visible in source review", async () => {
 		});
 	});
 	await openChange();
-	await page.getByText("Mode 100644 → 100755.", { exact: false }).waitFor();
-	await page.getByText("File mode changed; contents unchanged.", { exact: true }).waitFor();
+	const file = page.locator(".rv-file").filter({ hasText: "script.sh" });
+	await file.getByText("Mode 100644 → 100755", { exact: true }).waitFor();
+	// A mode-only change is supporting material: folded, labelled, and one click away.
+	await file.getByText("Mode only", { exact: true }).waitFor();
+	await file.getByRole("button", { name: "Unfold script.sh", exact: true }).click();
+	await file.getByText("File mode changed; contents unchanged.", { exact: true }).waitFor();
 });
 test("a completed mutation cannot navigate away from the page opened while it was pending", async () => {
 	let release, started;
@@ -707,6 +722,18 @@ async function openChange() {
 	await openRepo();
 	await page.locator(".change-row").filter({ hasText: "Bounded retry policy" }).click();
 	await page.getByRole("heading", { name: /Bounded retry policy/, level: 1 }).waitFor();
+}
+const reviewSteps = () => page.getByRole("navigation", { name: "Review checklist", exact: true });
+const stepDetail = () => page.getByRole("region", { name: "Review step", exact: true });
+async function openStep(name) {
+	await reviewSteps().getByRole("button", { name }).click();
+	await stepDetail().waitFor();
+}
+/** The default change lacks tests: its one next step opens the evidence details. */
+async function recordTestsPass() {
+	await page.getByRole("button", { name: "Record result", exact: true }).click();
+	await stepDetail().getByRole("button", { name: "Record checked tests pass", exact: true }).click();
+	await stepDetail().getByText("Tests attested", { exact: false }).waitFor();
 }
 const workspaceRow = (title) => page.locator(".workspace-row").filter({ has: page.getByText(title, { exact: true }) });
 async function openWorkspace(title) {
@@ -1337,23 +1364,28 @@ test("workspaces behind canonical say so and show canonical changes without movi
 test("a change on a stale base waits for its updated revision before review, and its owner can hand the update over", async () => {
 	await page.request.post(`${server.origin}/__fixture/upstream`);
 	await openChange();
-	const checklist = page.locator(".checklist");
-	await checklist.getByText(/Canonical has moved$/).waitFor();
-	await checklist.getByText(/Approve the updated revision$/).waitFor();
-	await checklist.getByText("Approval waits for the updated revision; this one can't be promoted.", { exact: true }).waitFor();
-	// Approving or attesting a revision that can never land would be review spent twice; concerns stay open.
+	await page
+		.getByRole("status")
+		.getByText(/^Canonical moved\./)
+		.waitFor();
+	await reviewSteps()
+		.getByRole("button", { name: /Behind canonical/ })
+		.waitFor();
+	// Approving or attesting a revision that can never land would be review spent twice; notes stay open.
 	assert.equal(await page.getByRole("button", { name: "Approve", exact: true }).count(), 0);
-	assert.equal(await page.getByRole("button", { name: "Record checked tests pass", exact: true }).count(), 0);
-	await page.getByRole("button", { name: "Raise concern", exact: true }).waitFor();
-	const handoff = checklist.locator(".update-handoff");
+	await openStep(/Approval/);
+	await stepDetail().getByText("Approval waits for the updated revision; this one can't be promoted.", { exact: true }).waitFor();
+	assert.equal(await stepDetail().getByRole("button", { name: "Approve", exact: true }).count(), 0);
+	await openStep(/Tests/);
+	assert.equal(await stepDetail().getByRole("button", { name: "Record checked tests pass", exact: true }).count(), 0);
+	await page.getByRole("button", { name: "Add a note on the whole change", exact: true }).waitFor();
+	await page.getByRole("button", { name: "How to update", exact: true }).click();
+	await stepDetail().getByText("Canonical has moved", { exact: false }).waitFor();
+	const handoff = stepDetail().locator(".update-handoff");
 	await handoff
 		.getByText(/^Continue Cruce workspace "Implement retry policy" \(.+\): attach it with attach_workspace, merge canonical \w{40} into it/)
 		.waitFor();
 	await handoff.getByText(/^cruce resume --server .* --workspace /).waitFor();
-	await page
-		.locator(".review-panel")
-		.getByText(/^Next: Merge canonical \w{8} with Git/)
-		.waitFor();
 	// The workspace page offers the same handoff once it is behind.
 	await page.getByRole("button", { name: "Implement retry policy", exact: true }).click();
 	await page.getByRole("heading", { name: "Implement retry policy", exact: true, level: 1 }).waitFor();
@@ -1367,35 +1399,47 @@ test("a reconciled change shows what changed since its last review, with canonic
 	await openRepo();
 	await page.locator(".change-row").filter({ hasText: "Bounded retry policy with jitter" }).click();
 	await page.getByRole("heading", { name: /Bounded retry policy with jitter/, level: 1 }).waitFor();
-	const compare = page.getByRole("navigation", { name: "Compare with" });
-	assert.equal(await compare.getByRole("button", { name: "Since reviewed #1", exact: true }).getAttribute("aria-pressed"), "true");
-	const files = page.getByRole("navigation", { name: "Changed files" });
-	// The workspace's own edit since review is in front; canonical's file is grouped and closed.
-	await files.getByRole("button", { name: /^src\/retry\.ts/ }).waitFor();
-	await page.locator(".patch").getByText("+export const jitter = true;", { exact: true }).waitFor();
-	const canonical = files.locator(".canonical-files");
-	await canonical.getByText("1 file from canonical, already reviewed there", { exact: true }).waitFor();
-	assert.equal(await canonical.getAttribute("open"), null);
-	await canonical.locator("summary").click();
-	await canonical.getByRole("button", { name: /^src\/timeout\.ts/ }).waitFor();
-	// The full change against the current canonical base is one click away.
-	await compare.getByRole("button", { name: "Full change", exact: true }).click();
-	await files.getByRole("button", { name: /^src\/retry\.ts/ }).waitFor();
-	assert.equal(await files.locator(".canonical-files").count(), 0);
-	assert.equal(await files.getByRole("button", { name: /^src\/timeout\.ts/ }).count(), 0);
+	const compare = page.locator(".rv-compare");
+	await compare.getByText("Since #1 was reviewed", { exact: false }).waitFor();
+	const files = page.getByRole("navigation", { name: "Changed files list" });
+	// The workspace's own edit since review is in front; canonical's file is supporting, folded and labelled.
+	await files.getByRole("button", { name: /^retry\.ts/ }).waitFor();
+	await page
+		.locator(".rv-file")
+		.filter({ hasText: "src/retry.ts" })
+		.locator(".rv-ln.a")
+		.getByText("export const jitter = true;", { exact: true })
+		.waitFor();
+	const canonical = page.locator(".rv-file").filter({ hasText: "src/timeout.ts" });
+	await canonical.getByText("From canonical", { exact: true }).waitFor();
+	assert.equal(await canonical.locator(".rv-code").count(), 0);
+	assert.equal(await files.getByRole("button", { name: /^timeout\.ts.*From canonical/ }).count(), 1);
+	// The whole change against the current canonical base is one click away.
+	await compare.click();
+	await page.locator(".rv-timeline").getByRole("button", { name: "Whole change", exact: true }).click();
+	await compare.getByText("Whole change", { exact: false }).waitFor();
+	await files.getByRole("button", { name: /^retry\.ts/ }).waitFor();
+	assert.equal(await files.getByRole("button", { name: /^timeout\.ts/ }).count(), 0);
 });
-test("review is a checklist: confirm checks, approve the exact revision, then promote to main", async () => {
+test("review leads with one next step: record evidence, approve the exact revision, then promote to main", async () => {
 	await openChange();
 	const promote = page.getByRole("button", { name: "Promote to main", exact: true });
-	assert.equal(await promote.isDisabled(), true);
-	await page.getByText("Finish the steps above to promote.", { exact: true }).waitFor();
-	await page.locator(".patch").waitFor();
+	assert.equal(await promote.count(), 0);
+	await page
+		.getByRole("status")
+		.getByText(/^Tests not recorded for \w{8}\.$/)
+		.waitFor();
+	await openStep(/Promote/);
+	await stepDetail().getByText("Finish the other steps to promote.", { exact: true }).waitFor();
+	await page.locator(".rv-ln.a").first().waitFor();
 	await page.screenshot({ path: "dist/ui-checks/review.png", fullPage: true });
-	await page.getByRole("button", { name: "Record checked tests pass", exact: true }).click();
-	await page.locator(".checklist").getByText("Tests attested", { exact: false }).waitFor();
+	await recordTestsPass();
+	await page
+		.getByRole("status")
+		.getByText(/^Ready for approval of \w{8}\.$/)
+		.waitFor();
 	await page.getByRole("button", { name: "Approve", exact: true }).click();
 	await page.locator(".change-header").getByText("Ready to promote", { exact: true }).waitFor();
-	assert.equal(await promote.isEnabled(), true);
 	await promote.click();
 	await page.locator(".change-header").getByText("Promoted", { exact: true }).waitFor();
 	await page.locator(".canonical-ref").getByText(/main/).waitFor();
@@ -1406,27 +1450,80 @@ test("review is a checklist: confirm checks, approve the exact revision, then pr
 	await behind.getByRole("button", { name: "Inspect payment timeout", exact: true }).click();
 	await page.getByRole("heading", { name: "Inspect payment timeout", exact: true, level: 1 }).waitFor();
 });
-test("concerns and failures ask for a reason and block promotion until resolved", async () => {
+test("a concern on a line blocks promotion until a maintainer resolves it with a reason", async () => {
 	await openChange();
-	await page.getByRole("button", { name: "Raise concern", exact: true }).click();
-	await page.getByLabel("Raise concern note", { exact: true }).fill("Retry bound needs a jitter test");
-	await page.locator(".note-action").getByRole("button", { name: "Raise concern", exact: true }).click();
-	await page
-		.locator(".review-blockers")
-		.getByText(/1 unresolved concern/)
+	await recordTestsPass();
+	await page.getByRole("button", { name: "Approve", exact: true }).click();
+	await page.getByRole("button", { name: "Promote to main", exact: true }).waitFor();
+	const line = page.locator(".rv-ln.a").filter({ hasText: "export const retries = 3;" });
+	await line.hover();
+	await line.getByRole("button", { name: "Add a note on line 1", exact: true }).click();
+	// The composer validates before saving.
+	await page.getByRole("button", { name: "Add concern", exact: true }).click();
+	await page.getByRole("alert").filter({ hasText: "Write the note first." }).waitFor();
+	await page.getByLabel("Note on line 1", { exact: true }).fill("Retry bound needs a jitter test");
+	await page.getByRole("button", { name: "Add concern", exact: true }).click();
+	const note = page.locator(".rv-note").filter({ hasText: "Retry bound needs a jitter test" });
+	await note.waitFor();
+	await reviewSteps()
+		.getByRole("button", { name: /1 concern/ })
 		.waitFor();
-	await page.getByText("Retry bound needs a jitter test", { exact: false }).first().waitFor();
-	await page.getByRole("button", { name: "Resolve concern", exact: true }).click();
-	await page.getByLabel("Resolve concern note", { exact: true }).fill("Covered by the existing bound test");
-	await page.locator(".note-action").getByRole("button", { name: "Resolve concern", exact: true }).click();
-	await page.locator(".review-blockers").filter({ hasNotText: "unresolved concern" }).waitFor();
-	await page.locator(".change-header").getByText("Needs preparation", { exact: true }).waitFor();
+	assert.equal(await page.getByRole("button", { name: "Promote to main", exact: true }).count(), 0);
+	await page.getByRole("status").getByText("1 concern waits for your changes.", { exact: true }).waitFor();
+	await note.getByRole("button", { name: "Resolve", exact: true }).click();
+	await note.getByRole("button", { name: "Resolve", exact: true }).click();
+	await note.getByRole("alert").filter({ hasText: "Give a reason to resolve this note." }).waitFor();
+	await note.getByLabel("Reason for resolving", { exact: true }).fill("Covered by the existing bound test");
+	await note.getByRole("button", { name: "Resolve", exact: true }).click();
+	await page.getByRole("button", { name: "Promote to main", exact: true }).waitFor();
+	await reviewSteps()
+		.getByRole("button", { name: /No concerns/ })
+		.waitFor();
+});
+test("review notes: the agent's answer sits beside its line, and the maintainer checks and resolves it", async () => {
+	await page.request.post(`${server.origin}/__fixture/scenario`, { data: { name: "review" } });
+	await openRepo();
+	await page.locator(".change-row").filter({ hasText: "Bounded retry policy with backoff" }).click();
+	await page.getByRole("heading", { name: /Bounded retry policy with backoff/, level: 1 }).waitFor();
+	await page.getByRole("status").getByText("Your agent answered 1 concern; 1 still open.", { exact: true }).waitFor();
+	await page.locator(".rv-compare").getByText("Since #1 was reviewed", { exact: false }).waitFor();
+	// Likely review targets lead; tests and docs are folded and labelled by kind.
+	const files = page.getByRole("navigation", { name: "Changed files list" });
+	assert.deepEqual(await files.locator(".rv-titem .rv-nm").evaluateAll((items) => items.map((i) => i.firstChild?.textContent)), [
+		"retry.ts",
+		"backoff.ts",
+		"retries.md",
+		"backoff.test.ts",
+	]);
+	await page.locator(".rv-file.sup").filter({ hasText: "docs/retries.md" }).getByText("Docs", { exact: true }).waitFor();
+	await page.getByRole("button", { name: "Check the answers", exact: true }).click();
+	const answered = page.locator(".rv-note").filter({ hasText: "Three immediate attempts" });
+	await answered.getByText("Added exponential backoff with full jitter", { exact: false }).waitFor();
+	await answered.getByText("your agent", { exact: true }).waitFor();
+	await answered.getByRole("button", { name: /^cites \w{8}$/ }).waitFor();
+	await answered.getByText("Answered. Check the code, then resolve or reply.", { exact: true }).waitFor();
+	// The note written on #1 sits on that line of the comparison.
+	await page.locator(".rv-ln").filter({ hasText: "export const retries = 3;" }).locator(".rv-pin").waitFor();
+	await page.screenshot({ path: "dist/ui-checks/review-notes.png", fullPage: true });
+	await answered.getByRole("button", { name: "Resolve", exact: true }).click();
+	await answered.getByLabel("Reason for resolving", { exact: true }).fill("Verified the backoff and its cap");
+	await answered.getByRole("button", { name: "Resolve", exact: true }).click();
+	await page.getByRole("status").getByText("1 concern waits for your changes.", { exact: true }).waitFor();
+	// The owner hands what is left to their own agent; Cruce never contacts it.
+	await page.getByRole("button", { name: "Hand to your agent", exact: true }).click();
+	await stepDetail().getByText("src/backoff.ts:4", { exact: true }).waitFor();
+	await stepDetail().getByText("Cruce never contacts the agent.", { exact: false }).waitFor();
+	await stepDetail().getByText("address_review_notes", { exact: true }).waitFor();
+	// Comments never block and stay quiet.
+	await page.getByText("Docs read well. Thanks for adding them.", { exact: true }).waitFor();
+	await reviewSteps()
+		.getByRole("button", { name: /1 concern/ })
+		.waitFor();
 });
 test("failed promotion preserves canonical source and reuses retry identity", async () => {
 	await openChange();
 	const before = await page.locator(".canonical-ref").innerText();
-	await page.getByRole("button", { name: "Record checked tests pass", exact: true }).click();
-	await page.locator(".checklist").getByText("Tests attested", { exact: false }).waitFor();
+	await recordTestsPass();
 	await page.getByRole("button", { name: "Approve", exact: true }).click();
 	await page.locator(".change-header").getByText("Ready to promote", { exact: true }).waitFor();
 	const keys = [];
@@ -1527,7 +1624,8 @@ test("stored evidence is readable beside its change and links back to it", async
 	await page.reload();
 	await page.getByRole("heading", { name: "Retry policy test report", exact: true }).waitFor();
 	await page.getByRole("button", { name: "View change #1 →", exact: true }).click();
-	assert.equal(await page.getByRole("button", { name: "Promote to main", exact: true }).isDisabled(), true);
+	await page.getByRole("heading", { name: /Bounded retry policy/, level: 1 }).waitFor();
+	assert.equal(await page.getByRole("button", { name: "Promote to main", exact: true }).count(), 0);
 });
 test("explicit stored inspection and recovery remain usable when cached source is unavailable", async () => {
 	await page.route("**/command", async (route) => {
@@ -1538,9 +1636,9 @@ test("explicit stored inspection and recovery remain usable when cached source i
 	});
 	await openChange();
 	await page.getByRole("alert").filter({ hasText: "Source cache unavailable; explicitly recover retained source" }).waitFor();
-	await page.getByText("Inspect stored diff", { exact: true }).click();
+	await page.getByText(/Loading the stored diff uses cloud storage and one namespace resource operation per file you open/).waitFor();
 	await page.getByRole("button", { name: "Load stored diff", exact: true }).click();
-	await page.locator(".patch").getByText("export const retries = 3;", { exact: false }).waitFor();
+	await page.locator(".rv-ln.a").getByText("export const retries = 3;", { exact: true }).waitFor();
 	await page.goto(`${root()}#/history/source`);
 	await page.getByRole("button", { name: "Browse files", exact: true }).waitFor();
 	await page.getByText("Inspect stored source", { exact: true }).click();
@@ -1593,7 +1691,10 @@ test("changes exclude stale and unrelated reports while keeping explicitly linke
 	const timeline = page.locator(".timeline");
 	await timeline.getByRole("button", { name: "Explicitly linked report", exact: true }).waitFor();
 	assert.equal(await timeline.getByRole("button", { name: /Earlier revision report|Unrelated workspace report/ }).count(), 0);
-	await page.getByText(/reported a pass: “Linked reported check”/).waitFor();
+	await openStep(/Tests/);
+	await stepDetail()
+		.getByText(/reported a pass: “Linked reported check”/)
+		.waitFor();
 	await page.goto(`${root()}#/history/stale`);
 	await page.getByRole("heading", { name: "Earlier revision report", exact: true }).waitFor();
 	assert.equal(await page.getByRole("button", { name: "View change #1 →", exact: true }).count(), 0);
@@ -1892,7 +1993,9 @@ test("many workspaces, long paths and read-only authority stay usable on a phone
 	await page.locator(".change-row").filter({ hasText: "Bounded retry policy" }).click();
 	assert.equal(await page.getByRole("button", { name: "Approve", exact: true }).count(), 0);
 	assert.equal(await page.getByRole("button", { name: "Promote to main", exact: true }).count(), 0);
-	await page.getByText("A human repository maintainer attests evidence, approves and promotes.", { exact: true }).waitFor();
+	await openStep(/Promote/);
+	await stepDetail().getByText("A human repository maintainer attests evidence, approves and promotes.", { exact: true }).waitFor();
+	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
 });
 
 test("published work with no change says so, groups shared scaffold paths once and offers one-click proposals", async () => {
@@ -2246,11 +2349,12 @@ test("another owner's change leads with its owner and connection, and evidence w
 	const meta = page.locator(".change-meta");
 	await meta.getByText("Owner: Maya Reyes", { exact: true }).waitFor();
 	await meta.getByText(/published through Codex, Maya Reyes's connection/).waitFor();
-	await page.getByText("Next: Inspect the reported evidence and attest what you checked", { exact: true }).waitFor();
-	await page.locator(".checklist").getByText("Tests reported passing; human attestation required", { exact: false }).waitFor();
-	await page.getByRole("button", { name: "Attest tests pass", exact: true }).click();
-	await page.locator(".checklist").getByText("Tests attested", { exact: false }).waitFor();
-	await page.getByText(`Next: Approve`, { exact: false }).waitFor();
+	await page.getByRole("status").getByText("Tests reported passing; a maintainer attests it.", { exact: true }).waitFor();
+	await page.getByRole("button", { name: "Record result", exact: true }).click();
+	await stepDetail().getByText("Tests reported passing; human attestation required", { exact: false }).waitFor();
+	await stepDetail().getByRole("button", { name: "Attest tests pass", exact: true }).click();
+	await stepDetail().getByText("Tests attested", { exact: false }).waitFor();
+	await page.getByRole("button", { name: "Approve", exact: true }).waitFor();
 });
 test("workspaces filter by owner and Mine, lanes name owners, and only the owner is offered continuation", async () => {
 	await page.request.post(`${server.origin}/__fixture/scenario`, { data: { name: "team" } });
@@ -2277,8 +2381,7 @@ test("workspaces filter by owner and Mine, lanes name owners, and only the owner
 });
 test("History connects each promotion to its approver, promoter, workspace owner and evidence", async () => {
 	await openChange();
-	await page.getByRole("button", { name: "Record checked tests pass", exact: true }).click();
-	await page.locator(".checklist").getByText("Tests attested", { exact: false }).waitFor();
+	await recordTestsPass();
 	await page.getByRole("button", { name: "Approve", exact: true }).click();
 	await page.getByRole("button", { name: "Promote to main", exact: true }).click();
 	await page.locator(".change-header").getByText("Promoted", { exact: true }).waitFor();

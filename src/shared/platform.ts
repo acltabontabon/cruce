@@ -339,6 +339,36 @@ export interface Verification {
 	artifactId?: string;
 	at: number;
 }
+/** The line a review note points at: a path and 1-based line in one exact revision, with that line's text. */
+export interface ReviewNoteAnchor {
+	path: string;
+	line: number;
+	revision: string;
+	text: string;
+}
+export interface ReviewNoteReply {
+	id: string;
+	actor: Actor;
+	body: string;
+	/** A published revision of the same workspace the reply points at; a pointer for the reviewer, never proof. */
+	citedRevision?: string;
+	at: number;
+}
+/**
+ * A reviewer's remark on an open change, naming its exact revision under review. Concerns block promotion until a human
+ * maintainer resolves them with a reason; comments never block. Immutable apart from replies and resolution.
+ */
+export interface ReviewNote {
+	id: string;
+	actor: Actor;
+	revision: string;
+	kind: "concern" | "comment";
+	body: string;
+	anchor?: ReviewNoteAnchor;
+	replies: ReviewNoteReply[];
+	resolution?: { actor: Actor; reason: string; at: number };
+	at: number;
+}
 /** Product-facing change: an exact source artifact proposed for review, not acceptance into canonical Git. */
 export interface Proposal {
 	id: string;
@@ -350,6 +380,10 @@ export interface Proposal {
 	title: string;
 	state: "open" | "rejected" | "promoting" | "promoted";
 	reviews: Review[];
+	/** Notes added while this change was the newest in its thread; a newer change inherits the unresolved ones. */
+	notes?: ReviewNote[];
+	/** The newer change from the same workspace that superseded this one. */
+	supersededBy?: string;
 	at: number;
 }
 export interface Promotion {
@@ -420,7 +454,10 @@ export interface Readiness {
 		canonical?: string;
 		approved: boolean;
 		reviewIds: string[];
+		/** Unresolved whole-change concerns on this revision plus unresolved concern notes in the change's thread. */
 		concerns: number;
+		/** Unresolved concern notes whose latest reply came from the workspace owner: waiting for the reviewer. */
+		answered: number;
 		evidence: { kind: string; trusted: boolean; reported: boolean; failed: boolean; verificationIds: string[] }[];
 		blockedByPromotion: boolean;
 	};
@@ -577,6 +614,12 @@ export const CommandInput = z
 		outcome: z.enum(["approve", "concern", "disagree", "pass", "fail", "reject"]).optional(),
 		reason: z.string().min(1).max(2000).optional(),
 		reviewIndex: z.number().int().nonnegative().optional(),
+		noteId: id.optional(),
+		body: z.string().trim().min(1).max(2000).optional(),
+		line: z.number().int().positive().max(1_000_000).optional(),
+		anchorRevision: revision.optional(),
+		lineText: z.string().max(500).optional(),
+		citedRevision: revision.optional(),
 		humanAttested: z.boolean().optional(),
 		ref: branch.optional(),
 		path: path.optional(),

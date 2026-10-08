@@ -4,6 +4,19 @@
 
 Use separate evidence for pure decisions, local integration, real provider behavior and real participant behavior. Passing one layer does not establish another. **Proposed** means a candidate design; **implemented** means code exists; **locally verified** means named local checks passed; **provider-tested** identifies a real-provider check with its stated harness/authority; **deployed** requires evidence through the deployed Worker and authentication boundary. Describe a result as live verified only with its specific environment, revision and authority scope. Generated client configuration does not prove heterogeneous-agent interoperability. These capability claims are separate from artifact/evidence [trust labels](architecture.md#publication-review-and-retention).
 
+## Review notes and the calmer change review
+
+On **2026-10-09**, [ADR 0014](decisions/0014-review-notes-on-exact-revisions.md) and the redesigned change review passed typecheck, lint, **425 unit/integration tests**, **97 browser journeys**, deterministic scenario verification and the offline cf build.
+
+What the tests cover:
+
+- **Controller** ([review note tests](../test/core/review-notes.test.ts)). A concern note blocks readiness until a human maintainer resolves it with a reason; agents and paired terminals cannot resolve. Comments never block. Notes must name the open change's exact revision, anchors must name a revision of the change thread or its base, and replies may cite only the workspace's published revisions. A newer change records `supersededBy` and inherits unresolved notes, so republishing never drops a concern, while approval does not carry over. A reply from the owner's side marks a concern answered; a reviewer's follow-up hands it back. Closing a change ends its thread. `get_review_notes` does not mutate state, and the note and reply limits hold.
+- **Tool surface** ([review note tests](../test/core/review-notes.test.ts), [prompt test](../test/worker/mcp-prompts.test.ts), read-purity and public-error tests). Agents read under `cruce:read` and add or reply under `change:write`; `resolve_review_note` is console-only. Hosted MCP offers the fixed `address_review_notes` prompt.
+- **Bridge** ([coordination tests](../test/runner/coordination.test.ts)). The `Cruce:` sentence names only the caller's own open changes whose notes await the owner, including notes inherited from a superseded change; attached workspaces are asked to address them, others only when the user asks.
+- **Console** ([diff model tests](../test/ui/diff-model.test.ts), [browser journeys](../test/browser/console.browser.mjs)). Patches parse with numbers on both sides; changed words are marked; whitespace-only edits fold into context; supporting files are labelled by kind; notes sit on their exact line, carry forward only on identical text, and are otherwise listed with their line rather than moved. Browser journeys cover the one next step through evidence, approval and promotion; a line concern that blocks promotion until resolved with a reason; an agent's cited answer beside its line, resolved by the maintainer; the owner's hand-off; stale-base, reconciled, stored-diff, developer, phone and mode-only cases.
+
+Not yet verified: an agent session reading and answering notes through the hosted test environment, or a client running the `address_review_notes` prompt.
+
 ## Reconciling just before review
 
 On **2026-10-08**, these changes passed typecheck, lint, **397 unit/integration tests**, **93 browser journeys**, deterministic scenario verification and the offline cf build.

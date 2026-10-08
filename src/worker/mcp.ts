@@ -4,7 +4,7 @@ import { z } from "zod";
 import { COST_LABELS, type Scope } from "../core/capabilities.ts";
 import { DomainError, publicError } from "../core/errors.ts";
 import type { Command } from "../shared/platform.ts";
-import { CRUCE_INSTRUCTIONS, CRUCE_TOOLS, toInternalCommand, toolInputShape } from "../shared/tools.ts";
+import { CRUCE_INSTRUCTIONS, CRUCE_PROMPTS, CRUCE_TOOLS, toInternalCommand, toolInputShape } from "../shared/tools.ts";
 import { CRUCE_VERSION } from "../shared/version.ts";
 import { correlate, diagnoseError, withDiagnostics } from "./diagnostics.ts";
 export type MachineCommand = Command;
@@ -56,6 +56,10 @@ export function cruceServer(execute: (command: MachineCommand) => Promise<unknow
 			(args) => dispatch(tool.name, args),
 		);
 	}
+	for (const prompt of CRUCE_PROMPTS)
+		server.registerPrompt(prompt.name, { title: prompt.title, description: prompt.description }, () => ({
+			messages: [{ role: "user" as const, content: { type: "text" as const, text: prompt.text } }],
+		}));
 	// Keep catalog schemas for discovery, but validate inside our boundary. The SDK's
 	// default tools/call handler copies raw validation messages (including unknown keys).
 	server.server.setRequestHandler("tools/call", (request) => dispatch(request.params.name, request.params.arguments));

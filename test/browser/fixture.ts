@@ -236,6 +236,81 @@ export async function fixture() {
 				});
 		}
 	};
+	/**
+	 * Opt-in review state: Sam raised a line concern on change #1, Alex approved it, then Alex's agent published a fixed
+	 * revision with backoff (change #2), answered the concern citing it, and Sam left a new concern and a comment on #2.
+	 */
+	const seedReview = async () => {
+		people.push({ id: "sam", name: "Sam Okafor", email: "sam@example.com" });
+		const sam: Actor = { id: "sam", userId: "sam", name: "Sam Okafor", kind: "human" };
+		const samAuthority = {
+			actor: sam,
+			namespaceId: shared.id,
+			repositoryId: repository.id,
+			role: "maintainer" as const,
+			repositoryRole: "maintain" as const,
+		};
+		const asSam = (tool: string, fields: Partial<Command> = {}) =>
+			c.command({ tool, namespaceId: shared.id, repositoryId: repository.id, ...fields }, samAuthority);
+		const first = c.state.proposals[0];
+		const concern = asSam("add_review_note", {
+			proposalId: first.id,
+			revision: head,
+			kind: "concern",
+			body: "Three immediate attempts hammer the provider during an outage. Back off between attempts, with jitter.",
+			path: "src/retry.ts",
+			line: 1,
+			anchorRevision: head,
+			lineText: "export const retries = 3;",
+		}) as { id: string };
+		run("review_proposal", { proposalId: first.id, revision: head, outcome: "approve", reason: "Bound looks right" });
+		const fixed = await git.commit({
+			ref: "refs/heads/retry",
+			parent: head,
+			files: {
+				"src/retry.ts":
+					'import { backoff } from "./backoff";\n\nexport const retries = 3;\n\n/** Delay before the next attempt, in milliseconds. */\nexport function delayFor(attempt: number) {\n\treturn backoff(attempt, { baseMs: 200, ceilingMs: 30_000 });\n}\n',
+				"src/backoff.ts":
+					"/** Exponential backoff with full jitter, capped at a ceiling. */\nexport function backoff(attempt: number, opts: { baseMs: number; ceilingMs: number }) {\n\tconst exp = Math.min(opts.ceilingMs, opts.baseMs * 2 ** attempt);\n\treturn Math.floor(Math.random() * exp);\n}\n",
+				"test/backoff.test.ts":
+					'import { expect, it } from "vitest";\nimport { backoff } from "../src/backoff";\n\nit("never exceeds the ceiling", () => {\n\texpect(backoff(20, { baseMs: 200, ceilingMs: 30_000 })).toBeLessThan(30_000);\n});\n',
+				"docs/retries.md": "# Retries\n\nPayment calls retry transient failures three times, backing off with jitter.\n",
+			},
+			message: "Back off between attempts",
+			author,
+		});
+		const w = c.state.workspaces[1];
+		c.addArtifact({
+			...c.artifact("source"),
+			id: "source-backoff",
+			revision: fixed,
+			title: "Bounded retry policy with backoff",
+			storage: { repository: "fixture-source", providerId: "fixture-source", revision: fixed },
+		});
+		w.publishedRevision = fixed;
+		const second = run("create_proposal", { artifactId: "source-backoff" }, agent) as { id: string };
+		run(
+			"reply_review_note",
+			{
+				noteId: concern.id,
+				body: "Added exponential backoff with full jitter, capped at 30 seconds, and a test for the cap.",
+				citedRevision: fixed,
+			},
+			agent,
+		);
+		asSam("add_review_note", {
+			proposalId: second.id,
+			revision: fixed,
+			kind: "concern",
+			body: "Math.random() makes this untestable. Inject the random source so the test can pin it.",
+			path: "src/backoff.ts",
+			line: 4,
+			anchorRevision: fixed,
+			lineText: "\treturn Math.floor(Math.random() * exp);",
+		});
+		asSam("add_review_note", { proposalId: second.id, revision: fixed, kind: "comment", body: "Docs read well. Thanks for adding them." });
+		return { first: first.id, second: second.id, fixed };
+	};
 	const day = 86_400_000;
 	let connections = [
 		{
@@ -321,6 +396,7 @@ export async function fixture() {
 			if (url.pathname === "/__fixture/calls") return json(res, calls);
 			if (url.pathname === "/__fixture/scenario" && req.method === "POST") {
 				if (body.name === "team") seedTeam();
+				if (body.name === "review") return json(res, { seeded: body.name, ...(await seedReview()) });
 				return json(res, { seeded: body.name });
 			}
 			if (url.pathname === "/__fixture/upstream" && req.method === "POST") {

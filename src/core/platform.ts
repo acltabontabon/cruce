@@ -10,12 +10,14 @@ import type {
 	Repository,
 	RepositorySnapshot,
 	RepositoryState,
+	ReviewNote,
 	Workspace,
 	WorkspaceUpdates,
 } from "../shared/platform.ts";
 import { attentionView } from "./attention.ts";
 import { humanMaintain, writeAccess } from "./capabilities.ts";
 import { DomainError, requireValue, stable } from "./errors.ts";
+import { changeThread, findReviewNote, reviewNoteState, threadHead, threadNotes } from "./review-notes.ts";
 export const WORKSPACE_TTL = 90_000;
 /** Minimum interval between `changes_reported` activity events for one workspace. */
 export const CHANGE_EVENT_INTERVAL = 15 * 60_000;
@@ -191,6 +193,11 @@ export class RepositoryController {
 			if (!check.trusted || check.failed) reasons.push(`Trusted passing ${kind} evidence required`);
 			return check;
 		});
+		// Concern notes follow the change thread: republishing never drops one a human has not resolved.
+		const owner = this.state.workspaces.find((w) => w.id === p.workspaceId)?.ownerId ?? "";
+		const concernNotes = threadNotes(this.state.proposals, p).filter(({ note }) => note.kind === "concern" && !note.resolution);
+		if (concernNotes.length && !reasons.includes("Review concern requires a reasoned human resolution"))
+			reasons.push("Review concern requires a reasoned human resolution");
 		const reviews = [...latest.values()];
 		return {
 			ready: attempted || !reasons.length,
@@ -201,7 +208,8 @@ export class RepositoryController {
 				canonical: head,
 				approved,
 				reviewIds: reviews.map((r) => r.id),
-				concerns: reviews.filter((r) => r.outcome !== "approve" && !r.resolution).length,
+				concerns: reviews.filter((r) => r.outcome !== "approve" && !r.resolution).length + concernNotes.length,
+				answered: concernNotes.filter(({ note }) => reviewNoteState(note, owner) === "awaiting_reviewer").length,
 				evidence: evidenceChecks,
 				blockedByPromotion: this.state.promotions.some((other) => other !== promotion && ["prepared", "uncertain"].includes(other.state)),
 			},
@@ -441,6 +449,7 @@ export class RepositoryController {
 				// A workspace's newer change replaces its older open ones; reviews name exact revisions, so none carry over.
 				for (const older of this.state.proposals.filter((o) => o.workspaceId === s.id && o.state === "open")) {
 					older.state = "rejected";
+					older.supersededBy = p.id;
 					this.event(a.actor, "change_rejected", `Superseded by #${p.number}`, [older.id]);
 				}
 				this.state.proposals.push(p);
@@ -473,6 +482,69 @@ export class RepositoryController {
 				r.resolution = { actor: a.actor, reason: requireValue(cmd.reason, "Resolution reason required"), at: this.now };
 				this.event(a.actor, "review_resolved", r.resolution.reason, [p.id]);
 				return p;
+			}
+			case "get_review_notes":
+				return this.reviewNotes(threadHead(this.state.proposals, this.openChange(cmd)));
+			case "add_review_note": {
+				writeAccess(a);
+				const p = this.openChange(cmd);
+				if (p.state !== "open" || cmd.revision !== p.revision)
+					throw new DomainError(409, "A note must name the open change's exact revision");
+				if (cmd.kind !== "concern" && cmd.kind !== "comment") throw new DomainError(400, "Note kind must be concern or comment");
+				const thread = changeThread(this.state.proposals, p);
+				if (thread.reduce((n, o) => n + (o.notes?.length ?? 0), 0) >= STATE_LIMITS.reviewNotes)
+					throw new DomainError(409, "This change has reached its review note limit; resolve notes or propose a new change");
+				let anchor: ReviewNote["anchor"];
+				if (cmd.path) {
+					const revisions = new Set(thread.flatMap((o) => [o.revision, o.base]));
+					const revision = requireValue(cmd.anchorRevision, "Anchor revision required");
+					if (!revisions.has(revision)) throw new DomainError(409, "Anchor a note to a revision of this change or its review base");
+					anchor = { path: cmd.path, line: requireValue(cmd.line, "Anchor line required"), revision, text: cmd.lineText ?? "" };
+				}
+				const note: ReviewNote = {
+					id: this.nextId(),
+					actor: a.actor,
+					revision: p.revision,
+					kind: cmd.kind,
+					body: requireValue(cmd.body, "Note text required"),
+					...(anchor ? { anchor } : {}),
+					replies: [],
+					at: this.now,
+				};
+				p.notes = [...(p.notes ?? []), note];
+				this.event(a.actor, "review_note_added", `${a.actor.name} added a ${note.kind} on #${p.number}`, [p.id, note.id, p.revision]);
+				return note;
+			}
+			case "reply_review_note": {
+				writeAccess(a);
+				const { note, head } = this.liveNote(cmd.noteId);
+				if (note.replies.length >= STATE_LIMITS.reviewReplies) throw new DomainError(409, "This note has reached its reply limit");
+				if (
+					cmd.citedRevision &&
+					!this.state.artifacts.some((x) => x.kind === "source" && x.workspaceId === head.workspaceId && x.revision === cmd.citedRevision)
+				)
+					throw new DomainError(409, "Cite a published revision of this workspace");
+				note.replies.push({
+					id: this.nextId(),
+					actor: a.actor,
+					body: requireValue(cmd.body, "Reply text required"),
+					...(cmd.citedRevision ? { citedRevision: cmd.citedRevision } : {}),
+					at: this.now,
+				});
+				this.event(a.actor, "review_note_replied", `${a.actor.name} replied on #${head.number}`, [
+					head.id,
+					note.id,
+					...(cmd.citedRevision ? [cmd.citedRevision] : []),
+				]);
+				return note;
+			}
+			case "resolve_review_note": {
+				humanMaintain(a);
+				const { note, head } = this.liveNote(cmd.noteId);
+				if (note.resolution) throw new DomainError(409, "Note is already resolved");
+				note.resolution = { actor: a.actor, reason: requireValue(cmd.reason, "Resolution reason required"), at: this.now };
+				this.event(a.actor, "review_note_resolved", note.resolution.reason, [head.id, note.id]);
+				return note;
 			}
 			case "record_verification": {
 				writeAccess(a);
@@ -516,6 +588,51 @@ export class RepositoryController {
 			default:
 				throw new DomainError(400, "Unsupported repository command");
 		}
+	}
+	/** The named change, or the open change of the named workspace. */
+	private openChange(cmd: Command) {
+		if (cmd.proposalId) return this.proposal(cmd.proposalId);
+		const s = this.workspace(cmd.workspaceId);
+		const open = this.state.proposals.filter((p) => p.workspaceId === s.id && p.state === "open").at(-1);
+		if (!open) throw new DomainError(404, "This workspace has no open change");
+		return open;
+	}
+	/** A note whose thread still ends at an open change; finished threads are history. */
+	private liveNote(id?: string) {
+		const found = findReviewNote(this.state.proposals, requireValue(id, "Note required"));
+		if (!found) throw new DomainError(404, "Review note unavailable");
+		const head = threadHead(this.state.proposals, found.change);
+		if (head.state !== "open") throw new DomainError(409, "Change is not open");
+		return { note: found.note, head };
+	}
+	/** The note thread of a change as its owner's agent reads it: what each note waits for, newest change first. */
+	reviewNotes(p: Proposal) {
+		const owner = this.workspace(p.workspaceId).ownerId,
+			notes = threadNotes(this.state.proposals, p).map(({ note, change }) => ({
+				...note,
+				change: change.number,
+				state: reviewNoteState(note, owner),
+			}));
+		return {
+			change: {
+				id: p.id,
+				number: p.number,
+				title: p.title,
+				workspaceId: p.workspaceId,
+				state: p.state,
+				base: p.base,
+				revision: p.revision,
+			},
+			ownerId: owner,
+			counts: {
+				awaitingOwner: notes.filter((n) => n.state === "awaiting_owner").length,
+				awaitingReviewer: notes.filter((n) => n.state === "awaiting_reviewer").length,
+				resolved: notes.filter((n) => n.state === "resolved").length,
+			},
+			notes: notes.toSorted((x, y) => +(x.state === "resolved") - +(y.state === "resolved")),
+			instructions:
+				"Address notes awaiting the owner in the workspace's own directory. Where you agree, change the code with Git, verify, push, publish_revision and create_proposal, then reply_review_note on each note with citedRevision set to the new revision. Where you disagree or need the user's judgment, reply with your reasoning instead of changing code. Anchors name an exact revision, path and line with that line's text. Only a human maintainer resolves notes; concerns block promotion until then.",
+		};
 	}
 	addArtifact(artifact: Artifact) {
 		this.state.artifacts.push(artifact);

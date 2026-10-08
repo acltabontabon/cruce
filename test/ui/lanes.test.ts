@@ -59,7 +59,17 @@ const promotion = (id: string, proposalId: string, from: string, to: string, at:
 const readiness = (checks: Partial<Readiness["checks"]> = {}, ready = false): Readiness => ({
 	ready,
 	reasons: [],
-	checks: { open: true, current: true, approved: false, reviewIds: [], concerns: 0, evidence: [], blockedByPromotion: false, ...checks },
+	checks: {
+		open: true,
+		current: true,
+		approved: false,
+		reviewIds: [],
+		concerns: 0,
+		answered: 0,
+		evidence: [],
+		blockedByPromotion: false,
+		...checks,
+	},
 });
 function view(extra: Partial<RepositorySnapshot> = {}): RepositorySnapshot {
 	return {

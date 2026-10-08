@@ -8,7 +8,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { DEFAULT_AGENT_SCOPES } from "../src/core/capabilities.ts";
 import type { Command, ExecutionContext, RepositorySnapshot, Workspace } from "../src/shared/platform.ts";
-import { CRUCE_INSTRUCTIONS, CRUCE_TOOLS, toolByName, toolInputShape } from "../src/shared/tools.ts";
+import { CRUCE_INSTRUCTIONS, CRUCE_PROMPTS, CRUCE_TOOLS, toolByName, toolInputShape } from "../src/shared/tools.ts";
 import { CRUCE_VERSION } from "../src/shared/version.ts";
 import { type CheckoutAddress, resolveCheckout } from "./checkout.ts";
 import { bridgeCommand, configureClient, KNOWN_CLIENTS, type KnownClient } from "./client-config.ts";
@@ -575,6 +575,10 @@ async function main() {
 					),
 			);
 			const detail = coordinationDetail();
+			for (const prompt of CRUCE_PROMPTS)
+				server.registerPrompt(prompt.name, { title: prompt.title, description: prompt.description }, () => ({
+					messages: [{ role: "user" as const, content: { type: "text" as const, text: prompt.text } }],
+				}));
 			for (const tool of CRUCE_TOOLS) {
 				server.registerTool(
 					tool.name,
