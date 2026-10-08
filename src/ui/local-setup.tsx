@@ -48,7 +48,8 @@ export function LocalSetup() {
 				<li>
 					<h3>Start work</h3>
 					<p>
-						Open a repository and use <strong>Set up locally</strong> to clone it. Run <code>{launch}</code> in the clone, then ask it:
+						Open a repository and use <strong>Clone</strong> next to its canonical revision. Run <code>{launch}</code> in the clone, then
+						ask it:
 					</p>
 					<CopyCommand text={START_PROMPT} />
 				</li>

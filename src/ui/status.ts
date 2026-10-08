@@ -375,11 +375,6 @@ export function attention(view: RepositorySnapshot) {
 	};
 }
 
-/** The completed promotion that produced the current canonical revision, if Cruce recorded one. */
-export function lastPromotion(view: RepositorySnapshot) {
-	return view.promotions.filter((p) => p.state === "complete").sort((a, b) => b.at - a.at)[0];
-}
-
 /** Activity summaries are stored terse ("Bounded retry policy"); say what happened and who did it. */
 export function activityText(e: Pick<ActivityEvent, "kind" | "summary" | "actor">) {
 	const who = actorLabel(e.actor),

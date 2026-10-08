@@ -1,4 +1,11 @@
-import type { Authority, NamespaceDeletionView, NamespaceState, Repository, RepositoryLifecycleView } from "../shared/platform.ts";
+import type {
+	Authority,
+	NamespaceDeletionView,
+	NamespaceState,
+	Repository,
+	RepositoryLifecycleView,
+	ResourceStorage,
+} from "../shared/platform.ts";
 
 export interface RepositoryRetirement {
 	repository: Repository;
@@ -9,15 +16,19 @@ export interface RepositoryRetirement {
  * Permanent namespace deletion is the owner's decision to delete every repository in it, so it ends their unfinished
  * work exactly as repository deletion does. It waits for whatever any one repository's deletion would wait for, and for
  * an archive or restore that has not finished. A repository already being deleted is resumed, not a blocker.
+ * Unavailable installation storage blocks it too: authorizing would freeze the namespace with no way to remove its
+ * repositories' cloud storage.
  */
 export function namespaceDeletionView(
 	state: Pick<NamespaceState, "namespace" | "lifecycle" | "policy">,
 	a: Authority,
 	repositories: RepositoryRetirement[],
+	storage: ResourceStorage | undefined,
 	deletion?: { idempotencyKey: string; reason?: string },
 ): NamespaceDeletionView {
 	const live = repositories.filter(({ repository }) => repository.lifecycle?.state !== "deleted");
 	const blockers = [
+		...(storage && !storage.ready && live.length ? [storage.reason] : []),
 		...(state.policy.rules["repository.delete"] === "deny" ? ["Storage operations do not allow deleting repositories."] : []),
 		...live.flatMap(({ repository, lifecycle }) =>
 			!lifecycle

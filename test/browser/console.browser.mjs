@@ -127,8 +127,8 @@ test("partial repository status stays unavailable rather than showing zero atten
 });
 test("repository setup only clones or attaches, and links one-time machine setup", async () => {
 	await openRepo();
-	await page.getByRole("button", { name: "Set up locally", exact: true }).click();
-	const dialog = page.getByRole("dialog", { name: "Set up locally", exact: true });
+	await page.locator(".canonical-chip").click();
+	const dialog = page.getByRole("region", { name: "Clone or attach", exact: true });
 	await dialog.getByText(/git clone https?:/).waitFor();
 	// Installing, authorizing Git and connecting tools happen once per machine, never per repository.
 	assert.equal(await dialog.getByText(/npm install|cruce (auth|login|connect)/).count(), 0);
@@ -139,7 +139,9 @@ test("repository setup only clones or attaches, and links one-time machine setup
 	await dialog.getByText(/history and existing remotes stay as they are/).waitFor();
 	await dialog.getByText(/creates an isolated fork and uses namespace resource operations/).waitFor();
 	await page.keyboard.press("Escape");
-	await page.getByRole("button", { name: "Set up locally", exact: true }).click();
+	assert.equal(await dialog.count(), 0);
+	assert.equal(await page.locator(".canonical-chip").evaluate((e) => e === document.activeElement), true);
+	await page.locator(".canonical-chip").click();
 	await dialog.getByRole("link", { name: "Local setup", exact: true }).click();
 	await page.getByRole("heading", { name: "Local setup", level: 1 }).waitFor();
 	assert.equal(new URL(page.url()).search, "?page=setup");
@@ -187,8 +189,12 @@ test("copy failures provide a manual-copy alternative", async () => {
 	await page.evaluate(() =>
 		Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.reject(new Error("denied")) } }),
 	);
-	await page.getByRole("button", { name: "Set up locally", exact: true }).click();
-	await page.getByRole("dialog").getByRole("button", { name: "Copy", exact: true }).first().click();
+	await page.locator(".canonical-chip").click();
+	await page
+		.getByRole("region", { name: "Clone or attach", exact: true })
+		.getByRole("button", { name: "Copy", exact: true })
+		.first()
+		.click();
 	await page.getByRole("alert").filter({ hasText: "Select and copy the command above." }).waitFor();
 });
 test("metadata-only Git changes remain visible in source review", async () => {
@@ -801,10 +807,10 @@ test("a new repository opens on Changes with a way to start local work", async (
 	await page.getByRole("heading", { name: "local-tools", exact: true }).waitFor();
 	await page.getByRole("heading", { name: "No changes yet", exact: true }).waitFor();
 	await page.getByText("Nothing needs attention right now.", { exact: true }).waitFor();
-	await page.locator(".changes-screen").getByText("Use Set up locally above to start.", { exact: false }).waitFor();
-	assert.equal(await page.getByRole("button", { name: "Set up locally", exact: true }).count(), 1);
-	await page.getByRole("button", { name: "Set up locally", exact: true }).click();
-	const dialog = page.getByRole("dialog", { name: "Set up locally", exact: true });
+	await page.locator(".changes-screen").getByText("Use Clone above to start.", { exact: false }).waitFor();
+	assert.equal(await page.locator(".canonical-chip").count(), 1);
+	await page.locator(".canonical-chip").click();
+	const dialog = page.getByRole("region", { name: "Clone or attach", exact: true });
 	await dialog.getByRole("link", { name: "Local setup", exact: true }).waitFor();
 	await page.screenshot({ path: "dist/ui-checks/setup-new-repository.png", fullPage: true });
 });
@@ -1172,9 +1178,9 @@ test("a repository whose creation stopped before canonical setup offers a mainta
 	await openRepo();
 	const notice = page.locator(".canonical-setup");
 	await notice.getByText("Canonical storage was not created.").waitFor();
-	await page.getByRole("button", { name: "Set up locally", exact: true }).click();
+	await page.locator(".canonical-chip").click();
 	assert.equal(
-		await page.getByRole("dialog", { name: "Set up locally" }).getByRole("button", { name: "Clone", exact: true }).isDisabled(),
+		await page.getByRole("region", { name: "Clone or attach" }).getByRole("button", { name: "Clone", exact: true }).isDisabled(),
 		true,
 	);
 	await page.keyboard.press("Escape");
@@ -1400,7 +1406,7 @@ test("review is a checklist: confirm checks, approve the exact revision, then pr
 	assert.equal(await promote.isEnabled(), true);
 	await promote.click();
 	await page.locator(".change-header").getByText("Promoted", { exact: true }).waitFor();
-	await page.locator(".canonical-line").getByText(/main/).waitFor();
+	await page.locator(".canonical-ref").getByText(/main/).waitFor();
 	await page.getByRole("button", { name: "1 workspace needs a Git update", exact: true }).waitFor();
 	// The promotion names the work it left behind, without asking anyone to update it now.
 	const behind = page.locator(".change-header .status-detail").filter({ hasText: "Now behind canonical" });
@@ -1426,7 +1432,7 @@ test("concerns and failures ask for a reason and block promotion until resolved"
 });
 test("failed promotion preserves canonical source and reuses retry identity", async () => {
 	await openChange();
-	const before = await page.locator(".canonical-line").innerText();
+	const before = await page.locator(".canonical-ref").innerText();
 	await page.getByRole("button", { name: "Record checked tests pass", exact: true }).click();
 	await page.locator(".checklist").getByText("Tests attested", { exact: false }).waitFor();
 	await page.getByRole("button", { name: "Approve", exact: true }).click();
@@ -1445,7 +1451,7 @@ test("failed promotion preserves canonical source and reuses retry identity", as
 	await page.getByRole("alert").filter({ hasText: "Canonical update unavailable" }).first().waitFor();
 	assert.equal(keys.length, 2);
 	assert.equal(keys[0], keys[1]);
-	assert.equal(await page.locator(".canonical-line").innerText(), before);
+	assert.equal(await page.locator(".canonical-ref").innerText(), before);
 	await page.locator(".change-header").getByText("Ready to promote", { exact: true }).waitFor();
 });
 test("interrupted promotion can reconcile after reload with its persisted operation identity", async () => {
@@ -1726,9 +1732,9 @@ test("namespace home, account and creation remain usable on mobile", async () =>
 });
 test("repository clone uses normal Git", async () => {
 	await openRepo();
-	await page.getByRole("button", { name: "Set up locally", exact: true }).click();
+	await page.locator(".canonical-chip").click();
 	await page
-		.getByRole("dialog", { name: "Set up locally" })
+		.getByRole("region", { name: "Clone or attach" })
 		.getByText(/git clone https?:/)
 		.waitFor();
 	await page.keyboard.press("Escape");
@@ -1766,19 +1772,16 @@ test("unknown canonical, quiet and detached workspaces stay distinct from accept
 		await route.fulfill({ json: data });
 	});
 	await openRepo();
-	await page
-		.locator(".canonical-line")
-		.getByText(/Canonical revision unavailable/)
-		.waitFor();
+	await page.locator(".canonical-ref").getByText("unavailable", { exact: true }).waitFor();
 	await page.getByRole("button", { name: "1 workspace not reporting", exact: true }).click();
 	assert.equal(await page.locator(".detached-workspaces").evaluate((e) => e.open), false);
 	await page.locator(".detached-workspaces summary").click();
 	await workspaceRow("Paused elsewhere").getByText("Detached", { exact: true }).waitFor();
 	await page.locator(".workspace-row").getByText("Not reporting", { exact: true }).waitFor();
 	assert.equal(await page.locator(".workspace-row").count(), 3);
-	await page.getByRole("button", { name: "Set up locally", exact: true }).click();
+	await page.locator(".canonical-chip").click();
 	assert.equal(
-		await page.getByRole("dialog", { name: "Set up locally" }).getByRole("button", { name: "Clone", exact: true }).isDisabled(),
+		await page.getByRole("region", { name: "Clone or attach" }).getByRole("button", { name: "Clone", exact: true }).isDisabled(),
 		true,
 	);
 	await page.keyboard.press("Escape");

@@ -397,7 +397,7 @@ export function WorkspaceList({
 					<p className="panel-note">
 						{active
 							? "No active workspaces match this filter."
-							: "No active workspaces. One appears when you or an agent starts work through Cruce. Use Set up locally to begin."}
+							: "No active workspaces. One appears when you or an agent starts work through Cruce. Use Clone next to the canonical revision to begin."}
 					</p>
 				)}
 				{settled.length > 0 && (

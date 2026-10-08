@@ -405,6 +405,7 @@ export async function fixture() {
 							repository: r,
 							lifecycle: repositoryLifecycleView(runtimes.get(r.id)!.state, { ...a, repositoryId: r.id, repositoryRole: "maintain" }),
 						})),
+						{ mode: "deployment", ready: true },
 					),
 					repositories: live,
 					repositorySummaries,

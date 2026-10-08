@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { gitRemotePath } from "../shared/git-access.ts";
 import type { AttentionGroup, Promotion, Proposal, RepositoryLifecycleView, RepositorySnapshot } from "../shared/platform.ts";
 import { ChangeDetail } from "./change.tsx";
@@ -22,7 +22,6 @@ import {
 	changeStatus,
 	ended,
 	GROUP_LABELS,
-	lastPromotion,
 	ownerName,
 	type People,
 	short,
@@ -190,7 +189,7 @@ function CanonicalPanel({ view, open }: { view: RepositorySnapshot; open: Open }
 	const promotions = view.promotions.filter((p) => p.state === "complete").sort((a, b) => b.at - a.at);
 	return (
 		<Section
-			title="Canonical"
+			title="Promotions"
 			action={
 				view.sourceAvailable && (
 					<button type="button" className="ghost" onClick={() => open("history", "canonical")}>
@@ -200,13 +199,6 @@ function CanonicalPanel({ view, open }: { view: RepositorySnapshot; open: Open }
 			}
 		>
 			<div className="canonical-card">
-				<p className="canonical-head">
-					<Icon name="branch" />
-					<code>{view.repository.defaultBranch}</code>
-					<code className="revision" title={view.sourceHead}>
-						{view.sourceHead ? short(view.sourceHead) : "unavailable"}
-					</code>
-				</p>
 				{promotions.length ? (
 					<ol className="mini-timeline">
 						{promotions.slice(0, 3).map((promotion) => {
@@ -332,8 +324,8 @@ function ChangesScreen({
 						<div className="empty-state">
 							<h3>No changes yet</h3>
 							<p>
-								When an agent or developer publishes a revision and proposes it, it shows up here for review against canonical. Use Set up
-								locally above to start.
+								When an agent or developer publishes a revision and proposes it, it shows up here for review against canonical. Use Clone
+								above to start.
 							</p>
 						</div>
 					))}
@@ -536,6 +528,57 @@ function HistoryScreen({
 }
 
 type SetupMethod = "clone" | "attach";
+/** The canonical revision, and the one place to clone or attach this repository locally. */
+function CloneMenu({ view, openSetup }: { view: RepositorySnapshot; openSetup: () => void }) {
+	const [open, setOpen] = useState(false);
+	const root = useRef<HTMLDivElement>(null),
+		button = useRef<HTMLButtonElement>(null);
+	const id = useId();
+	useEffect(() => {
+		if (!open) return;
+		const outside = (event: Event) => {
+			if (!root.current?.contains(event.target as Node)) setOpen(false);
+		};
+		document.addEventListener("pointerdown", outside);
+		document.addEventListener("focusin", outside);
+		return () => {
+			document.removeEventListener("pointerdown", outside);
+			document.removeEventListener("focusin", outside);
+		};
+	}, [open]);
+	return (
+		<div className="clone-menu" ref={root}>
+			<button type="button" className="canonical-chip" ref={button} aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>
+				<span className="canonical-ref">
+					<Icon name="branch" />
+					{view.repository.defaultBranch}
+					{view.sourceHead ? <code title={view.sourceHead}>{short(view.sourceHead)}</code> : <span>unavailable</span>}
+				</span>
+				<span className="canonical-action">
+					Clone
+					<Icon name="chevron" />
+				</span>
+			</button>
+			{open && (
+				<section
+					className="clone-popover"
+					id={id}
+					aria-label="Clone or attach"
+					onKeyDown={(event) => {
+						if (event.key !== "Escape") return;
+						event.preventDefault();
+						event.stopPropagation();
+						setOpen(false);
+						button.current?.focus();
+					}}
+				>
+					<ConnectGuide view={view} openSetup={openSetup} />
+				</section>
+			)}
+		</div>
+	);
+}
+
 /** What one repository needs locally. Installing, authorizing Git and connecting tools happen once, in Local setup. */
 function ConnectGuide({ view, initial = "clone", openSetup }: { view: RepositorySnapshot; initial?: SetupMethod; openSetup: () => void }) {
 	const [method, setMethod] = useState<SetupMethod>(initial);
@@ -780,7 +823,6 @@ function RepositorySettings({
 	mutate,
 	base,
 	onError,
-	setup,
 }: {
 	view: RepositorySnapshot;
 	leave: () => void;
@@ -788,7 +830,6 @@ function RepositorySettings({
 	mutate: Mutate;
 	base: string;
 	onError: (e: Error) => void;
-	setup: () => void;
 	execute: Execute;
 }) {
 	const url = `${base}/repositories/${view.repository.id}`;
@@ -844,14 +885,6 @@ function RepositorySettings({
 					</dl>
 				</SettingRow>
 			)}
-			<SettingRow
-				title="Local setup"
-				detail="Clone this repository or attach an existing checkout. Installing the client and connecting tools happen once per machine."
-			>
-				<button type="button" onClick={setup}>
-					Open setup guide
-				</button>
-			</SettingRow>
 			<SettingRow
 				title="Review policy"
 				detail="What a maintainer confirms before a change can be promoted, and which paths can't be published."
@@ -1039,47 +1072,31 @@ export function RepositoryPage({
 	onError: (e: Error) => void;
 	openSetup: () => void;
 }) {
-	const [dialog, setDialog] = useState<SetupMethod>();
-	const last = lastPromotion(view),
-		a = attention(view),
+	const a = attention(view),
 		live = view.workspaces.filter((w) => !ended(w)).length;
 	const who: People = { viewerId: viewerId ?? view.attention?.viewerId, people: namespace?.people };
 	const counts: Record<string, number> = { changes: a.recovery + a.promote + a.review, workspaces: live };
 	return (
 		<>
-			<header className={`page-header repo-header${id ? " compact" : ""}`}>
-				<div className="page-title">
-					<p className="kicker">
-						<span>Repository</span>
-						{namespace && <span>{namespace.namespace.name}</span>}
-					</p>
-					<h1>{view.repository.name}</h1>
-					<p className="canonical-line">
-						<span className="branch">
-							<Icon name="branch" />
-							{view.repository.defaultBranch}
-						</span>
-						{view.sourceHead ? (
-							<>
-								<span>at</span>
-								<code title={view.sourceHead}>{short(view.sourceHead)}</code>
-								{last && (
-									<>
-										<span className="sep">·</span>
-										<span>last promoted {ago(last.at)}</span>
-									</>
-								)}
-							</>
-						) : (
-							<span>Canonical revision unavailable</span>
-						)}
-					</p>
-				</div>
-				<div className="actions">
-					<button type="button" className="primary" onClick={() => setDialog("clone")}>
-						<Icon name="local" />
-						Set up locally
-					</button>
+			{/* The header breadcrumb names the repository; this bar holds its sections and canonical revision. */}
+			<header className="repo-bar">
+				<h1 className="sr-only">{view.repository.name}</h1>
+				<nav className="tabs" aria-label="Repository navigation">
+					{repositoryTabs.map((t) => (
+						<button
+							type="button"
+							key={t}
+							className={tab === t ? "selected" : ""}
+							aria-current={tab === t ? "page" : undefined}
+							onClick={() => open(t)}
+						>
+							{t[0].toUpperCase() + t.slice(1)}
+							{counts[t] ? <span className="tab-count">{counts[t]}</span> : null}
+						</button>
+					))}
+				</nav>
+				<div className="repo-canonical">
+					<CloneMenu view={view} openSetup={openSetup} />
 				</div>
 			</header>
 			{view.lifecycle && view.lifecycle.state !== "active" && (
@@ -1091,20 +1108,6 @@ export function RepositoryPage({
 			)}
 			<CanonicalSetup view={view} execute={execute} />
 			<AttentionBar view={view} open={open} />
-			<nav className="tabs" aria-label="Repository navigation">
-				{repositoryTabs.map((t) => (
-					<button
-						type="button"
-						key={t}
-						className={tab === t ? "selected" : ""}
-						aria-current={tab === t ? "page" : undefined}
-						onClick={() => open(t)}
-					>
-						{t[0].toUpperCase() + t.slice(1)}
-						{counts[t] ? <span className="tab-count">{counts[t]}</span> : null}
-					</button>
-				))}
-			</nav>
 			{tab === "changes" &&
 				(id ? (
 					<ChangeDetail key={id} view={view} id={id} execute={execute} busy={busy} open={open} who={who} />
@@ -1127,13 +1130,7 @@ export function RepositoryPage({
 					mutate={mutate}
 					base={base}
 					onError={onError}
-					setup={() => setDialog("clone")}
 				/>
-			)}
-			{dialog && (
-				<Dialog title="Set up locally" close={() => setDialog(undefined)} className="connect-dialog">
-					<ConnectGuide key={dialog} view={view} initial={dialog} openSetup={openSetup} />
-				</Dialog>
 			)}
 		</>
 	);

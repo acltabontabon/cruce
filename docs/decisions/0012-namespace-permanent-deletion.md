@@ -1,6 +1,6 @@
 # 0012 — Namespace permanent deletion
 
-**Status:** Accepted 2026-10-08
+**Status:** Accepted 2026-10-08; amended 2026-10-08 (unavailable storage blocks authorization)
 
 ## Context
 
@@ -12,7 +12,7 @@ Add one authenticated console decision, **Delete namespace**, for shared namespa
 
 Namespace deletion is the owner's decision to permanently delete every repository in the namespace, archived ones included, and then the namespace. Each repository is deleted by its own ADR 0010 deletion, under the same owner authority, ordering, reservation, identity checks and recovery; namespace deletion adds no second provider-deletion path. Unfinished work ends with its repository exactly as it does there, and the confirmation states how many repositories, archived repositories, workspaces (and attached ones) and open changes it ends.
 
-Authorization waits for whatever any one repository's deletion would wait for: in-flight promotions, unsettled resource operations, push-observation cleanup, an archive or restore awaiting retry, a repository that cannot be read, and a namespace or repository policy that denies repository deletion. Each blocker names its repository. A repository whose deletion its owner already started is resumed under that operation, not blocked.
+Authorization waits for whatever any one repository's deletion would wait for: in-flight promotions, unsettled resource operations, push-observation cleanup, an archive or restore awaiting retry, a repository that cannot be read, a namespace or repository policy that denies repository deletion, and installation storage the namespace cannot use (for example legacy connected-account storage) while it still has repositories, because authorizing would freeze a namespace whose repositories could never be removed. Each blocker names its repository. A repository whose deletion its owner already started is resumed under that operation, not blocked.
 
 Deletion is a durable, irreversible intent in the Namespace object. Recording it freezes the namespace at once: only the console Owner still reaches it, so members, agents and terminals are refused every request; no repository, membership, team, invitation, rename or resource reservation other than `repository.delete` is accepted; and repository mutations stop except the deletion itself, the retry of an unfinished archive/restore transition and the recovery of a promotion already under way. Namespace resource policy stays editable by the Owner, because a policy changed after authorization blocks recovery and must remain correctable.
 

@@ -256,6 +256,7 @@ export async function platformRoute(
 										? [{ repository, lifecycle: result.status === "fulfilled" ? result.value.lifecycle : undefined }]
 										: [];
 								}),
+								current.storage,
 								deletion,
 							),
 						}

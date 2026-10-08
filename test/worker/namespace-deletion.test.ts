@@ -99,6 +99,7 @@ function fixture(kind: "shared" | "personal" = "shared") {
 		ns.deleteNamespace(console_(actor), { confirmation, idempotencyKey: key });
 	return {
 		ns,
+		store,
 		add,
 		towers,
 		removed,
@@ -163,6 +164,19 @@ describe("permanent namespace deletion", () => {
 		await expect(f.remove()).rejects.toThrow("Namespace deletion has blockers");
 		expect(f.ns.snapshot(console_(owner)).lifecycle).toBeUndefined();
 		expect(f.removed).toEqual([]);
+	});
+
+	it("refuses before freezing when installation storage is unavailable, unless nothing needs storage", async () => {
+		const f = fixture();
+		f.add(repository("r1", "api"));
+		f.store.put("resource-account", { legacy: true });
+		await expect(f.remove()).rejects.toThrow("Namespace deletion has blockers");
+		expect(f.ns.snapshot(console_(owner)).lifecycle).toBeUndefined();
+		expect(f.removed).toEqual([]);
+
+		const empty = fixture();
+		empty.store.put("resource-account", { legacy: true });
+		expect(await empty.remove()).toEqual({ state: "deleted" });
 	});
 
 	it("freezes the namespace while repository cleanup finishes, then completes from its alarm", async () => {
@@ -249,30 +263,35 @@ describe("namespace deletion view", () => {
 			initialNamespace({ id: "team", ownerId: "owner", name: "Team", handle: "team", kind: "shared", createdAt: 1 }),
 			1,
 		);
-		const view = namespaceDeletionView(c.state, c.authority(owner), [
-			{
-				repository: repository("r1", "api"),
-				lifecycle: {
-					state: "active",
-					owner: true,
-					blockers: [],
-					deletionBlockers: ["Recover unfinished promotions."],
-					unfinished: { workspaces: 2, attached: 1, changes: 1 },
+		const view = namespaceDeletionView(
+			c.state,
+			c.authority(owner),
+			[
+				{
+					repository: repository("r1", "api"),
+					lifecycle: {
+						state: "active",
+						owner: true,
+						blockers: [],
+						deletionBlockers: ["Recover unfinished promotions."],
+						unfinished: { workspaces: 2, attached: 1, changes: 1 },
+					},
 				},
-			},
-			{
-				repository: { ...repository("r2", "web"), lifecycle: { state: "archived", at: 1, actorId: "owner", operationId: "a" } },
-				lifecycle: {
-					state: "archived",
-					owner: true,
-					blockers: [],
-					deletionBlockers: [],
-					unfinished: { workspaces: 0, attached: 0, changes: 0 },
-					transition: { tool: "restore_repository", idempotencyKey: "r" },
+				{
+					repository: { ...repository("r2", "web"), lifecycle: { state: "archived", at: 1, actorId: "owner", operationId: "a" } },
+					lifecycle: {
+						state: "archived",
+						owner: true,
+						blockers: [],
+						deletionBlockers: [],
+						unfinished: { workspaces: 0, attached: 0, changes: 0 },
+						transition: { tool: "restore_repository", idempotencyKey: "r" },
+					},
 				},
-			},
-			{ repository: repository("r3", "docs") },
-		]);
+				{ repository: repository("r3", "docs") },
+			],
+			{ mode: "deployment", ready: true },
+		);
 		expect(view).toMatchObject({
 			state: "active",
 			deletable: true,

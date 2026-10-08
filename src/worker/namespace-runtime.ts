@@ -64,7 +64,12 @@ export class NamespaceRuntime extends DurableObject<NamespaceEnv> {
 					)) as { state: string; reason?: string; blocked?: boolean },
 				blockers: async (grant) => {
 					const c = this.controller();
-					return namespaceDeletionView(c.state, c.authority(grant.actor), await this.retirements(grant)).blockers;
+					return namespaceDeletionView(
+						c.state,
+						c.authority(grant.actor),
+						await this.retirements(grant),
+						new ResourceBoundary(this.store, this.env, { namespace: c.state.namespace.id }).storage(),
+					).blockers;
 				},
 				retire: (namespace, members) => namespaceDirectory(this.env).retire(namespace.id, members),
 				schedule: async (at) => {

@@ -2081,64 +2081,81 @@ details.group[open] > summary::before {
 	}
 }
 
-/* ---------- repository header ---------- */
-.repo-header .canonical-line {
-	margin-top: 12px;
-}
-.canonical-line {
+/* ---------- repository bar: the header breadcrumb names the repository, this bar holds its sections ---------- */
+.repo-bar {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: 6px 8px;
+	justify-content: space-between;
+	gap: 8px 24px;
+	margin: 0 0 24px;
+	border-bottom: 1px solid var(--border);
+}
+.repo-bar .tabs {
 	margin: 0;
-	color: var(--text-muted);
+	border-bottom: 0;
+}
+.repo-canonical {
+	padding: 6px 0;
+}
+.clone-menu {
+	position: relative;
+}
+:where(.shell) .canonical-chip {
+	display: inline-flex;
+	align-items: stretch;
+	min-height: 32px;
+	padding: 0;
+	overflow: hidden;
+	border: 1px solid var(--border);
+	border-radius: var(--r-md);
+	background: var(--button);
+	color: var(--text);
 	font-size: 13px;
+	font-weight: 500;
 }
-.canonical-line .icon {
-	width: 15px;
-	height: 15px;
+:where(.shell) .canonical-chip:hover,
+:where(.shell) .canonical-chip[aria-expanded="true"] {
+	border-color: var(--border-strong);
 }
-.canonical-line .branch {
+.canonical-chip > span {
 	display: inline-flex;
 	align-items: center;
-	gap: 5px;
-	min-height: 22px;
-	padding: 0 9px;
-	border-radius: 999px;
-	background: var(--canonical);
-	color: var(--on-canonical);
+	gap: 6px;
+	padding: 0 10px;
+}
+.canonical-ref {
 	font-family: var(--font-mono);
-	font-size: 12px;
-	font-weight: 600;
+	font-size: 12.5px;
 }
-.canonical-line .branch .icon {
-	width: 12px;
-	height: 12px;
-}
-.canonical-line code {
+.canonical-ref code {
 	color: var(--accent);
+	font-size: inherit;
 }
-.canonical-line .sep {
-	color: var(--border-strong);
+.canonical-action {
+	border-left: 1px solid var(--border);
 }
-.repo-header.compact {
-	align-items: center;
-	margin: 4px 0 24px;
+.canonical-chip .icon {
+	width: 14px;
+	height: 14px;
+	color: var(--text-faint);
 }
-.repo-header.compact .kicker {
-	display: none;
+.clone-popover {
+	position: absolute;
+	top: calc(100% + 8px);
+	right: 0;
+	z-index: 30;
+	width: min(520px, calc(100vw - 32px));
+	padding: 18px;
+	border: 1px solid var(--border);
+	border-radius: var(--r-lg);
+	background: var(--surface);
+	box-shadow: var(--shadow-pop);
+	color: var(--text);
+	font-size: 13px;
 }
-.repo-header.compact .page-title {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: baseline;
-	gap: 6px 16px;
-}
-:where(.shell) .repo-header.compact h1 {
-	font-size: 20px;
-}
-.repo-header.compact .canonical-line {
-	margin: 0;
+.clone-popover .steps {
+	gap: 16px;
 }
 .alert.canonical-setup {
 	display: grid;
@@ -2157,25 +2174,6 @@ details.group[open] > summary::before {
 	justify-items: start;
 	gap: 14px;
 	padding-top: 16px;
-}
-.canonical-head {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	margin: 0;
-	font-family: var(--font-mono);
-	font-size: 12.5px;
-}
-.canonical-head .icon {
-	width: 16px;
-	color: var(--text-muted);
-}
-.canonical-head .revision {
-	padding: 2px 8px;
-	border-radius: var(--r-sm);
-	background: var(--canonical);
-	color: var(--on-canonical);
-	font-size: 12px;
 }
 .mini-timeline {
 	display: grid;
