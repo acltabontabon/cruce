@@ -409,6 +409,18 @@ async function main() {
 					command.ref ??= await git(directory, ["symbolic-ref", "--short", "HEAD"]);
 				}
 
+				// A recorded deletion resumes under its own operation identity, as the console does; a new one is refused.
+				let recordedKey: string | undefined;
+				if (raw.tool === "cleanup_workspace" && command.workspaceId && !connection.pending) {
+					const { cleanup } = (await call({
+						namespaceId: connection.namespaceId,
+						repositoryId: connection.repositoryId,
+						tool: "get_workspace",
+						workspaceId: command.workspaceId,
+					})) as Workspace;
+					if (cleanup && cleanup.state !== "complete") recordedKey = cleanup.command?.idempotencyKey;
+				}
+
 				const fingerprint = JSON.stringify(command);
 				const retrying = !!connection.pending;
 				// Presence and reports are latest-wins observations: an uncertain one is superseded by the
@@ -419,7 +431,7 @@ async function main() {
 					if (connection.pending && connection.pending.command.tool !== command.tool)
 						throw new Error("A previous mutation has an uncertain outcome. Retry that operation before starting another.");
 					if (connection.pending) Object.assign(command, connection.pending.command);
-					command.idempotencyKey = connection.pending?.command.idempotencyKey ?? randomUUID();
+					command.idempotencyKey = connection.pending?.command.idempotencyKey ?? recordedKey ?? randomUUID();
 					connection.pending = { fingerprint, command };
 					await save();
 				}
