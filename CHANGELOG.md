@@ -67,6 +67,7 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Fixed
 
+- Fix repository deletion staying blocked by "Recover unfinished resource operations" after an operation Cruce refused, such as a publication rejected for its review base. A refusal before any cloud call now releases its reservation instead of leaving it uncertain. Repository Settings lists any cloud operation that never settled, and the Owner can **Release** it; releasing runs, retries and deletes nothing, and a later retry of that operation is refused.
 - Fix Git pushes failing with "Invalid refresh token" when several agents push at once. Workspace forks, the bridge and the Git credential helper share one OAuth connection whose refresh token rotates on every use, and each helper process spent it independently. Refreshes now happen under the connection's file lock after re-reading it, so one process spends each refresh token and the others reuse its still-current access token.
 - When Git authentication fails, the credential helper now prints the exact command for the connection it reads (`cruce connect … --client NAME` for workspace forks, `cruce auth …` for canonical) with the real server, namespace and repository, and the cause.
 - Publishing from a workspace whose baseline is ahead of canonical (for example a published skeleton not yet promoted) now reviews against that baseline instead of failing with "Integrate the review base with Git before publishing" and requiring an explicit `baseRevision`.

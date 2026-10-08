@@ -108,7 +108,16 @@ async function fixture(_hosted = true) {
 			lifecycle: (g: typeof grant, id: string, lifecycle: NonNullable<Repository["lifecycle"]>) =>
 				w.lifecycle(w.authority(g.actor, id, g.scopes, g.repositories), lifecycle),
 			lifecycleReservations: (_g: typeof grant, id: string, operationId?: string) =>
-				w.state.reservations.some((r) => r.repositoryId === id && r.id !== operationId && ["reserved", "uncertain"].includes(r.state)),
+				w.state.reservations.filter((r) => r.repositoryId === id && r.id !== operationId && ["reserved", "uncertain"].includes(r.state)),
+			abandon: (id: string) => {
+				const r = w.state.reservations.find((r) => r.id === id)!;
+				if (r.state === "reserved") r.state = "released";
+			},
+			releaseReservation: (_g: typeof grant, _id: string, reservationId: string) => {
+				const r = w.state.reservations.find((r) => r.id === reservationId)!;
+				r.state = "released";
+				return r;
+			},
 			resourceConfiguration: () => ({ namespace: "namespace", binding: undefined, legacyAccount: false, policy: w.state.policy }),
 		};
 	const runtime = new RepositoryRuntime(store, git, port, {}, () => 1000);
@@ -601,7 +610,8 @@ describe("repository runtime", () => {
 		).rejects.toThrow("unavailable");
 		expect(f.host.ensure).toHaveBeenCalledTimes(calls);
 		expect(f.w.state.reservations).toHaveLength(reservations + 1);
-		expect(f.w.state.reservations.at(-1)?.state).toBe("uncertain");
+		// Refused before any provider effect: nothing was performed, so nothing is left uncertain.
+		expect(f.w.state.reservations.at(-1)?.state).toBe("released");
 	});
 	it("pins a reconciled publication's review base across uncertain push retries even as upstream advances", async () => {
 		const f = await fixture();
@@ -664,6 +674,11 @@ describe("repository runtime", () => {
 		});
 		const pack = Buffer.from(await f.git.exportPack(work)).toString("base64");
 		expect(f.runtime.state().sourceHead).toBe(f.base);
+		// A refused publication performed nothing, so it leaves no uncertain reservation to block retirement.
+		await expect(
+			f.call("publish_revision", { workspaceId: s.id, revision: work, pack, baseRevision: f.base, idempotencyKey: "refused" }),
+		).rejects.toThrow("Integrate the review base with Git before publishing");
+		expect(f.w.state.reservations.find((r) => r.id.endsWith(":refused"))?.state).toBe("released");
 		expect(await f.call("publish_revision", { workspaceId: s.id, revision: work, pack })).toMatchObject({
 			revision: work,
 			baseRevision: f.head,

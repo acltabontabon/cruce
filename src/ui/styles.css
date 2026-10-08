@@ -4172,6 +4172,19 @@ main[data-screen="settings"] > form {
 	background: var(--text-faint);
 }
 
+.lifecycle-operations ul {
+	list-style: none;
+	padding: 0;
+	display: grid;
+	gap: 0.5rem;
+}
+.lifecycle-operations li form {
+	display: flex;
+	gap: 1rem;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+}
 .lifecycle-actions {
 	display: flex;
 	gap: 1rem;

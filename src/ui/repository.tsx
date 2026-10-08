@@ -709,6 +709,30 @@ function RepositoryLifecycleSettings({ view, execute, leave }: { view: Repositor
 							))}
 						</ul>
 					)}
+					{lifecycle.owner && lifecycle.operations && lifecycle.operations.length > 0 && (
+						<section className="lifecycle-operations" aria-label="Unfinished cloud operations">
+							<p>
+								{lifecycle.operations.length === 1 ? "This cloud operation" : "These cloud operations"} never finished, and Cruce can't tell
+								whether {lifecycle.operations.length === 1 ? "it" : "they"} changed anything. Release one when no agent will retry it.
+								Releasing runs, retries and deletes nothing; a later retry of that operation is refused.
+							</p>
+							<ul>
+								{lifecycle.operations.map((operation) => (
+									<li key={operation.id}>
+										<Form label="Release" submit={() => execute({ tool: "release_resource_operation", reservationId: operation.id })}>
+											<span>
+												{OPERATION_LABELS[operation.action]}
+												{operation.workspaceId &&
+													` · ${view.workspaces.find((w) => w.id === operation.workspaceId)?.title ?? operation.workspaceId}`}{" "}
+												· started {new Date(operation.at).toLocaleString()} ·{" "}
+												{operation.state === "uncertain" ? "outcome unknown" : "never finished"}
+											</span>
+										</Form>
+									</li>
+								))}
+							</ul>
+						</section>
+					)}
 					{lifecycle.owner ? (
 						<div className="lifecycle-actions">
 							<Form
@@ -768,6 +792,16 @@ function RepositoryLifecycleSettings({ view, execute, leave }: { view: Repositor
 	);
 }
 
+const OPERATION_LABELS: Record<NonNullable<RepositoryLifecycleView["operations"]>[number]["action"], string> = {
+	"repository.create": "Create repository",
+	"repository.delete": "Delete repository",
+	"workspace.fork": "Create workspace fork",
+	"workspace.cleanup": "Delete workspace fork",
+	"revision.publish": "Publish revision",
+	"artifact.publish": "Store evidence",
+	"source.read": "Read stored source",
+	"observation.read": "Observe pushed refs",
+};
 /** What permanent deletion ends with the repository, in plain words for its confirmation. */
 function unfinishedWork({ workspaces, attached, changes }: RepositoryLifecycleView["unfinished"]) {
 	const parts = [

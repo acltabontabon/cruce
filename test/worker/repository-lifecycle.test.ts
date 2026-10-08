@@ -41,9 +41,14 @@ function fixture() {
 			namespace.lifecycle(namespace.authority(g.actor, id), lifecycle),
 		),
 		lifecycleReservations: async (_g: unknown, id: string, operationId?: string) =>
-			namespace.state.reservations.some(
+			namespace.state.reservations.filter(
 				(r) => r.repositoryId === id && r.id !== operationId && ["reserved", "uncertain"].includes(r.state),
 			),
+		releaseReservation: vi.fn((_g: unknown, _id: string, reservationId: string) => {
+			const r = namespace.state.reservations.find((r) => r.id === reservationId)!;
+			r.state = "released";
+			return r;
+		}),
 		reserve: async (g: { actor: Actor }, id: string, key: string, fingerprint: string, action: "repository.delete") =>
 			namespace.reserve(namespace.authority(g.actor, id), key, fingerprint, action),
 		settle: vi.fn(async (id: string, state: "complete" | "uncertain") => {
@@ -109,6 +114,31 @@ describe("repository lifecycle", () => {
 		expect(await f.call("delete_repository")).toEqual({ state: "deleted" });
 		expect(f.remove.mock.calls.map(([name]) => name)).toEqual(expect.arrayContaining(["fork-attached", "fork-detached", "repo-repo"]));
 		expect(f.remove.mock.calls.at(-1)?.[0]).toBe("repo-repo");
+	});
+	it("lets the owner release an unsettled cloud operation so deletion can proceed", async () => {
+		const f = fixture();
+		f.namespace.reserve(f.namespace.authority(owner, repo.id), "stuck", "fingerprint", "revision.publish");
+		f.namespace.state.reservations[0].state = "uncertain";
+		const view = await f.runtime.view(f.repository(), { actor: owner }, f.namespace.authority(owner, repo.id));
+		expect(view.deletionBlockers).toEqual(["Recover unfinished resource operations."]);
+		expect(view.operations).toEqual([expect.objectContaining({ action: "revision.publish", state: "uncertain" })]);
+		await expect(
+			f.runtime.command(
+				f.repository(),
+				{ ...f.command("release_resource_operation"), reservationId: view.operations![0].id },
+				{
+					actor: { ...owner, kind: "agent" },
+				},
+			),
+		).rejects.toThrow("Human namespace owner required");
+		const released = await f.runtime.command(
+			f.repository(),
+			{ ...f.command("release_resource_operation"), reservationId: view.operations![0].id },
+			{ actor: owner },
+		);
+		expect(released).toMatchObject({ deletionBlockers: [] });
+		expect(f.port.releaseReservation).toHaveBeenCalledOnce();
+		expect(await f.call("delete_repository")).toEqual({ state: "deleted" });
 	});
 	it("requires the console namespace owner, never an agent, terminal or maintainer", async () => {
 		for (const actor of [

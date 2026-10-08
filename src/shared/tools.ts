@@ -189,6 +189,7 @@ export const HUMAN_TOOLS = new Set([
 	"archive_repository",
 	"restore_repository",
 	"delete_repository",
+	"release_resource_operation",
 	"resolve_review",
 	"reject_proposal",
 	"promote_proposal",

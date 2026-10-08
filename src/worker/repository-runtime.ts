@@ -74,7 +74,16 @@ interface PublicationIntent {
 	counted?: boolean;
 }
 type NamespacePort = {
-	[K in "authority" | "repository" | "reserve" | "settle" | "resourceConfiguration" | "lifecycle" | "lifecycleReservations"]: (
+	[K in
+		| "authority"
+		| "repository"
+		| "reserve"
+		| "settle"
+		| "abandon"
+		| "releaseReservation"
+		| "resourceConfiguration"
+		| "lifecycle"
+		| "lifecycleReservations"]: (
 		...args: Parameters<NamespaceRuntime[K]>
 	) => Awaited<ReturnType<NamespaceRuntime[K]>> | Promise<Awaited<ReturnType<NamespaceRuntime[K]>>>;
 };
@@ -97,6 +106,7 @@ export class RepositoryRuntime {
 				authority: (grant, id) => this.namespace.authority(grant, id),
 				lifecycle: (grant, id, lifecycle) => this.namespace.lifecycle(grant, id, lifecycle),
 				lifecycleReservations: async (grant, id, operationId) => this.namespace.lifecycleReservations(grant, id, operationId),
+				releaseReservation: async (grant, id, reservationId) => this.namespace.releaseReservation(grant, id, reservationId),
 				reserve: async (grant, id, key, fingerprint, action, storageRequired) =>
 					this.namespace.reserve(grant, id, key, fingerprint, action, undefined, storageRequired),
 				settle: (id, state) => this.namespace.settle(id, state),
@@ -272,9 +282,24 @@ export class RepositoryRuntime {
 		await correlate({ reservationId: r.id, ...commandContext(cmd, grant.actor.id) });
 		diagnose("resource_reserved", { action, phase: r.state });
 		this.maintenanceNeeded = true;
+		// Whether any provider call that can change cloud state started; reads and read tokens change nothing.
+		let effects = false;
 		try {
 			journal?.prepare(r.id);
-			const result = await run(await (await this.resources()).host());
+			const host = await (await this.resources()).host();
+			const result = await run(
+				new Proxy(host, {
+					get: (target, key, receiver) => {
+						const value = Reflect.get(target, key, receiver);
+						if (typeof value !== "function") return value;
+						return (...args: unknown[]) => {
+							if (!["info", "verifyFork", "withSource"].includes(String(key)) && !(key === "withToken" && args[1] === "read"))
+								effects = true;
+							return value.apply(target, args);
+						};
+					},
+				}),
+			);
 			journal?.commit(result);
 			const phase = action === "workspace.cleanup" && (result as { state?: string }).state === "deleting" ? "uncertain" : "complete";
 			await this.namespace.settle(r.id, phase);
@@ -282,8 +307,11 @@ export class RepositoryRuntime {
 			journal?.settled();
 			return result;
 		} catch (error) {
-			await this.namespace.settle(r.id, "uncertain");
-			diagnose("resource_settled", { action, phase: "uncertain" });
+			// A refusal before any provider effect performed nothing; leaving it uncertain would block retirement forever.
+			const phase = !effects && error instanceof DomainError ? "released" : "uncertain";
+			if (phase === "released") await this.namespace.abandon(r.id);
+			else await this.namespace.settle(r.id, "uncertain");
+			diagnose("resource_settled", { action, phase });
 			throw error;
 		}
 	}
@@ -466,7 +494,7 @@ export class RepositoryRuntime {
 		// This empty projection is not persisted until explicit canonical setup.
 		const state = archiveLayout(stored ? structuredClone(stored) : initialRepository(repository));
 		state.repository = { ...repository, lifecycle: stored?.repository.lifecycle ?? repository.lifecycle };
-		if (["archive_repository", "restore_repository", "delete_repository"].includes(cmd.tool))
+		if (["archive_repository", "restore_repository", "delete_repository", "release_resource_operation"].includes(cmd.tool))
 			return this.lifecycle().command(repository, cmd, grant);
 		if (state.repository.lifecycle?.state === "deleted") throw new DomainError(410, "Repository has been deleted");
 		const lifecycleMutation = HUMAN_TOOLS.has(cmd.tool) || toolByName(cmd.tool)?.mutation || cmd.tool === "provision_repository";

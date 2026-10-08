@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { DEFAULT_RESOURCE_POLICY } from "../core/capabilities.ts";
 import { DomainError, stable } from "../core/errors.ts";
 import { initialNamespace, NamespaceController } from "../core/ownership.ts";
+import { repositoryOwner } from "../core/repository-lifecycle.ts";
 import { assertNamespaceCapacity } from "../core/state-limits.ts";
 import { STATE_LIMITS } from "../shared/limits.ts";
 import type {
@@ -17,7 +18,7 @@ import type {
 	User,
 } from "../shared/platform.ts";
 import { ResourceBoundary, type StorageEnv } from "./artifacts.ts";
-import { hash, someRecord, sqlStore } from "./store.ts";
+import { hash, sqlStore } from "./store.ts";
 export type ContinuationAuthorization =
 	| { kind: "console" }
 	| { kind: "oauth"; key: string; propsHash: string }
@@ -132,12 +133,44 @@ export class NamespaceRuntime extends DurableObject<StorageEnv> {
 		c.lifecycle(c.authority(grant.actor, repositoryId, grant.scopes, grant.repositories), lifecycle);
 		this.save(c);
 	}
+	/** Unsettled operations for one repository, oldest first and bounded, so its owner can see what retirement waits for. */
 	lifecycleReservations(grant: ConnectionGrant, repositoryId: string, operationId?: string) {
 		const c = this.controller(repositoryId);
 		c.authority(grant.actor, repositoryId, grant.scopes, grant.repositories);
 		const pending = (r: ResourceReservation) =>
 			r.repositoryId === repositoryId && r.id !== operationId && ["reserved", "uncertain"].includes(r.state);
-		return c.state.reservations.some(pending) || someRecord<ResourceReservation>(this.store, "reservation:", pending);
+		const found = new Map(c.state.reservations.filter(pending).map((r) => [r.id, r]));
+		let cursor: string | undefined;
+		for (let offset = 0; offset <= STATE_LIMITS.storeRecords && found.size <= 20; offset += STATE_LIMITS.pageSize) {
+			const rows = this.store.scan<ResourceReservation>("reservation:", cursor, STATE_LIMITS.pageSize);
+			for (const { value } of rows) if (pending(value)) found.set(value.id, value);
+			if (rows.length < STATE_LIMITS.pageSize) break;
+			cursor = rows.at(-1)!.key;
+		}
+		return [...found.values()].toSorted((a, b) => a.at - b.at).slice(0, 20);
+	}
+	/**
+	 * The repository owner's explicit reconciliation of an operation whose outcome Cruce cannot know. It runs, retries
+	 * and deletes nothing; a later retry of that operation identity is refused, so it cannot resume behind the decision.
+	 */
+	releaseReservation(grant: ConnectionGrant, repositoryId: string, id: string) {
+		const c = this.controller(repositoryId);
+		repositoryOwner(c.authority(grant.actor, repositoryId, grant.scopes, grant.repositories));
+		const r = this.store.get<ResourceReservation>(this.reservationKey(id)) ?? c.state.reservations.find((r) => r.id === id);
+		if (!r || r.repositoryId !== repositoryId) throw new DomainError(404, "Resource reservation unavailable");
+		if (r.action === "repository.delete") throw new DomainError(409, "Resume the repository deletion instead");
+		if (!["reserved", "uncertain"].includes(r.state)) return r;
+		r.state = "released";
+		this.store.put(this.reservationKey(id), r);
+		return r;
+	}
+	/** An operation refused before any provider call performed nothing, so its reservation is released, not uncertain. */
+	abandon(id: string) {
+		const r = this.store.get<ResourceReservation>(this.reservationKey(id)) ?? this.controller().state.reservations.find((r) => r.id === id);
+		if (!r) throw new DomainError(404, "Resource reservation unavailable");
+		if (r.state !== "reserved") return;
+		r.state = "released";
+		this.store.put(this.reservationKey(id), r);
 	}
 	member(grant: ConnectionGrant, userId: string, role?: NamespaceRole) {
 		const c = this.controller();

@@ -2452,6 +2452,45 @@ test("repository retirement shows blockers and requires exact confirmation after
 	await page.getByRole("button").filter({ hasText: "retirement-test" }).waitFor({ state: "detached" });
 });
 
+test("an unfinished cloud operation blocks deletion until the owner releases it", async () => {
+	await page.request.post(`${server.origin}/api/namespaces/fernloop/repositories`, {
+		data: { name: "stuck-operation", defaultBranch: "main", idempotencyKey: "stuck-operation" },
+	});
+	let stuck = true;
+	const released = [];
+	await page.route("**/api/namespaces/fernloop/repositories/stuck-operation", async (route) => {
+		const response = await route.fetch();
+		const snapshot = await response.json();
+		if (stuck) {
+			snapshot.lifecycle.blockers = ["Recover unfinished resource operations."];
+			snapshot.lifecycle.deletionBlockers = ["Recover unfinished resource operations."];
+			snapshot.lifecycle.operations = [
+				{ id: "agent:publish-1", action: "revision.publish", state: "uncertain", at: Date.UTC(2026, 9, 8, 9, 52) },
+			];
+		}
+		await route.fulfill({ response, json: snapshot });
+	});
+	await page.route("**/api/namespaces/fernloop/repositories/stuck-operation/command", async (route) => {
+		const command = route.request().postDataJSON();
+		if (command.tool !== "release_resource_operation") return route.continue();
+		released.push(command.reservationId);
+		stuck = false;
+		return route.fulfill({ json: {} });
+	});
+	await page.goto(`${server.origin}/?namespace=fernloop&repository=stuck-operation#/settings`);
+	const operations = page.getByRole("region", { name: "Unfinished cloud operations" });
+	await operations.getByText("Publish revision", { exact: false }).waitFor();
+	assert.match(await operations.innerText(), /outcome unknown/);
+	assert.equal(await page.getByRole("button", { name: "Delete repository…", exact: true }).isDisabled(), true);
+	await page.screenshot({ path: "dist/ui-checks/unfinished-operation.png", fullPage: true });
+	await operations.getByRole("button", { name: "Release", exact: true }).click();
+	await page.getByRole("button", { name: "Delete repository…", exact: true }).and(page.locator(":enabled")).waitFor();
+	assert.deepEqual(released, ["agent:publish-1"]);
+	assert.equal(await page.getByRole("region", { name: "Unfinished cloud operations" }).count(), 0);
+	await page.unroute("**/api/namespaces/fernloop/repositories/stuck-operation");
+	await page.unroute("**/api/namespaces/fernloop/repositories/stuck-operation/command");
+});
+
 test("partial repository deletion shows its reason and retries the original operation", async () => {
 	await page.request.post(`${server.origin}/api/namespaces/fernloop/repositories`, {
 		data: { name: "retry-deletion", defaultBranch: "main", idempotencyKey: "retry-deletion" },

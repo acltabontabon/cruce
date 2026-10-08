@@ -1,7 +1,7 @@
 import { DomainError, domainStatus, publicError, stable } from "../core/errors.ts";
 import { initialRepository } from "../core/platform.ts";
 import { repositoryLifecycleView, repositoryOwner } from "../core/repository-lifecycle.ts";
-import type { Authority, Command, Repository, RepositoryState } from "../shared/platform.ts";
+import type { Authority, Command, Repository, RepositoryState, ResourceReservation } from "../shared/platform.ts";
 import type { RepositoryHost } from "./artifacts.ts";
 import type { ConnectionGrant } from "./namespace-runtime.ts";
 import { hash, type Store, someRecord } from "./store.ts";
@@ -9,7 +9,12 @@ import { hash, type Store, someRecord } from "./store.ts";
 export interface LifecyclePort {
 	authority(grant: ConnectionGrant, repositoryId: string): Authority | Promise<Authority>;
 	lifecycle(grant: ConnectionGrant, repositoryId: string, lifecycle: NonNullable<Repository["lifecycle"]>): unknown | Promise<unknown>;
-	lifecycleReservations(grant: ConnectionGrant, repositoryId: string, operationId?: string): boolean | Promise<boolean>;
+	lifecycleReservations(
+		grant: ConnectionGrant,
+		repositoryId: string,
+		operationId?: string,
+	): ResourceReservation[] | Promise<ResourceReservation[]>;
+	releaseReservation(grant: ConnectionGrant, repositoryId: string, id: string): unknown;
 	reserve(
 		grant: ConnectionGrant,
 		repositoryId: string,
@@ -53,7 +58,16 @@ export class RepositoryLifecycleRuntime {
 		const pendingTransition = this.store.get<string>(transitionKey);
 		const transition = pendingTransition && this.store.get<{ lifecycle: NonNullable<Repository["lifecycle"]> }>(pendingTransition);
 		state.repository = { ...repository, lifecycle: state.repository.lifecycle ?? repository.lifecycle };
-		const view = repositoryLifecycleView(state, a, await this.port.lifecycleReservations(grant, repository.id, deletion?.reservationId));
+		const pending = await this.port.lifecycleReservations(grant, repository.id, deletion?.reservationId);
+		const view = repositoryLifecycleView(state, a, pending.length > 0);
+		if (pending.length)
+			view.operations = pending.map((r) => ({
+				id: r.id,
+				action: r.action,
+				state: r.state as "reserved" | "uncertain",
+				at: r.at,
+				...(r.workspaceId ? { workspaceId: r.workspaceId } : {}),
+			}));
 		if (
 			this.store.get<{ enabled: boolean }>("observation-config")?.enabled ||
 			someRecord<{ removed?: boolean; operation?: unknown }>(
@@ -77,6 +91,13 @@ export class RepositoryLifecycleRuntime {
 	async command(repository: Repository, command: Command, grant: ConnectionGrant) {
 		const a = await this.port.authority(grant, repository.id);
 		repositoryOwner(a);
+		if (command.tool === "release_resource_operation") {
+			if (Object.keys(command).some((key) => !["tool", "namespaceId", "repositoryId", "idempotencyKey", "reservationId"].includes(key)))
+				throw new DomainError(400, "Unsupported repository lifecycle input");
+			if (this.store.get(deletionKey)) throw new DomainError(409, "Resume the existing repository deletion");
+			await this.port.releaseReservation(grant, repository.id, requireReservation(command.reservationId));
+			return this.view(repository, grant, a);
+		}
 		if (Object.keys(command).some((key) => !["tool", "namespaceId", "repositoryId", "idempotencyKey", "confirmation"].includes(key)))
 			throw new DomainError(400, "Unsupported repository lifecycle input");
 		if (!command.idempotencyKey) throw new DomainError(400, "Mutation requires an idempotency key");
@@ -288,4 +309,8 @@ export class RepositoryLifecycleRuntime {
 		const deletion = this.store.get<Deletion>(deletionKey);
 		if (deletion?.state === "pending" && (deletion.nextAttempt ?? 0) <= this.now()) await this.remove(repository, deletion);
 	}
+}
+function requireReservation(id: string | undefined) {
+	if (!id) throw new DomainError(400, "Choose the operation to release");
+	return id;
 }

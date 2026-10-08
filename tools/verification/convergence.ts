@@ -105,9 +105,16 @@ export function convergenceRuntime(namespace: string) {
 			},
 			lifecycle: (g, id, lifecycle) => controller.lifecycle(controller.authority(g.actor, id, g.scopes, g.repositories), lifecycle),
 			lifecycleReservations: (_g, id, operationId) =>
-				controller.state.reservations.some(
+				controller.state.reservations.filter(
 					(r) => r.repositoryId === id && r.id !== operationId && ["reserved", "uncertain"].includes(r.state),
 				),
+			abandon: (id) => {
+				const r = controller.state.reservations.find((r) => r.id === id)!;
+				if (r.state === "reserved") r.state = "released";
+			},
+			releaseReservation: () => {
+				throw new Error("Convergence verification never releases reservations");
+			},
 			resourceConfiguration: () => ({ namespace, binding: undefined, legacyAccount: false, policy: controller.state.policy }),
 		},
 		env,

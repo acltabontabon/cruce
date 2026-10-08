@@ -73,6 +73,8 @@ export interface RepositoryLifecycleView {
 	deletionBlockers: string[];
 	/** Work that permanent deletion ends with the repository. */
 	unfinished: { workspaces: number; attached: number; changes: number };
+	/** Cloud operations that never settled; the owner can release each after deciding nothing more will come of it. */
+	operations?: { id: string; action: ResourceAction; state: "reserved" | "uncertain"; at: number; workspaceId?: string }[];
 	deletion?: { idempotencyKey: string; reason?: string };
 	transition?: { tool: "archive_repository" | "restore_repository"; idempotencyKey: string };
 }
@@ -516,6 +518,7 @@ export const CommandInput = z
 	.object({
 		tool: z.string(),
 		confirmation: z.string().max(120).optional(),
+		reservationId: z.string().min(1).max(400).optional(),
 		enabled: z.boolean().optional(),
 		namespaceId: id.optional(),
 		repositoryId: id.optional(),

@@ -1,6 +1,7 @@
 /** Explicit public text, paired with its status. Adding an internal error never publishes its message implicitly. */
 export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 	400: [
+		"Choose the operation to release",
 		"Unsupported repository lifecycle input",
 		"Type the repository name to confirm deletion",
 		"Observation enabled flag required",
@@ -133,6 +134,7 @@ export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 		"Repository retirement has blockers",
 		"Repository deletion is already authorized",
 		"Resume the existing repository deletion",
+		"Resume the repository deletion instead",
 		"Retry the unfinished repository transition",
 		"Fork parent identity changed",
 		"Observation subscription identity changed",
