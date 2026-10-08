@@ -6,9 +6,9 @@ The configured control-plane test Worker is [cruce.acltabontabon.com](https://cr
 
 ## Last recorded deployment
 
-As recorded on **2026-10-09**, the latest direct test deployment was Worker **`12219de2-7580-4767-8582-246ad55c5f85`**, from clean commit **`700d17c`**, deployed with `pnpm deploy:test` after a production dry run with unchanged bindings. This is a recorded result, not a query of current traffic.
+As recorded on **2026-10-09**, the latest direct test deployment was Worker **`ccd57b13-8df2-487e-beea-1b235bb26316`**, from commit **`9c2c156`**, deployed with `pnpm deploy:test` after a production dry run with unchanged bindings. The working tree held only an untracked scratch file outside the build. This is a recorded result, not a query of current traffic.
 
-The build passed typecheck, lint, **427 unit/integration tests**, **98 browser journeys**, scenario verification and the offline build in a clean worktree. Anonymous HTTPS returned homepage/session/discovery 200, private namespace API Access challenge 302 and MCP 401. Hosted document, entry script, App chunk and stylesheet matched the build. The public splash rendered and disappeared without console errors; signed-in splash/progress was not exercised.
+The build passed typecheck, lint, **429 unit/integration tests**, **98 browser journeys**, scenario verification and the offline build. Anonymous HTTPS returned the homepage and `/auth/session` 200, with the splash on the Daylight background, and served the recoloured `/brand/symbol.svg`, `/brand/symbol-ink.svg`, `/brand/wordmark.svg` and `/favicon.svg`. The signed-in console and the tool connection page were not exercised on the hosted Worker.
 
 The latest recorded tagged deployment was [0.1.0-alpha.3](https://github.com/acltabontabon/cruce/releases/tag/v0.1.0-alpha.3), Worker **`ddd14ac5-b249-4bb0-9b54-f74e669a2888`**, from **`823a3d62f66c39928fdffbd70113c89f9b9b25a6`**, on 2026-10-07 at 18:23 Philippine time. Later direct test deployments did not change that release tag or package version.
 
@@ -43,6 +43,8 @@ These bypass Access's browser challenge, not Cruce authentication. Discovery/reg
 ## Access sign-in branding
 
 On **2026-10-06**, the existing Access team and browser application's display names were set to **Cruce**, and the [branding payload](../tools/access-login-branding.json) applied the public ink symbol, paper background, forest text, sign-in header and email-code guidance. Organization readback preserved all non-appearance settings. Application readback preserved its ID, audience, routes, session settings, identity providers and admission rules; Cloudflare refreshed the policy update timestamps when saving. Public logo HTTPS and the anonymous branded email form returned 200. A local rendering of that hosted HTML was visually inspected. OTP delivery/submission was not repeated. Backups/readbacks and the non-secret verification receipt are in ignored `dist/access-branding/`.
+
+On **2026-10-09**, after that deployment served the recoloured symbol, the organization was updated from the revised [branding payload](../tools/access-login-branding.json): the console's Daylight background `#F5F6F9`, text `#151925` and the accent `/brand/symbol.svg`, with the same header and footer. The organization was backed up first, and readback matched the backup in every field except `login_design` and `updated_at`. The anonymous sign-in page kept serving the earlier design for a little over 20 minutes, then returned 200 with the email form, the new colours and the new logo. OTP delivery and submission were not repeated, and the browser application was not changed. Backups and readback are in ignored `dist/access-branding/`.
 
 Branding affects all applications in this Access team and is independent of Worker releases. The GitHub release environment was corrected to the existing custom domain and supplied the installation account, Worker name and stable Artifacts namespace required by alpha.2. No source transition, rebinding or cleanup was performed. See [setup](cloudflare-setup.md#access-login-branding) and [release verification](local-verification.md#current-evidence-at-a-glance).
 
