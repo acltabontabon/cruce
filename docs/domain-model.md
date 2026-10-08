@@ -72,7 +72,7 @@ A workspace belongs to one repository and one owner. Its baseline never changes.
 | Execution attachment is detached | The workspace, fork, history and provenance remain; it can be attached again elsewhere |
 | A different tool or machine of the same owner continues it | It attaches a new execution context, starting from the workspace's pushed fork head |
 | Local worktree is removed | Pushed and published work remains |
-| Workspace completes or is cancelled | No source is accepted or deleted; retained source and provenance remain |
+| Workspace completes or is cancelled | Its checkout reservation is released; no source is accepted or deleted; retained source and provenance remain. Cancelling withdraws its open changes |
 | Fork is cleaned up | Only after proof that every fork ref is retained; the workspace record remains |
 
 Only pushed revisions travel between execution contexts. Unpushed local commits and uncommitted files belong to the machine that has them. Git, not Cruce, is the transport.
@@ -111,6 +111,8 @@ stateDiagram-v2
 ```
 
 Presence is not part of the lifecycle. An `active` workspace whose execution has gone quiet is *displayed* as disconnected. Its attachment, local lock and server checkout reservation remain until someone explicitly detaches or ends it. Elapsed time never releases ownership, never detaches and never cleans up.
+
+Cancelling abandons the work, so its open changes are withdrawn (recorded as rejected) instead of waiting for review; a change already being promoted blocks cancellation. Completing leaves open changes reviewable. In the console, the owner's **Delete workspace** is one confirmed action: it ends the workspace (cancelled, or completed when some of its work was promoted), then deletes its fork under the normal retention proof. The workspace then leaves the live view as earlier work; its published revisions and provenance stay. A maintainer may finish deleting someone else's ended workspace. If a bridge still holds the checkout, its next `cruce end` or `cruce detach` releases it locally.
 
 The work itself follows Git:
 
@@ -210,7 +212,7 @@ Authority is derived on every request, including retries, from the authenticated
 | Propose a published revision | The workspace owner |
 | Review, record reported evidence, request promotion | Repository writers, humans or agents (`change:write`, `promotion:request`) |
 | Approve for promotion, attest evidence, resolve concerns, reject, promote | Authenticated human with Maintain; never an agent and never a paired terminal |
-| Clean up a workspace fork | The workspace owner's agent connection, or a human with Maintain; only after the workspace ends and every ref is retained |
+| Clean up a workspace fork | The workspace owner, through any authorized connection, or a human with Maintain; only after the workspace ends and every ref is retained |
 
 Promotion approval is stamped server-side with the human maintainer authority exercised for that exact revision. Unmarked historical reviews remain visible, but open changes require fresh qualified approval. Completed canonical promotions remain unchanged. Qualified approvals are historical decisions; the current promoter must still be authorized. See [ADR 0006](decisions/0006-qualified-approval-and-publication-recovery.md).
 
@@ -220,7 +222,7 @@ Effective agent authority is the intersection of its user's current authority, t
 
 - Completion preserves commits, published revisions, evidence and provenance. Ending a workspace never accepts or deletes source.
 - Local cleanup removes only Cruce-owned worktrees, and only when they are clean and their head is published or still at the retained baseline.
-- Fork cleanup requires an ended workspace and proof that every fork ref is retained by canonical or retained storage. Unretained commits, annotated tags and unknown refs block deletion, and so does uncertainty.
+- Fork cleanup requires an ended workspace and proof that every fork ref is retained by canonical or retained storage. Unretained commits, annotated tags and unknown refs block deletion, and so does uncertainty. To discard unpublished work, delete those fork refs with Git first.
 - Explicit retention inspection records exact fork refs, retained/unretained results, completeness and check time. Recorded inspection is an observation; cleanup checks again before accepting deletion.
 - Cleanup authorization is durable for one exact operation and fork ID. An alarm may resume only that submitted operation, using its original reservation under current membership, repository access, scopes and resource policy. It never creates a new system actor or derives permission from age. OAuth grant removal, expiry or changed repository approval blocks recovery until a current authenticated retry. Confirmed deletion is recorded before reservation settlement.
 - Source referenced by a published revision is retained. Publication pins an exact retention intent before pushing and saves its artifact, activity and receipt before settling the original resource reservation. Already-confirmed retention can be recorded after workspace completion or cache loss; recovering an older publication never regresses newer workspace state.

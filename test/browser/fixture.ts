@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { bundleIds } from "../../src/core/archive.ts";
+import { bundleIds, finishedWork, withoutBundles } from "../../src/core/archive.ts";
 import { attentionView } from "../../src/core/attention.ts";
 import { stable } from "../../src/core/errors.ts";
 import { DirectoryController, initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
@@ -396,6 +396,14 @@ export async function fixture() {
 			if (!runtime) return json(res, { error: "Repository access denied" }, 403);
 			if (runtime.state.repository.lifecycle?.state === "deleted") return json(res, { error: "Repository has been deleted" }, 410);
 			const authority = { ...a, repositoryId: runtime.state.repository.id, repositoryRole: "maintain" as const };
+			// Finished work leaves the live view the way the Worker archives it on save.
+			const archive = () => {
+				const bundles = finishedWork(runtime.state, FIXED_TIME);
+				if (!bundles.length) return;
+				const id = runtime.state.repository.id;
+				archives.set(id, [...bundles.toReversed(), ...(archives.get(id) ?? [])]);
+				Object.assign(runtime.state, withoutBundles(runtime.state, bundles));
+			};
 			if (req.method === "PATCH") {
 				Object.assign(runtime.state.repository, body);
 				w.repository(a, runtime.state.repository);
@@ -444,6 +452,27 @@ export async function fixture() {
 				};
 				reservation.state = "complete";
 				return json(res, workspace.retention);
+			}
+			if (cmd.tool === "cleanup_workspace") {
+				// Simulated fork deletion: the real Worker checks every fork ref is retained first.
+				const workspace = runtime.workspace(cmd.workspaceId);
+				const readiness = runtime.forkCleanup(workspace);
+				if (!readiness.ready) return json(res, { error: readiness.reasons[0] }, 409);
+				if (workspace.headRevision !== workspace.publishedRevision) {
+					workspace.retention = {
+						checkedAt: FIXED_TIME,
+						forkId: workspace.fork!.id,
+						complete: true,
+						refs: [{ ref: "refs/heads/unpublished", revision: workspace.headRevision, retained: false, reason: "unretained" }],
+						blockers: ["Unretained fork refs; publish their commits before cleanup"],
+					};
+					return json(res, { error: workspace.retention.blockers[0] }, 409);
+				}
+				w.reserve(authority, cmd.idempotencyKey!, stable(cmd), "workspace.cleanup", workspace.id).state = "complete";
+				workspace.fork!.state = "deleted";
+				runtime.event(authority.actor, "fork_deleted", workspace.title, [workspace.id]);
+				archive();
+				return json(res, { workspaceId: workspace.id, state: "deleted" });
 			}
 			if (cmd.tool === "inspect_source" || cmd.tool === "recover_source") {
 				if (!cmd.idempotencyKey) return json(res, { error: "Mutation requires an idempotency key" }, 400);
@@ -521,7 +550,9 @@ export async function fixture() {
 				runtime.event(authority.actor, "source_promoted", proposal.title, [proposal.id, proposal.revision, promotion.id]);
 				return json(res, promotion);
 			}
-			return json(res, runtime.command(cmd, authority));
+			const result = runtime.command(cmd, authority);
+			archive();
+			return json(res, result);
 		} catch (e) {
 			return json(res, { error: (e as Error).message }, 400);
 		}

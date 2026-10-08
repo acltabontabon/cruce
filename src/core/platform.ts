@@ -114,6 +114,26 @@ export class RepositoryController {
 				observedAt: s.every((s) => s.lastReportAt !== undefined) ? Math.min(...s.map((s) => s.lastReportAt!)) : undefined,
 			}));
 	}
+	/**
+	 * One owner action that clears finished or abandoned work out of the live view: end it (cancelled
+	 * unless something already reached canonical), withdraw its open changes and delete its fork once
+	 * every fork ref is retained. Published revisions and history stay, archived as earlier work.
+	 */
+	workspaceDeletion(s: Workspace, a: Authority) {
+		const reasons: string[] = [];
+		if (a.actor.kind !== "human" || a.actor.connectionId) reasons.push("Delete workspaces from the console");
+		const ended = ["completed", "cancelled"].includes(s.state);
+		// Ending belongs to the owner; a maintainer may also clean up someone else's ended workspace.
+		if (a.repositoryRole === "read" || (s.ownerId !== a.actor.userId && !(ended && a.repositoryRole === "maintain")))
+			reasons.push(ended ? "Only the workspace owner or a maintainer can delete it" : "Only the workspace owner can delete it");
+		if (this.state.proposals.some((p) => p.workspaceId === s.id && p.state === "promoting"))
+			reasons.push("A change from this workspace is being promoted");
+		if (s.cleanup?.state === "pending") reasons.push("Deletion is already in progress");
+		else if (s.cleanup && s.cleanup.state !== "complete" && s.cleanup.actorId !== a.actor.id)
+			reasons.push("Only the person who started this deletion can retry it");
+		if (ended && (!s.fork || s.fork.state === "deleted")) reasons.push("Workspace is already deleted");
+		return { ready: reasons.length === 0, reasons };
+	}
 	forkCleanup(s: Workspace) {
 		const reasons: string[] = [];
 		if (!s.fork || s.fork.state === "deleted") reasons.push("No retained fork");
@@ -211,8 +231,8 @@ export class RepositoryController {
 					(!state.repository.lifecycle || state.repository.lifecycle.state === "active"),
 			},
 			sourceAvailable: !!this.state.sourceHead || !!this.state.artifacts.find((a) => a.kind === "source"),
-			forkCleanup: Object.fromEntries(this.state.workspaces.map((s) => [s.id, this.forkCleanup(s)])),
 			executionRelease: Object.fromEntries(this.state.workspaces.map((s) => [s.id, this.executionRelease(s, a)])),
+			workspaceDeletion: Object.fromEntries(this.state.workspaces.map((s) => [s.id, this.workspaceDeletion(s, a)])),
 			canonicalSetup: {
 				required: !this.state.canonical,
 				retry: !this.state.canonical && a.actor.kind === "human" && !a.actor.connectionId && a.repositoryRole === "maintain",
@@ -381,10 +401,23 @@ export class RepositoryController {
 				return s;
 			}
 			case "end_workspace": {
-				const s = this.owned(a, cmd.workspaceId);
+				const s = this.owned(a, cmd.workspaceId),
+					open = this.state.proposals.filter((p) => p.workspaceId === s.id && ["open", "promoting"].includes(p.state));
+				if (cmd.cancelled && open.some((p) => p.state === "promoting"))
+					throw new DomainError(409, "A change from this workspace is being promoted");
 				s.state = cmd.cancelled ? "cancelled" : "completed";
 				s.endedAt = this.now;
+				// Ending releases the checkout reservation; unpushed local work stays on that machine.
+				s.execution = undefined;
+				s.changes = [];
+				s.changeEventPending = undefined;
 				this.event(a.actor, "workspace_ended", `${a.actor.name} ${s.state} ${s.title}`, [s.id]);
+				// Cancelled work is abandoned, so its open changes are withdrawn rather than left waiting for review.
+				if (cmd.cancelled)
+					for (const p of open) {
+						p.state = "rejected";
+						this.event(a.actor, "change_rejected", `Withdrawn: ${s.title} was cancelled`, [p.id]);
+					}
 				return s;
 			}
 			case "create_proposal": {

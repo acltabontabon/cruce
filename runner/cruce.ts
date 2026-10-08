@@ -396,7 +396,13 @@ async function main() {
 						delete connection.pending;
 						await save();
 					}
-					throw error;
+					// Ended elsewhere, such as deleted from the console: release this checkout rather than strand its lock.
+					const endedElsewhere =
+						(raw.tool === "end_workspace" || raw.tool === "detach_workspace") &&
+						(error as { status?: number }).status === 409 &&
+						(error as Error).message.includes("Workspace has ended");
+					if (!endedElsewhere) throw error;
+					result = { id: connection.workspaceId, state: "ended" };
 				}
 				if (raw.tool === "start_workspace") {
 					const workspace = result as unknown as Workspace;
@@ -506,7 +512,11 @@ async function main() {
 			for (const workspaceId of tracked)
 				void execute({ tool: "heartbeat", workspaceId })
 					.then(() => execute({ tool: "report_change", workspaceId }))
-					.catch((e) => process.stderr.write(`${(e as Error).message}\n`));
+					.catch((e) => {
+						// An ended workspace has nothing left to report; `cruce end` releases this checkout.
+						if ((e as Error).message.includes("Workspace has ended")) tracked.delete(workspaceId);
+						process.stderr.write(`${(e as Error).message}\n`);
+					});
 		};
 		if (operation === "mcp") {
 			if (connection.humanToken) throw new Error("Agent MCP cannot use human terminal credentials; connect the agent separately");

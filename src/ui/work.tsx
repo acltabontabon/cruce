@@ -3,7 +3,7 @@ import { reportFreshness } from "../core/reconciliation.ts";
 import { gitRemotePath } from "../shared/git-access.ts";
 import type { RepositorySnapshot, Workspace } from "../shared/platform.ts";
 import { Form } from "./controls.tsx";
-import { BackLink, CopyCommand, Icon, Pill, Section } from "./design.tsx";
+import { BackLink, CopyCommand, Dialog, Icon, Pill, Section } from "./design.tsx";
 import { WorkspaceUpdateInspection } from "./inspect.tsx";
 import { laneIndex } from "./lanes.ts";
 import { LaneBullet, LaneMap, LaneStrip, LaneTrack } from "./lanes.tsx";
@@ -497,7 +497,8 @@ export function WorkspaceDetail({
 	who: People;
 }) {
 	const w = view.workspaces.find((s) => s.id === id);
-	const [error, setError] = useState("");
+	const [error, setError] = useState(""),
+		[confirming, setConfirming] = useState(false);
 	if (!w) return <ArchivedRecord key={id} id={id} execute={execute} open={open} who={who} missing="This workspace is unavailable." />;
 	const status = workspaceStatus(w),
 		relation = canonicalRelation(view, w),
@@ -505,7 +506,7 @@ export function WorkspaceDetail({
 		latest = view.proposals.filter((p) => p.workspaceId === w.id).sort((a, b) => b.number - a.number)[0],
 		item = attentionItem(view, w.id) ?? (latest && attentionItem(view, latest.id)),
 		release = view.executionRelease[w.id],
-		cleanup = view.forkCleanup[w.id],
+		deletion = view.workspaceDeletion[w.id],
 		changes = view.proposals.filter((p) => p.workspaceId === w.id).sort((a, b) => b.number - a.number),
 		published = view.artifacts.filter((a) => a.workspaceId === w.id && a.kind === "source"),
 		waiting = view.permissions.write && w.ownerId === who.viewerId ? unproposed(view, w) : undefined,
@@ -743,83 +744,100 @@ export function WorkspaceDetail({
 									Release checkout
 								</button>
 							)}
-							{w.fork && (
-								<>
-									<p>
-										Workspace fork{" "}
-										{w.fork.state === "ready" ? "is available" : w.fork.state === "deleting" ? "is being deleted" : "was deleted"}.
-									</p>
-									{w.cleanup && (
-										<p role="status">
-											{w.cleanup.state === "pending"
-												? `Authorized cleanup will recover automatically. Attempt ${w.cleanup.attempts}.`
-												: (w.cleanup.reason ?? "Authorized cleanup completed.")}
-										</p>
-									)}
-									{w.retention && (
-										<section aria-label="Retention blockers">
-											<p>
-												Last checked {ago(w.retention.checkedAt)}.{" "}
-												{w.retention.complete ? "Ref inventory complete." : "Ref inventory incomplete."}
-											</p>
-											{w.retention.blockers.map((blocker) => (
-												<p key={blocker}>{blocker}</p>
+							{w.fork?.state === "ready" && (
+								<CopyCommand text={`git fetch ${location.origin}${gitRemotePath(view.repository.namespaceId, view.repository.id, w.id)}`} />
+							)}
+							{w.cleanup && w.cleanup.state !== "complete" && (
+								<p role="status">
+									{w.cleanup.state === "pending"
+										? "Deleting its cloud fork. This finishes on its own."
+										: w.retention?.blockers.length
+											? "Deletion stopped. Publish the commits listed below, or delete those refs with Git, then delete again."
+											: `Deletion stopped. ${w.cleanup.reason ?? "Delete again to retry."}`}
+								</p>
+							)}
+							{w.retention && w.retention.blockers.length > 0 && (
+								<section aria-label="Retention blockers">
+									{w.retention.blockers.map((blocker) => (
+										<p key={blocker}>{blocker}</p>
+									))}
+									<ul className="file-list">
+										{w.retention.refs
+											.filter((ref) => !ref.retained)
+											.map((ref) => (
+												<li key={ref.ref}>
+													<code>{ref.ref}</code>
+													<code>{short(ref.revision)}</code>
+													<span>{ref.reason === "unavailable" ? "retention unavailable" : "not published"}</span>
+												</li>
 											))}
-											<ul className="file-list">
-												{w.retention.refs
-													.filter((ref) => !ref.retained)
-													.map((ref) => (
-														<li key={ref.ref}>
-															<code>{ref.ref}</code>
-															<code>{short(ref.revision)}</code>
-															<span>{ref.reason === "unavailable" ? "retention unavailable" : "not retained"}</span>
-														</li>
-													))}
-											</ul>
-										</section>
-									)}
-									{w.fork.state === "ready" && (
-										<div>
-											<button type="button" className="ghost" onClick={() => run({ tool: "inspect_retention", workspaceId: w.id })}>
-												Inspect retention
-											</button>
-											<small className="muted">Checks cloud storage using one namespace operation. Inspection never deletes a fork.</small>
-										</div>
-									)}
-									{w.fork.state === "ready" && (
-										<CopyCommand
-											text={`git fetch ${location.origin}${gitRemotePath(view.repository.namespaceId, view.repository.id, w.id)}`}
-										/>
-									)}
-									{view.permissions.maintain && view.permissions.human && w.fork.state !== "deleted" && (
-										<div className="fork-actions">
-											<button
-												type="button"
-												className="ghost"
-												disabled={!cleanup?.ready || (!!w.cleanup && !w.cleanup.command)}
-												title={cleanup?.reasons.join("; ")}
-												onClick={() => run(w.cleanup?.command ?? { tool: "cleanup_workspace", workspaceId: w.id })}
-											>
-												{w.cleanup?.state === "blocked"
-													? "Retry authorized deletion"
-													: w.fork.state === "deleting"
-														? "Check fork deletion"
-														: "Delete fork"}
-											</button>
-											<small className="muted">
-												{!cleanup?.ready && cleanup?.reasons.length
-													? `${cleanup.reasons.join(". ")}.`
-													: "Deletion only proceeds when every fork ref is already retained. Published revisions and history stay."}
-											</small>
-										</div>
-									)}
-								</>
+									</ul>
+								</section>
+							)}
+							{deletion?.ready && (
+								<button type="button" className="danger-button" onClick={() => setConfirming(true)}>
+									Delete workspace…
+								</button>
 							)}
 							{error && <p role="alert">{error}</p>}
 						</div>
 					</Section>
 				</aside>
 			</div>
+			{confirming && <DeleteWorkspace w={w} changes={changes} execute={execute} close={() => setConfirming(false)} open={open} />}
 		</article>
+	);
+}
+
+/** One confirmation for the whole cleanup: end, withdraw open changes, release the checkout and delete the fork. */
+function DeleteWorkspace({
+	w,
+	changes,
+	execute,
+	close,
+	open,
+}: {
+	w: Workspace;
+	changes: RepositorySnapshot["proposals"];
+	execute: Execute;
+	close: () => void;
+	open: Open;
+}) {
+	// Work that reached canonical finished; anything else is abandoned, which withdraws its open changes.
+	const cancelled = !changes.some((p) => p.state === "promoted"),
+		openChanges = ended(w) ? 0 : changes.filter((p) => p.state === "open").length,
+		fork = w.fork && w.fork.state !== "deleted";
+	return (
+		<Dialog title={`Delete ${w.title}`} close={close}>
+			<ul>
+				{!ended(w) && <li>Ends the workspace{w.execution ? ` and releases its checkout on ${w.execution.machineId}` : ""}.</li>}
+				{openChanges > 0 &&
+					(cancelled ? (
+						<li>Withdraws {openChanges === 1 ? "its open change" : `its ${openChanges} open changes`}.</li>
+					) : (
+						<li>Its open {openChanges === 1 ? "change stays" : "changes stay"} open for review.</li>
+					))}
+				{fork && <li>Deletes its cloud fork. This uses one namespace operation.</li>}
+				<li>Published revisions and history stay in History under Earlier work.</li>
+				<li>Local files are not touched{w.execution ? "; unpushed work stays on that machine" : ""}.</li>
+			</ul>
+			{fork && (
+				<p className="muted">Commits pushed to the fork but never published stop the fork deletion, so nothing unpublished is lost.</p>
+			)}
+			<Form
+				label="Delete workspace"
+				danger
+				primary
+				cancel={close}
+				submit={async () => {
+					if (!ended(w)) await execute({ tool: "end_workspace", workspaceId: w.id, cancelled });
+					if (fork) await execute(w.cleanup?.command ?? { tool: "cleanup_workspace", workspaceId: w.id });
+					close();
+					open("workspaces");
+				}}
+			>
+				{null}
+			</Form>
+		</Dialog>
 	);
 }

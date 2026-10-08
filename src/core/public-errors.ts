@@ -228,6 +228,7 @@ export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 		"Unretained fork refs; publish their commits before cleanup",
 		"Verification must name the exact revision",
 		"Verification requires an open change",
+		"A change from this workspace is being promoted",
 		"Workspace has ended",
 		"Workspace is attached to a different execution context",
 		"Workspace is attached to another execution context; detach it first",

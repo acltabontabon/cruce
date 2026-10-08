@@ -351,11 +351,48 @@ describe("actor-neutral workspaces", () => {
 			storage: { repository: "store", providerId: "store", revision: head },
 			at: 100,
 		});
+		const execution = exec(s);
 		c.command(cmd("end_workspace", { workspaceId: s.id }), authority(agent));
 		expect(c.state.artifacts).toHaveLength(1);
 		expect(s.commits).toEqual([head]);
 		expect(s.baseRevision).toBe(base);
-		expect(() => c.command(cmd("heartbeat", { workspaceId: s.id, execution: exec(s) }), authority(agent))).toThrow("ended");
+		expect(s.execution).toBeUndefined();
+		expect(() => c.command(cmd("heartbeat", { workspaceId: s.id, execution }), authority(agent))).toThrow("ended");
+	});
+	it("deleting a workspace cancels it, withdraws its open changes and leaves only fork cleanup", () => {
+		const c = controller(),
+			s = start(c);
+		const proposal = (state: "open" | "promoting") =>
+			c.state.proposals.push({
+				id: `change-${state}`,
+				number: c.state.proposals.length + 1,
+				workspaceId: s.id,
+				artifactId: "artifact",
+				base,
+				revision: head,
+				title: "Retry",
+				state,
+				reviews: [],
+				at: 100,
+			});
+		proposal("open");
+		expect(c.snapshot(authority()).workspaceDeletion[s.id]).toEqual({ ready: true, reasons: [] });
+		expect(c.snapshot(authority(agent)).workspaceDeletion[s.id].reasons).toContain("Delete workspaces from the console");
+		const other = { ...authority({ ...human, id: "other", userId: "someone-else" }), repositoryRole: "maintain" as const };
+		expect(c.snapshot(other).workspaceDeletion[s.id].reasons).toContain("Only the workspace owner can delete it");
+		proposal("promoting");
+		expect(() => c.command(cmd("end_workspace", { workspaceId: s.id, cancelled: true }), authority())).toThrow("being promoted");
+		c.state.proposals.pop();
+		c.command(cmd("end_workspace", { workspaceId: s.id, cancelled: true }), authority());
+		expect(s).toMatchObject({ state: "cancelled", execution: undefined, changes: [] });
+		expect(c.state.proposals[0].state).toBe("rejected");
+		expect(c.state.activity.at(-1)).toMatchObject({ kind: "change_rejected", ids: ["change-open"] });
+		// Only the fork remains; once the workspace has ended a maintainer may finish someone else's cleanup.
+		s.fork = { name: "fork", id: "fork-id", remote: "remote", state: "ready" };
+		expect(c.snapshot(other).workspaceDeletion[s.id].ready).toBe(true);
+		expect(c.forkCleanup(s).ready).toBe(true);
+		s.fork.state = "deleted";
+		expect(c.snapshot(authority()).workspaceDeletion[s.id].reasons).toEqual(["Workspace is already deleted"]);
 	});
 	it("does not expose heartbeat as a pure MCP read or allow human-only machine actions", () => {
 		expect(CRUCE_TOOLS.find((t) => t.name === "heartbeat")?.mutation).toBe(true);

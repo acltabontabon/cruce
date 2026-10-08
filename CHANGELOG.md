@@ -6,6 +6,8 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Added
 
+- Add **Delete workspace** to workspace pages: one confirmed action for the owner that ends the workspace, withdraws its open changes, releases its checkout and deletes its cloud fork, after which it moves to Earlier work in History with its published revisions and history. It replaces the separate Inspect retention and Delete fork steps. Deletion still stops when the fork holds commits that were never published, and the page lists those refs. Human owners no longer need Maintain to delete their own workspace's fork, and a maintainer can finish deleting someone else's ended workspace.
+
 - Add owner-only Archive, Restore and permanent Delete in repository Settings, with unfinished-work blockers, exact-name confirmation, read-only archives, recoverable identity-checked cloud cleanup and original-operation retries. Deletion removes Cruce source/history while preserving local checkouts and external upstream repositories.
 
 - Lane map: draw workspaces on a compressed axis of recorded time. Each lane leaves main at its baseline commit, shows its reported revisions as dots, published revisions as rings and its change as a capsule at the exact revision, and reaches "now" while the workspace exists; a breathing tip means a present connection and a dotted tail means the workspace stopped reporting. Long idle gaps are marked as breaks. Focusing a lane highlights how many promotions main recorded since its baseline. **Replay history** scrubs or plays the recorded starts, reports, publications, changes, approvals and promotions; presence, relation and shared paths are current facts and show only live.
@@ -30,6 +32,7 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Changed
 
+- Cancelling a workspace (`end_workspace` with `cancelled`) withdraws its open changes, and ending any workspace releases its checkout reservation. `cruce end` and `cruce detach` release the local checkout when the workspace was already ended elsewhere.
 - Say "Not compared yet" instead of "Canonical unavailable" when there is no accepted canonical revision to compare against, and "Already in canonical" instead of "Behind canonical" for work whose published revision canonical already contains.
 - Label stale work as **Needs Git update**, distinguish agent-capable reconciliation from human approval, and guide agents to reconcile within their authorized task before proposing or requesting promotion. Divergence is not presented as proof of merge conflicts.
 

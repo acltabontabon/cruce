@@ -1658,7 +1658,7 @@ test("namespace home, account and creation remain usable on mobile", async () =>
 	await dialog.getByRole("button", { name: "Add repository", exact: true }).click();
 	await page.getByRole("heading", { name: "mobile-tools", exact: true }).waitFor();
 });
-test("repository clone uses normal Git and fork deletion waits until the workspace ends", async () => {
+test("repository clone uses normal Git", async () => {
 	await openRepo();
 	await page.getByRole("button", { name: "Set up locally", exact: true }).click();
 	await page
@@ -1670,13 +1670,28 @@ test("repository clone uses normal Git and fork deletion waits until the workspa
 		.getByText(/cruce auth --server/)
 		.waitFor();
 	await page.keyboard.press("Escape");
+});
+test("deleting a workspace withdraws its change, deletes its fork and moves it to earlier work", async () => {
+	await openRepo();
 	await repoNav()
 		.getByRole("button", { name: /^Workspaces/ })
 		.click();
 	await workspaceRow("Implement retry policy").click();
-	await page.getByText("Workspace fork is available.", { exact: false }).waitFor();
-	assert.equal(await page.getByRole("button", { name: "Delete fork" }).isDisabled(), true);
-	await page.getByText("End the workspace before cleaning up its fork.", { exact: false }).waitFor();
+	await page.getByRole("button", { name: "Delete workspace…", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "Delete Implement retry policy" });
+	const text = await dialog.innerText();
+	assert.match(text, /Ends the workspace and releases its checkout on fixture/);
+	assert.match(text, /Withdraws its open change/);
+	assert.match(text, /Deletes its cloud fork\. This uses one namespace operation/);
+	assert.match(text, /Published revisions and history stay in History under Earlier work/);
+	await dialog.getByRole("button", { name: "Delete workspace", exact: true }).click();
+	await page.waitForFunction(() => location.hash === "#/workspaces");
+	await workspaceRow("Inspect payment timeout").waitFor();
+	assert.equal(await workspaceRow("Implement retry policy").count(), 0);
+	await page.getByRole("button", { name: "History", exact: true }).click();
+	const earlier = page.getByRole("region", { name: "Earlier work", exact: true });
+	await earlier.getByRole("button", { name: "Show earlier work", exact: true }).click();
+	await earlier.getByRole("button", { name: /Implement retry policy/ }).waitFor();
 });
 test("unknown canonical, quiet and detached workspaces stay distinct from accepted source", async () => {
 	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
@@ -2048,19 +2063,25 @@ test("work already in main folds into one pill on the main line and unfolds on r
 	assert.equal(await map.locator(".lane").count(), 3);
 });
 
-test("retention inspection discloses cloud cost and shows exact unpublished refs without deleting", async () => {
+test("deleting a workspace stops at unpublished fork commits and shows them", async () => {
 	await openRepo();
 	await repoNav()
 		.getByRole("button", { name: /^Workspaces/ })
 		.click();
 	await page.getByRole("button", { name: /^Inspect payment timeout/ }).click();
-	await page.getByRole("button", { name: "Inspect retention", exact: true }).waitFor();
-	assert.match(await page.locator(".workspace-page").innerText(), /Checks cloud storage using one namespace operation/);
-	await page.getByRole("button", { name: "Inspect retention", exact: true }).click();
-	await page.getByRole("region", { name: "Retention blockers" }).waitFor();
-	assert.match(await page.getByRole("region", { name: "Retention blockers" }).innerText(), /refs\/heads\/unpublished/);
-	assert.match(await page.getByRole("region", { name: "Retention blockers" }).innerText(), /not retained/);
-	assert.match(await page.locator(".workspace-page").innerText(), /Workspace fork is available/);
+	await page.getByRole("button", { name: "Delete workspace…", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "Delete Inspect payment timeout" });
+	assert.match(await dialog.innerText(), /never published stop the fork deletion/);
+	await dialog.getByRole("button", { name: "Delete workspace", exact: true }).click();
+	await dialog.getByRole("alert").getByText("Unretained fork refs; publish their commits before cleanup").waitFor();
+	await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+	const blockers = page.getByRole("region", { name: "Retention blockers" });
+	await blockers.waitFor();
+	assert.match(await blockers.innerText(), /refs\/heads\/unpublished/);
+	assert.match(await blockers.innerText(), /not published/);
+	// The workspace ended, so retrying only needs the fork deletion.
+	await page.getByRole("button", { name: "Delete workspace…", exact: true }).click();
+	assert.doesNotMatch(await page.getByRole("dialog").innerText(), /Ends the workspace/);
 	await page.screenshot({ path: "dist/ui-checks/retention-blockers.png", fullPage: true });
 });
 

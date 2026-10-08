@@ -1153,7 +1153,8 @@ export class RepositoryRuntime {
 		authorizeMachine(a, cmd);
 		writeAccess(a);
 		if (a.actor.kind === "agent" && workspace.ownerId !== a.actor.userId) throw new DomainError(403, "Workspace belongs to another user");
-		if (a.actor.kind === "human") humanMaintain(a);
+		// A human owner may delete their own workspace's fork; anyone else's needs Maintain.
+		if (a.actor.kind === "human" && workspace.ownerId !== a.actor.userId) humanMaintain(a);
 		const readiness = c.forkCleanup(workspace);
 		if (workspace.fork?.state !== "deleted" && !readiness.ready) throw new DomainError(409, readiness.reasons[0]);
 		return workspace;

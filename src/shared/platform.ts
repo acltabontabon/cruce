@@ -454,8 +454,9 @@ export interface RepositorySnapshot extends Omit<RepositoryState, "receipts"> {
 	sourceAvailable: boolean;
 	readiness: Record<string, Readiness>;
 	promotionRecovery: Record<string, { command: Command; ready: boolean; reasons: string[] }>;
-	forkCleanup: Record<string, { ready: boolean; reasons: string[] }>;
 	executionRelease: Record<string, { ready: boolean; reasons: string[] }>;
+	/** Whether this viewer can delete each workspace: end it, withdraw its open changes and delete its fork. */
+	workspaceDeletion: Record<string, { ready: boolean; reasons: string[] }>;
 	/** Canonical storage is missing after a failed creation; `retry` says whether this viewer may replay setup. */
 	canonicalSetup: { required: boolean; retry: boolean; settlementPending?: boolean };
 	capacity?: { bytes: number; records: number; stateBytes: number; limits: typeof import("./limits.ts").STATE_LIMITS };

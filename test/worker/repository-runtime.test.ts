@@ -574,6 +574,20 @@ describe("repository runtime", () => {
 		expect(f.w.state.reservations.filter((r) => r.action === "workspace.cleanup")).toHaveLength(1);
 		expect(everyWorkspace(f.runtime, f.store).find((w) => w.id === f.workspace.id)?.baseRevision).toBe(f.base);
 	});
+	it("lets a human owner delete their own ended workspace's fork without Maintain", async () => {
+		const f = await fixture(true);
+		f.w.member(f.w.authority(owner), "dev", "developer");
+		f.w.state.repositories[0].grants = [{ subject: "user", id: "dev", role: "write" }];
+		const dev = { actor: { ...owner, id: "dev-human", userId: "dev", name: "Dev" }, continuation: { kind: "console" as const } };
+		const s = (await f.call("start_workspace", { title: "Spike", baseRevision: f.base }, dev)) as Workspace;
+		const execution = { id: s.id, checkoutId: "spike", machineId: "m", kind: "checkout" as const, owned: false };
+		await f.call("attach_workspace", { workspaceId: s.id, execution }, dev);
+		await f.call("end_workspace", { workspaceId: s.id, cancelled: true }, dev);
+		await f.call("end_workspace", { workspaceId: f.workspace.id });
+		vi.spyOn(f.git, "remoteRefs").mockResolvedValue([{ ref: "refs/heads/trunk", oid: f.base }]);
+		await expect(f.call("cleanup_workspace", { workspaceId: f.workspace.id }, dev)).rejects.toThrow("maintainer required");
+		expect(await f.call("cleanup_workspace", { workspaceId: s.id }, dev)).toMatchObject({ state: "deleted" });
+	});
 	it("reserves bounded baseline recovery but rejects unavailable source before provisioning a fork", async () => {
 		const f = await fixture(true);
 		const s = (await f.call("start_workspace", { title: "Missing base", baseRevision: "d".repeat(40) })) as Workspace;

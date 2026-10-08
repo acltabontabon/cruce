@@ -151,7 +151,11 @@ export const CRUCE_TOOLS: Tool[] = [
 		"workspace:write",
 		"workspace.cleanup",
 	),
-	write("end_workspace", "End participation, preserving working changes, commits and artifacts.", ["workspaceId", "cancelled"]),
+	write(
+		"end_workspace",
+		"End the workspace and release its checkout, keeping local files, commits and artifacts. cancelled: true abandons the work and withdraws its open changes.",
+		["workspaceId", "cancelled"],
+	),
 	write(
 		"publish_revision",
 		"Seal an exact pushed fork revision as an immutable source artifact. Push with normal Git first.",

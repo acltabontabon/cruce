@@ -70,8 +70,8 @@ function view(extra: Partial<RepositorySnapshot> = {}): RepositorySnapshot {
 		sourceAvailable: true,
 		readiness: {},
 		promotionRecovery: {},
-		forkCleanup: {},
 		executionRelease: {},
+		workspaceDeletion: {},
 		...extra,
 	} as RepositorySnapshot;
 }

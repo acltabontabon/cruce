@@ -45,7 +45,7 @@ Promote it. The change becomes **Promoted**, the header shows the new canonical 
 
 ## 4. Follow concurrent workspaces
 
-The **Workspaces** tab lists each workspace with its state, its relation to canonical and what it overlaps with. Open **Inspect payment timeout**: it shows the fixed starting revision, the reported head, whether it is up to date with canonical, and that `src/retry.ts` is also changed in **Implement retry policy**. Shared files are a heads-up, not a conflict. **Checkout and storage** shows the attached checkout (with **Release checkout**, so the workspace can continue elsewhere) and the workspace fork, which can be deleted only after the workspace ends and every ref is retained.
+The **Workspaces** tab lists each workspace with its state, its relation to canonical and what it overlaps with. Open **Inspect payment timeout**: it shows the fixed starting revision, the reported head, whether it is up to date with canonical, and that `src/retry.ts` is also changed in **Implement retry policy**. Shared files are a heads-up, not a conflict. **Checkout and storage** shows the attached checkout (with **Release checkout**, so the workspace can continue elsewhere) and **Delete workspace**, which ends it, withdraws its open changes and deletes its fork once every fork ref is retained. Published revisions and history move to Earlier work.
 
 ![Workspace page with baseline, canonical relation, overlap and checkout](images/local-demo/workspace.jpg)
 
