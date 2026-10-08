@@ -221,6 +221,9 @@ export class RepositoryLifecycleRuntime {
 				deletion.phase = "deleting";
 				this.store.put(deletionKey, deletion);
 				const rows = this.store.scan<string>("provider-repository:", deletion.cursor, 4);
+				// Provider deletion is asynchronous: request the whole batch, then confirm absence on the next attempt.
+				// The cursor only passes repositories confirmed absent, so a later attempt rechecks the rest.
+				let confirmed = true;
 				for (const row of rows) {
 					const name = row.key.slice("provider-repository:".length);
 					if (name !== repository.storageName) {
@@ -235,12 +238,13 @@ export class RepositoryLifecycleRuntime {
 							deletion.hasResources,
 						);
 						if (!row.value) throw new DomainError(409, "Provider repository identity unavailable");
-						if (!(await (await this.port.host()).remove(name, row.value))) return this.pending(deletion);
+						if (!(await (await this.port.host()).remove(name, row.value))) confirmed = false;
 					}
+					if (!confirmed) continue;
 					deletion.cursor = row.key;
 					this.store.put(deletionKey, deletion);
 				}
-				if (rows.length === 4) return this.pending(deletion);
+				if (!confirmed || rows.length === 4) return this.pending(deletion);
 				const canonicalId = this.store.get<string>(`provider-repository:${repository.storageName}`);
 				if (canonicalId && !deletion.canonicalConfirmed) {
 					repositoryOwner(await this.port.authority(deletion.grant, repository.id));

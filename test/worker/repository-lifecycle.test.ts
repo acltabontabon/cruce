@@ -237,15 +237,26 @@ describe("repository lifecycle", () => {
 		const f = fixture();
 		f.remove.mockResolvedValueOnce(false);
 		await f.call("delete_repository");
+		// One attempt requests the whole batch; the unconfirmed repository holds the cursor.
+		expect(f.remove.mock.calls.map(([name]) => name)).toEqual(["fork-old", "source-one"]);
 		expect(f.store.get("archive:old")).toBeDefined();
 		f.namespace.state.policy.rules["repository.delete"] = "deny";
 		f.advance();
 		await f.restart().recover(f.repository());
-		expect(f.remove).toHaveBeenCalledOnce();
+		expect(f.remove).toHaveBeenCalledTimes(2);
 		f.namespace.state.policy.rules["repository.delete"] = "allow";
 		f.namespace.state.members.owner = "maintainer";
 		await expect(f.call("delete_repository")).rejects.toThrow("Human namespace owner required");
-		expect(f.remove).toHaveBeenCalledOnce();
+		expect(f.remove).toHaveBeenCalledTimes(2);
+	});
+	it("rechecks a repository whose deletion was requested but not yet confirmed before removing canonical", async () => {
+		const f = fixture();
+		f.remove.mockResolvedValueOnce(false);
+		expect(await f.call("delete_repository")).toEqual({ state: "deleting" });
+		f.advance();
+		await f.restart().recover(f.repository());
+		expect(f.remove.mock.calls.map(([name]) => name)).toEqual(["fork-old", "source-one", "fork-old", "source-one", "repo-repo"]);
+		expect(f.repository().lifecycle?.state).toBe("deleted");
 	});
 	it("purges a large retained record set in bounded restart-safe batches", async () => {
 		const f = fixture();
