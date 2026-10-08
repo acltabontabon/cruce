@@ -125,28 +125,27 @@ test("partial repository status stays unavailable rather than showing zero atten
 	assert.equal(await page.locator(".stats").getByText("—", { exact: true }).count(), 3);
 	assert.equal(await page.getByRole("button", { name: "Retry unavailable repositories", exact: true }).count(), 1);
 });
-test("setup gives Clone its credentials and offers a separate existing-checkout path", async () => {
+test("repository setup only clones or attaches, and links one-time machine setup", async () => {
 	await openRepo();
 	await page.getByRole("button", { name: "Set up locally", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "Set up locally", exact: true });
-	await dialog.getByText(/npm install --global .*downloads\/cruce-client.tgz/).waitFor();
-	await dialog.getByText(/cruce auth --server/).waitFor();
-	assert.equal(await dialog.getByText(/path\/to\/cruce/).count(), 0);
-	const download = await page.request.get(`${server.origin}/downloads/cruce-client.tgz`);
-	assert.equal(download.status(), 200);
-	assert.equal(download.headers()["content-type"], "application/gzip");
-	assert.deepEqual([...(await download.body()).subarray(0, 2)], [0x1f, 0x8b]);
-	await page.screenshot({ path: "dist/ui-checks/clone-client-install.png", fullPage: true });
 	await dialog.getByText(/git clone https?:/).waitFor();
+	// Installing, authorizing Git and connecting tools happen once per machine, never per repository.
+	assert.equal(await dialog.getByText(/npm install|cruce (auth|login|connect)/).count(), 0);
+	assert.equal(await dialog.getByText(/path\/to\/cruce/).count(), 0);
+	await page.screenshot({ path: "dist/ui-checks/setup-clone.png", fullPage: true });
 	await dialog.getByRole("button", { name: "Existing checkout", exact: true }).click();
-	await dialog.getByText(/files, branch and existing remotes are preserved/).waitFor();
+	await dialog.getByText(/git remote add cruce https?:.*\/canonical\.git/).waitFor();
+	await dialog.getByText(/history and existing remotes stay as they are/).waitFor();
 	await dialog.getByText(/creates an isolated fork and uses namespace resource operations/).waitFor();
 	await page.keyboard.press("Escape");
 	await page.getByRole("button", { name: "Set up locally", exact: true }).click();
-	await page
-		.getByRole("dialog", { name: "Set up locally", exact: true })
-		.getByRole("button", { name: "Existing checkout", exact: true })
-		.click();
+	await dialog.getByRole("link", { name: "Local setup", exact: true }).click();
+	await page.getByRole("heading", { name: "Local setup", level: 1 }).waitFor();
+	assert.equal(new URL(page.url()).search, "?page=setup");
+	assert.equal(await page.getByRole("dialog").count(), 0);
+	await page.goBack();
+	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
 });
 test("review remains usable after approval and after a failed evidence result", async () => {
 	await openChange();
@@ -406,25 +405,43 @@ test("fast session checks do not flash loading content; slow checks remain visib
 	assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(245, 245, 239)");
 	await page.getByRole("heading", { name: "Code is written in parallel now. The decision is still yours.", level: 1 }).waitFor();
 });
-test("agent connections list what each agent may do and revoke one after confirmation", async () => {
+test("local setup is once per machine, then lists what each connection may do and revokes one", async () => {
 	await page.goto(server.origin);
 	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
 	await page.getByRole("button", { name: "Your account", exact: true }).click();
-	await page.getByRole("link", { name: "Agent connections", exact: true }).click();
-	await page.getByRole("heading", { name: "Agent connections", level: 1 }).waitFor();
-	assert.equal(new URL(page.url()).search, "?page=connections");
-	assert.equal(await page.title(), "Agent connections · Cruce");
+	await page.getByRole("link", { name: "Local setup", exact: true }).click();
+	await page.getByRole("heading", { name: "Local setup", level: 1 }).waitFor();
+	assert.equal(new URL(page.url()).search, "?page=setup");
+	assert.equal(await page.title(), "Local setup · Cruce");
+	const main = page.locator("main");
+	await main.getByText(/npm install --global .*downloads\/cruce-client.tgz/).waitFor();
+	const download = await page.request.get(`${server.origin}/downloads/cruce-client.tgz`);
+	assert.equal(download.status(), 200);
+	assert.equal(download.headers()["content-type"], "application/gzip");
+	assert.deepEqual([...(await download.body()).subarray(0, 2)], [0x1f, 0x8b]);
+	await main.getByText(`cruce login --server ${server.origin}`, { exact: true }).waitFor();
+	await main.getByText(`cruce connect --server ${server.origin} --client claude`, { exact: true }).waitFor();
+	// Nothing on this page names a repository: one setup serves every repository the person can access.
+	assert.equal(await main.getByText(/--namespace|--repository/).count(), 0);
+	await main.getByRole("button", { name: "Codex", exact: true }).click();
+	await main.getByText(`cruce connect --server ${server.origin} --client codex`, { exact: true }).waitFor();
+	assert.equal(await main.getByRole("button", { name: "Codex", exact: true }).getAttribute("aria-pressed"), "true");
+	await main.getByText("codex", { exact: true }).waitFor();
 	// The heading renders before /api/connections settles; wait for the loaded list before reading it.
-	await page.locator(".kicker", { hasText: "3 connected" }).waitFor();
+	await page.locator("#connections-heading .panel-count", { hasText: "4" }).waitFor();
 	const rows = page.locator(".connection-row");
-	await rows.nth(2).waitFor();
-	assert.deepEqual(await rows.locator("strong").allTextContents(), ["Codex", "release-check script", "Claude Code"]);
+	await rows.nth(3).waitFor();
+	await page.waitForTimeout(250); // Let the 140ms selection transition finish before capturing.
+	await page.screenshot({ path: "dist/ui-checks/local-setup.png", fullPage: true });
+	assert.deepEqual(await rows.locator("strong").allTextContents(), ["Cursor", "Codex", "release-check script", "Claude Code"]);
 	// Known reported names get their mark; anything else falls back to initials.
 	assert.deepEqual(await rows.locator(".agent-mark").evaluateAll((marks) => marks.map((m) => m.dataset.agent ?? m.textContent)), [
+		"cursor",
 		"codex",
 		"RC",
 		"claude",
 	]);
+	assert.equal(await rows.filter({ hasText: "Cursor" }).getByText("All repositories you can access", { exact: true }).count(), 1);
 	const codex = rows.filter({ hasText: "Codex" });
 	assert.equal(await codex.locator("code").textContent(), "fernloop/payment-service");
 	assert.deepEqual(await codex.locator(".connection-abilities li").allTextContents(), ["Workspaces", "Publish revisions", "Changes"]);
@@ -433,19 +450,20 @@ test("agent connections list what each agent may do and revoke one after confirm
 	await codex.getByRole("button", { name: "Revoke Codex" }).click();
 	const dialog = page.getByRole("dialog", { name: "Revoke Codex?" });
 	await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
-	assert.equal(await rows.count(), 3);
+	assert.equal(await rows.count(), 4);
 	await codex.getByRole("button", { name: "Revoke Codex" }).click();
 	await dialog.getByRole("button", { name: "Revoke connection", exact: true }).click();
 	await page.getByRole("status").filter({ hasText: "Codex was revoked." }).waitFor();
-	assert.deepEqual(await rows.locator("strong").allTextContents(), ["release-check script", "Claude Code"]);
+	assert.deepEqual(await rows.locator("strong").allTextContents(), ["Cursor", "release-check script", "Claude Code"]);
 	assert.deepEqual(
 		(await (await page.request.get(`${server.origin}/__fixture/calls`)).json()).filter((call) => call.revoke),
 		[{ revoke: "grant-codex" }],
 	);
 	await page.goBack();
 	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
-	await page.goto(`${server.origin}/?page=connections`);
-	await page.getByRole("heading", { name: "Agent connections", level: 1 }).waitFor();
+	await page.goto(`${server.origin}/?page=setup`);
+	await page.getByRole("heading", { name: "Local setup", level: 1 }).waitFor();
+	await page.getByRole("heading", { name: /Agent connections/, level: 2 }).waitFor();
 	await page.setViewportSize({ width: 320, height: 800 });
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
 	await page.setViewportSize({ width: 1440, height: 1000 });
@@ -775,7 +793,7 @@ test("prefixed form fields align with ordinary inputs in creation dialogs", asyn
 		await page.keyboard.press("Escape");
 	}
 });
-test("a new repository opens on Changes with a way to connect an agent", async () => {
+test("a new repository opens on Changes with a way to start local work", async () => {
 	await page.goto(`${server.origin}/?namespace=fernloop`);
 	await page.getByRole("button", { name: "New repository", exact: true }).click();
 	await page.getByLabel("Repository name", { exact: true }).fill("local-tools");
@@ -787,12 +805,8 @@ test("a new repository opens on Changes with a way to connect an agent", async (
 	assert.equal(await page.getByRole("button", { name: "Set up locally", exact: true }).count(), 1);
 	await page.getByRole("button", { name: "Set up locally", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "Set up locally", exact: true });
-	await dialog.getByRole("button", { name: "Connect an agent", exact: true }).click();
-	await dialog.getByRole("button", { name: "Codex", exact: true }).click();
-	await dialog.getByText(/--client codex/).waitFor();
-	assert.equal(await dialog.getByRole("button", { name: "Codex", exact: true }).getAttribute("aria-pressed"), "true");
-	await page.waitForTimeout(250); // Let the 140ms selection transition finish before capturing.
-	await page.screenshot({ path: "dist/ui-checks/connect-agent.png", fullPage: true });
+	await dialog.getByRole("link", { name: "Local setup", exact: true }).waitFor();
+	await page.screenshot({ path: "dist/ui-checks/setup-new-repository.png", fullPage: true });
 });
 test("brand navigation reaches an unscoped Home and Back restores the repository", async () => {
 	await openRepo();
@@ -837,7 +851,7 @@ test("avatar menu preserves repository context and keyboard focus; saved account
 	assert.equal(await menu.getByRole("link", { name: "Sign out", exact: true }).getAttribute("href"), "/auth/logout");
 	assert.deepEqual(
 		(await menu.getByRole("link").allTextContents()).map((text) => text.trim()),
-		["Agent connections", "Sign out"],
+		["Local setup", "Sign out"],
 	);
 	assert.equal(page.url(), current);
 	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
@@ -866,13 +880,10 @@ test("avatar menu fits a narrow screen and tabbing out dismisses it without trap
 	assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 320);
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
 	await page.screenshot({ path: "dist/ui-checks/account-narrow.png", fullPage: true });
-	// Focus starts on the selected appearance; Tab reaches Agent connections then Sign out, and the next Tab leaves and dismisses the menu.
+	// Focus starts on the selected appearance; Tab reaches Local setup then Sign out, and the next Tab leaves and dismisses the menu.
 	assert.equal(await menu.getByRole("radio", { name: "System", exact: true }).evaluate((e) => e === document.activeElement), true);
 	await page.keyboard.press("Tab");
-	assert.equal(
-		await menu.getByRole("link", { name: "Agent connections", exact: true }).evaluate((e) => e === document.activeElement),
-		true,
-	);
+	assert.equal(await menu.getByRole("link", { name: "Local setup", exact: true }).evaluate((e) => e === document.activeElement), true);
 	await page.keyboard.press("Tab");
 	assert.equal(await menu.getByRole("link", { name: "Sign out", exact: true }).evaluate((e) => e === document.activeElement), true);
 	await page.keyboard.press("Tab");
@@ -1665,10 +1676,6 @@ test("repository clone uses normal Git", async () => {
 		.getByRole("dialog", { name: "Set up locally" })
 		.getByText(/git clone https?:/)
 		.waitFor();
-	await page
-		.getByRole("dialog")
-		.getByText(/cruce auth --server/)
-		.waitFor();
 	await page.keyboard.press("Escape");
 });
 test("deleting a workspace withdraws its change, deletes its fork and moves it to earlier work", async () => {
@@ -1749,6 +1756,7 @@ test("screen families remain readable across desktop, tablet, mobile and 200 per
 		["teams", `${server.origin}/?namespace=fernloop#/teams`, "Fernloop"],
 		["namespace-settings", `${server.origin}/?namespace=fernloop#/settings`, "Storage operations"],
 		["account", `${server.origin}/?page=account`, "Your repositories"],
+		["setup", `${server.origin}/?page=setup`, "Local setup"],
 	];
 	for (const width of [1440, 1024, 390]) {
 		await page.setViewportSize({ width, height: 1000 });
@@ -2249,9 +2257,13 @@ test("unknown ancestry is reported as missing knowledge, never as nothing waitin
 		.waitFor();
 });
 
-test("tool consent searches repositories, preserves selections and submits only chosen access", async () => {
+test("tool consent allows every repository by default and can narrow to chosen ones", async () => {
 	await page.goto(`${server.origin}/__fixture/consent`);
 	const connect = page.getByRole("button", { name: "Connect", exact: true });
+	assert.equal(await page.getByRole("radio", { name: /All repositories you can access/ }).isChecked(), true);
+	assert.equal(await page.locator("#chooser").isVisible(), false);
+	assert.equal(await connect.isEnabled(), true);
+	await page.getByRole("radio", { name: /Choose repositories/ }).check();
 	assert.equal(await connect.isDisabled(), true);
 	await page.getByRole("checkbox", { name: "maya hello-world" }).check();
 	assert.equal(await connect.isEnabled(), true);
@@ -2267,23 +2279,36 @@ test("tool consent searches repositories, preserves selections and submits only 
 	await page.getByRole("checkbox", { name: "Publish Git revisions" }).uncheck();
 	assert.equal(await page.getByRole("checkbox", { name: "Read repositories and work history" }).isDisabled(), true);
 	assert.equal(await page.locator("#permission-count").textContent(), "5 enabled");
+	const submissions = [];
 	await page.route("**/__fixture/consent", async (route) => {
-		const submitted = new URLSearchParams(route.request().postData());
-		assert.deepEqual(submitted.getAll("repository"), ["hello", "payments"]);
-		assert.equal(submitted.get("handle"), "fixture-consent");
-		assert.equal(submitted.getAll("scope").includes("revision:publish"), false);
+		if (route.request().method() !== "POST") return route.continue();
+		submissions.push(new URLSearchParams(route.request().postData()));
 		await route.fulfill({ body: "Consent submitted" });
 	});
 	await connect.click();
 	await page.getByText("Consent submitted").waitFor();
+	await page.goto(`${server.origin}/__fixture/consent`);
+	await connect.click();
+	await page.getByText("Consent submitted").waitFor();
+	const [chosen, all] = submissions;
+	assert.equal(chosen.get("access"), "choose");
+	assert.deepEqual(chosen.getAll("repository"), ["hello", "payments"]);
+	assert.equal(chosen.get("handle"), "fixture-consent");
+	assert.equal(chosen.getAll("scope").includes("revision:publish"), false);
+	// The default follows current access, so it submits no repository list.
+	assert.equal(all.get("access"), "all");
+	assert.deepEqual(all.getAll("repository"), []);
 });
 
 test("tool consent stays legible on desktop and mobile and provides empty and expired recovery", async () => {
 	await page.goto(`${server.origin}/__fixture/consent`);
+	await page.screenshot({ path: "dist/ui-checks/consent-desktop.png", fullPage: true });
+	await page.getByRole("radio", { name: /Choose repositories/ }).focus();
+	await page.keyboard.press("Space");
 	await page.getByRole("checkbox", { name: "maya hello-world" }).focus();
 	await page.keyboard.press("Space");
 	assert.equal(await page.getByRole("button", { name: "Connect", exact: true }).isEnabled(), true);
-	await page.screenshot({ path: "dist/ui-checks/consent-desktop.png", fullPage: true });
+	await page.screenshot({ path: "dist/ui-checks/consent-choose.png", fullPage: true });
 	await page.setViewportSize({ width: 375, height: 812 });
 	await page.getByText("Review permissions", { exact: false }).click();
 	await page.screenshot({ path: "dist/ui-checks/consent-mobile.png", fullPage: true });
@@ -2291,8 +2316,9 @@ test("tool consent stays legible on desktop and mobile and provides empty and ex
 	await page.getByText("Connection details", { exact: true }).click();
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
 	await page.goto(`${server.origin}/__fixture/consent?empty`);
-	await page.getByText("You don’t have any repositories available to connect.", { exact: false }).waitFor();
-	assert.equal(await page.getByRole("button", { name: "Connect", exact: true }).isDisabled(), true);
+	// With nothing to choose yet, every repository the person can access later is still a valid approval.
+	assert.equal(await page.getByRole("radio", { name: /Choose repositories/ }).isDisabled(), true);
+	assert.equal(await page.getByRole("button", { name: "Connect", exact: true }).isEnabled(), true);
 	await page.goto(`${server.origin}/__fixture/consent?error`);
 	await page.getByRole("link", { name: "Start again" }).click();
 	await page.getByRole("heading", { name: "Connect to Cruce" }).waitFor();
@@ -2394,26 +2420,6 @@ test("lane maps bound parallel work, fold detached work, and keep every lane rea
 	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
 	await map.locator(".lane-canvas").focus();
 	assert.equal(await map.locator(".lane-canvas").evaluate((e) => document.activeElement === e), true);
-});
-
-test("repository-scoped consent confirms one known repository without a picker", async () => {
-	await page.goto(`${server.origin}/__fixture/consent?bound`);
-	await page.getByText("Access is limited to this repository.", { exact: true }).waitFor();
-	assert.equal(await page.getByRole("searchbox").count(), 0);
-	assert.equal(await page.locator('input[type="checkbox"][name="repository"]').count(), 0);
-	assert.equal(await page.locator(".repositories .repository").count(), 1);
-	assert.equal(await page.getByRole("button", { name: "Connect", exact: true }).isEnabled(), true);
-	await page.screenshot({ path: "dist/ui-checks/consent-bound.png", fullPage: true });
-	await page.setViewportSize({ width: 390, height: 844 });
-	await page.screenshot({ path: "dist/ui-checks/consent-bound-mobile.png", fullPage: true });
-	assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-	await page.route("**/__fixture/consent?bound", async (route) => {
-		const form = new URLSearchParams(route.request().postData());
-		assert.deepEqual(form.getAll("repository"), ["hello"]);
-		await route.fulfill({ body: "Repository confirmed" });
-	});
-	await page.getByRole("button", { name: "Connect", exact: true }).click();
-	await page.getByText("Repository confirmed", { exact: true }).waitFor();
 });
 
 test("repository retirement shows blockers and requires exact confirmation after reversible archive", async () => {

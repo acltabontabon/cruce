@@ -36,7 +36,7 @@ Access protects browser sign-in, consent, pairing approval, invitations and name
 
 Sign out expires the Cruce cookie and redirects to `/cdn-cgi/access/logout`, ending Access sessions across applications in the same team. It does not revoke Cruce OAuth connections or alter namespace membership.
 
-Agent OAuth connections and paired terminals do not depend on the browser's Access session. They last for their own grant or terminal authorization, and every request still rechecks membership, repository grants, approved repositories and scopes. Removing someone from the Access policy stops their browser sign-in only; to cut off their agents, remove their namespace membership, or have them revoke the connections under **Agent connections** in the avatar menu.
+Agent OAuth connections and paired terminals do not depend on the browser's Access session. They last for their own grant or terminal authorization, and every request still rechecks membership, repository grants, the connection's repository approval and scopes. Removing someone from the Access policy stops their browser sign-in only; to cut off their agents, remove their namespace membership, or have them revoke the connections under **Local setup** in the avatar menu.
 
 ### Browser sign-in
 

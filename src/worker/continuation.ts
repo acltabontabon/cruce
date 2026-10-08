@@ -4,7 +4,7 @@ import { hash } from "./store.ts";
 
 /** A submitted operation is durable authorization, never a new system principal.
  * OAuth recovery additionally checks the provider's current grant record. Its
- * encrypted props digest binds the approved repository set without storing tokens
+ * encrypted props digest binds the repository approval without storing tokens
  * or decrypting credentials. Changed props require a new authenticated retry.
  */
 export async function continuationGrant(grant: ConnectionGrant, kv: KVNamespace, now = Date.now()): Promise<ConnectionGrant> {
@@ -29,7 +29,7 @@ export async function continuationGrant(grant: ConnectionGrant, kv: KVNamespace,
 
 /** Capture approval from the authenticated token snapshot, then require that the
  * current connection still has that approval. A newer grant must never lend its
- * approval to an older token whose repository selection differs. */
+ * approval to an older token whose repository approval differs. */
 export async function cleanupTokenGrant(grant: ConnectionGrant, token: string | undefined, kv: KVNamespace) {
 	const parts = token?.split(":");
 	if (parts?.length !== 3) throw new DomainError(403, "Cleanup recovery authorization unavailable; retry from an authorized connection");

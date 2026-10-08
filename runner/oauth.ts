@@ -1,11 +1,10 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { auth, type OAuthClientProvider, type StoredOAuthClientInformation, type StoredOAuthTokens } from "@modelcontextprotocol/client";
 import type { Scope } from "../src/core/capabilities.ts";
-import { type RepositoryConsentTarget, repositoryConsentState } from "../src/shared/repository-consent.ts";
 import { withStateLock, writeState } from "./state-file.ts";
 
 async function read<T>(path: string, fallback: T) {
@@ -41,29 +40,17 @@ export class Credentials implements OAuthClientProvider {
 		state?: string;
 	} = {};
 	path: string;
-	consentTarget?: RepositoryConsentTarget;
 	server: string;
 	/** This process holds the file lock, so saves write directly. */
 	private locked = false;
 	/** This process is driving an authorization, so the SDK reads exactly what is stored. */
 	authorizing = false;
-	constructor(server: string, connection = "agent", target?: RepositoryConsentTarget) {
+	/** One account-level connection per server and tool; the grant, not this file, decides which repositories it reaches. */
+	constructor(server: string, connection: string) {
 		this.server = server;
 		if (!/^[a-zA-Z0-9-]{1,160}$/.test(connection)) throw new Error("Use a connection name containing only letters, numbers and dashes");
-		if (target) repositoryConsentState(target, "validation");
-		this.consentTarget = target;
 		this.clientMetadata.client_name = `Cruce ${connection} bridge`;
-		this.path = join(
-			homedir(),
-			".config/cruce",
-			`${Buffer.from(new URL(server).origin).toString("base64url")}-${connection}${
-				target
-					? `-${createHash("sha256")
-							.update(JSON.stringify([target.namespaceId, target.repositoryId]))
-							.digest("hex")}`
-					: ""
-			}.json`,
-		);
+		this.path = join(homedir(), ".config/cruce", `${Buffer.from(new URL(server).origin).toString("base64url")}-${connection}.json`);
 	}
 	async load() {
 		this.data = await read(this.path, {});
@@ -125,8 +112,7 @@ export class Credentials implements OAuthClientProvider {
 		return this.data.verifier;
 	}
 	async state() {
-		const nonce = randomUUID();
-		const state = this.consentTarget ? repositoryConsentState(this.consentTarget, nonce) : nonce;
+		const state = randomUUID();
 		this.data = await this.save({ state });
 		return state;
 	}
@@ -134,8 +120,7 @@ export class Credentials implements OAuthClientProvider {
 		process.stderr.write(`Open this sign-in link in your browser:\n${url.href}\n`);
 	}
 }
-export async function login(server: string, credentials: Credentials, scopes: Scope[], target?: RepositoryConsentTarget) {
-	credentials.consentTarget = target;
+export async function login(server: string, credentials: Credentials, scopes: Scope[]) {
 	let timeout: ReturnType<typeof setTimeout> | undefined;
 	let complete!: (code: string, iss?: string) => void;
 	const callback = new Promise<{ code: string; iss?: string }>((resolve) => {

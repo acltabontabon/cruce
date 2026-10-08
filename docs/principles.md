@@ -52,7 +52,7 @@ Cruce's responsibility ends when concurrent work is reviewed and reconciled into
 
 ## 9. Derive authority on every request
 
-Verify authentication, then resolve current membership, repository grants, approved repositories and capability scopes on every request and retry before returning saved results. Git authors, branch names, client labels, source files and analysis are not authority. Credentials stay sealed server-side. Git uses 60-second scoped provider tokens that are revoked after use, never tokens in source, remotes, configuration, logs or frontend responses.
+Verify authentication, then resolve current membership, repository grants, the connection's repository approval and capability scopes on every request and retry before returning saved results. Git authors, branch names, client labels, source files and analysis are not authority. Credentials stay sealed server-side. Git uses 60-second scoped provider tokens that are revoked after use, never tokens in source, remotes, configuration, logs or frontend responses.
 
 ## 10. Account for resources where they are owned
 

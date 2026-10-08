@@ -6,7 +6,7 @@ import type { AgentConnection } from "../shared/platform.ts";
 export interface ConnectionMetadata {
 	connectionId: string;
 	clientName: string;
-	repositories: { id: string; label: string }[];
+	repositories: "all" | { id: string; label: string }[];
 }
 const MAX_CONNECTIONS = 500;
 const metadataOf = (value: unknown): Partial<ConnectionMetadata> => (value && typeof value === "object" ? value : {});
@@ -39,7 +39,7 @@ export async function listConnections(oauth: OAuthHelpers, userId: string): Prom
 				id: grant.id,
 				client: metadata.clientName ?? (await clientName(grant.clientId)),
 				connectionId: metadata.connectionId,
-				repositories: Array.isArray(metadata.repositories) ? metadata.repositories : undefined,
+				repositories: metadata.repositories === "all" || Array.isArray(metadata.repositories) ? metadata.repositories : undefined,
 				scopes: grant.scope,
 				createdAt: grant.createdAt * 1000,
 				expiresAt: grant.expiresAt ? grant.expiresAt * 1000 : undefined,

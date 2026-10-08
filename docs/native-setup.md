@@ -8,45 +8,53 @@ Use Git and Node 22.18+ (including npm). Install the local Cruce client from the
 
 Explicit console sign-in or OAuth authorization initializes your Cruce identity and personal namespace. Coordination reads never create identity, repository metadata or source storage. If canonical setup was interrupted, inspect the registered repository and use its maintainer-only setup retry; reading it consumes no Artifacts operation. An unknown identity must sign in again. See the [read boundary](architecture.md#coordination-read-boundary).
 
-## Authenticate and clone with Git
+## Set up once per machine
 
-The repository's Clone control shows the canonical remote with stable IDs:
+The account **Local setup** page (avatar menu) shows these commands with your host filled in. Run them once on each machine; every repository you can access works afterwards, including repositories created or shared with you later ([ADR 0011](decisions/0011-account-level-connections-and-local-setup.md)).
 
-```text
-https://YOUR_HOST/mcp/git/NAMESPACE_ID/REPOSITORY_ID/canonical.git
-```
-
-Install the client once on each machine. The website serves an npm package containing the bridge and Git credential helper, matching its build. npm installs its declared runtime dependencies; this does not require a separately published npm registry package:
+The website serves an npm package containing the bridge and Git credential helper, matching its build. npm installs its declared runtime dependencies; this does not require a separately published npm registry package:
 
 ```sh
 npm install --global https://YOUR_HOST/downloads/cruce-client.tgz
+cruce login --server https://YOUR_HOST
+cruce connect --server https://YOUR_HOST --client codex
 ```
 
-Replace `YOUR_HOST` and the IDs below with the values shown by the repository's Clone control. Authorize Git, select this repository on the consent page, then clone:
+`login` signs in through OAuth with read access and configures the installed credential helper in your global Git configuration for that Cruce server only. The helper answers only Cruce Git paths there; helpers for other destinations remain unchanged. Helper configuration contains installation paths and the server address, never tokens. OAuth credentials are stored privately under `~/.config/cruce`, one file per server and connection. Cloudflare repository tokens remain server-side. Never embed a password in a remote URL.
+
+`connect` approves one connection for the tool and registers the local bridge in that tool's own user-level settings: `claude mcp add --scope user` for Claude Code (plus a prompt hint hook in `~/.claude/settings.json`), `~/.codex/config.toml` for Codex and `~/.cursor/mcp.json` for Cursor. It writes nothing into your repositories. Any other MCP-capable tool can connect by name; `connect` then prints the stdio command to add to its settings. Restart the tool after connecting.
+
+Both consents default to **all repositories you can access**, which follows your current namespace roles and repository grants. Choose repositories on the consent page to narrow a connection. Revoke connections from Local setup.
+
+## Clone or attach a repository
+
+The repository's **Set up locally** guide shows the canonical remote with stable IDs:
 
 ```sh
-cruce auth --server https://YOUR_HOST --namespace NAMESPACE_ID --repository REPOSITORY_ID
 git clone https://YOUR_HOST/mcp/git/NAMESPACE_ID/REPOSITORY_ID/canonical.git
 ```
 
-`auth` signs in through OAuth and configures the installed credential helper in your global Git configuration, scoped to this repository's exact canonical URL. Clone and subsequent fetches use ordinary Git without extra credential options. Existing helpers for other destinations remain unchanged. Helper configuration contains installation paths/server addresses, never tokens. OAuth credentials are stored privately outside tracked source. Cloudflare repository tokens remain server-side. Never embed a password in a remote URL.
+Clone and subsequent fetches use ordinary Git without extra credential options. Canonical is readable by authorized participants; its accepted branch advances through reviewed human promotion. Writers push to their own forks with normal Git. `get_git_access` returns canonical and fork paths relative to the Cruce server.
 
-Canonical is readable by authorized participants; its accepted branch advances through reviewed human promotion. Writers push to their own forks with normal Git. `get_git_access` returns canonical and fork paths relative to the Cruce server.
-
-## Connect and start isolated work
-
-From the cloned repository, or an existing checkout containing the known canonical base:
+To use an existing checkout instead, add the canonical remote; files, branches, history and other remotes stay as they are, and nothing is uploaded:
 
 ```sh
-cruce connect --server https://YOUR_HOST --namespace NAMESPACE_ID --repository REPOSITORY_ID --client codex
-cruce start --title "Improve retries"
+git remote add cruce https://YOUR_HOST/mcp/git/NAMESPACE_ID/REPOSITORY_ID/canonical.git
 ```
 
-`auth` and `connect` carry the selected namespace/repository into browser consent. Confirm access to that one repository; there is no second repository picker. The updated client keeps OAuth credentials per repository, so authorize each repository once after updating the installed client. Existing grant records are not rewritten.
+The bridge finds the repository from local state an attachment recorded, or else from exactly one remote naming a canonical repository on the configured server. That URL is an address carrying stable IDs: it selects which repository to ask for, and the server rechecks the connection's authority on every call. Several such remotes are refused rather than guessed. Outside a Cruce checkout, the bridge still starts and its tools explain how to clone or add the remote; the prompt hint prints nothing.
 
-`connect` authorizes the client, saves local connection state and, as a convenience for `codex`, `claude` or `cursor`, writes client MCP configuration and a participation block. Any MCP-capable tool can connect without it. Choose either the CLI `start` above or let a connected agent call `start_workspace` through MCP. Move the agent to the returned dedicated directory before editing; Cruce does not launch or relocate its process.
+## Start isolated work
 
-The bridge creates a worktree at the exact starting commit and attaches one hosted fork to the workspace. A unique `cruce-WORKSPACE_ID` remote and branch-specific push destination keep other worktrees' destinations and existing `origin` unchanged. Attaching by repository ID is not an import: it never identifies a repository from a matching remote URL or silently uploads unrelated history.
+Start your connected tool in the checkout and ask it to start a workspace, or use the CLI with the tool's connection:
+
+```sh
+cruce start --client codex --title "Improve retries"
+```
+
+Move the agent to the returned dedicated directory before editing; Cruce does not launch or relocate its process.
+
+The bridge creates a worktree at the exact starting commit and attaches one hosted fork to the workspace. A unique `cruce-WORKSPACE_ID` remote and branch-specific push destination keep other worktrees' destinations and existing `origin` unchanged. Attaching is not an import: it never silently uploads unrelated history.
 
 For parallel work through one MCP connection, call `start_workspace` for each workstream. Keep each returned `id` and `directory`, and pass `workspaceId` to workspace operations such as `report_change`, `publish_revision`, `publish_artifact`, `get_workspace_updates` and `detach_workspace`, and to change operations such as `create_proposal` and `record_verification` (their artifact/proposal IDs still identify the reviewed record). Previous workspaces remain attached to their own worktrees. `attach_workspace` with a workspace ID creates or reuses that workspace's local execution without a CLI handoff. `cruce publish --workspace ID` can also select a locally registered workspace from the repository root. CLI and MCP reload the same workspace state, including pending retry identity.
 
@@ -92,11 +100,10 @@ A workspace is not tied to an agent session, a process or a machine. A new agent
 cruce detach
 ```
 
-`detach` keeps the worktree, the fork and all history. It only releases the local writer lock and the server attachment. If the old machine is unavailable, the owner can release the attachment from the console. Then, in any clone of the repository on the new machine:
+`detach` keeps the worktree, the fork and all history. It only releases the local writer lock and the server attachment. If the old machine is unavailable, the owner can release the attachment from the console. Then, once the new machine is set up, in any clone of the repository there:
 
 ```sh
-cruce connect --server https://YOUR_HOST --namespace NAMESPACE_ID --repository REPOSITORY_ID
-cruce resume --workspace WORKSPACE_ID
+cruce resume --client codex --workspace WORKSPACE_ID
 ```
 
 `resume --workspace` creates a Cruce-owned worktree at the workspace baseline, configures the workspace fork remote and fast-forwards to the branch head you last pushed. Only pushed work travels; Git is the transport. Unpushed commits and uncommitted files stay where they were made. If the pushed history does not fast-forward from the baseline, `resume` stops and leaves the worktree for you to reconcile with Git.
@@ -109,7 +116,7 @@ Hosted fork cleanup is a separate `cleanup_workspace` operation or console actio
 
 ## Human terminals
 
-`cruce human --server URL --namespace ID --repository ID` requests browser-approved terminal participation. Then use `start` from the existing checkout. Human terminals can attach that checkout but cannot approve canonical source promotion.
+`cruce human --server URL --namespace ID --repository ID` requests browser-approved terminal participation for one checkout; the Existing checkout tab of **Set up locally** shows it with the IDs filled in. Then use `start` from the existing checkout. Human terminals can attach that checkout but cannot approve canonical source promotion.
 
 The credential helper can use `--human-file /absolute/path/to/git-metadata/cruce/connection.json` with `credential.useHttpPath=true`, scoped to that repository. Use the fork URL from `get_git_access` for explicit `git push FORK_URL HEAD:BRANCH`; existing remotes remain unchanged. Renew terminal authorization from its checkout when it expires. Agent MCP must use its own OAuth connection, never human terminal credentials.
 
@@ -120,7 +127,7 @@ If `cruce` is not found, check that npm’s global executable directory is on yo
 | Symptom | Check |
 | --- | --- |
 | Git redirects to browser sign-in | Current Worker and narrow Access `/mcp/git/*` transport configuration must be applied |
-| Authentication or scope denied | Reauthorize the connection and check current membership, repository selection and scopes; retry cannot bypass revocation |
+| Authentication or scope denied | Run `cruce login` or `cruce connect` again and check current membership, the connection's repository approval and scopes; retry cannot bypass revocation |
 | Workspace remains preparing | Retry `resume` with the original workspace after resolving attachment/provisioning failure |
 | Attach refused: attached elsewhere | `detach` on the old checkout, or release the attachment from the console, then `resume --workspace ID` |
 | Publication rejects a revision | Push the exact branch head first; preserve base/previous-publication ancestry and satisfy protected-path policy |

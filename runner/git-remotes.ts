@@ -1,6 +1,13 @@
 import { fileURLToPath } from "node:url";
 import { git } from "./local-git.ts";
 
+/** A Cruce server address: HTTPS (or local development over HTTP), without credentials. Returns its origin. */
+export function serverOrigin(server: string) {
+	const url = new URL(server);
+	if (url.username || url.password || (url.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(url.hostname)))
+		throw new Error("Use an HTTPS server URL without credentials");
+	return url.origin;
+}
 export const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
 export function credentialHelper(server: string, client: string, humanFile?: string) {
 	return `!${shellQuote(process.execPath)} ${shellQuote(fileURLToPath(new URL("./git-credential.mjs", import.meta.url)))} --server ${shellQuote(server)} --client ${shellQuote(client)}${humanFile ? ` --human-file ${shellQuote(humanFile)}` : ""}`;
@@ -25,7 +32,9 @@ export async function configureFork(cwd: string, workspaceId: string, server: st
 		await git(cwd, ["config", `branch.${branch}.merge`, `refs/heads/${branch}`]);
 	}
 	await git(cwd, ["config", `credential.${url.href}.useHttpPath`, "true"]);
-	await git(cwd, ["config", `credential.${url.href}.helper`, credentialHelper(server, client, humanFile)]);
+	// Clear helpers inherited from the account-level server entry, so the fork authenticates as this connection.
+	await git(cwd, ["config", "--replace-all", `credential.${url.href}.helper`, ""]);
+	await git(cwd, ["config", "--add", `credential.${url.href}.helper`, credentialHelper(server, client, humanFile)]);
 	return { remote, url: url.href };
 }
 /** Continue a workspace from its pushed fork head. Only pushed revisions travel; divergence is left to Git. */

@@ -1,7 +1,6 @@
 import { AuthorizationError } from "@cloudflare/workers-oauth-provider";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DirectoryController } from "../../src/core/ownership.ts";
-import { repositoryConsentState } from "../../src/shared/repository-consent.ts";
 import { type AuthEnv, accessIdentity, authRoute, connectionIdentity, oauthProvider, seal, unseal } from "../../src/worker/auth.ts";
 import { bridgeRoute } from "../../src/worker/bridge-auth.ts";
 import type { PlatformEnv } from "../../src/worker/platform-router.ts";
@@ -105,86 +104,73 @@ describe("native identity", () => {
 		expect(c.state.users).toHaveLength(1);
 		expect(c.state.namespaces).toHaveLength(1);
 	});
-	it.each(["generic", "bound", "unavailable", "rejected"])(
-		"renders consent and rejected-consent retry pages as HTML (%s)",
-		async (mode) => {
-			const rejected = mode === "rejected";
-			const f = await identityFixture();
-			vi.stubGlobal("fetch", f.send);
-			const consentHeaders = new Headers({ "set-cookie": "consent=fixture; Secure; HttpOnly", "cache-control": "no-store" });
-			const namespace = { id: "namespace", handle: "test", ownerId: "owner" };
-			const repo = { id: "repo", name: "gateway-check" };
-			const env = {
-				...f.env,
-				DIRECTORY: {
-					getByName: () => ({
-						login: async () => ({ id: "owner", name: "Owner", personalNamespaceId: namespace.id }),
-						namespace: async () => namespace,
-						namespaces: async () => [namespace],
-					}),
-				},
-				NAMESPACE: { getByName: () => ({ initialize: async () => {}, snapshot: async () => ({ repositories: [repo] }) }) },
-				OAUTH_PROVIDER: {
-					approveConsent: vi.fn(async () => {
-						throw new AuthorizationError("invalid_request", { description: "This authorization expired <fixture>; start again" });
-					}),
-					completeAuthorization: vi.fn(),
-					parseAuthRequest: async () => ({
-						clientId: "client",
-						scope: ["cruce:read"],
-						redirectUri: "http://127.0.0.1:12345/callback",
-						state:
-							mode === "bound" || mode === "unavailable"
-								? repositoryConsentState({ namespaceId: "namespace", repositoryId: mode === "unavailable" ? "missing" : "repo" }, "nonce")
-								: "nonce",
-					}),
-					beginConsent: async () => ({ handle: "consent-handle", headers: consentHeaders }),
-					describeConsent: async () => ({ clientName: "Gateway <client>" }),
-				},
-			} as unknown as AuthEnv;
-			const response = (await authRoute(
-				new Request("https://cruce.example.test/authorize", {
-					method: rejected ? "POST" : "GET",
-					...(rejected ? { body: new URLSearchParams({ handle: "expired" }) } : {}),
-					headers: { "cf-access-jwt-assertion": await f.token({ exp: Math.floor(Date.now() / 1000) + 600 }) },
+	it.each(["consent", "rejected"])("renders consent and rejected-consent retry pages as HTML (%s)", async (mode) => {
+		const rejected = mode === "rejected";
+		const f = await identityFixture();
+		vi.stubGlobal("fetch", f.send);
+		const consentHeaders = new Headers({ "set-cookie": "consent=fixture; Secure; HttpOnly", "cache-control": "no-store" });
+		const namespace = { id: "namespace", handle: "test", ownerId: "owner" };
+		const repo = { id: "repo", name: "gateway-check" };
+		const env = {
+			...f.env,
+			DIRECTORY: {
+				getByName: () => ({
+					login: async () => ({ id: "owner", name: "Owner", personalNamespaceId: namespace.id }),
+					namespace: async () => namespace,
+					namespaces: async () => [namespace],
 				}),
-				env,
-			))!;
-			expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
-			if (rejected) {
-				expect(response.status).toBe(400);
-				expect(response.headers.get("cache-control")).toBe("no-store");
-				const html = await response.text();
-				expect(html).toContain("This authorization expired &lt;fixture>; start again");
-				expect(html).toContain('href="https://cruce.example.test/authorize"');
-				expect(env.OAUTH_PROVIDER!.completeAuthorization).not.toHaveBeenCalled();
-				return;
-			}
-			if (mode === "unavailable") {
-				expect(response.status).toBe(400);
-				expect(await response.text()).toContain("This repository is unavailable");
-				return;
-			}
-			expect(response.headers.get("set-cookie")).toBe(consentHeaders.get("set-cookie"));
+			},
+			NAMESPACE: { getByName: () => ({ initialize: async () => {}, snapshot: async () => ({ repositories: [repo] }) }) },
+			OAUTH_PROVIDER: {
+				approveConsent: vi.fn(async () => {
+					throw new AuthorizationError("invalid_request", { description: "This authorization expired <fixture>; start again" });
+				}),
+				completeAuthorization: vi.fn(),
+				parseAuthRequest: async () => ({
+					clientId: "client",
+					scope: ["cruce:read"],
+					redirectUri: "http://127.0.0.1:12345/callback",
+					state: "nonce",
+				}),
+				beginConsent: async () => ({ handle: "consent-handle", headers: consentHeaders }),
+				describeConsent: async () => ({ clientName: "Gateway <client>" }),
+			},
+		} as unknown as AuthEnv;
+		const response = (await authRoute(
+			new Request("https://cruce.example.test/authorize", {
+				method: rejected ? "POST" : "GET",
+				...(rejected ? { body: new URLSearchParams({ handle: "expired" }) } : {}),
+				headers: { "cf-access-jwt-assertion": await f.token({ exp: Math.floor(Date.now() / 1000) + 600 }) },
+			}),
+			env,
+		))!;
+		expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+		if (rejected) {
+			expect(response.status).toBe(400);
 			expect(response.headers.get("cache-control")).toBe("no-store");
 			const html = await response.text();
-			expect(html).toContain('<form method="post">');
-			expect(html).toContain('name="repository" value="repo"');
-			if (mode === "bound") {
-				expect(html).toContain('type="hidden" name="repository"');
-				expect(html).toContain("Access is limited to this repository.");
-				expect(html).not.toContain("Find a repository");
-				expect(html).not.toContain("Choose repositories");
-			}
-			expect(html).toContain('name="handle" value="consent-handle"');
-			expect(html).toContain("Gateway &lt;client>");
-			expect(html).toContain('name="viewport"');
-			expect(html).toContain('name="scope" value="cruce:read" checked disabled');
-			expect(html).toContain('name="scope" value="workspace:write">');
-			const nonce = html.match(/<script nonce="([^"]+)"/)![1];
-			expect(response.headers.get("content-security-policy")).toContain(`script-src 'nonce-${nonce}'`);
-		},
-	);
+			expect(html).toContain("This authorization expired &lt;fixture>; start again");
+			expect(html).toContain('href="https://cruce.example.test/authorize"');
+			expect(env.OAUTH_PROVIDER!.completeAuthorization).not.toHaveBeenCalled();
+			return;
+		}
+		expect(response.headers.get("set-cookie")).toBe(consentHeaders.get("set-cookie"));
+		expect(response.headers.get("cache-control")).toBe("no-store");
+		const html = await response.text();
+		expect(html).toContain('<form method="post">');
+		expect(html).toContain('name="repository" value="repo"');
+		// Every repository the person can access is the default; choosing narrows it.
+		expect(html).toContain('name="access" value="all" checked');
+		expect(html).toContain('name="access" value="choose">');
+		expect(html).toContain("All repositories you can access");
+		expect(html).toContain('name="handle" value="consent-handle"');
+		expect(html).toContain("Gateway &lt;client>");
+		expect(html).toContain('name="viewport"');
+		expect(html).toContain('name="scope" value="cruce:read" checked disabled');
+		expect(html).toContain('name="scope" value="workspace:write">');
+		const nonce = html.match(/<script nonce="([^"]+)"/)![1];
+		expect(response.headers.get("content-security-policy")).toContain(`script-src 'nonce-${nonce}'`);
+	});
 	it("verifies real signatures, issuer, application audience and expiry", async () => {
 		const f = await identityFixture(),
 			jwt = await f.token();
@@ -291,19 +277,14 @@ describe("public Cruce session boundary", () => {
 describe("agent and terminal connections", () => {
 	afterEach(() => vi.unstubAllGlobals());
 	const live = () => Math.floor(Date.now() / 1000) + 600;
-	it.each(["generic", "repository", "tampered", "revoked"])(
-		"approving an agent preserves identity and repository consent (%s)",
+	it.each(["all", "choose", "empty", "tampered", "revoked", "missing"])(
+		"approving an agent preserves identity and its repository approval (%s)",
 		async (mode) => {
 			const f = await identityFixture();
 			vi.stubGlobal("fetch", f.send);
 			const namespace = { id: "namespace", handle: "test", ownerId: "owner" };
 			const completeAuthorization = vi.fn(async () => ({ redirectTo: "http://127.0.0.1:12345/callback?code=fixture" }));
-			const original = {
-				clientId: "client",
-				scope: ["cruce:read"],
-				redirectUri: "http://127.0.0.1:12345/callback",
-				state: mode === "generic" ? "nonce" : repositoryConsentState({ namespaceId: "namespace", repositoryId: "repo" }, "nonce"),
-			};
+			const original = { clientId: "client", scope: ["cruce:read"], redirectUri: "http://127.0.0.1:12345/callback", state: "nonce" };
 			const env = {
 				...f.env,
 				DIRECTORY: {
@@ -339,14 +320,16 @@ describe("agent and terminal connections", () => {
 					body: new URLSearchParams([
 						["handle", "consent-handle"],
 						["scope", "cruce:write"],
-						["repository", "repo"],
-						...(mode === "generic" ? [["repository", "not-offered"]] : mode === "tampered" ? [["repository", "other"]] : []),
+						...(mode === "missing" ? [] : [["access", mode === "all" ? "all" : "choose"]]),
+						// A choice-list submitted with "all" is ignored; "all" follows current access instead.
+						...(mode === "empty" ? [] : [["repository", "repo"]]),
+						...(mode === "tampered" ? [["repository", "not-offered"]] : []),
 					]),
 					headers: { "cf-access-jwt-assertion": await f.token({ exp: live() }) },
 				}),
 				env,
 			))!;
-			if (mode === "tampered" || mode === "revoked") {
+			if (mode !== "all" && mode !== "choose") {
 				expect(response.status).toBe(400);
 				expect(completeAuthorization).not.toHaveBeenCalled();
 				return;
@@ -359,14 +342,14 @@ describe("agent and terminal connections", () => {
 			expect(metadata).toEqual({
 				connectionId: props.connectionId,
 				clientName: "Codex",
-				repositories: [{ id: "repo", label: "test/gateway" }],
+				repositories: mode === "all" ? "all" : [{ id: "repo", label: "test/gateway" }],
 			});
 			expect(props).toEqual({
 				developerId: "person",
 				tenantId: f.env.CRUCE_ACCESS_ISSUER,
 				email: "person@example.test",
 				connectionId: expect.any(String),
-				repositoryIds: ["repo"],
+				repositories: mode === "all" ? "all" : ["repo"],
 				clientName: "Codex",
 			});
 		},
@@ -380,12 +363,16 @@ describe("agent and terminal connections", () => {
 			tenantId: f.env.CRUCE_ACCESS_ISSUER!,
 			email: "person@example.test",
 			connectionId: "connection",
-			repositoryIds: ["repo"],
+			repositories: ["repo"],
 			clientName: "Claude Code",
 		};
 		// Grants approved before this change still carry an Access token; it is ignored rather than re-verified.
 		const legacy = { ...props, accessJwt: await f.token({ exp: 1 }) };
 		expect(connectionIdentity(legacy, f.env)).toEqual(props);
+		expect(connectionIdentity({ ...props, repositories: "all" }, f.env).repositories).toBe("all");
+		// Anything but "all" or a list of IDs approves nothing.
+		for (const repositories of ["al", "*", [1], { all: true }])
+			expect(connectionIdentity({ ...props, repositories } as never, f.env).repositories).toBeUndefined();
 		expect(send).not.toHaveBeenCalled();
 		expect(() => connectionIdentity({ ...props, tenantId: "https://other.cloudflareaccess.com" }, f.env)).toThrow("Reconnect this agent");
 		expect(() => connectionIdentity({ ...props, developerId: "" }, f.env)).toThrow("Reconnect this agent");

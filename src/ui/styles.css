@@ -3649,7 +3649,25 @@ main[data-screen="settings"] > form {
 		flex-basis: 100%;
 	}
 }
-/* ---------- agent connections ---------- */
+/* ---------- local setup and agent connections ---------- */
+.steps.local-setup {
+	max-width: 760px;
+	margin: 28px 0 18px;
+}
+.local-setup + .cost {
+	max-width: 760px;
+}
+.connections {
+	margin-top: 48px;
+	padding-top: 28px;
+	border-top: 1px solid var(--border-subtle);
+}
+:where(.shell) .connections h2 {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 0 0 8px;
+}
 .connection-list {
 	display: grid;
 	margin: 28px 0 0;

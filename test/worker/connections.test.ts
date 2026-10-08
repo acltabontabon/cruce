@@ -14,7 +14,7 @@ describe("agent connections", () => {
 		const h = helpers([
 			{
 				items: [
-					{ id: "older", clientId: "known", scope: ["cruce:read"], metadata: {}, createdAt: 100 },
+					{ id: "older", clientId: "known", scope: ["cruce:read"], metadata: { repositories: "all" }, createdAt: 100 },
 					{
 						id: "recorded",
 						clientId: "unknown",
@@ -26,7 +26,7 @@ describe("agent connections", () => {
 				],
 				cursor: "1",
 			},
-			{ items: [{ id: "unnamed", clientId: "missing", scope: [], metadata: null, createdAt: 200 }] },
+			{ items: [{ id: "unnamed", clientId: "missing", scope: [], metadata: { repositories: "everything" }, createdAt: 200 }] },
 		]);
 		expect(await listConnections(h.oauth, "subject")).toEqual([
 			{
@@ -39,7 +39,7 @@ describe("agent connections", () => {
 				expiresAt: 900_000,
 			},
 			{ id: "unnamed", client: "Agent", scopes: [], createdAt: 200_000 },
-			{ id: "older", client: "Registered client", scopes: ["cruce:read"], createdAt: 100_000 },
+			{ id: "older", client: "Registered client", repositories: "all", scopes: ["cruce:read"], createdAt: 100_000 },
 		]);
 		expect(h.listUserGrants.mock.calls.map(([user]) => user)).toEqual(["subject", "subject"]);
 		expect(h.lookupClient).not.toHaveBeenCalledWith("unknown");

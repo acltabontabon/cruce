@@ -108,7 +108,7 @@ export async function platformRoute(
 		name: props?.clientName ?? user.name,
 		connectionId: props?.connectionId ?? bridge?.connectionId,
 	};
-	const grant: ConnectionGrant = { actor, scopes, repositories: props?.repositoryIds };
+	const grant: ConnectionGrant = { actor, scopes, repositories: props?.repositories };
 	if (url.pathname.startsWith("/mcp/git/")) {
 		if (!props && !bridge) throw new DomainError(401, "Git requires a Cruce connection");
 		const route = requireValue(parseGitRoute(url), "Unsupported Git route");

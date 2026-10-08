@@ -209,7 +209,7 @@ export function ConsoleHeader({
 	routeKey,
 	open,
 	home,
-	connections,
+	setup,
 	accountRequested,
 	create,
 }: {
@@ -223,7 +223,7 @@ export function ConsoleHeader({
 	routeKey: string;
 	open: (namespaceId: string, repositoryId?: string) => void;
 	home: () => void;
-	connections: () => void;
+	setup: () => void;
 	accountRequested: boolean;
 	create: () => void;
 }) {
@@ -306,7 +306,7 @@ export function ConsoleHeader({
 						</>
 					) : (
 						<span className="global-location" aria-current="page">
-							{screen === "connections" ? "Agent connections" : "Home"}
+							{screen === "setup" ? "Local setup" : "Home"}
 						</span>
 					)}
 				</nav>
@@ -354,16 +354,16 @@ export function ConsoleHeader({
 								<div className="account-actions">
 									<a
 										className="account-link"
-										href="/?page=connections"
-										aria-current={screen === "connections" ? "page" : undefined}
+										href="/?page=setup"
+										aria-current={screen === "setup" ? "page" : undefined}
 										onClick={(event) => {
 											if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
 											event.preventDefault();
-											connections();
+											setup();
 										}}
 									>
-										<Icon name="plug" />
-										<span>Agent connections</span>
+										<Icon name="local" />
+										<span>Local setup</span>
 										<Icon name="arrow" />
 									</a>
 									<a className="account-link account-sign-out" href="/auth/logout">

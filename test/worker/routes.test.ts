@@ -196,7 +196,7 @@ describe("namespace repository contracts", () => {
 	});
 	it("rejects forged actor payloads and repositories absent from agent consent", async () => {
 		const f = fixture();
-		const props = { tenantId: "issuer", developerId: "subject", email: "owner@example.com", connectionId: "agent", repositoryIds: [] };
+		const props = { tenantId: "issuer", developerId: "subject", email: "owner@example.com", connectionId: "agent", repositories: [] };
 		const c = {
 			tool: "start_workspace",
 			namespaceId: f.repo.namespaceId,
@@ -206,7 +206,7 @@ describe("namespace repository contracts", () => {
 			idempotencyKey: "start",
 		};
 		await expect(f.call("/mcp/command", c, props)).rejects.toThrow("not authorized");
-		await expect(f.call("/mcp/command", { ...c, actor: { kind: "human" } }, { ...props, repositoryIds: [f.repo.id] })).rejects.toThrow();
+		await expect(f.call("/mcp/command", { ...c, actor: { kind: "human" } }, { ...props, repositories: [f.repo.id] })).rejects.toThrow();
 		expect(f.controller.state.workspaces).toHaveLength(0);
 	});
 	it("human bridge credentials cannot invoke human source promotion", async () => {

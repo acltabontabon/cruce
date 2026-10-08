@@ -205,7 +205,7 @@ async function fixture(initialized = true) {
 		c.command({ tool: "create_proposal", artifactId: artifact.id, title: "Change" }, a);
 		runtime.save(c);
 	}
-	const props = { ...identity, connectionId: "connection", repositoryIds: [repository.id] };
+	const props = { ...identity, connectionId: "connection", repositories: [repository.id] };
 	const ctx = { waitUntil: vi.fn() } as unknown as ExecutionContext;
 	const call = (path: string, body?: unknown, agent = false, bridge?: Parameters<typeof platformRoute>[5]) =>
 		platformRoute(

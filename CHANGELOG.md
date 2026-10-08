@@ -6,6 +6,9 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Added
 
+- Set up a machine once instead of once per repository. A new **Local setup** page in the avatar menu holds the one-time commands: install the client, `cruce login --server URL` to authorize Git for every repository you can access, and `cruce connect --server URL --client claude|codex|cursor` to register Cruce in that tool's own user-level settings. Below them, **Agent connections** lists each connection, what it reaches and what it may do, with Revoke. A repository's **Set up locally** now only clones it, or attaches an existing checkout with `git remote add cruce <canonical URL>` (or `cruce human` to work yourself), and links to Local setup. Connected tools find the repository from the checkout they start in. Outside a Cruce checkout the bridge explains how to start, and the Claude prompt hint stays silent. See [ADR 0011](docs/decisions/0011-account-level-connections-and-local-setup.md).
+- The tool consent page defaults to **All repositories you can access**, which follows your current namespace roles and repository grants, including repositories created or shared later. **Choose repositories** still narrows a connection. The server rejects an empty or no-longer-accessible choice.
+
 - Coordinating agents now see workspaces left behind by a promotion. Every bridge tool response starts with an **Action needed** sentence naming each of the owner's unended workspaces behind canonical, published or not, with the Git reconciliation to do, and `cruce connect --client claude` installs a Claude Code prompt hook (`cruce hint`) that adds the same sentence to the user's next prompt. Agent instructions say to reconcile every named workspace, including ones whose agents have finished.
 - Add **Delete workspace** to workspace pages: one confirmed action for the owner that ends the workspace, withdraws its open changes, releases its checkout and deletes its cloud fork, after which it moves to Earlier work in History with its published revisions and history. It replaces the separate Inspect retention and Delete fork steps. Deletion still stops when the fork holds commits that were never published, and the page lists those refs. Human owners no longer need Maintain to delete their own workspace's fork, and a maintainer can finish deleting someone else's ended workspace.
 
@@ -33,6 +36,7 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Changed
 
+- Installed clients need `cruce login` and `cruce connect` once per machine; earlier per-repository credentials are no longer read. Revoke old per-repository connections from Local setup, and delete project-level `cruce` entries in `.mcp.json`, `.cursor/mcp.json` or `.codex/config.toml` and the Cruce participation blocks in `CLAUDE.md`, `AGENTS.md` or `.cursor/rules/cruce.mdc`; participation guidance now travels as MCP server instructions.
 - **Delete repository** no longer requires ending work first. Live workspaces, attached, disconnected or detached, and open changes end with the repository, and the confirmation says how many. Deletion still waits for in-flight promotions, unsettled resource operations and push-observation cleanup. Archive still requires finished work ([ADR 0010](docs/decisions/0010-repository-archive-and-permanent-deletion.md), amended).
 - Proposing a newer revision from a workspace closes its older open change ("Superseded by #N"), so stale changes no longer wait for review or block archive.
 - Cancelling a workspace (`end_workspace` with `cancelled`) withdraws its open changes, and ending any workspace releases its checkout reservation. `cruce end` and `cruce detach` release the local checkout when the workspace was already ended elsewhere.
@@ -63,6 +67,7 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Removed
 
+- Remove `cruce auth` and the `--namespace`/`--repository` options of `cruce connect`, the repository-scoped consent confirmation, and the **Connect an agent** tab of **Set up locally**. Use Local setup instead.
 - Remove the namespace daily operation budget ([ADR 0008](docs/decisions/0008-remove-daily-operation-budget.md)). Resource operations, including source reads, no longer count against a daily limit, and nothing stops at midnight UTC. Namespace settings keep per-operation resource policy under **Storage operations**, and the namespace overview no longer shows today's usage. Retries still reuse their original reservation.
 
 ### Fixed

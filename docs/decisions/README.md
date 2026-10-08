@@ -17,5 +17,6 @@ Focused records of consequential decisions whose rationale is larger than its ow
 | [0009 — Replaceable observations and archived finished work](0009-replaceable-observations-and-archived-finished-work.md) | Accepted 2026-10-08 | Presence and reports keep one replaceable record per workspace; change reports are coalesced; finished work moves to immutable archive bundles so limits bound live work. Amends 0005 |
 
 | [0010 — Repository archive and permanent deletion](0010-repository-archive-and-permanent-deletion.md) | Accepted 2026-10-08 | Owner-only reversible archive and explicit permanent deletion, with durable cleanup, namespace-gated retries and minimal tombstones. Amends retention in 0005 and 0009 |
+| [0011 — Account-level connections and local setup](0011-account-level-connections-and-local-setup.md) | Accepted 2026-10-08 | Connections approve all accessible repositories (default) or a chosen list; install, Git sign-in and tool connection happen once per machine; a checkout's canonical remote is an address, never authority |
 
 Add a record only for a decision that changes the product boundary, the domain model, authority or a core dependency. Number records sequentially, and never rewrite an accepted record's decision. Supersede it with a new one.

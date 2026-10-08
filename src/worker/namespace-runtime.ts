@@ -12,6 +12,7 @@ import type {
 	NamespaceRole,
 	NamespaceState,
 	Repository,
+	RepositoryApproval,
 	ResourceAction,
 	ResourcePolicy,
 	ResourceReservation,
@@ -26,7 +27,7 @@ export type ContinuationAuthorization =
 export interface ConnectionGrant {
 	actor: Actor;
 	scopes?: string[];
-	repositories?: string[];
+	repositories?: RepositoryApproval;
 	continuation?: ContinuationAuthorization;
 }
 export class NamespaceRuntime extends DurableObject<StorageEnv> {

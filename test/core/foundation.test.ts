@@ -133,6 +133,20 @@ describe("namespace ownership", () => {
 		expect(c.authority(agent, "repo", ["cruce:read"], ["repo"]).actor.kind).toBe("agent");
 		expect(() => c.authority({ ...human, userId: "stranger" }, "repo")).toThrow("denied");
 	});
+	it("approving all repositories follows current access, including later repositories, and never widens it", () => {
+		const c = namespace(),
+			a = authority();
+		c.repository(a, repo);
+		expect(c.authority(agent, "repo", ["cruce:read"], "all").repositoryId).toBe("repo");
+		c.repository(a, { ...repo, id: "later", name: "later" });
+		expect(c.authority(agent, "later", ["cruce:read"], "all").repositoryId).toBe("later");
+		expect(() => c.authority(agent, "later", [], "all")).toThrow("not authorized");
+		expect(() => c.authority(agent, "later", ["cruce:read"])).toThrow("not authorized");
+		// A list never matches by substring, and a repository outside the person's access stays denied.
+		expect(() => c.authority(agent, "repo", ["cruce:read"], ["repository"])).toThrow("not authorized");
+		expect(() => c.authority(agent, "missing", ["cruce:read"], "all")).toThrow("denied");
+		expect(() => c.authority({ ...agent, userId: "stranger" }, "repo", ["cruce:read"], "all")).toThrow("denied");
+	});
 	it("binds invitations to verified email and expiry; acceptance is idempotent", () => {
 		const c = namespace();
 		c.invite(authority(), { id: "invite", email: "maya@example.com", role: "developer", tokenHash: "hash", expiresAt: 200 });

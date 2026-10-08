@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Command, Namespace, Repository, RepositorySnapshot, User } from "../shared/platform.ts";
 import { BRAND } from "./brand.tsx";
-import { AgentConnections } from "./connections.tsx";
 import { Empty, Form, PrefixedInput, value } from "./controls.tsx";
 import { Dialog } from "./design.tsx";
 import { NamespaceHome } from "./home.tsx";
+import { LocalSetup } from "./local-setup.tsx";
 import { NamespacePage, namespaceViews } from "./namespace.tsx";
 import { ConsoleHeader } from "./navigation.tsx";
 import { poll } from "./poll.ts";
@@ -23,11 +23,7 @@ function readRoute() {
 		[tab, id] = location.hash.replace(/^#\/?/, "").split("/");
 	const page = query.get("page");
 	const screen =
-		page === "connections"
-			? "connections"
-			: page === "account" || page === "namespaces" || !query.has("namespace")
-				? "namespaces"
-				: "namespace";
+		page === "setup" ? "setup" : page === "account" || page === "namespaces" || !query.has("namespace") ? "namespaces" : "namespace";
 	return {
 		screen,
 		accountRequested: page === "account",
@@ -103,8 +99,8 @@ export function App() {
 		setRoute(readRoute());
 		setOverlay(undefined);
 	}, []);
-	/** Home, or another unscoped page of the signed-in person such as their agent connections. */
-	const navigateHome = useCallback((page?: "connections") => {
+	/** Home, or another unscoped page of the signed-in person such as their local setup. */
+	const navigateHome = useCallback((page?: "setup") => {
 		navigationVersion.current++;
 		pendingActions.current = 0;
 		const url = new URL(location.href);
@@ -159,8 +155,8 @@ export function App() {
 				? route.tab === "settings"
 					? ["Settings", namespace.namespace.name]
 					: [namespace.namespace.name]
-				: route.screen === "connections"
-					? ["Agent connections"]
+				: route.screen === "setup"
+					? ["Local setup"]
 					: ["Your repositories"];
 		document.title = [...parts, BRAND.name].join(" · ");
 	}, [route, view, namespace]);
@@ -376,7 +372,7 @@ export function App() {
 					routeKey={`${route.screen}/${route.namespaceId}/${route.repositoryId}/${route.tab}/${route.id}`}
 					open={navigate}
 					home={() => navigateHome()}
-					connections={() => navigateHome("connections")}
+					setup={() => navigateHome("setup")}
 					accountRequested={route.accountRequested}
 					create={() => setOverlay("create-namespace")}
 				/>
@@ -410,8 +406,8 @@ export function App() {
 						</button>
 					</p>
 				)}
-				{route.screen === "connections" ? (
-					<AgentConnections />
+				{route.screen === "setup" ? (
+					<LocalSetup />
 				) : route.screen === "namespaces" ? (
 					<NamespaceHome me={me} refresh={refresh} open={navigate} create={() => setOverlay("create-namespace")} />
 				) : route.repositoryId ? (
@@ -432,6 +428,7 @@ export function App() {
 							onError={(error) => {
 								if (error.name !== "AbortError") setError(error);
 							}}
+							openSetup={() => navigateHome("setup")}
 						/>
 					) : (
 						<Empty>{error ? "Repository unavailable." : "Loading repository…"}</Empty>

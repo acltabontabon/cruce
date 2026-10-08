@@ -238,6 +238,15 @@ export async function fixture() {
 	const day = 86_400_000;
 	let connections = [
 		{
+			id: "grant-cursor",
+			client: "Cursor",
+			connectionId: "connection-cursor",
+			repositories: "all",
+			scopes: ["cruce:read", "workspace:write", "revision:publish", "artifact:publish", "change:write", "promotion:request"],
+			createdAt: FIXED_TIME - day,
+			expiresAt: FIXED_TIME + 29 * day,
+		},
+		{
 			id: "grant-codex",
 			client: "Codex",
 			connectionId: "connection-codex",

@@ -6,6 +6,7 @@ import { Form, value } from "./controls.tsx";
 import { BackLink, CopyCommand, Dialog, Icon, Initials, PageHeader, Pill, Section, SettingRow } from "./design.tsx";
 import { laneIndex } from "./lanes.ts";
 import { LaneBullet, LaneTrack } from "./lanes.tsx";
+import { START_PROMPT } from "./local-setup.tsx";
 import { ArchivedRecord, EarlierWork, RetainedActivity, RetainedRecordDetail, RetainedRecordRow } from "./records.tsx";
 import { type Execute, RevisionBrowser } from "./source.tsx";
 import {
@@ -534,118 +535,77 @@ function HistoryScreen({
 	);
 }
 
-type SetupMethod = "clone" | "attach" | "connect";
-function ConnectGuide({ view, initial = "connect" }: { view: RepositorySnapshot; initial?: SetupMethod }) {
+type SetupMethod = "clone" | "attach";
+/** What one repository needs locally. Installing, authorizing Git and connecting tools happen once, in Local setup. */
+function ConnectGuide({ view, initial = "clone", openSetup }: { view: RepositorySnapshot; initial?: SetupMethod; openSetup: () => void }) {
 	const [method, setMethod] = useState<SetupMethod>(initial);
-	const [tool, setTool] = useState<"claude" | "codex" | "cursor">("claude");
-	const origin = location.origin,
-		url = `${origin}${gitRemotePath(view.repository.namespaceId, view.repository.id)}`;
-	const launch = tool === "claude" ? "claude" : tool === "codex" ? "codex" : "cursor-agent";
+	const url = `${location.origin}${gitRemotePath(view.repository.namespaceId, view.repository.id)}`;
 	return (
 		<div className="connect-guide">
+			<p className="muted">
+				First time on this machine? Install the client, authorize Git and connect your tools once in{" "}
+				<a
+					href="/?page=setup"
+					onClick={(event) => {
+						if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+						event.preventDefault();
+						openSetup();
+					}}
+				>
+					Local setup
+				</a>
+				.
+			</p>
 			<nav className="segmented" aria-label="Setup method">
-				{(["clone", "attach", "connect"] as const).map((mode) => (
-					<button
-						type="button"
-						key={mode}
-						aria-pressed={method === mode}
-						disabled={mode !== "connect" && !view.sourceHead}
-						onClick={() => setMethod(mode)}
-					>
-						{mode === "clone" ? "Clone" : mode === "attach" ? "Existing checkout" : "Connect an agent"}
+				{(["clone", "attach"] as const).map((mode) => (
+					<button type="button" key={mode} aria-pressed={method === mode} disabled={!view.sourceHead} onClick={() => setMethod(mode)}>
+						{mode === "clone" ? "Clone" : "Existing checkout"}
 					</button>
 				))}
 			</nav>
-			{!view.sourceHead && (
+			{!view.sourceHead ? (
 				<p className="cost">Canonical Git is not ready. A maintainer must finish repository setup before local work can start.</p>
-			)}
-			<p className="muted">Use Git and Node.js 22.18 or later. Install the Cruce client once on this machine.</p>
-			<CopyCommand text={`npm install --global ${origin}/downloads/cruce-client.tgz`} />
-			{method === "clone" ? (
+			) : method === "clone" ? (
 				<ol className="steps">
-					<li>
-						<h3>Authorize Git</h3>
-						<CopyCommand
-							text={`cruce auth --server ${origin} --namespace ${view.repository.namespaceId} --repository ${view.repository.id}`}
-						/>
-						<p>Select this repository on the consent page.</p>
-					</li>
 					<li>
 						<h3>Clone canonical</h3>
 						<CopyCommand text={`git clone ${url} ${view.repository.name}`} />
 						<p>Canonical is read-only. A workspace pushes to its own fork.</p>
 					</li>
 					<li>
-						<button type="button" onClick={() => setMethod("connect")}>
-							Connect a tool in the clone
-						</button>
+						<h3>Start work</h3>
+						<p>Start Claude Code, Codex or Cursor in the clone, then ask it:</p>
+						<CopyCommand text={START_PROMPT} />
 						<button type="button" onClick={() => setMethod("attach")}>
 							Work in the checkout yourself
 						</button>
 					</li>
 				</ol>
-			) : method === "attach" ? (
-				<>
-					<p>
-						From your existing checkout, authorize this terminal and start a workspace. Your files, branch and existing remotes are
-						preserved. Cruce adds a separate workspace remote and a local writer lock; it does not upload history.
-					</p>
-					<CopyCommand
-						text={`cruce human --server ${origin} --namespace ${view.repository.namespaceId} --repository ${view.repository.id}\ncruce start --title "Describe your work"`}
-					/>
-					<p>
-						Use a branch that can be reviewed from canonical. Commit with Git, then push to the added{" "}
-						<code>cruce-&lt;workspace-id&gt;</code> remote with an explicit branch ref. Run <code>cruce publish</code> after pushing. The
-						paired terminal cannot approve or promote.
-					</p>
-				</>
 			) : (
 				<ol className="steps">
 					<li>
-						<h3>Use a local checkout</h3>
-						<p>
-							Open your checkout, or{" "}
-							<button type="button" className="text-button" onClick={() => setMethod("clone")}>
-								clone canonical first
-							</button>
-							.
-						</p>
+						<h3>For your connected tools</h3>
+						<CopyCommand text={`git remote add cruce ${url}`} />
+						<p>Lets your tools find this repository. Your files, branch, history and existing remotes stay as they are.</p>
 					</li>
 					<li>
-						<h3>Connect your tool</h3>
-						<fieldset className="segmented">
-							<legend className="sr-only">Agent tool</legend>
-							{(["claude", "codex", "cursor"] as const).map((t) => (
-								<button key={t} type="button" aria-pressed={tool === t} onClick={() => setTool(t)}>
-									{t === "claude" ? "Claude Code" : t === "codex" ? "Codex" : "Cursor"}
-								</button>
-							))}
-						</fieldset>
+						<h3>To work yourself</h3>
+						<p>Authorize this terminal and start a workspace. Cruce adds a separate workspace remote and a local writer lock.</p>
 						<CopyCommand
-							text={`cruce connect --server ${origin} --namespace ${view.repository.namespaceId} --repository ${view.repository.id} --client ${tool}`}
+							text={`cruce human --server ${location.origin} --namespace ${view.repository.namespaceId} --repository ${view.repository.id}\ncruce start --title "Describe your work"`}
 						/>
-						<p className="muted">
-							Approve this repository on the consent page. This writes the tool's MCP settings and preserves existing remotes.
-						</p>
-					</li>
-					<li>
-						<h3>Start work</h3>
 						<p>
-							Run <code>{launch}</code> in the checkout, then ask it:
+							Use a branch that can be reviewed from canonical. Commit with Git, then push to the added{" "}
+							<code>cruce-&lt;workspace-id&gt;</code> remote with an explicit branch ref. Run <code>cruce publish</code> after pushing. The
+							paired terminal cannot approve or promote.
 						</p>
-						<CopyCommand text="Use the Cruce tools to start a workspace for this task and work only in the directory it returns. Commit and push, then publish the revision, record your test results and propose it for review." />
 					</li>
 				</ol>
 			)}
-			{method === "clone" && (
+			{view.sourceHead && (
 				<p className="cost">
-					Cloning reads cloud Git storage. Creating a workspace uses a separate fork and namespace resource operations.
-				</p>
-			)}
-			{method !== "clone" && (
-				<p className="cost">
-					Starting a workspace creates an isolated fork and uses namespace resource operations. Cruce coordinates the Git work; your tools
-					run it.
+					{method === "clone" ? "Cloning reads cloud Git storage. " : ""}Starting a workspace creates an isolated fork and uses namespace
+					resource operations. Cruce coordinates the Git work; your tools run it.
 				</p>
 			)}
 		</div>
@@ -885,8 +845,8 @@ function RepositorySettings({
 				</SettingRow>
 			)}
 			<SettingRow
-				title="Connect"
-				detail="Clone canonical, connect a coding tool and start a workspace. Cruce coordinates the work; your tools run it."
+				title="Local setup"
+				detail="Clone this repository or attach an existing checkout. Installing the client and connecting tools happen once per machine."
 			>
 				<button type="button" onClick={setup}>
 					Open setup guide
@@ -1062,6 +1022,7 @@ export function RepositoryPage({
 	mutate,
 	base,
 	onError,
+	openSetup,
 }: {
 	view: RepositorySnapshot;
 	leave: () => void;
@@ -1076,6 +1037,7 @@ export function RepositoryPage({
 	mutate: Mutate;
 	base: string;
 	onError: (e: Error) => void;
+	openSetup: () => void;
 }) {
 	const [dialog, setDialog] = useState<SetupMethod>();
 	const last = lastPromotion(view),
@@ -1114,7 +1076,7 @@ export function RepositoryPage({
 					</p>
 				</div>
 				<div className="actions">
-					<button type="button" className="primary" onClick={() => setDialog(view.sourceHead ? "clone" : "connect")}>
+					<button type="button" className="primary" onClick={() => setDialog("clone")}>
 						<Icon name="local" />
 						Set up locally
 					</button>
@@ -1165,12 +1127,12 @@ export function RepositoryPage({
 					mutate={mutate}
 					base={base}
 					onError={onError}
-					setup={() => setDialog("connect")}
+					setup={() => setDialog("clone")}
 				/>
 			)}
 			{dialog && (
 				<Dialog title="Set up locally" close={() => setDialog(undefined)} className="connect-dialog">
-					<ConnectGuide key={dialog} view={view} initial={dialog} />
+					<ConnectGuide key={dialog} view={view} initial={dialog} openSetup={openSetup} />
 				</Dialog>
 			)}
 		</>

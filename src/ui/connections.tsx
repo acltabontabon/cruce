@@ -3,7 +3,7 @@ import { SCOPE_LABELS, type Scope } from "../core/capabilities.ts";
 import type { AgentConnection } from "../shared/platform.ts";
 import { AgentMark } from "./agent-marks.tsx";
 import { Form } from "./controls.tsx";
-import { Dialog, Icon, PageHeader } from "./design.tsx";
+import { Dialog, Icon } from "./design.tsx";
 import { SkeletonRows } from "./home.tsx";
 import { request } from "./request.ts";
 
@@ -31,7 +31,9 @@ function ConnectionRow({ connection, revoke }: { connection: AgentConnection; re
 				<strong>{connection.client}</strong>
 				<p className="connection-repositories">
 					<Icon name="repositories" />
-					{connection.repositories ? (
+					{connection.repositories === "all" ? (
+						<span>All repositories you can access</span>
+					) : connection.repositories ? (
 						connection.repositories.length ? (
 							connection.repositories.map((repository) => <code key={repository.id}>{repository.label}</code>)
 						) : (
@@ -72,7 +74,7 @@ function ConnectionRow({ connection, revoke }: { connection: AgentConnection; re
 	);
 }
 
-/** Agents the signed-in person approved. Revoking ends one connection; work it already pushed or published stays. */
+/** Tools the signed-in person approved. Revoking ends one connection; work it already pushed or published stays. */
 export function AgentConnections() {
 	const [connections, setConnections] = useState<AgentConnection[]>(),
 		[error, setError] = useState(""),
@@ -94,11 +96,11 @@ export function AgentConnections() {
 		return () => controller.abort();
 	}, [attempt]);
 	return (
-		<>
-			<PageHeader kicker={connections ? `Your account · ${connections.length} connected` : "Your account"} title="Agent connections" />
+		<section className="connections" aria-labelledby="connections-heading">
+			<h2 id="connections-heading">Agent connections{connections && <span className="panel-count">{connections.length}</span>}</h2>
 			<p className="page-lead">
-				Agents you approved to work as you. Each is limited to the repositories and permissions you approved, within your current namespace
-				roles. Names and icons are what each agent reports about itself.
+				Tools you approved to work as you. Each reaches all repositories you can access, or the ones you chose, with the permissions you
+				approved, always within your current namespace roles. Names and icons are what each tool reports about itself.
 			</p>
 			{notice && <p role="status">{notice}</p>}
 			{error && (
@@ -121,7 +123,7 @@ export function AgentConnections() {
 				<div className="connection-empty">
 					<Icon name="plug" />
 					<strong>No agents connected</strong>
-					<p>When an agent connects to Cruce, you approve it in your browser and it appears here.</p>
+					<p>Connect a tool above. You approve it in your browser once and it appears here.</p>
 				</div>
 			)}
 			{revoking && (
@@ -145,6 +147,6 @@ export function AgentConnections() {
 					</Form>
 				</Dialog>
 			)}
-		</>
+		</section>
 	);
 }

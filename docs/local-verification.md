@@ -4,6 +4,31 @@
 
 Use separate evidence for pure decisions, local integration, real provider behavior and real participant behavior. Passing one layer does not establish another. **Proposed** means a candidate design; **implemented** means code exists; **locally verified** means named local checks passed; **provider-tested** identifies a real-provider check with its stated harness/authority; **deployed** requires evidence through the deployed Worker and authentication boundary. Describe a result as live verified only with its specific environment, revision and authority scope. Generated client configuration does not prove heterogeneous-agent interoperability. These capability claims are separate from artifact/evidence [trust labels](architecture.md#publication-review-and-retention).
 
+## Account-level connections and local setup
+
+On **2026-10-08**, [ADR 0011](decisions/0011-account-level-connections-and-local-setup.md) passed typecheck, lint, **394 unit/integration tests**, **91 browser journeys**, deterministic scenario verification and the offline cf build.
+
+What the tests cover:
+
+- **Core authority** ([foundation tests](../test/core/foundation.test.ts)). An "all" approval reaches a member's repositories, including one created after approval. It is denied without `cruce:read`, outside the person's access or after membership removal. A chosen list never matches by substring.
+- **Consent** ([identity tests](../test/worker/identity.test.ts)). It records `"all"` or the chosen list in props and metadata. It rejects a missing access choice, an empty choice, an unoffered repository or revoked access before creating a grant. Malformed approvals fail closed.
+- **Runner** ([install tests](../test/runner/install.test.ts), [checkout tests](../test/runner/checkout.test.ts)).
+  - One server-level Git helper preserves other helpers.
+  - `git credential fill` answers canonical with the `git` login and a workspace fork with its tool's own connection. That test fails without the fork's helper reset.
+  - User-level tool settings are written for Claude Code (through its CLI), Codex and Cursor, with nothing written into a project.
+  - Checkout resolution ignores forks, other servers and credentialed URLs, refuses several repositories, and writes no local state.
+  - Outside a checkout, the bridge starts with guidance and the prompt hint prints nothing (about 0.3 s).
+- **Browser.** The browser journeys check the Local setup page (commands without repository IDs), the clone/attach-only repository guide and the All/Choose consent page. Screenshots are in ignored `dist/ui-checks/local-setup.png`, `setup-clone.png`, `consent-desktop.png` and `consent-choose.png`.
+- **Client archive.** It contains the checkout resolver and no repository-consent module.
+
+Not yet verified:
+
+- Hosted consent and callback with `cruce login` and `cruce connect`.
+- Cloning two repositories after one login.
+- How each tool launches the user-level bridge: Claude Code's `CLAUDE_PROJECT_DIR`, Codex's working directory, and Cursor's `${workspaceFolder}` in the global file.
+
+The build and lint notices are unchanged: unavailable Docker, and the Biome deprecation info.
+
 ## Concurrent agent coordination and repository deletion with live work
 
 On **2026-10-08**, these changes passed typecheck, lint, **385 unit/integration tests**, **91 browser journeys**, deterministic scenario verification and the offline cf build. [OAuth tests](../test/runner/oauth.test.ts) run six processes refreshing one rotating refresh token at once and spend it exactly once. [Runtime tests](../test/worker/repository-runtime.test.ts) publish from a baseline canonical does not carry yet without an explicit base. [Coordination](../test/runner/coordination.test.ts) and [bridge](../test/runner/parallel.test.ts) tests name owned workspaces behind canonical, published or not, and lead the live bridge response with **Action needed**; [install tests](../test/runner/install.test.ts) add the Claude Code prompt hook beside existing hooks and replace it on reconnect. [Core tests](../test/core/foundation.test.ts) close an older open change when its workspace proposes again. [Lifecycle tests](../test/worker/repository-lifecycle.test.ts) delete a repository with attached and detached workspaces and an open change, removing their forks before canonical, while archive stays blocked. The deletion confirmation was visually inspected in the generated Chromium screenshot.

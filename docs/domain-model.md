@@ -196,7 +196,7 @@ Provenance never includes agent prompts, conversations or reasoning. Git authors
 
 ## Authority model
 
-Authority is derived on every request, including retries, from the authenticated actor, current namespace membership, repository grants, the repositories a connection was approved for, and capability scopes.
+Authority is derived on every request, including retries, from the authenticated actor, current namespace membership, repository grants, the connection's repository approval (every repository its user can access, or a chosen list), and capability scopes.
 
 | Operation | Who may perform it |
 | --- | --- |
@@ -216,7 +216,7 @@ Authority is derived on every request, including retries, from the authenticated
 
 Promotion approval is stamped server-side with the human maintainer authority exercised for that exact revision. Unmarked historical reviews remain visible, but open changes require fresh qualified approval. Completed canonical promotions remain unchanged. Qualified approvals are historical decisions; the current promoter must still be authorized. See [ADR 0006](decisions/0006-qualified-approval-and-publication-recovery.md).
 
-Effective agent authority is the intersection of its user's current authority, the approved repositories and the granted scopes. Revoking any of them applies to the next request, including retries of earlier operations.
+Effective agent authority is the intersection of its user's current authority, the connection's repository approval and the granted scopes. An approval of all repositories follows the user's current access, including repositories created later, and never widens it ([ADR 0011](decisions/0011-account-level-connections-and-local-setup.md)). Revoking any of them applies to the next request, including retries of earlier operations.
 
 ## Retention and cleanup
 

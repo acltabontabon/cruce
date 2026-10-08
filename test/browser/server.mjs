@@ -37,21 +37,17 @@ export async function startFixtureServer() {
 							email: "maya@example.test",
 							handle: "fixture-consent",
 							redirectUri: "http://127.0.0.1:53605/callback",
-							boundRepository: req.url.includes("bound"),
-							repositories: req.url.includes("bound")
-								? [{ id: "hello", label: "maya/hello-world" }]
-								: req.url.includes("empty")
-									? []
-									: [
-											{ id: "hello", label: "maya/hello-world" },
-											{ id: "payments", label: "fernloop/payment-service" },
-											{ id: "gateway", label: "gateway-check-20261006/gateway-reconciliation" },
-											{
-												id: "long",
-												label:
-													"a-very-long-namespace-name-for-narrow-screens/a-very-long-repository-name-that-must-wrap-instead-of-overflow",
-											},
-										],
+							repositories: req.url.includes("empty")
+								? []
+								: [
+										{ id: "hello", label: "maya/hello-world" },
+										{ id: "payments", label: "fernloop/payment-service" },
+										{ id: "gateway", label: "gateway-check-20261006/gateway-reconciliation" },
+										{
+											id: "long",
+											label: "a-very-long-namespace-name-for-narrow-screens/a-very-long-repository-name-that-must-wrap-instead-of-overflow",
+										},
+									],
 							preset: ["cruce:read", "workspace:write", "revision:publish", "artifact:publish", "change:write", "promotion:request"],
 						},
 						new Headers(),

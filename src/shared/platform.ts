@@ -12,12 +12,17 @@ export interface User {
 	personalNamespaceId: string;
 }
 /** One agent OAuth connection as the console lists it. The client name is the label the agent supplied, never proof of the tool. */
+/** An agent connection's repository approval: every repository its user can access, or the chosen ones. */
+export type RepositoryApproval = "all" | string[];
 export interface AgentConnection {
 	id: string;
 	client: string;
 	connectionId?: string;
-	/** Repositories approved for the connection, labelled as they were named at approval; absent for older grants. */
-	repositories?: { id: string; label: string }[];
+	/**
+	 * Every repository its user can access ("all", following current access including later repositories), or the chosen
+	 * repositories labelled as they were named at approval; absent for older grants.
+	 */
+	repositories?: "all" | { id: string; label: string }[];
 	scopes: string[];
 	createdAt: number;
 	expiresAt?: number;

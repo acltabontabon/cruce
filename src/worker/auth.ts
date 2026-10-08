@@ -1,7 +1,7 @@
 import { type ApprovedConsent, AuthorizationError, type OAuthHelpers, OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { DEFAULT_AGENT_SCOPES, SCOPES, type Scope } from "../core/capabilities.ts";
 import { DomainError as CoordinationError, domainStatus } from "../core/errors.ts";
-import { repositoryConsentTarget } from "../shared/repository-consent.ts";
+import type { RepositoryApproval } from "../shared/platform.ts";
 import type { ConnectionMetadata } from "./connections.ts";
 import { consentErrorPage, consentPage } from "./consent-page.ts";
 import type { Directory } from "./directory.ts";
@@ -35,7 +35,7 @@ export interface SessionIdentity extends Identity {
  */
 export interface AuthProps extends Identity {
 	connectionId?: string;
-	repositoryIds?: string[];
+	repositories?: RepositoryApproval;
 	clientName?: string;
 }
 function cookie(request: Request, name: string) {
@@ -131,7 +131,11 @@ export function connectionIdentity(props: AuthProps, env: AuthEnv): AuthProps {
 		tenantId: props.tenantId,
 		email: props.email,
 		connectionId: props.connectionId,
-		repositoryIds: props.repositoryIds,
+		// Anything but "all" or a list of IDs approves nothing, so a malformed grant fails closed.
+		repositories:
+			props.repositories === "all" || (Array.isArray(props.repositories) && props.repositories.every((id) => typeof id === "string"))
+				? props.repositories
+				: undefined,
 		clientName: props.clientName,
 	};
 }
@@ -211,18 +215,6 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 		const original = await oauth.parseAuthRequest(request),
 			consent = await oauth.beginConsent(original),
 			description = await oauth.describeConsent(original);
-		let target: ReturnType<typeof repositoryConsentTarget>;
-		try {
-			target = repositoryConsentTarget(original.state);
-		} catch {
-			return consentErrorPage("This repository connection request is invalid. Start again from your tool.", request.url);
-		}
-		const offered = target ? choices.filter((r) => r.id === target.repositoryId && r.namespaceId === target.namespaceId) : choices;
-		if (target && !offered.length)
-			return consentErrorPage(
-				"This repository is unavailable to your account. Check your access and start again from your tool.",
-				request.url,
-			);
 		const requested = original.scope?.filter((s): s is Scope => (SCOPES as readonly string[]).includes(s));
 		const preset = requested?.length ? requested : DEFAULT_AGENT_SCOPES;
 		return consentPage(
@@ -231,8 +223,7 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 				email: identity.email,
 				handle: consent.handle,
 				redirectUri: original.redirectUri,
-				repositories: offered,
-				boundRepository: !!target,
+				repositories: choices,
 				preset,
 			},
 			consent.headers,
@@ -246,32 +237,31 @@ export async function authRoute(request: Request, env: AuthEnv): Promise<Respons
 		if (!(error instanceof AuthorizationError)) throw error;
 		return consentErrorPage(error.description, request.url);
 	}
-	let target: ReturnType<typeof repositoryConsentTarget>;
-	try {
-		target = repositoryConsentTarget(approved.request.state);
-	} catch {
-		return consentErrorPage("This repository connection request is invalid. Start again from your tool.", request.url);
-	}
-	const offered = target ? choices.filter((r) => r.id === target.repositoryId && r.namespaceId === target.namespaceId) : choices;
-	const selected = form.getAll("repository").map(String);
-	if (target && (offered.length !== 1 || selected.length !== 1 || selected[0] !== target.repositoryId))
+	// "all" follows the person's current access, including repositories created later; a choice names what was offered.
+	const access = form.get("access");
+	if (access !== "all" && access !== "choose")
+		return consentErrorPage("Choose which repositories this tool can reach, then connect again.", request.url);
+	const selected = new Set(form.getAll("repository").map(String));
+	if (access === "choose" && (!selected.size || [...selected].some((id) => !choices.some((r) => r.id === id))))
 		return consentErrorPage(
-			"Repository access does not match this connection request. Check your access and start again from your tool.",
+			selected.size
+				? "Repository access changed while you were choosing. Check your access and start again from your tool."
+				: "Choose at least one repository, or allow all repositories you can access.",
 			request.url,
 		);
 	const chosen = form.getAll("scope").map(String),
 		scope = SCOPES.filter((s) => s === "cruce:read" || chosen.includes(s)),
-		requested = new Set(form.getAll("repository").map(String)),
-		repositories = offered.filter((r) => requested.has(r.id)).map(({ id, label }) => ({ id, label })),
+		repositories = choices.filter((r) => selected.has(r.id)).map(({ id, label }) => ({ id, label })),
+		approval: RepositoryApproval = access === "all" ? "all" : repositories.map((r) => r.id),
 		connectionId = crypto.randomUUID(),
 		clientName = (await oauth.describeConsent(approved.request)).clientName ?? "Agent",
-		metadata: ConnectionMetadata = { connectionId, clientName, repositories },
+		metadata: ConnectionMetadata = { connectionId, clientName, repositories: access === "all" ? "all" : repositories },
 		result = await oauth.completeAuthorization({
 			request: approved.request,
 			userId: identity.developerId,
 			metadata,
 			scope,
-			props: { ...identityOf(identity), connectionId, repositoryIds: repositories.map((r) => r.id), clientName },
+			props: { ...identityOf(identity), connectionId, repositories: approval, clientName },
 		});
 	approved.headers.set("location", result.redirectTo);
 	return new Response(null, { status: 302, headers: approved.headers });

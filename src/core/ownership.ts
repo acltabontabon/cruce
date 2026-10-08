@@ -6,6 +6,7 @@ import type {
 	NamespaceRole,
 	NamespaceState,
 	Repository,
+	RepositoryApproval,
 	RepositoryRole,
 	ResourceAction,
 	ResourcePolicy,
@@ -100,7 +101,7 @@ export class NamespaceController {
 		readonly state: NamespaceState,
 		readonly now: number,
 	) {}
-	authority(actor: Actor, repositoryId?: string, scopes?: string[], approvedRepositories?: string[]): Authority {
+	authority(actor: Actor, repositoryId?: string, scopes?: string[], approval?: RepositoryApproval): Authority {
 		const role = this.state.members[actor.userId];
 		if (!role || actor.kind === "system") throw new DomainError(403, "Namespace access denied");
 		let access: RepositoryRole | undefined;
@@ -108,7 +109,9 @@ export class NamespaceController {
 			const repository = this.state.repositories.find((r) => r.id === repositoryId);
 			access = repository ? repositoryRole(this.state, repository, actor.userId) : undefined;
 			if (!access) throw new DomainError(403, "Repository access denied");
-			if (actor.kind === "agent" && (!approvedRepositories?.includes(repositoryId) || !scopes?.includes("cruce:read")))
+			// "all" follows the user's current access above; it never widens it. A list never matches by substring.
+			const approved = approval === "all" || (Array.isArray(approval) && approval.includes(repositoryId));
+			if (actor.kind === "agent" && (!approved || !scopes?.includes("cruce:read")))
 				throw new DomainError(403, "Repository not authorized for this agent connection");
 		}
 		return { actor, namespaceId: this.state.namespace.id, repositoryId, role, repositoryRole: access, scopes };

@@ -10,7 +10,8 @@ import { DEFAULT_AGENT_SCOPES } from "../src/core/capabilities.ts";
 import type { Command, ExecutionContext, RepositorySnapshot, Workspace } from "../src/shared/platform.ts";
 import { CRUCE_INSTRUCTIONS, CRUCE_TOOLS, toolByName, toolInputShape } from "../src/shared/tools.ts";
 import { CRUCE_VERSION } from "../src/shared/version.ts";
-import { configureClient } from "./client-config.ts";
+import { type CheckoutAddress, resolveCheckout } from "./checkout.ts";
+import { bridgeCommand, configureClient, KNOWN_CLIENTS, type KnownClient } from "./client-config.ts";
 import { coordinationContext, coordinationResource } from "./coordination.ts";
 import {
 	cleanupExecution,
@@ -21,8 +22,8 @@ import {
 	reserveCheckout,
 	stateDirectory,
 } from "./execution.ts";
-import { configureCanonicalCredentials } from "./git-auth.ts";
-import { configureFork, continueFromFork } from "./git-remotes.ts";
+import { configureServerCredentials } from "./git-auth.ts";
+import { configureFork, continueFromFork, serverOrigin } from "./git-remotes.ts";
 import { git } from "./local-git.ts";
 import { previewReconciliation } from "./merge-preview.ts";
 import { Credentials, login } from "./oauth.ts";
@@ -57,41 +58,85 @@ async function main() {
 	const operation = args[0] ?? "help";
 	if (operation === "help" || args.includes("--help")) {
 		process.stdout.write(
-			"Cruce — Git coordination for parallel agentic development\n\ncruce auth --server URL --namespace ID --repository ID   authorize Git\ncruce connect --namespace ID --repository ID --server URL [--client codex|claude|cursor]\ncruce human --namespace ID --repository ID --server URL\ncruce start --title TEXT\ncruce mcp [--client TOOL]\ncruce watch [--coordination]   emit changed coordination state for an external host\ncruce hint                     print workspaces behind canonical, for a client prompt hook\ncruce preview [--workspace ID]  check an exact-commit Git merge locally\ncruce publish [--title TEXT]\ncruce detach                   release this checkout; the workspace continues elsewhere\ncruce resume [--workspace ID]  reattach, or continue a workspace here from its pushed head\ncruce end [--cleanup]\n",
+			"Cruce — Git coordination for parallel agentic development\n\nOnce per machine:\ncruce login --server URL                          authorize Git for every repository you can access\ncruce connect --server URL --client claude|codex|cursor   connect a tool to every Cruce checkout\n\nIn a checkout:\ncruce human --namespace ID --repository ID --server URL   pair this terminal to work yourself\ncruce start --title TEXT\ncruce mcp [--server URL] [--client TOOL]\ncruce watch [--coordination]   emit changed coordination state for an external host\ncruce hint                     print workspaces behind canonical, for a client prompt hook\ncruce preview [--workspace ID]  check an exact-commit Git merge locally\ncruce publish [--title TEXT]\ncruce detach                   release this checkout; the workspace continues elsewhere\ncruce resume [--workspace ID]  reattach, or continue a workspace here from its pushed head\ncruce end [--cleanup]\n",
 		);
 		return;
 	}
-	if (operation === "auth") {
-		const server = option("server"),
-			namespaceId = option("namespace"),
-			repositoryId = option("repository");
-		if (!server || !namespaceId || !repositoryId) throw new Error("Choose --server URL, --namespace ID and --repository ID");
-		const origin = new URL(server);
-		if (origin.username || origin.password || (origin.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(origin.hostname)))
-			throw new Error("Use an HTTPS server URL without credentials");
-		if (![namespaceId, repositoryId].every((id) => /^[a-zA-Z0-9-]+$/.test(id))) throw new Error("Choose namespace and repository IDs");
-		const credentials = new Credentials(origin.origin, "git", { namespaceId, repositoryId });
+	if (operation === "login") {
+		const server = option("server");
+		if (!server) throw new Error("Choose --server URL");
+		const origin = serverOrigin(server);
+		// Git only clones and fetches canonical with this connection; workspace forks use the tool's own connection.
+		const credentials = new Credentials(origin, "git");
 		await credentials.load();
-		await login(origin.origin, credentials, DEFAULT_AGENT_SCOPES, { namespaceId, repositoryId });
-		await configureCanonicalCredentials(origin.origin, namespaceId, repositoryId);
-		process.stdout.write("Git authorized. Clone with the command shown in Cruce.\n");
+		await login(origin, credentials, ["cruce:read"]);
+		await configureServerCredentials(origin);
+		process.stdout.write(`Git authorized for ${origin}. Clone any repository you can access with the command shown in Cruce.\n`);
 		return;
 	}
-	const root = cwd;
+	if (operation === "connect") {
+		const server = option("server"),
+			client = option("client");
+		if (!server || !client) throw new Error("Choose --server URL and --client claude, codex or cursor");
+		const origin = serverOrigin(server),
+			credentials = new Credentials(origin, client);
+		await credentials.load();
+		await login(origin, credentials, DEFAULT_AGENT_SCOPES);
+		// One read proves the new grant works before any tool settings change.
+		const remote = new Client({ name: `cruce-${client}-bridge`, version: CRUCE_VERSION });
+		await remote.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp`), { authProvider: credentials }));
+		try {
+			const checked = await remote.callTool({ name: "list_namespaces", arguments: {} });
+			if (checked.isError) throw new Error("Cruce rejected the new connection; check your access and connect again");
+		} finally {
+			await remote.close();
+		}
+		const bridge = fileURLToPath(new URL("./cruce.mjs", import.meta.url));
+		if (KNOWN_CLIENTS.includes(client as KnownClient)) {
+			await configureClient(client as KnownClient, bridge, origin);
+			process.stdout.write(`Connected ${client} to ${origin}. Restart it, then start it in any Cruce checkout.\n`);
+		} else
+			process.stdout.write(
+				`Connected ${client} to ${origin}. Add this stdio MCP server to its user settings:\n${[process.execPath, ...bridgeCommand(bridge, origin, client)].join(" ")}\n`,
+			);
+		return;
+	}
+	const server = option("server") ? serverOrigin(option("server")!) : undefined;
+	let root = cwd,
+		address: CheckoutAddress | undefined;
+	if (operation === "mcp" || operation === "hint") {
+		// User-level tool settings start the bridge wherever the tool runs: bind to the checkout that tool works in.
+		const candidates = [option("cwd"), process.env.CLAUDE_PROJECT_DIR, process.cwd()]
+			.filter((d): d is string => !!d)
+			.map((d) => resolve(d));
+		for (const directory of new Set(candidates)) {
+			address = await resolveCheckout(directory, server);
+			if (address) {
+				root = directory;
+				break;
+			}
+		}
+		if (!address) {
+			if (operation === "mcp") await unboundBridge(server);
+			return;
+		}
+	} else if (operation !== "human") address = await resolveCheckout(root, server);
 	let configFile = join(await stateDirectory(root), "connection.json");
 	const connection: Connection = await readFile(configFile, "utf8")
 		.then(JSON.parse)
 		.catch((e: NodeJS.ErrnoException) => {
 			if (e.code !== "ENOENT") throw e;
 			return {
-				server: option("server") ?? "https://cruce.acltabontabon.workers.dev",
-				namespaceId: option("namespace") ?? "",
-				repositoryId: option("repository") ?? "",
+				server: server ?? address?.server ?? "",
+				namespaceId: option("namespace") ?? address?.namespaceId ?? "",
+				repositoryId: option("repository") ?? address?.repositoryId ?? "",
 			};
 		});
-	if (operation === "mcp" && !connection.workspaceId) {
-		// Every bridge process owns its workspace state. The repository connection remains shareable.
+	if (operation === "mcp" && (!connection.workspaceId || connection.humanToken)) {
+		// Every bridge process owns its workspace state. The repository connection remains shareable; a terminal's
+		// human credential never is: the bridge uses its tool's own connection.
 		configFile = join(await stateDirectory(root), `agent-${randomUUID()}.json`);
+		delete connection.humanToken;
 		delete connection.workspaceId;
 		delete connection.directory;
 		delete connection.baseRevision;
@@ -100,7 +145,8 @@ async function main() {
 		delete connection.pending;
 	}
 	connection.client = option("client") ?? connection.client ?? "agent";
-	connection.server = (option("server") ?? connection.server).replace(/\/$/, "");
+	connection.server = (server ?? connection.server).replace(/\/$/, "");
+	if (!connection.server) throw new Error("Choose --server URL");
 	connection.namespaceId = option("namespace") ?? connection.namespaceId;
 	connection.repositoryId = option("repository") ?? connection.repositoryId;
 	if (connection.stateFile && connection.owned) configFile = connection.stateFile;
@@ -108,7 +154,8 @@ async function main() {
 	const url = new URL(connection.server);
 	if (url.username || url.password) throw new Error("Use a server URL without credentials");
 	if (url.protocol !== "https:" && !["localhost", "127.0.0.1"].includes(url.hostname)) throw new Error("Use HTTPS");
-	if (!connection.namespaceId || !connection.repositoryId) throw new Error("Choose a namespace and repository ID from Cruce");
+	if (!connection.namespaceId || !connection.repositoryId)
+		throw new Error("Run this in a Cruce checkout, or choose --namespace ID and --repository ID from Cruce");
 	let defaultConfigFile = configFile;
 	const repositoryConnection = {
 		server: connection.server,
@@ -158,18 +205,8 @@ async function main() {
 		throw new Error("Terminal authorization timed out");
 	}
 	const clientName = connection.client,
-		credentials = new Credentials(connection.server, clientName, {
-			namespaceId: connection.namespaceId,
-			repositoryId: connection.repositoryId,
-		});
+		credentials = new Credentials(connection.server, clientName);
 	await credentials.load();
-	if (operation === "connect") {
-		delete connection.humanToken;
-		await login(connection.server, credentials, DEFAULT_AGENT_SCOPES, {
-			namespaceId: connection.namespaceId,
-			repositoryId: connection.repositoryId,
-		});
-	}
 	let remote: Client | undefined;
 	if (!connection.humanToken) {
 		remote = new Client({ name: `cruce-${clientName}-bridge`, version: CRUCE_VERSION });
@@ -466,15 +503,6 @@ async function main() {
 			if (context.available && context.summary) process.stdout.write(`Cruce: ${context.summary}\n`);
 			return;
 		}
-		if (operation === "connect") {
-			await call({ tool: "get_repository", namespaceId: connection.namespaceId, repositoryId: connection.repositoryId });
-			await save();
-			const client = option("client");
-			if (client && ["codex", "claude", "cursor"].includes(client))
-				await configureClient(root, client as "codex" | "claude" | "cursor", fileURLToPath(new URL("./cruce.mjs", import.meta.url)));
-			process.stdout.write("Connected. Start work through Cruce MCP or cruce start.\n");
-			return;
-		}
 		if (operation === "resume") {
 			const requested = option("workspace");
 			if (requested) configFile = (await findWorkspaceState(root, requested, repositoryConnection)) ?? configFile;
@@ -531,7 +559,6 @@ async function main() {
 					});
 		};
 		if (operation === "mcp") {
-			if (connection.humanToken) throw new Error("Agent MCP cannot use human terminal credentials; connect the agent separately");
 			const server = new McpServer({ name: "Cruce local bridge", version: CRUCE_VERSION }, { instructions: CRUCE_INSTRUCTIONS });
 			const coordination = coordinationResource(
 				server,
@@ -546,13 +573,11 @@ async function main() {
 					),
 			);
 			for (const tool of CRUCE_TOOLS) {
-				// The bridge supplies identities and the attached execution from local state.
-				const { namespaceId: _, repositoryId: __, idempotencyKey: ____, execution: _____, ...shape } = toolInputShape(tool);
 				server.registerTool(
 					tool.name,
 					{
 						description: tool.description,
-						inputSchema: shape,
+						inputSchema: bridgeShape(tool),
 					},
 					async (values) => {
 						// Needed reconciliation leads the response, so a coordinating agent sees it before the result.
@@ -666,6 +691,29 @@ async function main() {
 	} finally {
 		await remote?.close();
 	}
+}
+/** The bridge supplies identities and the attached execution from local state. */
+function bridgeShape(tool: (typeof CRUCE_TOOLS)[number]) {
+	const { namespaceId: _, repositoryId: __, idempotencyKey: ___, execution: ____, ...shape } = toolInputShape(tool);
+	return shape;
+}
+/** Outside a Cruce checkout the bridge still starts, so the tool shows no failed server, and explains how to begin. */
+async function unboundBridge(server?: string) {
+	const origin = server ?? "https://CRUCE-SERVER";
+	const message = `This directory is not a Cruce checkout. Clone the repository with the command in Cruce, or in an existing checkout add its canonical Git as a remote: git remote add cruce ${origin}/mcp/git/NAMESPACE/REPOSITORY/canonical.git`;
+	const mcp = new McpServer({ name: "Cruce local bridge", version: CRUCE_VERSION }, { instructions: CRUCE_INSTRUCTIONS });
+	for (const tool of CRUCE_TOOLS)
+		mcp.registerTool(tool.name, { description: tool.description, inputSchema: bridgeShape(tool) }, async () => ({
+			isError: true,
+			content: [{ type: "text" as const, text: message }],
+		}));
+	await mcp.connect(new StdioServerTransport());
+	await new Promise<void>((done) => {
+		process.once("SIGTERM", done);
+		process.once("SIGINT", done);
+		process.stdin.once("end", done);
+	});
+	await mcp.close();
 }
 main().catch((error) => {
 	process.stderr.write(`${(error as Error).message}\n`);
