@@ -8,7 +8,7 @@ Use separate evidence for pure decisions, local integration, real provider behav
 
 On **2026-10-08**, console workspace deletion passed typecheck, lint, **379 unit/integration tests**, **91 browser journeys**, deterministic scenario verification and the offline cf build. [Core tests](../test/core/foundation.test.ts) cover deletion readiness by viewer, cancellation withdrawing open changes, refusal while a change is being promoted, checkout release on end and maintainer cleanup of another owner's ended workspace. [Runtime tests](../test/worker/repository-runtime.test.ts) cover a Developer human owner deleting their own fork without Maintain while another user's fork still requires it. Browser journeys delete a workspace with an open change through to Earlier work, and stop at unpublished fork refs, which are listed on the page; the dialog was visually inspected in the generated Chromium screenshot.
 
-The browser fixture simulates fork deletion and retention. Hosted Artifacts fork deletion, the deployed console and a live bridge receiving a console-side end have not been verified, and this change has not been deployed. The offline build completed with the existing unavailable-Docker notice; lint retains its Biome deprecation notice.
+The browser fixture simulates fork deletion and retention. It is deployed to the [test environment](test-environment.md#latest-test-deployment--2026-10-08) (Worker `1267d43a`); signed-in hosted deletion, hosted Artifacts fork deletion and a live bridge receiving a console-side end have not been verified. The offline build completed with the existing unavailable-Docker notice; lint retains its Biome deprecation notice.
 
 ## Repository archive and permanent deletion
 

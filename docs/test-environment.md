@@ -6,7 +6,11 @@ The configured control-plane test Worker is [cruce.acltabontabon.com](https://cr
 
 ## Latest test deployment — 2026-10-08
 
-Current direct test deployment: Worker version **`9c1c9bb9-a835-4e42-9d65-6a8757d4263a`**, deployed with `pnpm deploy:test` from clean commit **`e3a60df`**. It ships the lane map on a recorded-time axis with **Replay history**, promoted work rejoining main and folded settled work (from `3a990c5`), the unproposed-work surfaces (from `09dc4af`), and owner-only repository Archive, Restore and permanent Delete.
+Current direct test deployment: Worker version **`1267d43a-d63e-4e1b-b017-663b93018f41`**, deployed with `pnpm deploy:test` from clean commit **`7348c6b`**. It ships one-step **Delete workspace** in the console (end, withdraw open changes, release the checkout and delete the fork, then move to Earlier work), cancellation withdrawing open changes, owner fork cleanup without Maintain and the bridge releasing a checkout ended elsewhere.
+
+Typecheck, lint, **379 unit/integration tests**, **91 browser journeys**, scenario verification, offline build and the configured deployment dry run passed; the dry run showed unchanged bindings. Anonymous HTTPS confirmed the homepage, `/auth/session` and OAuth discovery 200, `/api/namespaces` Access challenge 302 and MCP 401, and the hosted `App` chunk carries the new Delete workspace UI. Signed-in deletion, hosted Artifacts fork deletion and a live bridge receiving a console-side end were not exercised.
+
+Previous direct test deployment: Worker version **`9c1c9bb9-a835-4e42-9d65-6a8757d4263a`**, deployed with `pnpm deploy:test` from clean commit **`e3a60df`**. It ships the lane map on a recorded-time axis with **Replay history**, promoted work rejoining main and folded settled work (from `3a990c5`), the unproposed-work surfaces (from `09dc4af`), and owner-only repository Archive, Restore and permanent Delete.
 
 Typecheck, lint, **377 unit/integration tests**, **90 browser journeys**, scenario verification, offline build and the configured deployment dry run passed. Anonymous HTTPS confirmed the homepage and OAuth discovery 200, `/api/session` and `/api/namespaces` Access challenge 302 and MCP 401. The hosted entry script, stylesheet and `App` chunk (which carries the lane map) matched the verified build byte for byte. Signed-in use of the new lane map, replay, and hosted archive, restore or deletion were not exercised.
 
