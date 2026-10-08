@@ -431,7 +431,7 @@ test("sign-in goes directly to Access and saved sign-in links skip the removed p
 	assert.equal(new URL(page.url()).pathname, "/");
 	assert.equal(await page.locator(".sign-in").count(), 0);
 });
-test("cold start shows one splash until the first screen, on the surface this browser last used", async () => {
+test("cold start shows one splash until the first screen, in the appearance the console uses", async () => {
 	await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
 	await page.addInitScript(() => {
 		window.splash = { mark: false, text: false };
@@ -444,22 +444,22 @@ test("cold start shows one splash until the first screen, on the surface this br
 		requestAnimationFrame(watch);
 	});
 	const background = () => page.locator("#boot").evaluate((element) => getComputedStyle(element).backgroundColor);
-	// A browser that has not signed in starts on the public paper surface, whatever the appearance.
+	// A browser that has not signed in starts in the same appearance the console would use.
 	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false, delay: 900 } });
 	await page.goto(server.origin);
-	assert.equal(await background(), "rgb(245, 245, 239)");
+	assert.equal(await background(), "rgb(15, 17, 26)");
 	assert.equal(await page.locator("#boot[role=status]").textContent(), "Loading Cruce");
 	await page.waitForFunction(() => window.splash.mark);
 	await page.getByRole("heading", { name: "Code is written in parallel now. The decision is still yours.", level: 1 }).waitFor();
 	await page.locator("#boot").waitFor({ state: "detached" });
-	assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(245, 245, 239)");
+	assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(15, 17, 26)");
 	// Signing in carries the same splash through the session check, the console code and identity: no loading text in between.
 	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: true, delay: 900 } });
 	await page.goto(server.origin);
 	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
 	await page.locator("#boot").waitFor({ state: "detached" });
 	assert.deepEqual(await page.evaluate(() => window.splash), { mark: true, text: false });
-	// The next cold start paints the console surface in the saved appearance.
+	// The next cold start paints the same surface straight away.
 	await page.goto(server.origin);
 	assert.equal(await background(), "rgb(15, 17, 26)");
 	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
@@ -1022,10 +1022,19 @@ test("appearance matches the system by default, persists a choice and survives u
 	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
 	assert.equal(await theme(), "light");
 });
-test("the public homepage stays on its light paper whatever the console appearance", async () => {
+test("the public homepage uses the console palette in either appearance", async () => {
+	await openHomepage();
+	const colours = () =>
+		page
+			.locator(".landing")
+			.evaluate((e) => [getComputedStyle(e).backgroundColor, getComputedStyle(e.querySelector(".brand-symbol")).color]);
+	// Daylight: the console's background and accent.
+	assert.deepEqual(await colours(), ["rgb(245, 246, 249)", "rgb(44, 88, 208)"]);
 	await page.emulateMedia({ colorScheme: "dark" });
 	await openHomepage();
-	assert.equal(await page.locator(".landing").evaluate((e) => getComputedStyle(e).backgroundColor), "rgb(245, 245, 239)");
+	// Midnight, as the console would show it.
+	assert.deepEqual(await colours(), ["rgb(15, 17, 26)", "rgb(130, 166, 255)"]);
+	await page.screenshot({ path: "dist/ui-checks/homepage-dark.png", fullPage: true });
 });
 test("the lane map draws each live workspace from its baseline and highlights its row", async () => {
 	await openRepo();

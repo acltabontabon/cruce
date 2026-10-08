@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { BRAND } from "./brand.tsx";
+import { BRAND, Brand } from "./brand.tsx";
 import {
 	auth,
 	billing,
@@ -720,8 +720,8 @@ export function Landing() {
 				Skip to content
 			</a>
 			<header className="landing-header landing-wrap">
-				<a className="landing-brand" href="/" aria-label={`${BRAND.name} home`}>
-					<img src={BRAND.wordmarkInk} alt={BRAND.name} />
+				<a className="landing-brand brand" href="/" aria-label={`${BRAND.name} home`}>
+					<Brand />
 				</a>
 				<nav aria-label="Homepage navigation">
 					{BRAND.docsUrl && <a href={BRAND.docsUrl}>Docs</a>}

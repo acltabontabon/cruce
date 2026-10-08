@@ -1,27 +1,26 @@
-@import "@fontsource-variable/inter";
-
 html:not(:has(.shell, .welcome)),
 body:not(:has(.shell, .welcome)) {
-	background: #f5f5ef;
+	background: var(--bg);
 }
 
-/* The public homepage and the session screen keep the original paper palette and element styles, whatever the console appearance. */
+/*
+ * The public homepage and the session screen speak the console's palette: Daylight or Midnight tokens from styles.css, Geist and
+ * JetBrains Mono. These names only alias those tokens. Ink blocks invert with the theme, as the console's canonical pill does.
+ */
 :where(.landing, .session-status) {
-	color-scheme: light;
-	--ink: #17251f;
-	--accent: #b5e86a;
-	--green: #346345;
-	--muted: #5c695f;
-	--line: #d4dacf;
-	--paper: #f5f5ef;
-	--surface: #fff;
-	--attention: #8a5128;
-	--danger: #a12f34;
-	--radius: 6px;
-	--hairline: #c9d0c3;
-	--faint: #7d897f;
-	--mono: "JetBrains Mono Variable", ui-monospace, monospace;
-	font-family: "Inter Variable", system-ui, sans-serif;
+	--ink: var(--text);
+	--muted: var(--text-muted);
+	--line: var(--border);
+	--paper: var(--bg);
+	--attention: var(--tone-warning);
+	--danger: var(--tone-danger);
+	--radius: var(--r-sm);
+	--hairline: var(--border);
+	--faint: var(--text-faint);
+	/* An accent that reads on an ink block, whichever way the theme inverts it. */
+	--highlight: light-dark(#82a6ff, #2c58d0);
+	--mono: var(--font-mono);
+	font-family: var(--font-ui);
 	font-synthesis: none;
 	font-size: 14px;
 	color: var(--ink);
@@ -51,19 +50,19 @@ body:not(:has(.shell, .welcome)) {
 		color 140ms;
 }
 :where(.landing, .session-status) button:hover {
-	background: #edf1e7;
-	border-color: #9aa994;
+	background: var(--button-hover);
+	border-color: var(--border-strong);
 }
 :where(.landing, .session-status) a {
-	color: var(--green);
+	color: var(--accent);
 	text-underline-offset: 3px;
 }
 :where(.landing, .session-status) :is(button, a, summary):focus-visible {
-	outline: 2px solid var(--green);
+	outline: 2px solid var(--accent);
 	outline-offset: 4px;
 }
 :where(.landing, .session-status) :is(code, kbd, pre) {
-	font-family: "JetBrains Mono Variable", monospace;
+	font-family: var(--font-mono);
 	font-size: 11px;
 }
 :where(.landing, .session-status) code {
@@ -126,25 +125,19 @@ body:not(:has(.shell, .welcome)) {
 }
 :where(.landing, .session-status) [role="alert"] {
 	border-left: 3px solid var(--danger);
-	background: #fff3f0;
-	color: #86282d;
+	background: color-mix(in srgb, var(--tone-danger) 8%, var(--surface));
+	color: var(--tone-danger);
 	padding: 12px 16px;
 	margin: 16px 0;
 }
 :where(.landing, .session-status) [role="status"] {
 	padding: 10px 14px;
-	color: var(--green);
-	background: #e9f1dc;
+	color: var(--accent);
+	background: color-mix(in srgb, var(--accent) 10%, var(--surface));
 	border-radius: var(--radius);
 }
 
 .landing {
-	--lane-0: #4f6286;
-	--lane-1: #3a6e52;
-	--lane-2: #7b6a45;
-	--hairline: #c9d0c3;
-	--faint: #7d897f;
-	--mono: "JetBrains Mono Variable", ui-monospace, monospace;
 	font-size: 16px;
 	background: var(--paper);
 	color: var(--ink);
@@ -167,7 +160,7 @@ body:not(:has(.shell, .welcome)) {
 }
 .landing em {
 	font-style: normal;
-	color: var(--green);
+	color: var(--accent);
 }
 
 /* Header */
@@ -185,9 +178,8 @@ body:not(:has(.shell, .welcome)) {
 	min-height: 44px;
 	align-items: center;
 }
-.landing-brand img {
-	width: 116px;
-	display: block;
+.landing-brand .brand-name {
+	font-size: 17px;
 }
 .landing-header nav {
 	display: flex;
@@ -254,7 +246,7 @@ body:not(:has(.shell, .welcome)) {
 	content: "";
 	position: absolute;
 	inset: 0 -48px 0 38%;
-	background-image: radial-gradient(circle, rgb(23 37 31 / 0.11) 1px, transparent 1.2px);
+	background-image: radial-gradient(circle, var(--grid-dot) 1px, transparent 1.2px);
 	background-size: 22px 22px;
 	mask-image: radial-gradient(ellipse 70% 62% at 55% 48%, #000 30%, transparent 78%);
 	pointer-events: none;
@@ -280,7 +272,7 @@ body:not(:has(.shell, .welcome)) {
 .landing-kicker::before {
 	content: "";
 	width: 28px;
-	border-top: 1.5px solid var(--green);
+	border-top: 1.5px solid var(--accent);
 }
 .landing h1 {
 	font-size: clamp(40px, 5vw, 76px);
@@ -323,7 +315,7 @@ body:not(:has(.shell, .welcome)) {
 	content: "";
 	width: 7px;
 	height: 7px;
-	border: 1.5px solid var(--green);
+	border: 1.5px solid var(--accent);
 	border-radius: 50%;
 }
 
@@ -336,7 +328,7 @@ body:not(:has(.shell, .welcome)) {
 	grid-template-columns: 1.6fr 1fr 0.8fr auto;
 	border: 1px solid var(--hairline);
 	border-radius: 2px;
-	background: rgb(245 245 239 / 0.85);
+	background: color-mix(in srgb, var(--paper) 85%, transparent);
 	margin-bottom: 18px;
 }
 .title-block > span {
@@ -417,7 +409,7 @@ body:not(:has(.shell, .welcome)) {
 	font-weight: 600;
 }
 .graph-note {
-	font-family: "Inter Variable", sans-serif;
+	font-family: var(--font-ui);
 	font-size: 11.5px;
 	fill: var(--muted);
 }
@@ -429,7 +421,7 @@ body:not(:has(.shell, .welcome)) {
 	letter-spacing: -0.02em;
 }
 .graph-tool {
-	font-family: "Inter Variable", sans-serif;
+	font-family: var(--font-ui);
 	font-size: 11.5px;
 	font-style: italic;
 	fill: var(--faint);
@@ -443,14 +435,15 @@ body:not(:has(.shell, .welcome)) {
 	stroke: var(--ink);
 	stroke-width: 2;
 }
-.lane-0 {
-	--lane: var(--lane-0);
-}
-.lane-1 {
+/* Scoped past the console's own .lane-N rules, which number lanes from 1. */
+.crossing-graph .lane-0 {
 	--lane: var(--lane-1);
 }
-.lane-2 {
+.crossing-graph .lane-1 {
 	--lane: var(--lane-2);
+}
+.crossing-graph .lane-2 {
+	--lane: var(--lane-3);
 }
 .graph-lane path,
 .lane-0 > path,
@@ -541,7 +534,7 @@ body:not(:has(.shell, .welcome)) {
 	display: grid;
 	margin: 14px 0 6px;
 	padding-left: 16px;
-	border-left: 2px solid var(--green);
+	border-left: 2px solid var(--accent);
 }
 .sequence-note > div {
 	grid-area: 1 / 1;
@@ -763,7 +756,7 @@ body:not(:has(.shell, .welcome)) {
 .identity small {
 	grid-column: 1;
 	grid-row: 2;
-	font-family: "Inter Variable", sans-serif;
+	font-family: var(--font-ui);
 	font-style: italic;
 	font-size: 11.5px;
 	color: var(--faint);
@@ -788,7 +781,7 @@ body:not(:has(.shell, .welcome)) {
 	font-family: var(--mono);
 	font-weight: 600;
 	font-size: 14px;
-	color: var(--accent);
+	color: var(--highlight);
 	margin: 0 0 8px;
 }
 .identity-record > div {
@@ -801,11 +794,11 @@ body:not(:has(.shell, .welcome)) {
 .identity-record dt {
 	font-family: var(--mono);
 	font-size: 11px;
-	color: #9fac9f;
+	color: color-mix(in srgb, var(--paper) 62%, var(--ink));
 }
 .identity-record dd {
 	margin: 0;
-	color: #d8ddd3;
+	color: color-mix(in srgb, var(--paper) 88%, var(--ink));
 }
 .identity-record code {
 	color: var(--paper);
@@ -824,7 +817,7 @@ body:not(:has(.shell, .welcome)) {
 }
 .ledger-work,
 .ledger-merge {
-	stroke: var(--lane-1);
+	stroke: var(--lane-2);
 	stroke-width: 2;
 	fill: none;
 }
@@ -839,7 +832,7 @@ body:not(:has(.shell, .welcome)) {
 	stroke: var(--ink);
 }
 .is-w .ledger-dot {
-	stroke: var(--lane-1);
+	stroke: var(--lane-2);
 }
 .ledger-ring,
 .ledger-check {
@@ -869,7 +862,7 @@ body:not(:has(.shell, .welcome)) {
 	font-weight: 700;
 }
 .ledger-label {
-	font-family: "Inter Variable", sans-serif;
+	font-family: var(--font-ui);
 	font-size: 12px;
 	fill: var(--muted);
 }
@@ -904,7 +897,7 @@ body:not(:has(.shell, .welcome)) {
 	color: var(--paper);
 }
 .strata-cruce small {
-	color: var(--accent);
+	color: var(--highlight);
 }
 .strata-wire {
 	display: flex;
@@ -993,7 +986,7 @@ body:not(:has(.shell, .welcome)) {
 	padding: 16px;
 	clip-path: none;
 	overflow: visible;
-	outline-color: var(--accent);
+	outline-color: var(--highlight);
 }
 .landing-sr-only {
 	position: absolute;
@@ -1005,7 +998,7 @@ body:not(:has(.shell, .welcome)) {
 	white-space: nowrap;
 }
 .landing :focus-visible {
-	outline: 2px solid var(--green);
+	outline: 2px solid var(--accent);
 	outline-offset: 3px;
 }
 .session-status {
@@ -1013,8 +1006,8 @@ body:not(:has(.shell, .welcome)) {
 	margin: 0 auto;
 	padding: calc(14vh + 24px) 24px 24px;
 }
-.session-status > img {
-	width: 120px;
+.session-status > .brand {
+	display: flex;
 	margin-bottom: 40px;
 }
 .session-status > a {
@@ -1085,9 +1078,6 @@ body:not(:has(.shell, .welcome)) {
 	}
 	.landing-header {
 		min-height: 68px;
-	}
-	.landing-brand img {
-		width: 100px;
 	}
 	.landing-hero {
 		padding-block: 20px 48px;
@@ -1233,7 +1223,7 @@ body:not(:has(.shell, .welcome)) {
 .era strong {
 	font-weight: 650;
 	color: var(--ink);
-	background: linear-gradient(transparent 62%, rgb(181 232 106 / 0.55) 62%);
+	background: linear-gradient(transparent 62%, color-mix(in srgb, var(--accent) 24%, transparent) 62%);
 }
 .shift {
 	display: flex;
@@ -1265,7 +1255,7 @@ body:not(:has(.shell, .welcome)) {
 	background-size: 0 1.5px;
 }
 .shift > span {
-	color: var(--green);
+	color: var(--accent);
 }
 .shift strong {
 	font-weight: 600;
@@ -1303,11 +1293,11 @@ body:not(:has(.shell, .welcome)) {
 	stroke-width: 2;
 }
 .gen-agent {
-	stroke: var(--lane-0);
+	stroke: var(--lane-1);
 	stroke-width: 2;
 }
 .gen-agent-commit {
-	stroke: var(--lane-0);
+	stroke: var(--lane-1);
 }
 .gen-review {
 	fill: var(--paper);
@@ -1325,13 +1315,13 @@ body:not(:has(.shell, .welcome)) {
 	stroke-width: 2;
 }
 .gen-strand-0 {
-	stroke: var(--lane-0);
-}
-.gen-strand-1 {
 	stroke: var(--lane-1);
 }
-.gen-strand-2 {
+.gen-strand-1 {
 	stroke: var(--lane-2);
+}
+.gen-strand-2 {
+	stroke: var(--lane-3);
 }
 .gen-strand-3 {
 	stroke: var(--attention);
@@ -1343,7 +1333,7 @@ body:not(:has(.shell, .welcome)) {
 	fill: var(--ink);
 }
 .gen-reconcile {
-	stroke: var(--accent);
+	stroke: var(--highlight);
 	stroke-width: 1.5;
 }
 .gen-promoted {
