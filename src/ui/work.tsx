@@ -26,6 +26,7 @@ import {
 	ownerName,
 	type People,
 	RECONCILIATION_GUIDANCE,
+	settledInMain,
 	short,
 	unproposed,
 	waitingOn,
@@ -325,7 +326,8 @@ export function WorkspaceList({
 	const live = sorted.filter((w) => !ended(w)),
 		done = sorted.filter(ended),
 		detached = live.filter((w) => w.state === "detached"),
-		attached = live.filter((w) => w.state !== "detached");
+		settled = live.filter((w) => w.state !== "detached" && settledInMain(view, w)),
+		attached = live.filter((w) => w.state !== "detached" && !settledInMain(view, w));
 	return (
 		<>
 			<LaneMap view={view} focus={focus} setFocus={setFocus} open={(id) => open("workspaces", id)} who={who} />
@@ -380,6 +382,19 @@ export function WorkspaceList({
 							? "No active workspaces match this filter."
 							: "No active workspaces. One appears when you or an agent starts work through Cruce. Use Set up locally to begin."}
 					</p>
+				)}
+				{settled.length > 0 && (
+					<details className="group settled-workspaces" open={active ? true : undefined}>
+						<summary>
+							{settled.length} already in {view.repository.defaultBranch}
+							<span className="muted"> · nothing left to decide, folded away</span>
+						</summary>
+						<div className="rows">
+							{settled.map((w) => (
+								<WorkspaceRow key={w.id} view={view} w={w} open={open} who={who} focused={focus === w.id} setFocus={setFocus} />
+							))}
+						</div>
+					</details>
 				)}
 				{detached.length > 0 && (
 					<details className="group detached-workspaces" open={active ? true : undefined}>

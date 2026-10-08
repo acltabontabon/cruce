@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { RepositorySummary } from "../shared/coordination.ts";
 import type { RepositorySnapshot, Workspace } from "../shared/platform.ts";
@@ -19,10 +20,12 @@ export function LaneBullet({ lane }: { lane?: number }) {
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 const VISIBLE_TRUNK = 5;
 const MAX_LANES = 12;
+/** Return rails are staggered downward so none cross; more than this many promoted lanes keep the filled pill without a rail. */
+const MAX_RETURNS = 6;
 const tone = (key: string) =>
 	["behind", "diverged", "reconciliation", "preparation"].includes(key)
 		? "var(--tone-warning)"
-		: ["current", "ahead", "promote", "promoted"].includes(key)
+		: ["current", "ahead", "contained", "promote", "promoted"].includes(key)
 			? "var(--tone-success)"
 			: key === "review"
 				? "var(--tone-accent)"
@@ -49,6 +52,7 @@ export function LaneMap({
 	who?: People;
 }) {
 	const [showDetached, setShowDetached] = useState(false);
+	const [showSettled, setShowSettled] = useState(false);
 	const [page, setPage] = useState(0);
 	const [paused, setPaused] = useState(false);
 	const [visible, setVisible] = useState(false);
@@ -87,8 +91,10 @@ export function LaneMap({
 		position = (index: number) => (hidden ? (index < hidden ? 0 : index - hidden + 1) : index),
 		ticks = hidden ? [{ revision: "", earlier: hidden }, ...nodes.slice(hidden)] : nodes;
 	const detached = all.filter((lane) => lane.detached);
+	// Work already in canonical has nothing left to decide; it folds into one pill on main until asked for.
+	const settled = all.filter((lane) => lane.settled);
 	const eligible = all
-		.filter((lane) => showDetached || !lane.detached)
+		.filter((lane) => (showDetached || !lane.detached) && (showSettled || !lane.settled))
 		.toSorted(
 			(a, b) =>
 				Number(a.detached) - Number(b.detached) ||
@@ -99,11 +105,14 @@ export function LaneMap({
 	const shown = eligible.slice(currentPage * MAX_LANES, (currentPage + 1) * MAX_LANES);
 	const TY = 66,
 		tx = (i: number) => 80 + i * 104,
-		COL = { head: 560, pub: 680, chg: 800, rel: 870 },
+		// Only a recorded promotion rejoins main. A clean merge preview or an open change never draws a return path.
+		merged = shown.filter((lane) => lane.change?.status.key === "promoted").slice(0, MAX_RETURNS),
+		railSpace = merged.length ? 36 + merged.length * 12 : 0,
+		COL = { head: 560, pub: 680, chg: 800, rel: 870 + railSpace },
 		top = 160,
 		gap = shown.length > 5 ? 72 : 82,
 		overlaps = view.overlaps.slice(0, 4),
-		W = 1030 + overlaps.length * 14,
+		W = 1030 + railSpace + overlaps.length * 14,
 		H = Math.max(180, top + shown.length * gap - 14),
 		R = 22;
 	const groups = new Map<number, Lane[]>();
@@ -115,11 +124,13 @@ export function LaneMap({
 		return tx(position(lane.baseline)) + ((group.length - 1) / 2 - group.indexOf(lane)) * 10;
 	};
 	const rowY = new Map(shown.map((lane, i) => [lane.id, top + i * gap]));
+	const returnX = new Map(merged.map((lane, k) => [lane.id, 800 + 46 + k * 12]));
+	const lastReturn = merged.length ? 800 + 46 + (merged.length - 1) * 12 : 0;
 	const headX = tx(ticks.length - 1);
 	const relationCounts = {
-		current: all.filter((l) => ["current", "ahead"].includes(l.relation.key)).length,
+		current: all.filter((l) => ["current", "ahead", "contained"].includes(l.relation.key)).length,
 		behind: all.filter((l) => ["behind", "diverged"].includes(l.relation.key)).length,
-		unknown: all.filter((l) => !["current", "ahead", "behind", "diverged"].includes(l.relation.key)).length,
+		unknown: all.filter((l) => !["current", "ahead", "contained", "behind", "diverged"].includes(l.relation.key)).length,
 	};
 	const caption = [
 		`${all.length} live ${all.length === 1 ? "workspace" : "workspaces"} from ${view.repository.defaultBranch}`,
@@ -131,6 +142,7 @@ export function LaneMap({
 			.filter(Boolean)
 			.join(", "),
 	].join(": ");
+	const promoted = all.filter((l) => l.change?.status.key === "promoted").length;
 	const notProposed = all.filter((l) => l.published && !l.change && ["ahead", "diverged"].includes(l.relation.key)).length;
 	return (
 		<figure
@@ -166,6 +178,12 @@ export function LaneMap({
 						</svg>
 						not reporting or unplaced
 					</li>
+					<li>
+						<svg width="22" height="12" aria-hidden="true">
+							<path d="M1 10h8q6 0 6-6h6" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+						</svg>
+						promoted, rejoined main
+					</li>
 					<li className="shared">
 						<svg width="10" height="12" aria-hidden="true">
 							<path d="M1 1h7v10H1" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="3 2" />
@@ -180,6 +198,18 @@ export function LaneMap({
 					{all.filter((lane) => !lane.quiet).length} connected <span className="muted">· pulse means presence, not a commit</span>
 				</div>
 				<div className="lane-map-actions">
+					{settled.length > 0 && (
+						<button
+							type="button"
+							aria-expanded={showSettled}
+							onClick={() => {
+								setShowSettled(!showSettled);
+								setPage(0);
+							}}
+						>
+							{showSettled ? "Fold" : "Show"} {settled.length} already in {view.repository.defaultBranch}
+						</button>
+					)}
 					{detached.length > 0 && (
 						<button
 							type="button"
@@ -228,7 +258,7 @@ export function LaneMap({
 					</text>
 					{!shown.length && (
 						<text x="32" y="140" fontSize="13" fill="var(--text-muted)">
-							Detached workspaces are folded away. Show them to inspect their revisions.
+							Every workspace is folded away. Show them to inspect their revisions.
 						</text>
 					)}
 					{shown.map((lane) => (
@@ -246,10 +276,33 @@ export function LaneMap({
 							focused={focus === lane.id}
 							setFocus={setFocus}
 							open={open}
+							returnX={returnX.get(lane.id)}
 						/>
 					))}
 					<path d={`M32 ${TY} H${headX}`} stroke="var(--surface)" strokeWidth="14" strokeLinecap="round" />
 					<path d={`M32 ${TY} H${headX}`} stroke="var(--canonical)" strokeWidth="8" strokeLinecap="round" />
+					{merged.length > 0 && (
+						<g>
+							<text x={COL.chg + 36} y={26} fontSize="10.5" fill="var(--text-faint)">
+								merged
+							</text>
+							<path d={`M${headX + 80} ${TY} H${lastReturn - R}`} stroke="var(--surface)" strokeWidth="14" strokeLinecap="round" />
+							<path d={`M${headX + 80} ${TY} H${lastReturn - R}`} stroke="var(--canonical)" strokeWidth="8" strokeLinecap="round" />
+							{merged.map((lane) => (
+								<circle
+									key={lane.id}
+									cx={(returnX.get(lane.id) ?? 0) - R}
+									cy={TY}
+									r="6"
+									fill={`var(--lane-${lane.lane})`}
+									stroke="var(--surface)"
+									strokeWidth="3"
+								>
+									<title>{`#${lane.change?.number} promoted from ${lane.title}`}</title>
+								</circle>
+							))}
+						</g>
+					)}
 					<text x={32} y={26} fontSize="10.5" fill="var(--text-faint)">
 						{view.repository.defaultBranch}
 					</text>
@@ -289,6 +342,43 @@ export function LaneMap({
 							</g>
 						);
 					})}
+					{settled.length > 0 && !showSettled && (
+						// biome-ignore lint/a11y/noStaticElementInteractions: decorative shortcut; the "Show … already in" button is the accessible control.
+						<g
+							className="lane-fold"
+							style={{ cursor: "pointer" }}
+							onClick={() => setShowSettled(true)}
+							onMouseEnter={() => setFocus(undefined)}
+						>
+							<title>{`${settled.length} already in ${view.repository.defaultBranch}: ${settled.map((lane) => lane.title).join(", ")}`}</title>
+							<path d={`M${headX + 70} ${TY} H${headX + 98}`} stroke="var(--surface)" strokeWidth="14" strokeLinecap="round" />
+							<path d={`M${headX + 70} ${TY} H${headX + 98}`} stroke="var(--canonical)" strokeWidth="8" strokeLinecap="round" />
+							<rect
+								x={headX + 92}
+								y={TY - 13}
+								width={26 + Math.min(settled.length, 6) * 13 + `${settled.length} merged`.length * 6.6}
+								height="26"
+								rx="13"
+								fill="var(--surface)"
+								stroke="var(--canonical)"
+								strokeWidth="3"
+							/>
+							{settled.slice(0, 6).map((lane, i) => (
+								<circle
+									key={lane.id}
+									className="lane-fold-bead"
+									style={{ "--i": i } as CSSProperties}
+									cx={headX + 108 + i * 13}
+									cy={TY}
+									r="4.5"
+									fill={`var(--lane-${lane.lane})`}
+								/>
+							))}
+							<text x={headX + 104 + Math.min(settled.length, 6) * 13} y={TY + 4} fontSize="11" fontWeight="600" fill="var(--text)">
+								{settled.length} merged
+							</text>
+						</g>
+					)}
 					<g transform={`translate(${headX + 22} ${TY - 12})`}>
 						<rect width="58" height="24" rx="12" fill="var(--canonical)" />
 						<text x="29" y="16" textAnchor="middle" fontSize="12" fontWeight="700" fill="var(--on-canonical)">
@@ -336,6 +426,10 @@ export function LaneMap({
 			)}
 			<figcaption>
 				{caption}.{notProposed > 0 && ` ${notProposed} published, not yet proposed for review.`}
+				{settled.length > 0 &&
+					!showSettled &&
+					` ${settled.length} already in ${view.repository.defaultBranch} ${settled.length === 1 ? "is" : "are"} folded into the main line${settled.some((lane) => lane.settled === "other") ? " (some arrived through another workspace's promotion)" : ""}.`}
+				{promoted > 0 && showSettled && ` ${promoted} promoted into ${view.repository.defaultBranch} by a recorded human approval.`}
 				{view.overlaps.length > 0 &&
 					` Shared ${view.overlaps.length === 1 ? "path" : "paths"}: ${view.overlaps
 						.slice(0, 3)
@@ -362,6 +456,7 @@ function LanePath({
 	focused,
 	setFocus,
 	open,
+	returnX,
 }: {
 	lane: Lane;
 	update?: string;
@@ -375,6 +470,8 @@ function LanePath({
 	focused: boolean;
 	setFocus: (id?: string) => void;
 	open: (id: string) => void;
+	/** Rail x where a promoted lane climbs back to main; undefined for work that has not been promoted. */
+	returnX?: number;
 }) {
 	const colour = `var(--lane-${lane.lane})`,
 		placed = bx !== undefined,
@@ -382,7 +479,12 @@ function LanePath({
 		end = lane.change ? COL.chg : lane.published ? COL.pub : COL.head,
 		dashed = !placed || lane.quiet || lane.relation.key === "unknown",
 		d = placed ? `M${bx} ${TY} V${y - R} Q${bx} ${y} ${bx + R} ${y} H${end}` : `M${startX} ${y} H${end}`,
-		nameX = placed ? bx + R + 12 : startX + 22;
+		nameX = placed ? bx + R + 12 : startX + 22,
+		stagger = returnX === undefined ? 0 : Math.round((returnX - (COL.chg + 46)) / 12),
+		back =
+			returnX === undefined
+				? ""
+				: `M${COL.chg + 22} ${y} H${returnX - R} Q${returnX} ${y} ${returnX} ${y - R} V${TY + R} Q${returnX} ${TY} ${returnX - R} ${TY}`;
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: the drawing is aria-hidden; each lane's row below is the accessible control.
 		<g
@@ -396,13 +498,50 @@ function LanePath({
 			<rect x={startX - 24} y={y - 46} width={W - startX} height={gap - 6} fill="transparent" />
 			<path d={d} fill="none" stroke="var(--surface)" strokeWidth="12" strokeLinecap="round" />
 			<path d={d} fill="none" stroke={colour} strokeWidth="6" strokeLinecap="round" strokeDasharray={dashed ? "1 11" : undefined} />
-			<path
-				d={`M${end + 24} ${y} H${COL.rel - 14}`}
-				stroke="var(--border-strong)"
-				strokeWidth="1.5"
-				strokeDasharray="1 5"
-				strokeLinecap="round"
-			/>
+			{returnX === undefined ? (
+				<path
+					d={`M${end + 24} ${y} H${COL.rel - 14}`}
+					stroke="var(--border-strong)"
+					strokeWidth="1.5"
+					strokeDasharray="1 5"
+					strokeLinecap="round"
+				/>
+			) : (
+				<>
+					{/* The recorded promotion: the lane climbs its own rail and curves into main, ending at the junction dot. */}
+					<path
+						className="lane-return-halo"
+						pathLength={1}
+						d={back}
+						fill="none"
+						stroke="var(--surface)"
+						strokeWidth="12"
+						strokeLinecap="round"
+					/>
+					<path className="lane-return" pathLength={1} d={back} fill="none" stroke={colour} strokeWidth="6" strokeLinecap="round" />
+					{/* Presentation only: a spark travels the recorded return and the junction pulses; neither implies anything new has merged. */}
+					<g className="lane-return-motion" style={{ "--k": stagger } as CSSProperties}>
+						<circle className="lane-return-ripple" cx={returnX - R} cy={TY} r="6" fill="none" stroke={colour} strokeWidth="2" />
+						<circle
+							className="lane-return-spark"
+							cx="0"
+							cy="0"
+							r="4.5"
+							fill="var(--surface)"
+							stroke={colour}
+							strokeWidth="2.5"
+							style={{ offsetPath: `path("${back}")` }}
+						/>
+					</g>
+					<path
+						d={`M${returnX + 14} ${y} H${COL.rel - 14}`}
+						stroke="var(--border-strong)"
+						strokeWidth="1.5"
+						strokeDasharray="1 5"
+						strokeLinecap="round"
+					/>
+				</>
+			)}
 			<circle cx={nameX + 10} cy={y - 26} r="10" fill={colour} />
 			<text x={nameX + 10} y={y - 22.2} textAnchor="middle" fontSize="11" fontWeight="700" fill="var(--on-lane)">
 				{lane.lane}

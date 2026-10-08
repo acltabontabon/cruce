@@ -6,6 +6,7 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Added
 
+- Lane map: promoted work now rejoins the main line on its own rail, with a draw-in, a travelling spark and a pulse at the junction (paused by "Pause motion", off under reduced motion). Only a recorded promotion draws a return path. Work already in canonical, through its own promotion or another workspace's, folds into a single "N merged" pill on main and into a collapsed group in the workspace list; unfold it with "Show N already in main". Work with newer commits, an open change or a detached checkout never folds.
 - Show published revisions that no change proposes yet: an attention item, a "Not proposed" filter and pill, a lane-map label, and a one-click "Propose for review" for the owner (single or all). Shared reported paths are summarized once above the workspace list instead of repeated on every row. Agent instructions now say that `publish_revision` does not request review and to propose the revision when the task's work is done.
 - Add an explicit local `preview_reconciliation` / `cruce preview` check against accepted canonical, with exact commits, conflict paths/types and honest unavailable/unrelated results. Scratch Git objects are isolated and working changes are preserved.
 - Deliver bounded reported-overlap warnings, canonical update hints and continuation workspace IDs through bridge coordination context; add a read-only `cruce watch --coordination` JSON feed for external hosts.
@@ -26,6 +27,7 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Changed
 
+- Say "Not compared yet" instead of "Canonical unavailable" when there is no accepted canonical revision to compare against, and "Already in canonical" instead of "Behind canonical" for work whose published revision canonical already contains.
 - Label stale work as **Needs Git update**, distinguish agent-capable reconciliation from human approval, and guide agents to reconcile within their authorized task before proposing or requesting promotion. Divergence is not presented as proof of merge conflicts.
 
 - Replace the three overlapping repository setup buttons with one **Set up locally** guide containing Clone, Existing checkout and Connect an agent.

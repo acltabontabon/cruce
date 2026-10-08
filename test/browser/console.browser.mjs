@@ -1898,6 +1898,156 @@ test("published work with no change says so, groups shared scaffold paths once a
 	assert.equal(proposed.length, 5);
 });
 
+test("promoted work rejoins main on the lane map and only promoted work does", async () => {
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		const data = await (await route.fetch()).json();
+		const original = data.workspaces[0];
+		const names = ["ProductController", "WarehouseController", "StockLevelController", "SupplierController", "PurchaseOrderController"];
+		const revision = (i) => `${i}`.repeat(40);
+		data.workspaces = names.map((title, i) => ({
+			...original,
+			id: `scaffold-${i}`,
+			title,
+			startedAt: i,
+			publishedRevision: revision(i + 1),
+		}));
+		data.artifacts = names.map((title, i) => ({
+			id: `artifact-${i}`,
+			workspaceId: `scaffold-${i}`,
+			revision: revision(i + 1),
+			kind: "source",
+			title,
+			at: i,
+			actor: original.createdBy,
+		}));
+		const proposal = (i, state) => ({
+			id: `change-${i}`,
+			number: i + 1,
+			workspaceId: `scaffold-${i}`,
+			artifactId: `artifact-${i}`,
+			base: data.sourceHead,
+			revision: revision(i + 1),
+			title: names[i],
+			state,
+			reviews: [],
+			at: i,
+		});
+		data.proposals = [proposal(0, "promoted"), proposal(1, "promoted"), proposal(2, "open")];
+		data.promotions = [0, 1].map((i) => ({
+			id: `promotion-${i}`,
+			proposalId: `change-${i}`,
+			state: "complete",
+			from: i ? revision(1) : data.sourceHead,
+			to: revision(i + 1),
+			at: i + 1,
+		}));
+		data.overlaps = [];
+		data.reconciliation = { ...data.reconciliation, workspaces: [], proposals: [] };
+		data.attention = { ...data.attention, items: [], ancestryUnavailable: 0 };
+		await route.fulfill({ json: data });
+	});
+	await openRepo();
+	await repoNav()
+		.getByRole("button", { name: /^Workspaces/ })
+		.click();
+	const map = page.locator(".lane-map");
+	await map.locator(".lane").first().waitFor();
+	assert.equal(await map.locator(".lane-return").count(), 2);
+	assert.equal(await map.locator(".lane-return-spark").count(), 2);
+	// Let the return draw in and a spark start along it, then freeze the frame.
+	await page.waitForTimeout(2600);
+	await map.getByRole("button", { name: "Pause motion", exact: true }).click();
+	await page.screenshot({ path: "dist/ui-checks/lane-map-merged.png", fullPage: true });
+});
+
+test("work already in main folds into one pill on the main line and unfolds on request", async () => {
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		const data = await (await route.fetch()).json();
+		const original = data.workspaces[0];
+		const names = ["ProductController", "WarehouseController", "StockLevelController", "SupplierController", "PurchaseOrderController"];
+		const revision = (i) => `${i}`.repeat(40);
+		data.workspaces = names.map((title, i) => ({
+			...original,
+			id: `scaffold-${i}`,
+			title,
+			startedAt: i,
+			publishedRevision: revision(i + 1),
+			headRevision: i === 2 ? "9".repeat(40) : revision(i + 1),
+		}));
+		data.artifacts = names.map((title, i) => ({
+			id: `artifact-${i}`,
+			workspaceId: `scaffold-${i}`,
+			revision: revision(i + 1),
+			kind: "source",
+			title,
+			at: i,
+			actor: original.createdBy,
+		}));
+		const proposal = (i, state) => ({
+			id: `change-${i}`,
+			number: i + 1,
+			workspaceId: `scaffold-${i}`,
+			artifactId: `artifact-${i}`,
+			base: data.sourceHead,
+			revision: revision(i + 1),
+			title: names[i],
+			state,
+			reviews: [],
+			at: i,
+		});
+		data.proposals = [proposal(0, "promoted"), proposal(2, "promoted"), proposal(3, "open")];
+		data.promotions = [0, 2].map((i) => ({
+			id: `promotion-${i}`,
+			proposalId: `change-${i}`,
+			state: "complete",
+			from: data.sourceHead,
+			to: revision(i + 1),
+			at: i + 1,
+		}));
+		data.overlaps = [];
+		const relation = ["current", "behind", "current", "ahead", "ahead"];
+		data.reconciliation = {
+			...data.reconciliation,
+			workspaces: names.map((_, i) => ({
+				workspaceId: `scaffold-${i}`,
+				revision: revision(i + 1),
+				basis: "published",
+				canonicalRevision: data.sourceHead,
+				relation: relation[i],
+				report: { state: "fresh" },
+				incorporationCounts: { present: 0, missing: 0, unknown: 0 },
+				incorporationTruncated: false,
+				incorporation: [],
+			})),
+			proposals: [],
+		};
+		data.attention = { ...data.attention, items: [], ancestryUnavailable: 0 };
+		await route.fulfill({ json: data });
+	});
+	await openRepo();
+	await repoNav()
+		.getByRole("button", { name: /^Workspaces/ })
+		.click();
+	const map = page.locator(".lane-map");
+	await map.locator(".lane").first().waitFor();
+	assert.equal(await map.locator(".lane").count(), 3);
+	assert.equal(await map.locator(".lane-fold").count(), 1);
+	assert.match(
+		await map.locator(".lane-map figcaption, figcaption").innerText(),
+		/2 already in main are folded into the main line \(some arrived through another workspace's promotion\)/,
+	);
+	assert.equal(await page.locator(".settled-workspaces .workspace-row").count(), 2);
+	assert.equal(await page.locator(".settled-workspaces").evaluate((e) => e.open), false);
+	await page.locator(".settled-workspaces summary").click();
+	await page.locator(".settled-workspaces").getByText("Already in canonical", { exact: true }).first().waitFor();
+	await map.getByRole("button", { name: "Show 2 already in main", exact: true }).click();
+	assert.equal(await map.locator(".lane").count(), 5);
+	assert.equal(await map.locator(".lane-fold").count(), 0);
+	assert.equal(await map.locator(".lane-return").count(), 2);
+	await map.getByRole("button", { name: "Fold 2 already in main", exact: true }).click();
+	assert.equal(await map.locator(".lane").count(), 3);
+});
+
 test("retention inspection discloses cloud cost and shows exact unpublished refs without deleting", async () => {
 	await openRepo();
 	await repoNav()

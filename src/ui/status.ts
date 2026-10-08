@@ -88,7 +88,7 @@ export function workspaceStatus(w: Workspace): Status {
 	}
 }
 
-export function canonicalRelation(view: RepositorySnapshot, w: Workspace): Status & { detail: string } {
+export function canonicalRelation(view: RepositorySnapshot, w: Workspace): Status & { detail: string; contained?: boolean } {
 	const relation = view.reconciliation?.workspaces.find((row) => row.workspaceId === w.id);
 	if (relation) {
 		const labels = {
@@ -103,10 +103,10 @@ export function canonicalRelation(view: RepositorySnapshot, w: Workspace): Statu
 		const contained = relation.relation === "behind" && relation.basis === "published";
 		const reconcile = relation.relation === "diverged" || (relation.relation === "behind" && !contained);
 		return {
-			key: relation.relation,
-			label: labels[relation.relation],
-			tone:
-				reconcile || relation.relation === "unrelated" ? "warning" : relation.relation === "unknown" || contained ? "neutral" : "success",
+			key: contained ? "contained" : relation.relation,
+			label: contained ? "Already in canonical" : labels[relation.relation],
+			contained,
+			tone: reconcile || relation.relation === "unrelated" ? "warning" : relation.relation === "unknown" ? "neutral" : "success",
 			detail: `${relation.basis === "published" ? "Published revision" : "Baseline"} ${short(relation.revision)} compared with canonical ${short(relation.canonicalRevision)}.${
 				reconcile
 					? ` Canonical moved to ${short(relation.canonicalRevision)}; reconcile with Git and publish for fresh review.`
@@ -120,7 +120,13 @@ export function canonicalRelation(view: RepositorySnapshot, w: Workspace): Statu
 	}
 	const updates = view.workspaceUpdates[w.id];
 	if (!updates || updates.status === "unknown")
-		return { key: "unknown", label: "Canonical unavailable", tone: "neutral", detail: "Canonical revision is unavailable." };
+		return {
+			key: "unknown",
+			label: "Not compared yet",
+			tone: "neutral",
+			detail:
+				"Cruce has no accepted canonical revision to compare this work with yet, so it cannot say whether the work is ahead or behind.",
+		};
 	if (updates.status === "available")
 		return {
 			key: "unknown",
@@ -129,6 +135,20 @@ export function canonicalRelation(view: RepositorySnapshot, w: Workspace): Statu
 			detail: "Inspect published ancestry to determine whether reconciliation is needed.",
 		};
 	return { key: "current", label: "Up to date", tone: "success", detail: "Built on the current canonical revision." };
+}
+
+/**
+ * Work that has nothing left to do: its published revision is already in canonical, either through its own promoted change
+ * or because another workspace's promotion carried it. Newer reported commits, open changes or detachment keep a lane live.
+ * Returns how it got there; folding it away never hides anything that needs a decision.
+ */
+export function settledInMain(view: RepositorySnapshot, w: Workspace): "own" | "other" | undefined {
+	if (ended(w) || w.state === "detached" || !w.publishedRevision || w.headRevision !== w.publishedRevision) return undefined;
+	const latest = view.proposals.filter((p) => p.workspaceId === w.id).sort((a, b) => b.number - a.number)[0];
+	if (latest && latest.state !== "promoted") return undefined;
+	const relation = canonicalRelation(view, w);
+	if (relation.contained) return latest ? "own" : "other";
+	return latest && relation.key === "current" ? "own" : undefined;
 }
 
 /**

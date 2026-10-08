@@ -15,6 +15,7 @@ import {
 	overlapGroups,
 	overlapsFor,
 	ownerName,
+	settledInMain,
 	throughConnection,
 	unproposed,
 	waitingOn,
@@ -212,6 +213,62 @@ describe("console status language", () => {
 		expect(unproposed(v, v.workspaces[3])).toBeUndefined();
 		expect(attention(v).unproposed).toBe(1);
 		expect(overlapGroups(v)).toEqual([{ workspaces: ["a", "b", "c"], paths: ["pom.xml", ".gitignore"] }]);
+	});
+	it("folds only work that is already in canonical and says why", () => {
+		const published = "c".repeat(40);
+		const row = (workspaceId: string, relation: "current" | "behind" | "ahead", basis: "published" | "baseline" = "published") => ({
+			workspaceId,
+			revision: published,
+			basis,
+			canonicalRevision: base,
+			relation,
+			report: { state: "fresh" } as never,
+			incorporationCounts: { present: 0, missing: 0, unknown: 0 },
+			incorporationTruncated: false,
+			incorporation: [],
+		});
+		const done = (id: string, extra: Partial<Workspace> = {}) =>
+			workspace(id, { publishedRevision: published, headRevision: published, ...extra });
+		const v = view({
+			sourceHead: base,
+			workspaces: [
+				done("own"),
+				done("other"),
+				done("open"),
+				done("newer", { headRevision: "d".repeat(40) }),
+				done("baseline"),
+				done("detached", { state: "detached" }),
+			],
+			proposals: [
+				proposal("p-own", 1, "own", { state: "promoted", revision: published }),
+				proposal("p-open", 2, "open", { revision: published }),
+			],
+			reconciliation: {
+				asOf: 0,
+				observation: { state: "current" } as never,
+				workspaces: [
+					row("own", "current"),
+					row("other", "behind"),
+					row("open", "behind"),
+					row("newer", "behind"),
+					row("baseline", "behind", "baseline"),
+					row("detached", "behind"),
+				],
+				proposals: [],
+			},
+		});
+		const by = (id: string) => v.workspaces.find((w) => w.id === id)!;
+		expect(settledInMain(v, by("own"))).toBe("own");
+		expect(settledInMain(v, by("other"))).toBe("other");
+		expect(canonicalRelation(v, by("other"))).toMatchObject({ key: "contained", label: "Already in canonical", tone: "success" });
+		expect(settledInMain(v, by("open"))).toBeUndefined();
+		expect(settledInMain(v, by("newer"))).toBeUndefined();
+		expect(settledInMain(v, by("baseline"))).toBeUndefined();
+		expect(settledInMain(v, by("detached"))).toBeUndefined();
+	});
+	it("says plainly when canonical has not been compared yet", () => {
+		const v = view({ workspaces: [workspace("w")] });
+		expect(canonicalRelation(v, v.workspaces[0])).toMatchObject({ key: "unknown", label: "Not compared yet" });
 	});
 	it("describes elapsed time plainly", () => {
 		expect(ago(1000, 2000)).toBe("just now");

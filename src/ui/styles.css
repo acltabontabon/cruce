@@ -3871,6 +3871,104 @@ main[data-screen="settings"] > form {
 .lane-map[data-motion="paused"] .lane-publication-flash {
 	animation-play-state: paused;
 }
+/* Promoted work: the return draws itself once, then a spark travels it and the junction rings as it joins main. */
+.lane-return,
+.lane-return-halo {
+	stroke-dasharray: 1;
+	animation: lane-return-draw 1.5s cubic-bezier(0.45, 0, 0.2, 1) both;
+	animation-delay: calc(var(--k, 0) * 0.18s);
+}
+.lane-return-spark {
+	offset-rotate: 0deg;
+	opacity: 0;
+	animation: lane-return-travel 5.2s ease-in-out infinite;
+	animation-delay: calc(1.6s + var(--k, 0) * 0.9s);
+}
+.lane-return-ripple {
+	transform-box: fill-box;
+	transform-origin: center;
+	opacity: 0;
+	animation: lane-return-ripple 5.2s ease-out infinite;
+	animation-delay: calc(1.6s + var(--k, 0) * 0.9s);
+}
+.lane-map[data-motion="paused"] .lane-return,
+.lane-map[data-motion="paused"] .lane-return-halo,
+.lane-map[data-motion="paused"] .lane-return-spark,
+.lane-map[data-motion="paused"] .lane-return-ripple {
+	animation-play-state: paused;
+}
+@keyframes lane-return-draw {
+	from {
+		stroke-dashoffset: 1;
+	}
+	to {
+		stroke-dashoffset: 0;
+	}
+}
+@keyframes lane-return-travel {
+	0% {
+		offset-distance: 0%;
+		opacity: 0;
+	}
+	8% {
+		opacity: 1;
+	}
+	55% {
+		offset-distance: 100%;
+		opacity: 1;
+	}
+	60%,
+	100% {
+		offset-distance: 100%;
+		opacity: 0;
+	}
+}
+@keyframes lane-return-ripple {
+	0%,
+	54% {
+		opacity: 0;
+		transform: scale(0.8);
+	}
+	58% {
+		opacity: 0.7;
+	}
+	80%,
+	100% {
+		opacity: 0;
+		transform: scale(3);
+	}
+}
+/* Folded work: each bead drops into the main line in turn, then the pill rests. */
+.lane-fold {
+	transform-box: fill-box;
+	transform-origin: left center;
+	animation: lane-fold-in 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.lane-fold-bead {
+	transform-box: fill-box;
+	transform-origin: center;
+	animation: lane-fold-drop 0.6s cubic-bezier(0.3, 1.4, 0.5, 1) both;
+	animation-delay: calc(0.25s + var(--i, 0) * 0.09s);
+}
+.lane-fold:hover rect {
+	stroke-width: 4;
+}
+.lane-map[data-motion="paused"] .lane-fold,
+.lane-map[data-motion="paused"] .lane-fold-bead {
+	animation-play-state: paused;
+}
+@keyframes lane-fold-in {
+	from {
+		opacity: 0;
+		transform: scaleX(0.4);
+	}
+}
+@keyframes lane-fold-drop {
+	from {
+		opacity: 0;
+		transform: translateY(-14px) scale(0.4);
+	}
+}
 @keyframes lane-presence {
 	0%,
 	100% {
@@ -3908,8 +4006,18 @@ main[data-screen="settings"] > form {
 }
 @media (prefers-reduced-motion: reduce) {
 	.lane-presence-pulse,
-	.lane-revision-arrival {
+	.lane-revision-arrival,
+	.lane-return-spark,
+	.lane-return-ripple {
 		display: none;
+	}
+	.lane-fold,
+	.lane-fold-bead {
+		animation: none;
+	}
+	.lane-return,
+	.lane-return-halo {
+		animation: none;
 	}
 	.lane-map .lane {
 		transition: none;

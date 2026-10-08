@@ -1,5 +1,5 @@
 import type { RepositorySnapshot, Workspace } from "../shared/platform.ts";
-import { canonicalRelation, changeStatus, ended, overlapsFor, type Status, workedBy } from "./status.ts";
+import { canonicalRelation, changeStatus, ended, overlapsFor, type Status, settledInMain, workedBy } from "./status.ts";
 
 /** Lane colours cycle through six tokens; a workspace keeps its colour for as long as it exists. */
 export const LANE_COLOURS = 6;
@@ -28,6 +28,8 @@ export interface Lane {
 	relation: Status;
 	quiet: boolean;
 	detached: boolean;
+	/** Already in canonical: through this workspace's own promoted change, or carried by another workspace's. */
+	settled?: "own" | "other";
 	presence: string;
 	shared: string[];
 }
@@ -86,6 +88,7 @@ function toLane(view: RepositorySnapshot, w: Workspace, lane: number, nodes: Tru
 		relation: canonicalRelation(view, w),
 		quiet: w.state !== "active" || !w.execution,
 		detached: w.state === "detached",
+		settled: settledInMain(view, w),
 		presence:
 			w.state === "detached"
 				? "detached"
