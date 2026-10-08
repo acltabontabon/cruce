@@ -34,7 +34,7 @@ That framing invited drift toward a local multi-agent orchestrator. A single dev
 
 ## Alignment audit (Phase 2)
 
-Inspected: README, AGENTS.md, CONTRIBUTING, ROADMAP, every document under `docs/`, `src/shared`, `src/core`, `src/worker`, `runner`, `src/intelligence` and `src/ui` at commit `c783295`.
+Inspected: README, AGENTS.md, CONTRIBUTING, ROADMAP, every document under `docs/`, `src/shared`, `src/core`, `src/worker`, `runner`, `src/intelligence` and `src/ui` at commit `923644d`.
 
 **Aligned and foundational.** The Namespace → Repository → Workspace hierarchy, stable IDs and the Directory/Namespace/Repository Durable Object split. Canonical Artifacts repositories, reusable direct writer forks and pinned baselines. The normal Git smart-HTTP gateway with short-lived scoped tokens. Exact-revision publication with ancestry checks. Separate source and evidence records. Proposals, reviews, controller readiness and human-only promotion with the exact-base journal. Advisory path overlap with honest trust labels. Canonical divergence (`get_workspace_updates`). Guarded fork cleanup. Lineage. Namespace budgets. The local bridge's worktrees, unique remotes, persistent locks and preservation of existing remotes. Explicit removal of deployments and CI.
 

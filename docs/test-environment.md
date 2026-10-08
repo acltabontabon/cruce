@@ -6,17 +6,17 @@ The configured control-plane test Worker is [cruce.acltabontabon.com](https://cr
 
 ## Last recorded deployment
 
-As recorded on **2026-10-09**, the latest direct test deployment was Worker **`12219de2-7580-4767-8582-246ad55c5f85`**, from clean commit **`919400e`**, deployed with `pnpm deploy:test` after a production dry run with unchanged bindings. This is a recorded result, not a query of current traffic.
+As recorded on **2026-10-09**, the latest direct test deployment was Worker **`12219de2-7580-4767-8582-246ad55c5f85`**, from clean commit **`700d17c`**, deployed with `pnpm deploy:test` after a production dry run with unchanged bindings. This is a recorded result, not a query of current traffic.
 
 The build passed typecheck, lint, **427 unit/integration tests**, **98 browser journeys**, scenario verification and the offline build in a clean worktree. Anonymous HTTPS returned homepage/session/discovery 200, private namespace API Access challenge 302 and MCP 401. Hosted document, entry script, App chunk and stylesheet matched the build. The public splash rendered and disappeared without console errors; signed-in splash/progress was not exercised.
 
-The latest recorded tagged deployment was [0.1.0-alpha.3](https://github.com/acltabontabon/cruce/releases/tag/v0.1.0-alpha.3), Worker **`ddd14ac5-b249-4bb0-9b54-f74e669a2888`**, from **`2df8243ea3f21bd1a79b48edf9eedea3bb9ad860`**, on 2026-10-07 at 18:23 Philippine time. Later direct test deployments did not change that release tag or package version.
+The latest recorded tagged deployment was [0.1.0-alpha.3](https://github.com/acltabontabon/cruce/releases/tag/v0.1.0-alpha.3), Worker **`ddd14ac5-b249-4bb0-9b54-f74e669a2888`**, from **`823a3d62f66c39928fdffbd70113c89f9b9b25a6`**, on 2026-10-07 at 18:23 Philippine time. Later direct test deployments did not change that release tag or package version.
 
 Behavioral acceptance is summarized in [verification](local-verification.md#current-evidence-at-a-glance). Important hosted results include:
 
 - [Current binding publication, agent replies and human review-note resolution](local-verification.md#review-notes-and-the-calmer-change-review), Worker `04eaa58a`.
-- [Fork deletion and retained-source recovery](local-verification.md#retained-source-proof-on-cloudflare-artifacts), Worker `afb692eb` from `5f8a7fe`.
-- Repository deletion removing four Artifacts repositories, followed by two autonomous deletions, Worker `78a29a43` from `1f4d5ca` on 2026-10-08.
+- [Fork deletion and retained-source recovery](local-verification.md#retained-source-proof-on-cloudflare-artifacts), Worker `afb692eb` from `3a60b07`.
+- Repository deletion removing four Artifacts repositories, followed by two autonomous deletions, Worker `78a29a43` from `10c4887` on 2026-10-08.
 - Empty shared-namespace deletion from the signed-in console, Worker `a4587056`; this consumed no repository deletion resources.
 - [Push-observation subscription setup](local-verification.md#coordination-observation-and-reconciliation-c1c3), with subsequent explicit disable/removal; real push and gap recovery remain unverified.
 
