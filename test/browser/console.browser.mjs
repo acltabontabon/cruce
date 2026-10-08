@@ -1941,6 +1941,7 @@ test("deleting a workspace withdraws its change, deletes its fork and moves it t
 	await dialog.getByRole("button", { name: "Delete workspace", exact: true }).click();
 	await page.waitForFunction(() => location.hash === "#/workspaces");
 	await workspaceRow("Inspect payment timeout").waitFor();
+	await workspaceRow("Implement retry policy").waitFor({ state: "detached" });
 	assert.equal(await workspaceRow("Implement retry policy").count(), 0);
 	await page.getByRole("button", { name: "History", exact: true }).click();
 	const earlier = page.getByRole("region", { name: "Earlier work", exact: true });
