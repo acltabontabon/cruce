@@ -597,6 +597,7 @@ describe("repository lifecycle with persisted Namespace and SQL adapters", () =>
 				f.store,
 				{
 					authority: (grant, id) => f.namespace().authority(grant, id),
+					storage: async () => ({ mode: "deployment", ready: true }),
 					lifecycle: (grant, id, lifecycle) => f.namespace().lifecycle(grant, id, lifecycle),
 					lifecycleReservations: (grant, id, op) => f.namespace().lifecycleReservations(grant, id, op),
 					releaseReservation: (grant, id, reservation) => f.namespace().releaseReservation(grant, id, reservation),

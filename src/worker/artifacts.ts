@@ -353,6 +353,7 @@ export class ResourceBoundary {
 				mode: "deployment",
 				ready: false,
 				reason: "Existing connected-account storage requires an explicit storage transition by the administrator",
+				legacy: true,
 			};
 		const accountId = this.env.CRUCE_STORAGE_ACCOUNT_ID;
 		const namespace = this.env.CRUCE_ARTIFACTS_NAMESPACE;

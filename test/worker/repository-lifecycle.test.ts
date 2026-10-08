@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
 import { initialRepository } from "../../src/core/platform.ts";
 import { repositoryLifecycleView } from "../../src/core/repository-lifecycle.ts";
-import type { Actor, Command, Repository, RepositoryState } from "../../src/shared/platform.ts";
+import type { Actor, Command, Repository, RepositoryState, ResourceStorage } from "../../src/shared/platform.ts";
 import { RepositoryLifecycleRuntime } from "../../src/worker/repository-lifecycle.ts";
 import { memoryStore } from "../../src/worker/store.ts";
 
@@ -32,6 +32,7 @@ function fixture() {
 	store.put("provider-repository:fork-old", "fork-id");
 	store.put("archive:old", { source: "retained" });
 	let now = 1000;
+	let storage: ResourceStorage = { mode: "deployment", ready: true };
 	const remove = vi.fn(async (_name: string, _id?: string) => true);
 	const resetCache = vi.fn();
 	const schedule = vi.fn(async (_at: number) => {});
@@ -55,6 +56,7 @@ function fixture() {
 			namespace.state.reservations.find((r) => r.id === id)!.state = state;
 		}),
 		host: async () => ({ remove }) as never,
+		storage: async () => storage,
 		resetCache,
 		schedule,
 	};
@@ -82,6 +84,9 @@ function fixture() {
 		resetCache,
 		advance: () => {
 			now += 30_000;
+		},
+		setStorage: (value: ResourceStorage) => {
+			storage = value;
 		},
 	};
 }
@@ -257,6 +262,40 @@ describe("repository lifecycle", () => {
 		await f.restart().recover(f.repository());
 		expect(f.remove.mock.calls.map(([name]) => name)).toEqual(["fork-old", "source-one", "fork-old", "source-one", "repo-repo"]);
 		expect(f.repository().lifecycle?.state).toBe("deleted");
+	});
+	it("forgets unreachable legacy storage only after the owner confirms it, removing records but no provider repository", async () => {
+		const f = fixture();
+		f.setStorage({ mode: "deployment", ready: false, reason: "legacy", legacy: true });
+		const a = f.namespace.authority(owner, repo.id);
+		const view = await f.runtime.view(f.repository(), { actor: owner }, a);
+		expect(view).toMatchObject({ forgetStorage: true, deletionBlockers: [] });
+		await expect(f.call("delete_repository")).rejects.toThrow("Confirm that Cruce will not delete this repository's legacy storage");
+		const forget = { ...f.command("delete_repository", "forget"), forgetStorage: true as const };
+		expect(await f.runtime.command(f.repository(), forget, { actor: owner })).toEqual({ state: "deleted" });
+		expect(f.remove).not.toHaveBeenCalled();
+		expect(f.store.scan("").map((r) => r.key)).toEqual(["repository", "repository-deletion"]);
+		expect(f.store.get<{ forgotten: { name: string }[] }>("repository-deletion")?.forgotten).toEqual([
+			{ name: "fork-old", id: "fork-id" },
+			{ name: repo.storageName, id: "canonical-id" },
+			{ name: "source-one", id: "source-id" },
+		]);
+		expect(f.repository().lifecycle?.state).toBe("deleted");
+		// A no-storage reservation still carries the operation identity and settles complete.
+		expect(f.namespace.state.reservations.map((r) => [r.action, r.state])).toEqual([["repository.delete", "complete"]]);
+	});
+	it("waits for storage that can be restored, and never forgets reachable storage", async () => {
+		const f = fixture();
+		f.setStorage({ mode: "deployment", ready: false, reason: "Installation storage is unavailable; contact the administrator" });
+		const view = await f.runtime.view(f.repository(), { actor: owner }, f.namespace.authority(owner, repo.id));
+		expect(view.deletionBlockers).toEqual(["Installation storage is unavailable; contact the administrator"]);
+		expect(view.forgetStorage).toBeUndefined();
+		await expect(f.call("delete_repository")).rejects.toThrow("Repository retirement has blockers");
+		f.setStorage({ mode: "deployment", ready: true });
+		const forget = { ...f.command("delete_repository", "forget"), forgetStorage: true as const };
+		await expect(f.runtime.command(f.repository(), forget, { actor: owner })).rejects.toThrow(
+			"Storage is reachable; delete without forgetting it",
+		);
+		expect(f.store.get("repository-deletion")).toBeUndefined();
 	});
 	it("purges a large retained record set in bounded restart-safe batches", async () => {
 		const f = fixture();

@@ -37,6 +37,7 @@ export function domainStatus(error: unknown): number | undefined {
 const PUBLIC_FIELDS = new Set([
 	"tool",
 	"confirmation",
+	"forgetStorage",
 	"repository.delete",
 	"namespaceId",
 	"repositoryId",

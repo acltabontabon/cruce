@@ -405,6 +405,7 @@ function ConnectGuide({ view, initial = "clone", openSetup }: { view: Repository
 function RepositoryLifecycleSettings({ view, execute, leave }: { view: RepositorySnapshot; execute: Execute; leave: () => void }) {
 	const [confirming, setConfirming] = useState(false);
 	const [confirmation, setConfirmation] = useState("");
+	const [forget, setForget] = useState(false);
 	const lifecycle = view.lifecycle;
 	if (!lifecycle) return null;
 	const archived = lifecycle.state === "archived";
@@ -433,6 +434,7 @@ function RepositoryLifecycleSettings({ view, execute, leave }: { view: Repositor
 									tool: "delete_repository",
 									confirmation: view.repository.name,
 									idempotencyKey: lifecycle.deletion!.idempotencyKey,
+									...(lifecycle.deletion!.forgetStorage ? { forgetStorage: true as const } : {}),
 								})) as { state: string };
 								if (result.state === "deleted") leave();
 							}}
@@ -498,6 +500,7 @@ function RepositoryLifecycleSettings({ view, execute, leave }: { view: Repositor
 								disabled={lifecycle.deletionBlockers.length > 0}
 								onClick={() => {
 									setConfirmation("");
+									setForget(false);
 									setConfirming(true);
 								}}
 							>
@@ -519,18 +522,34 @@ function RepositoryLifecycleSettings({ view, execute, leave }: { view: Repositor
 						<p role="alert">{unfinishedWork(lifecycle.unfinished)}</p>
 					)}
 					<p>Local checkouts and external upstream repositories remain. This uses installation cloud resources under namespace policy.</p>
+					{lifecycle.forgetStorage && (
+						<p role="alert">
+							This repository is in connected-account storage from before this installation managed storage. Cruce can't reach it and won't
+							delete it, so deleting removes Cruce's records only. Its Git stays there until someone removes it in that account.
+						</p>
+					)}
 					<Form
 						label="Delete repository permanently"
 						danger
 						primary
 						cancel={() => setConfirming(false)}
-						disabled={confirmation !== view.repository.name}
+						disabled={confirmation !== view.repository.name || (lifecycle.forgetStorage && !forget)}
 						submit={async () => {
-							const result = (await execute({ tool: "delete_repository", confirmation })) as { state: string };
+							const result = (await execute({
+								tool: "delete_repository",
+								confirmation,
+								...(lifecycle.forgetStorage ? { forgetStorage: true as const } : {}),
+							})) as { state: string };
 							setConfirming(false);
 							if (result.state === "deleted") leave();
 						}}
 					>
+						{lifecycle.forgetStorage && (
+							<label className="checkbox">
+								<input type="checkbox" checked={forget} onChange={(event) => setForget(event.target.checked)} />I understand Cruce will not
+								delete the old storage
+							</label>
+						)}
 						<label>
 							Type {view.repository.name} to confirm
 							<input autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required />

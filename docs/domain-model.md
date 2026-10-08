@@ -58,6 +58,8 @@ Permanent deletion is the explicit exception to source and provenance retention.
 
 A shared namespace can be permanently deleted with every repository in it; a personal namespace belongs to its account and cannot. Only the authenticated console namespace Owner can delete it, by typing the namespace handle. Authorization waits for anything a repository deletion would wait for, plus unfinished archive/restore transitions and policies that deny deletion, and then freezes the namespace: only the Owner's console still reaches it. Each repository goes through its own permanent deletion; once none remain, the namespace leaves discovery, its handle can be used again and a tombstone keeps its stable ID from returning. [ADR 0012](decisions/0012-namespace-permanent-deletion.md) records the decision.
 
+Repositories and namespaces on legacy connected-account storage, which Cruce can no longer reach, are deleted by forgetting that storage: the Owner confirms that Cruce will not delete it, Cruce removes only its own records and keeps an inventory of what was left behind. Restorable storage is never forgotten. [ADR 0013](decisions/0013-forgetting-unreachable-legacy-storage.md) records this exception.
+
 ## Workspace identity
 
 ```text

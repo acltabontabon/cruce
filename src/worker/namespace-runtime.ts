@@ -50,7 +50,7 @@ export class NamespaceRuntime extends DurableObject<NamespaceEnv> {
 			{
 				load: () => this.controller(),
 				save: (c, entries) => this.save(c, entries),
-				deleteRepository: async (repository, idempotencyKey, grant) =>
+				deleteRepository: async (repository, idempotencyKey, grant, forgetStorage) =>
 					(await this.env.CONTROL_TOWER.getByName(repository.id).command(
 						repository,
 						CommandInput.parse({
@@ -59,6 +59,7 @@ export class NamespaceRuntime extends DurableObject<NamespaceEnv> {
 							repositoryId: repository.id,
 							idempotencyKey,
 							confirmation: repository.name,
+							...(forgetStorage ? { forgetStorage: true } : {}),
 						}),
 						grant,
 					)) as { state: string; reason?: string; blocked?: boolean },
@@ -71,6 +72,7 @@ export class NamespaceRuntime extends DurableObject<NamespaceEnv> {
 						new ResourceBoundary(this.store, this.env, { namespace: c.state.namespace.id }).storage(),
 					).blockers;
 				},
+				storage: () => new ResourceBoundary(this.store, this.env, { namespace: this.controller().state.namespace.id }).storage(),
 				retire: (namespace, members) => namespaceDirectory(this.env).retire(namespace.id, members),
 				schedule: async (at) => {
 					const current = await this.ctx.storage.getAlarm();
@@ -103,7 +105,7 @@ export class NamespaceRuntime extends DurableObject<NamespaceEnv> {
 		await this.deletion().recover();
 	}
 	/** The console owner's permanent deletion of this shared namespace and every repository in it. */
-	deleteNamespace(grant: ConnectionGrant, input: { confirmation: string; idempotencyKey: string }) {
+	deleteNamespace(grant: ConnectionGrant, input: { confirmation: string; idempotencyKey: string; forgetStorage?: true }) {
 		return this.deletion().command(grant, input);
 	}
 	private controller(repositoryId?: string) {

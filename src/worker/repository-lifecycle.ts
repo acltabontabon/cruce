@@ -1,7 +1,7 @@
 import { DomainError, domainStatus, publicError, stable } from "../core/errors.ts";
 import { initialRepository } from "../core/platform.ts";
 import { repositoryLifecycleView, repositoryOwner } from "../core/repository-lifecycle.ts";
-import type { Authority, Command, Repository, RepositoryState, ResourceReservation } from "../shared/platform.ts";
+import type { Authority, Command, Repository, RepositoryState, ResourceReservation, ResourceStorage } from "../shared/platform.ts";
 import type { RepositoryHost } from "./artifacts.ts";
 import type { ConnectionGrant } from "./namespace-runtime.ts";
 import { hash, type Store, someRecord } from "./store.ts";
@@ -25,6 +25,8 @@ export interface LifecyclePort {
 	): Promise<{ id: string }>;
 	settle(id: string, state: "complete" | "uncertain"): unknown | Promise<unknown>;
 	host(): Promise<RepositoryHost>;
+	/** Read-only storage readiness; never binds or calls the provider. */
+	storage(): Promise<ResourceStorage>;
 	schedule(at: number): Promise<void>;
 	resetCache(): void;
 }
@@ -36,6 +38,10 @@ interface Deletion {
 	cursor?: string;
 	canonicalConfirmed?: boolean;
 	hasResources: boolean;
+	/** The owner confirmed Cruce will not delete this repository's unreachable legacy storage; only records are removed. */
+	forget?: boolean;
+	/** Provider repositories left in legacy storage, kept with the receipt so they can be removed outside Cruce. */
+	forgotten?: { name: string; id?: string }[];
 	phase: "authorized" | "deleting" | "confirmed" | "purging" | "complete";
 	state: "pending" | "blocked" | "complete";
 	reason?: string;
@@ -77,6 +83,13 @@ export class RepositoryLifecycleRuntime {
 			)
 		)
 			for (const list of [view.blockers, view.deletionBlockers]) list.push("Disable push observation and finish subscription cleanup.");
+		// Deletion needs storage to remove what the repository holds. Legacy storage cannot be reached at all, so
+		// deleting it can only forget it; other unavailable storage can be restored, so deletion waits for it.
+		const storage = await this.port.storage();
+		if (!storage.ready) {
+			if (storage.legacy) view.forgetStorage = true;
+			else view.deletionBlockers.push(storage.reason);
+		}
 		if (transition && view.owner)
 			view.transition = {
 				tool: transition.lifecycle.state === "archived" ? "archive_repository" : "restore_repository",
@@ -84,7 +97,11 @@ export class RepositoryLifecycleRuntime {
 			};
 		if (deletion && deletion.phase !== "complete") {
 			view.state = "deleting";
-			view.deletion = { idempotencyKey: deletion.command.idempotencyKey!, reason: deletion.reason };
+			view.deletion = {
+				idempotencyKey: deletion.command.idempotencyKey!,
+				reason: deletion.reason,
+				...(deletion.forget ? { forgetStorage: true as const } : {}),
+			};
 		}
 		return view;
 	}
@@ -98,7 +115,12 @@ export class RepositoryLifecycleRuntime {
 			await this.port.releaseReservation(grant, repository.id, requireReservation(command.reservationId));
 			return this.view(repository, grant, a);
 		}
-		if (Object.keys(command).some((key) => !["tool", "namespaceId", "repositoryId", "idempotencyKey", "confirmation"].includes(key)))
+		if (
+			Object.keys(command).some(
+				(key) => !["tool", "namespaceId", "repositoryId", "idempotencyKey", "confirmation", "forgetStorage"].includes(key),
+			) ||
+			(command.forgetStorage && command.tool !== "delete_repository")
+		)
 			throw new DomainError(400, "Unsupported repository lifecycle input");
 		if (!command.idempotencyKey) throw new DomainError(400, "Mutation requires an idempotency key");
 		const fingerprint = stable({ command, actorId: grant.actor.id });
@@ -142,6 +164,13 @@ export class RepositoryLifecycleRuntime {
 		if (command.tool !== "restore_repository" && blockers.length) throw new DomainError(409, "Repository retirement has blockers");
 		if (command.tool === "delete_repository") {
 			if (command.confirmation !== repository.name) throw new DomainError(400, "Type the repository name to confirm deletion");
+			if (Boolean(command.forgetStorage) !== Boolean(view.forgetStorage))
+				throw new DomainError(
+					409,
+					view.forgetStorage
+						? "Confirm that Cruce will not delete this repository's legacy storage"
+						: "Storage is reachable; delete without forgetting it",
+				);
 			// Inventory includes source/evidence stores and identities preserved when finished work was archived.
 			const state = this.state(repository);
 			const identities = [
@@ -149,7 +178,8 @@ export class RepositoryLifecycleRuntime {
 				...state.workspaces.flatMap((w) => (w.fork ? [{ name: w.fork.name, id: w.fork.id }] : [])),
 				...state.artifacts.map((artifact) => ({ name: artifact.storage.repository, id: artifact.storage.providerId })),
 			];
-			for (const identity of identities) {
+			// Forgetting removes no provider repository, so it needs no recorded identity; it keeps the inventory instead.
+			for (const identity of command.forgetStorage ? [] : identities) {
 				if (!identity.id) throw new DomainError(409, "Provider repository identity unavailable");
 				const key = `provider-repository:${identity.name}`;
 				const old = this.store.get<string>(key);
@@ -162,7 +192,8 @@ export class RepositoryLifecycleRuntime {
 				fingerprint,
 				phase: "authorized",
 				state: "pending",
-				hasResources: this.store.scan("provider-repository:", undefined, 1).length > 0,
+				hasResources: !command.forgetStorage && this.store.scan("provider-repository:", undefined, 1).length > 0,
+				...(command.forgetStorage ? { forget: true, forgotten: this.inventory(identities) } : {}),
 			};
 			await this.port.schedule(this.now() + 30_000);
 			this.store.put(deletionKey, intent);
@@ -219,6 +250,11 @@ export class RepositoryLifecycleRuntime {
 				{ key: "repository", value: state },
 			]);
 			await this.port.lifecycle(deletion.grant, repository.id, lifecycle);
+			if (deletion.forget && deletion.phase === "authorized") {
+				// Nothing reachable to remove: the owner's confirmation stands in for confirmed absence.
+				deletion.phase = "confirmed";
+				this.store.put(deletionKey, deletion);
+			}
 			if (["authorized", "deleting"].includes(deletion.phase)) {
 				deletion.phase = "deleting";
 				this.store.put(deletionKey, deletion);
@@ -304,6 +340,13 @@ export class RepositoryLifecycleRuntime {
 				await this.port.settle(deletion.reservationId, "uncertain");
 			return { state: "deleting", reason: deletion.reason, blocked: deletion.state === "blocked" };
 		}
+	}
+	/** Every provider repository this repository is known to hold: current state plus identities recorded earlier. */
+	private inventory(identities: { name: string; id?: string }[]) {
+		const all = new Map(identities.map((identity) => [identity.name, identity]));
+		for (const row of this.store.scan<string>("provider-repository:", undefined, 2048))
+			all.set(row.key.slice("provider-repository:".length), { name: row.key.slice("provider-repository:".length), id: row.value });
+		return [...all.values()].toSorted((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).slice(0, 2048);
 	}
 	private pending(deletion: Deletion) {
 		deletion.nextAttempt = this.now() + 30_000;

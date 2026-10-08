@@ -279,7 +279,9 @@ export async function platformRoute(
 	}
 	if (parts[3] === "deletion" && parts.length === 4 && request.method === "POST") {
 		// Console only: agents and terminals were refused above, and the namespace checks for its human owner.
-		const body = z.object({ confirmation: name, idempotencyKey: id }).parse(await input(request));
+		const body = z
+			.object({ confirmation: name, idempotencyKey: id, forgetStorage: z.literal(true).optional() })
+			.parse(await input(request));
 		return json(await namespace.deleteNamespace(grant, body));
 	}
 	if (parts[3] === "members" && request.method === "POST") {

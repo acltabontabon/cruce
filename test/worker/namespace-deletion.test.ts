@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { namespaceDeletionView } from "../../src/core/namespace-lifecycle.ts";
 import { initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
 import { initialRepository } from "../../src/core/platform.ts";
-import type { Actor, Command, Repository, Workspace } from "../../src/shared/platform.ts";
+import type { Actor, Command, Repository, ResourceStorage, Workspace } from "../../src/shared/platform.ts";
 import type { StorageEnv } from "../../src/worker/artifacts.ts";
 import { Directory } from "../../src/worker/directory.ts";
 import type { ConnectionGrant } from "../../src/worker/namespace-runtime.ts";
@@ -90,6 +90,10 @@ function fixture(kind: "shared" | "personal" = "shared") {
 				ns.reserve(g, rid, key, fingerprint, action, undefined, storage),
 			settle: (rid: string, state: "complete" | "uncertain") => ns.settle(rid, state),
 			host: async () => ({ remove }) as never,
+			storage: async (): Promise<ResourceStorage> =>
+				ns.resourceConfiguration().legacyAccount
+					? { mode: "deployment", ready: false, reason: "legacy", legacy: true }
+					: { mode: "deployment", ready: true },
 			schedule: async () => {},
 			resetCache: () => {},
 		};
@@ -100,6 +104,7 @@ function fixture(kind: "shared" | "personal" = "shared") {
 	return {
 		ns,
 		store,
+		env: env as { ARTIFACTS?: Artifacts },
 		add,
 		towers,
 		removed,
@@ -166,16 +171,35 @@ describe("permanent namespace deletion", () => {
 		expect(f.removed).toEqual([]);
 	});
 
-	it("refuses before freezing when installation storage is unavailable, unless nothing needs storage", async () => {
+	it("forgets unreachable legacy storage only when the owner confirms it, removing no provider repository", async () => {
+		const f = fixture();
+		f.add(repository("r1", "api"), [liveWorkspace("w1")]);
+		f.store.put("resource-account", { legacy: true });
+		await expect(f.remove()).rejects.toThrow("Confirm that Cruce will not delete this namespace's legacy storage");
+		expect(f.ns.snapshot(console_(owner)).lifecycle).toBeUndefined();
+
+		const forget = { confirmation: "team", idempotencyKey: "forget", forgetStorage: true as const };
+		expect(await f.ns.deleteNamespace(console_(owner), forget)).toEqual({ state: "deleted" });
+		expect(f.removed).toEqual([]);
+		expect(f.retire).toHaveBeenCalledWith("team", ["owner"]);
+		const receipt = f.towers.get("r1")!.store.get<{ forget: boolean; forgotten: { name: string }[] }>("repository-deletion");
+		expect(receipt?.forget).toBe(true);
+		expect(receipt?.forgotten.map((r) => r.name)).toEqual(["repo-r1", "w1-fork"]);
+	});
+
+	it("waits for restorable storage, never forgets reachable storage, and deletes an empty namespace without storage", async () => {
 		const f = fixture();
 		f.add(repository("r1", "api"));
-		f.store.put("resource-account", { legacy: true });
+		await expect(f.ns.deleteNamespace(console_(owner), { confirmation: "team", idempotencyKey: "k", forgetStorage: true })).rejects.toThrow(
+			"Storage is reachable; delete without forgetting it",
+		);
+		f.env.ARTIFACTS = undefined;
 		await expect(f.remove()).rejects.toThrow("Namespace deletion has blockers");
 		expect(f.ns.snapshot(console_(owner)).lifecycle).toBeUndefined();
 		expect(f.removed).toEqual([]);
 
 		const empty = fixture();
-		empty.store.put("resource-account", { legacy: true });
+		empty.env.ARTIFACTS = undefined;
 		expect(await empty.remove()).toEqual({ state: "deleted" });
 	});
 

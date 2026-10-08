@@ -111,6 +111,7 @@ export class RepositoryRuntime {
 					this.namespace.reserve(grant, id, key, fingerprint, action, undefined, storageRequired),
 				settle: (id, state) => this.namespace.settle(id, state),
 				host: async () => (await this.resources()).host(),
+				storage: async () => (await this.resources()).storage(),
 				schedule: async (at) => {
 					if (!this.recovery) throw new DomainError(503, "Repository lifecycle unavailable");
 					await this.recovery.schedule(at);

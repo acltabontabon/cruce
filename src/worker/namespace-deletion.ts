@@ -1,7 +1,7 @@
 import { DomainError, domainStatus, publicError, stable } from "../core/errors.ts";
 import type { NamespaceController } from "../core/ownership.ts";
 import { repositoryOwner } from "../core/repository-lifecycle.ts";
-import type { Namespace, Repository } from "../shared/platform.ts";
+import type { Namespace, Repository, ResourceStorage } from "../shared/platform.ts";
 import type { ConnectionGrant } from "./namespace-runtime.ts";
 import type { Store } from "./store.ts";
 
@@ -14,15 +14,19 @@ export interface NamespaceDeletionPort {
 		repository: Repository,
 		idempotencyKey: string,
 		grant: ConnectionGrant,
+		forgetStorage: boolean,
 	): Promise<{ state: string; reason?: string; blocked?: boolean }>;
+	/** Read-only storage readiness of the namespace; never binds or calls the provider. */
+	storage(): ResourceStorage;
 	/** Whatever stops deleting the namespace's repositories, each naming its repository. */
 	blockers(grant: ConnectionGrant): Promise<string[]>;
 	/** Removes the namespace from discovery and frees its handle. Idempotent. */
 	retire(namespace: Namespace, members: string[]): Promise<unknown>;
 	schedule(at: number): Promise<void>;
 }
+type Input = { confirmation: string; idempotencyKey: string; forgetStorage?: true };
 interface Deletion {
-	input: { confirmation: string; idempotencyKey: string };
+	input: Input;
 	grant: ConnectionGrant;
 	fingerprint: string;
 	phase: "repositories" | "directory" | "complete";
@@ -47,10 +51,11 @@ export class NamespaceDeletionRuntime {
 		if (!deletion || deletion.phase === "complete") return;
 		return {
 			idempotencyKey: deletion.input.idempotencyKey,
+			...(deletion.input.forgetStorage ? { forgetStorage: true as const } : {}),
 			...(deletion.reason ? { reason: deletion.repository ? `${deletion.repository}: ${deletion.reason}` : deletion.reason } : {}),
 		};
 	}
-	async command(grant: ConnectionGrant, input: { confirmation: string; idempotencyKey: string }) {
+	async command(grant: ConnectionGrant, input: Input) {
 		const c = this.port.load();
 		const a = c.authority(grant.actor);
 		repositoryOwner(a);
@@ -64,6 +69,16 @@ export class NamespaceDeletionRuntime {
 		if (c.state.namespace.kind !== "shared")
 			throw new DomainError(409, "A personal namespace belongs to its account; delete its repositories instead");
 		if (input.confirmation !== c.state.namespace.handle) throw new DomainError(400, "Type the namespace handle to confirm deletion");
+		// Legacy storage cannot be reached, so its repositories can only be forgotten, and only with the owner's confirmation.
+		const storage = this.port.storage();
+		const forget = !storage.ready && Boolean(storage.legacy) && this.live().length > 0;
+		if (Boolean(input.forgetStorage) !== forget)
+			throw new DomainError(
+				409,
+				forget
+					? "Confirm that Cruce will not delete this namespace's legacy storage"
+					: "Storage is reachable; delete without forgetting it",
+			);
 		if ((await this.port.blockers(grant)).length) throw new DomainError(409, "Namespace deletion has blockers");
 		const deletion: Deletion = {
 			input,
@@ -101,7 +116,7 @@ export class NamespaceDeletionRuntime {
 							: `${deletion.input.idempotencyKey}:${repository.id}`;
 					let result: Awaited<ReturnType<NamespaceDeletionPort["deleteRepository"]>>;
 					try {
-						result = await this.port.deleteRepository(repository, key, deletion.grant);
+						result = await this.port.deleteRepository(repository, key, deletion.grant, Boolean(deletion.input.forgetStorage));
 					} catch (error) {
 						deletion.repository = repository.name;
 						throw error;

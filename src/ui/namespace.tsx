@@ -389,10 +389,11 @@ function NamespaceDeletion({
 	const [confirmation, setConfirmation] = useState("");
 	// One operation identity per confirmation, so a lost response is retried rather than refused.
 	const [key, setKey] = useState("");
+	const [forget, setForget] = useState(false);
 	const view = namespace.deletion,
 		ns = namespace.namespace;
 	if (ns.kind !== "shared") return null;
-	const submit = async (input: { confirmation: string; idempotencyKey: string }) => {
+	const submit = async (input: { confirmation: string; idempotencyKey: string; forgetStorage?: true }) => {
 		const result = await mutate<{ state: string }>(`${base}/deletion`, input);
 		setConfirming(false);
 		if (result.state === "deleted") deleted();
@@ -415,7 +416,16 @@ function NamespaceDeletion({
 					</p>
 					{view.deletion?.reason && <p role="alert">{view.deletion.reason}</p>}
 					{view.owner && view.deletion && (
-						<Form label="Retry deletion" submit={() => submit({ confirmation: ns.handle, idempotencyKey: view.deletion!.idempotencyKey })}>
+						<Form
+							label="Retry deletion"
+							submit={() =>
+								submit({
+									confirmation: ns.handle,
+									idempotencyKey: view.deletion!.idempotencyKey,
+									...(view.deletion!.forgetStorage ? { forgetStorage: true as const } : {}),
+								})
+							}
+						>
 							<span>Resumes the same authorized deletion.</span>
 						</Form>
 					)}
@@ -423,6 +433,12 @@ function NamespaceDeletion({
 			) : (
 				<>
 					<p>{view.blockers.length ? "Deletion waits for the items below." : `Deletes the namespace with ${deletedWork(view)}`}</p>
+					{view.forgetStorage && (
+						<p>
+							This namespace's repositories are in connected-account storage from before this installation managed storage. Cruce can't
+							reach it, so deleting removes Cruce's records only.
+						</p>
+					)}
 					{view.blockers.length > 0 && (
 						<ul>
 							{view.blockers.map((blocker) => (
@@ -438,6 +454,7 @@ function NamespaceDeletion({
 								disabled={view.blockers.length > 0}
 								onClick={() => {
 									setConfirmation("");
+									setForget(false);
 									setKey(crypto.randomUUID());
 									setConfirming(true);
 								}}
@@ -459,14 +476,26 @@ function NamespaceDeletion({
 						Local checkouts and external upstream repositories remain. Members lose access and the handle can be used again. This uses
 						installation cloud resources under namespace policy.
 					</p>
+					{view.forgetStorage && (
+						<p role="alert">
+							Cruce can't reach this namespace's old connected-account storage and won't delete it. Its repositories' Git stays there until
+							someone removes it in that account. Each deleted repository keeps a list of what it left behind.
+						</p>
+					)}
 					<Form
 						label="Delete namespace permanently"
 						danger
 						primary
 						cancel={() => setConfirming(false)}
-						disabled={confirmation !== ns.handle}
-						submit={() => submit({ confirmation, idempotencyKey: key })}
+						disabled={confirmation !== ns.handle || (view.forgetStorage && !forget)}
+						submit={() => submit({ confirmation, idempotencyKey: key, ...(view.forgetStorage ? { forgetStorage: true as const } : {}) })}
 					>
+						{view.forgetStorage && (
+							<label className="checkbox">
+								<input type="checkbox" checked={forget} onChange={(event) => setForget(event.target.checked)} />I understand Cruce will not
+								delete the old storage
+							</label>
+						)}
 						<label>
 							Type {ns.handle} to confirm
 							<input autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required />

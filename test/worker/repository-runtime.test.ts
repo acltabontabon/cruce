@@ -87,6 +87,7 @@ async function fixture(_hosted = true) {
 	};
 	const push = vi.spyOn(git, "push").mockResolvedValue({} as never);
 	vi.spyOn(ResourceBoundary.prototype, "host").mockResolvedValue(host);
+	vi.spyOn(ResourceBoundary.prototype, "storage").mockReturnValue({ mode: "deployment", ready: true });
 	const store = memory(),
 		port = {
 			authority: (g: typeof grant, id?: string) => w.authority(g.actor, id, g.scopes, g.repositories),

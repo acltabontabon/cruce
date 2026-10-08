@@ -59,6 +59,8 @@ Moving an installation to a different account or physical namespace is not suppo
 - keep the old storage until every published revision is retained elsewhere
 - record the decision
 
+To retire a legacy connected-account namespace instead, delete it with **Forget storage** confirmed ([ADR 0013](decisions/0013-forgetting-unreachable-legacy-storage.md)). Cruce removes only its own records; each repository's deletion receipt lists the provider repositories left in the old storage. Removing them there is a separate administrator decision.
+
 ## Fork cleanup blockers
 
 **Inspect.** `get_retention`, then explicit `inspect_retention`. The latter is a `source.read` resource operation and checks every fork ref against canonical and retained source.

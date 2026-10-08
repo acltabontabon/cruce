@@ -80,9 +80,11 @@ export interface RepositoryLifecycleView {
 	deletionBlockers: string[];
 	/** Work that permanent deletion ends with the repository. */
 	unfinished: { workspaces: number; attached: number; changes: number };
+	/** Its storage is legacy and unreachable: deletion can only forget it, removing Cruce's records but not that storage. */
+	forgetStorage?: true;
 	/** Cloud operations that never settled; the owner can release each after deciding nothing more will come of it. */
 	operations?: { id: string; action: ResourceAction; state: "reserved" | "uncertain"; at: number; workspaceId?: string }[];
-	deletion?: { idempotencyKey: string; reason?: string };
+	deletion?: { idempotencyKey: string; reason?: string; forgetStorage?: true };
 	transition?: { tool: "archive_repository" | "restore_repository"; idempotencyKey: string };
 }
 export interface NamespaceLifecycle {
@@ -103,7 +105,9 @@ export interface NamespaceDeletionView {
 	unfinished: { workspaces: number; attached: number; changes: number };
 	/** What stops deletion, each naming its repository. */
 	blockers: string[];
-	deletion?: { idempotencyKey: string; reason?: string; remaining: number };
+	/** Its storage is legacy and unreachable: deletion can only forget its repositories' storage, never remove it. */
+	forgetStorage: boolean;
+	deletion?: { idempotencyKey: string; reason?: string; remaining: number; forgetStorage?: true };
 }
 export interface Repository {
 	lifecycle?: RepositoryLifecycle;
@@ -142,7 +146,10 @@ export interface ResourceReservation {
 	at: number;
 	state: "reserved" | "complete" | "uncertain" | "released";
 }
-export type ResourceStorage = { mode: "deployment"; ready: true } | { mode: "deployment"; ready: false; reason: string };
+export type ResourceStorage =
+	| { mode: "deployment"; ready: true }
+	/** `legacy`: connected-account storage from before deployment-managed storage, which Cruce can no longer reach. */
+	| { mode: "deployment"; ready: false; reason: string; legacy?: true };
 export interface NamespaceState {
 	namespace: Namespace;
 	members: Record<string, NamespaceRole>;
@@ -546,6 +553,7 @@ export const CommandInput = z
 	.object({
 		tool: z.string(),
 		confirmation: z.string().max(120).optional(),
+		forgetStorage: z.literal(true).optional(),
 		reservationId: z.string().min(1).max(400).optional(),
 		enabled: z.boolean().optional(),
 		namespaceId: id.optional(),

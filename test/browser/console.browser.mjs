@@ -2669,3 +2669,33 @@ test("a namespace deletion in progress freezes the namespace and retries the ori
 	assert.deepEqual(posts[1], posts[0]);
 	assert.equal(posts[0].confirmation, "fernloop");
 });
+
+test("a namespace on unreachable legacy storage can only be forgotten after an explicit acknowledgment", async () => {
+	const posts = [];
+	await page.route("**/api/namespaces/fernloop", async (route) => {
+		if (route.request().method() !== "GET") return route.continue();
+		const response = await route.fetch();
+		const view = await response.json();
+		view.deletion = { ...view.deletion, forgetStorage: true };
+		await route.fulfill({ response, json: view });
+	});
+	await page.route("**/api/namespaces/fernloop/deletion", async (route) => {
+		posts.push(route.request().postDataJSON());
+		return route.continue();
+	});
+	await page.goto(`${server.origin}/?namespace=fernloop`);
+	await page.getByRole("button", { name: "Settings", exact: true }).click();
+	await page.getByText("Cruce can't reach it, so deleting removes Cruce's records only.", { exact: false }).waitFor();
+	await page.getByRole("button", { name: "Delete namespace…", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "Delete namespace permanently", exact: true });
+	assert.match(await dialog.getByRole("alert").innerText(), /won't delete it/);
+	const confirm = dialog.getByRole("button", { name: "Delete namespace permanently", exact: true });
+	await dialog.getByLabel("Type fernloop to confirm", { exact: true }).fill("fernloop");
+	assert.equal(await confirm.isDisabled(), true);
+	await dialog.getByLabel("I understand Cruce will not delete the old storage", { exact: true }).check();
+	await page.screenshot({ path: "dist/ui-checks/delete-namespace-forget-storage.png", fullPage: true });
+	await confirm.click();
+	await page.waitForURL((url) => !url.search.includes("namespace=fernloop"));
+	assert.equal(posts.length, 1);
+	assert.equal(posts[0].forgetStorage, true);
+});
