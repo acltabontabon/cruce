@@ -169,7 +169,7 @@ it("targets independent workspaces through one running bridge and sees CLI state
 			const directory = String(workspace.directory);
 			await writeFile(join(directory, "change.txt"), String(workspace.id));
 			await promisify(execFile)("git", ["-C", directory, "add", "."]);
-			await promisify(execFile)("git", ["-C", directory, "commit", "-qm", String(workspace.id)]);
+			await promisify(execFile)("git", ["-C", directory, "-c", "user.email=a@example.com", "-c", "user.name=A", "commit", "-qm", String(workspace.id)]);
 		}
 		const results = await Promise.all(
 			[first, second].map((workspace) => client.callTool({ name: "publish_revision", arguments: { workspaceId: workspace.id } })),

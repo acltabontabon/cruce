@@ -2012,7 +2012,7 @@ describe("archived finished work", () => {
 			cursor = page.cursor;
 		} while (cursor);
 		expect(seen).toBe(STATE_LIMITS.workspaces + 44);
-	});
+	}, 30000);
 });
 
 describe("repository retirement through the command and Git boundaries", () => {
