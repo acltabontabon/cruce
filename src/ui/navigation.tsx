@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import type { Namespace, Repository, User } from "../shared/platform.ts";
 import { BRAND, Brand } from "./brand.tsx";
 import { Icon } from "./design.tsx";
+import { SkeletonText, useProgress } from "./loading.tsx";
 import { RepositorySearch } from "./search.tsx";
 import { type Appearance, useAppearance } from "./theme.ts";
 
@@ -212,6 +213,7 @@ export function ConsoleHeader({
 	setup,
 	accountRequested,
 	create,
+	unavailable,
 }: {
 	me: { user: User; namespaces: Namespace[] };
 	screen: string;
@@ -226,10 +228,13 @@ export function ConsoleHeader({
 	setup: () => void;
 	accountRequested: boolean;
 	create: () => void;
+	/** The current namespace or repository failed to load; until then a missing name is still arriving. */
+	unavailable: boolean;
 }) {
-	const [appearance, setAppearance] = useAppearance();
+	const [appearance, setAppearance] = useAppearance(),
+		pending = useProgress();
 	return (
-		<header className="console-header" data-scope={screen}>
+		<header className="console-header" data-scope={screen} data-pending={pending || undefined}>
 			<div className="header-inner">
 				<a
 					className="brand"
@@ -254,7 +259,7 @@ export function ConsoleHeader({
 								routeKey={routeKey}
 								trigger={
 									<span className="scope-name" title={namespace?.name}>
-										{namespace?.name ?? "Namespace unavailable"}
+										{namespace?.name ?? (unavailable ? "Namespace unavailable" : <SkeletonText label="Loading namespace" />)}
 									</span>
 								}
 								options={me.namespaces.map((item) => ({
@@ -279,7 +284,7 @@ export function ConsoleHeader({
 											<>
 												<Icon name="branch" />
 												<span className="scope-name" title={repository?.name}>
-													{repository?.name ?? "Repository unavailable"}
+													{repository?.name ?? (unavailable ? "Repository unavailable" : <SkeletonText label="Loading repository" />)}
 												</span>
 											</>
 										}
@@ -377,6 +382,7 @@ export function ConsoleHeader({
 					</HeaderDropdown>
 				</div>
 			</div>
+			<span className="header-progress" aria-hidden="true" />
 		</header>
 	);
 }

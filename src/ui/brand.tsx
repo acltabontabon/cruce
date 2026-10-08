@@ -1,3 +1,5 @@
+import { MARK } from "./splash.ts";
+
 export const BRAND = {
 	name: "Cruce",
 	symbol: "/brand/symbol.svg",
@@ -10,10 +12,10 @@ export const BRAND = {
 export function Brand() {
 	return (
 		<>
-			<svg className="brand-symbol" viewBox="0 0 32 32" aria-hidden="true">
+			<svg className="brand-symbol" viewBox={MARK.viewBox} aria-hidden="true">
 				<g fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-					<path d="M4 25 14.3 6.8Q16 3.8 17.7 6.8L28 25" />
-					<path d="M3 14h3m5 3 2.2 3.2q2.8 4 5.6 0L21 17m5-3h3" />
+					<path d={MARK.arch} />
+					<path d={MARK.crossing} />
 				</g>
 			</svg>
 			<span className="brand-name">{BRAND.name}</span>

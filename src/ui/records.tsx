@@ -3,6 +3,7 @@ import type { ActivityEvent, ArchiveBundle, Artifact, RepositorySnapshot } from 
 import { Form, short, time, value } from "./controls.tsx";
 import { BackLink, Icon, PageHeader } from "./design.tsx";
 import type { Execute } from "./inspect.tsx";
+import { SkeletonPage } from "./loading.tsx";
 import { actorLabel, ago, ownerName, type People } from "./status.ts";
 
 export function RetainedRecordRow({ record: a, open }: { record: Artifact; open: (id: string) => void }) {
@@ -363,7 +364,7 @@ export function ArchivedRecord({
 		};
 	}, [id]);
 	if (error) return <p role="alert">{error}</p>;
-	if (bundle === undefined) return <p className="muted">Loading…</p>;
+	if (bundle === undefined) return <SkeletonPage label="Loading record" />;
 	if (bundle === null) return <p className="empty">{missing}</p>;
 	const w = bundle.workspace;
 	return (

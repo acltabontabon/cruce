@@ -431,24 +431,64 @@ test("sign-in goes directly to Access and saved sign-in links skip the removed p
 	assert.equal(new URL(page.url()).pathname, "/");
 	assert.equal(await page.locator(".sign-in").count(), 0);
 });
-test("fast session checks do not flash loading content; slow checks remain visible", async () => {
+test("cold start shows one splash until the first screen, on the surface this browser last used", async () => {
 	await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
 	await page.addInitScript(() => {
-		window.loadingMessages = [];
-		new MutationObserver(() => {
-			const status = document.querySelector(".session-status [role=status]");
-			if (status) window.loadingMessages.push(status.textContent);
-		}).observe(document, { childList: true, subtree: true });
+		window.splash = { mark: false, text: false };
+		const watch = () => {
+			const mark = document.querySelector(".boot .boot-mark");
+			if (mark && Number(getComputedStyle(mark).opacity) > 0) window.splash.mark = true;
+			if (/Loading Cruce…|Checking sign-in/.test(document.body?.innerText ?? "")) window.splash.text = true;
+			requestAnimationFrame(watch);
+		};
+		requestAnimationFrame(watch);
 	});
-	await openHomepage();
-	assert.deepEqual(await page.evaluate(() => window.loadingMessages), []);
-	assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(245, 245, 239)");
+	const background = () => page.locator("#boot").evaluate((element) => getComputedStyle(element).backgroundColor);
+	// A browser that has not signed in starts on the public paper surface, whatever the appearance.
 	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: false, delay: 900 } });
 	await page.goto(server.origin);
-	await page.getByRole("status").filter({ hasText: "Checking sign-in…" }).waitFor();
-	assert.equal(await page.locator(".session-status").evaluate((element) => element.getBoundingClientRect().height <= innerHeight), true);
-	assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(245, 245, 239)");
+	assert.equal(await background(), "rgb(245, 245, 239)");
+	assert.equal(await page.locator("#boot[role=status]").textContent(), "Loading Cruce");
+	await page.waitForFunction(() => window.splash.mark);
 	await page.getByRole("heading", { name: "Code is written in parallel now. The decision is still yours.", level: 1 }).waitFor();
+	await page.locator("#boot").waitFor({ state: "detached" });
+	assert.equal(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor), "rgb(245, 245, 239)");
+	// Signing in carries the same splash through the session check, the console code and identity: no loading text in between.
+	await page.request.post(`${server.origin}/__fixture/session`, { data: { authenticated: true, delay: 900 } });
+	await page.goto(server.origin);
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
+	await page.locator("#boot").waitFor({ state: "detached" });
+	assert.deepEqual(await page.evaluate(() => window.splash), { mark: true, text: false });
+	// The next cold start paints the console surface in the saved appearance.
+	await page.goto(server.origin);
+	assert.equal(await background(), "rgb(15, 17, 26)");
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
+	assert.equal(await page.evaluate(() => window.splash.text), false);
+});
+test("opening a page shows header progress and placeholders until its data arrives", async () => {
+	await page.goto(server.origin);
+	await page.getByRole("heading", { name: "Your repositories", exact: true }).waitFor();
+	let release;
+	const held = new Promise((resolve) => {
+		release = resolve;
+	});
+	await page.route("**/api/namespaces/fernloop/repositories/payments", async (route) => {
+		await held;
+		await route.continue();
+	});
+	await page.locator(".repo-row").filter({ hasText: "payment-service" }).first().click();
+	const header = page.locator(".console-header");
+	await page.locator(".console-header[data-pending]").waitFor();
+	await page.waitForFunction(() => getComputedStyle(document.querySelector(".header-progress")).opacity === "1");
+	assert.equal(await page.locator("#content").getAttribute("aria-busy"), "true");
+	await page.locator(".skeleton-page").waitFor();
+	assert.equal(await header.getByText("Repository unavailable").count(), 0);
+	assert.equal(await page.getByText(/Loading repository…/).count(), 0);
+	release();
+	await page.getByRole("heading", { name: "payment-service", exact: true }).waitFor();
+	await page.locator(".console-header:not([data-pending])").waitFor();
+	assert.equal(await page.locator("#content").getAttribute("aria-busy"), "false");
+	await page.unroute("**/api/namespaces/fernloop/repositories/payments");
 });
 test("local setup is once per machine, then lists what each connection may do and revokes one", async () => {
 	await page.goto(server.origin);

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Command } from "../shared/platform.ts";
+import { SkeletonLines } from "./loading.tsx";
 import { short } from "./status.ts";
 
 export type Execute = (cmd: Partial<Command> & { tool: string }) => Promise<unknown>;
@@ -174,7 +175,7 @@ export function RevisionBrowser({
 				</div>
 			</div>
 			<StoredSource key={revision} revision={revision} execute={execute} />
-			{loading && <p role="status">Loading revision…</p>}
+			{loading && <SkeletonLines label="Loading revision" />}
 			{error && <p role="alert">{error}</p>}
 			{files && (
 				<div className="source-browser">

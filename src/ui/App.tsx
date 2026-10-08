@@ -4,6 +4,7 @@ import { BRAND } from "./brand.tsx";
 import { Empty, Form, PrefixedInput, value } from "./controls.tsx";
 import { Dialog } from "./design.tsx";
 import { NamespaceHome } from "./home.tsx";
+import { SkeletonPage, Splash, track, usePending, useProgress } from "./loading.tsx";
 import { LocalSetup } from "./local-setup.tsx";
 import { NamespacePage, namespaceViews } from "./namespace.tsx";
 import { ConsoleHeader } from "./navigation.tsx";
@@ -68,6 +69,10 @@ export function App() {
 		generation = useRef(0),
 		[busy, setBusy] = useState(false);
 	const reload = useCallback(() => setRefresh((n) => n + 1), []);
+	// Opening a namespace or repository shows progress until its first snapshot arrives; later polls stay silent.
+	usePending(!!route.namespaceId && namespace?.namespace.id !== route.namespaceId && !namespaceError);
+	usePending(!!route.repositoryId && view?.repository.id !== route.repositoryId && !error);
+	const progress = useProgress();
 	useEffect(() => {
 		alive.current = true;
 		return () => {
@@ -282,13 +287,15 @@ export function App() {
 		const fingerprint = JSON.stringify({ url, body, method }),
 			key = (body.idempotencyKey as string | undefined) ?? retries.current.get(fingerprint) ?? crypto.randomUUID();
 		retries.current.set(fingerprint, key);
-		const result = await request<T>(
-			url,
-			{
-				...body,
-				...(method === "POST" && (body.tool || url.endsWith("repositories") || url === "/api/namespaces") ? { idempotencyKey: key } : {}),
-			},
-			method,
+		const result = await track(
+			request<T>(
+				url,
+				{
+					...body,
+					...(method === "POST" && (body.tool || url.endsWith("repositories") || url === "/api/namespaces") ? { idempotencyKey: key } : {}),
+				},
+				method,
+			),
 		);
 		retries.current.delete(fingerprint);
 		if (refreshAfter) reload();
@@ -299,7 +306,7 @@ export function App() {
 	const execute = async (command: Partial<Command> & { tool: string }) => {
 		if (!view) throw new Error("Repository unavailable");
 		const url = `/api/namespaces/${route.namespaceId}/repositories/${route.repositoryId}/command`;
-		if (command.tool.startsWith("get_") || command.tool === "read_artifact") return request(url, command);
+		if (command.tool.startsWith("get_") || command.tool === "read_artifact") return track(request(url, command));
 		if (command.tool === "inspect_source" || command.tool === "recover_source") return mutate(url, command, "POST", false);
 		const originRoute = location.href;
 		const originVersion = navigationVersion.current;
@@ -318,20 +325,18 @@ export function App() {
 	};
 	const base = `/api/namespaces/${route.namespaceId}`;
 	if (!me)
-		return (
+		return identityError ? (
 			<main className="welcome">
 				<strong>{BRAND.name}</strong>
-				<h1>{identityError ? "Connection unavailable" : `Loading ${BRAND.name}…`}</h1>
-				{identityError && (
-					<>
-						<p role="alert">{identityError.message}</p>
-						<button type="button" onClick={reload}>
-							Retry
-						</button>
-						<a href="/auth/login">Sign in</a>
-					</>
-				)}
+				<h1>Connection unavailable</h1>
+				<p role="alert">{identityError.message}</p>
+				<button type="button" onClick={reload}>
+					Retry
+				</button>
+				<a href="/auth/login">Sign in</a>
 			</main>
+		) : (
+			<Splash />
 		);
 	if (location.pathname.startsWith("/invite/"))
 		return (
@@ -376,12 +381,14 @@ export function App() {
 					setup={() => navigateHome("setup")}
 					accountRequested={route.accountRequested}
 					create={() => setOverlay("create-namespace")}
+					unavailable={!!screenError}
 				/>
 			}
 		>
 			<main
 				id="content"
 				tabIndex={-1}
+				aria-busy={progress}
 				data-screen={route.screen === "namespace" ? (route.repositoryId ? route.tab : namespaceTab) : route.screen}
 			>
 				{screenError && (
@@ -431,8 +438,10 @@ export function App() {
 							}}
 							openSetup={() => navigateHome("setup")}
 						/>
+					) : error ? (
+						<Empty>Repository unavailable.</Empty>
 					) : (
-						<Empty>{error ? "Repository unavailable." : "Loading repository…"}</Empty>
+						<SkeletonPage label="Loading repository" />
 					)
 				) : namespace ? (
 					<NamespacePage
@@ -448,8 +457,10 @@ export function App() {
 							navigateHome();
 						}}
 					/>
+				) : namespaceError ? (
+					<Empty>Namespace unavailable.</Empty>
 				) : (
-					<Empty>{error ? "Namespace unavailable." : "Loading namespace…"}</Empty>
+					<SkeletonPage label="Loading namespace" />
 				)}
 			</main>
 			{overlay === "create-namespace" && (

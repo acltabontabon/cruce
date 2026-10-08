@@ -4,7 +4,7 @@ import type { AgentConnection } from "../shared/platform.ts";
 import { AgentMark } from "./agent-marks.tsx";
 import { Form } from "./controls.tsx";
 import { Dialog, Icon } from "./design.tsx";
-import { SkeletonRows } from "./home.tsx";
+import { SkeletonRows, track, usePending } from "./loading.tsx";
 import { request } from "./request.ts";
 
 /** Short names for what a connection may do beyond reading; the full scope label is in each item's tooltip. */
@@ -81,6 +81,7 @@ export function AgentConnections() {
 		[attempt, setAttempt] = useState(0),
 		[revoking, setRevoking] = useState<AgentConnection>(),
 		[notice, setNotice] = useState("");
+	usePending(!connections && !error);
 	useEffect(() => {
 		void attempt;
 		const controller = new AbortController();
@@ -137,7 +138,7 @@ export function AgentConnections() {
 						primary
 						cancel={() => setRevoking(undefined)}
 						submit={async () => {
-							await request(`/api/connections/${encodeURIComponent(revoking.id)}`, undefined, "DELETE");
+							await track(request(`/api/connections/${encodeURIComponent(revoking.id)}`, undefined, "DELETE"));
 							setConnections((list) => list?.filter((item) => item.id !== revoking.id));
 							setNotice(`${revoking.client} was revoked.`);
 							setRevoking(undefined);

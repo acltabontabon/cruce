@@ -1,35 +1,37 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { BRAND } from "./brand.tsx";
 import { Landing } from "./landing.tsx";
+import { Splash, settleBoot } from "./loading.tsx";
 import { request } from "./request.ts";
 import { rememberSignInDestination, requiresSignIn, restoreSignInDestination } from "./sign-in-destination.ts";
+import { SURFACE_KEY } from "./splash.ts";
 
 const Console = lazy(() => import("./App.tsx").then((module) => ({ default: module.App })));
 
+/** Remembers which surface this browser lands on, so the next cold start paints it straight away. */
+function rememberSurface(surface: "console" | "public") {
+	if (surface === "console") document.documentElement.dataset.surface = "console";
+	else delete document.documentElement.dataset.surface;
+	try {
+		localStorage.setItem(SURFACE_KEY, surface);
+	} catch {
+		// Without storage the next cold start paints the public surface.
+	}
+}
+
 function SessionStatus({ error, retry }: { error?: string; retry?: () => void }) {
-	const [visible, setVisible] = useState(false);
-	useEffect(() => {
-		// Fast session checks should not flash a separate loading screen.
-		const timer = setTimeout(() => setVisible(true), 300);
-		return () => clearTimeout(timer);
-	}, []);
+	if (!error) return <Splash />;
 	return (
-		<main className="session-status" aria-busy={!error}>
-			{(visible || error) && <img src={BRAND.wordmarkInk} alt={BRAND.name} />}
-			{error ? (
-				<>
-					<h1>Connection unavailable.</h1>
-					<p role="alert">{error}</p>
-					<button type="button" onClick={retry}>
-						Try again
-					</button>
-					<a href="/auth/login" onClick={rememberSignInDestination}>
-						Sign in
-					</a>
-				</>
-			) : visible ? (
-				<p role="status">Checking sign-in…</p>
-			) : null}
+		<main className="session-status">
+			<img src={BRAND.wordmarkInk} alt={BRAND.name} />
+			<h1>Connection unavailable.</h1>
+			<p role="alert">{error}</p>
+			<button type="button" onClick={retry}>
+				Try again
+			</button>
+			<a href="/auth/login" onClick={rememberSignInDestination}>
+				Sign in
+			</a>
 		</main>
 	);
 }
@@ -87,10 +89,14 @@ export function SessionBoundary() {
 			window.removeEventListener("pageshow", restored);
 		};
 	}, [attempt]);
+	useEffect(() => {
+		if (state === "console" || state === "public") rememberSurface(state);
+		settleBoot();
+	}, [state]);
 	if (state === "public") return <Landing />;
 	if (state === "console")
 		return (
-			<Suspense fallback={<SessionStatus />}>
+			<Suspense fallback={<Splash />}>
 				<Console />
 			</Suspense>
 		);

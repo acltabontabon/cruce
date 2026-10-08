@@ -4,6 +4,7 @@ import type { AttentionItem, Namespace, Repository, User } from "../shared/platf
 import { Empty } from "./controls.tsx";
 import { Icon, Initials, PageHeader, Pill, Section } from "./design.tsx";
 import { MiniLanes } from "./lanes.tsx";
+import { SkeletonRows, usePending } from "./loading.tsx";
 import { request } from "./request.ts";
 import { ACTION_LABELS, blockerSummary, GROUP_LABELS, ownerName, type People, short, waitingOn } from "./status.ts";
 import type { NamespaceView } from "./types.ts";
@@ -71,20 +72,6 @@ export function totals(summaries: (Summary | undefined)[]) {
 			active: sum.active + (s?.active ?? 0),
 		}),
 		{ mine: 0, review: 0, ready: 0, active: 0 },
-	);
-}
-
-export function SkeletonRows({ label }: { label: string }) {
-	return (
-		<div className="rows skeleton" aria-busy="true">
-			<p className="sr-only">{label}</p>
-			{[0, 1, 2].map((n) => (
-				<span key={n} className="skeleton-row" aria-hidden="true">
-					<span />
-					<span />
-				</span>
-			))}
-		</div>
 	);
 }
 
@@ -269,6 +256,7 @@ export function NamespaceHome({
 		[loading, setLoading] = useState(true),
 		[retry, setRetry] = useState(0),
 		[filter, setFilter] = useState("");
+	usePending(loading);
 	useEffect(() => {
 		void refresh;
 		void retry;
@@ -371,7 +359,7 @@ export function NamespaceHome({
 				<div className="overview-main">
 					{loading && !rows.length ? (
 						<Section title="Needs you">
-							<SkeletonRows label="Loading what needs you…" />
+							<SkeletonRows label="Loading what needs you" />
 						</Section>
 					) : (
 						<Decisions rows={rows} open={open} partial={partial} />
@@ -391,7 +379,7 @@ export function NamespaceHome({
 								))}
 							</div>
 						) : loading ? (
-							<SkeletonRows label="Loading repositories…" />
+							<SkeletonRows label="Loading repositories" />
 						) : (
 							<Empty>{needle ? "No repositories match that filter." : "No repositories yet. Open a namespace to create one."}</Empty>
 						)}

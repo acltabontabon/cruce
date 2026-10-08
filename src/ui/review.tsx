@@ -6,6 +6,7 @@ import { Initials } from "./design.tsx";
 import { enclosing, type Hunk, type Placement, parsePatch, placeNotes, prepareRows, type Row, supportingKind } from "./diff-model.ts";
 import { grammarFor, segments } from "./highlight.ts";
 import { laneIndex } from "./lanes.ts";
+import { SkeletonLines, SkeletonRows } from "./loading.tsx";
 import type { Execute } from "./source.tsx";
 import { actorLabel, ago, type People, short } from "./status.ts";
 
@@ -679,7 +680,7 @@ function FileBlock({
 		);
 	};
 	const body = () => {
-		if (!loaded || loaded.loading) return <p className="rv-quiet">Loading changes…</p>;
+		if (!loaded || loaded.loading) return <SkeletonLines label="Loading changes" />;
 		if (loaded.error)
 			return (
 				<p role="alert" className="rv-quiet">
@@ -1306,7 +1307,7 @@ export function ReviewFiles({
 						</div>
 					</div>
 				)}
-				{!list && !listError && <p className="rv-quiet">Loading changed files…</p>}
+				{!list && !listError && <SkeletonRows label="Loading changed files" />}
 				{(wholeNotes.length > 0 || wholeDraft) && (
 					<div className="rv-whole">
 						<p className="rv-section">Notes on the whole change</p>

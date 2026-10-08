@@ -14,6 +14,10 @@ On the hosted test environment (Worker `afb692eb`, from `5f8a7fe`; the repositor
 
 Not yet verified: resuming an agent-started deletion from the console. The stored operation identity includes the starting actor, so another actor's retry is refused.
 
+## Standard loading states
+
+On **2026-10-09**, the cold-start splash and the console's shared loading states passed typecheck, Biome on tracked files, **427 unit/integration tests**, **98 browser journeys**, deterministic scenario verification and the offline cf build. These ran in a clean worktree at HEAD with only this change applied. Browser coverage checks two things. On a cold start, one splash stays up from first paint until the first screen, with no "Checking sign-in…" or "Loading Cruce…" text in between; it uses paper for browsers that have not signed in and Midnight after sign-in under a dark preference, and it is removed once the page renders. Opening a repository shows header progress, `aria-busy` content and a placeholder page, and the breadcrumb never says "Repository unavailable" while the data is still loading. The offline build's page contains the splash and its pre-paint script. Hosted behaviour is not yet verified.
+
 ## Review notes and the calmer change review
 
 On **2026-10-09**, [ADR 0014](decisions/0014-review-notes-on-exact-revisions.md) and the redesigned change review passed typecheck, lint, **425 unit/integration tests**, **97 browser journeys**, deterministic scenario verification and the offline cf build.
