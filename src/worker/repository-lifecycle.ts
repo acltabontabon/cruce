@@ -307,7 +307,10 @@ export class RepositoryLifecycleRuntime {
 	}
 	async recover(repository: Repository) {
 		const deletion = this.store.get<Deletion>(deletionKey);
-		if (deletion?.state === "pending" && (deletion.nextAttempt ?? 0) <= this.now()) await this.remove(repository, deletion);
+		if (deletion?.state !== "pending" || deletion.phase === "complete") return;
+		// The alarm set when an attempt began can fire before that attempt's next time; wake again then rather than stall.
+		if ((deletion.nextAttempt ?? 0) > this.now()) await this.port.schedule(deletion.nextAttempt!);
+		else await this.remove(repository, deletion);
 	}
 }
 function requireReservation(id: string | undefined) {

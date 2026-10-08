@@ -198,6 +198,19 @@ describe("repository lifecycle", () => {
 		expect(f.remove).toHaveBeenCalledTimes(3);
 		await expect(f.call("restore_repository")).rejects.toThrow("Resume the existing repository deletion");
 	});
+	it("keeps a bounded deletion going when its alarm fires before the next attempt is due", async () => {
+		const f = fixture();
+		for (const name of ["fork-a", "fork-b", "fork-c"]) f.store.put(`provider-repository:${name}`, `${name}-id`);
+		expect(await f.call("delete_repository")).toEqual({ state: "deleting" });
+		f.port.schedule.mockClear();
+		// The alarm set at the start of the attempt fires before the next attempt the batch recorded.
+		await f.restart().recover(f.repository());
+		expect(f.port.schedule).toHaveBeenCalledOnce();
+		expect(f.repository().lifecycle?.state).toBe("deleting");
+		f.advance();
+		await f.restart().recover(f.repository());
+		expect(f.repository().lifecycle?.state).toBe("deleted");
+	});
 	it("recovers a lost delete response after restart under the same reservation", async () => {
 		const f = fixture();
 		f.remove.mockRejectedValueOnce(new Error("response lost"));
