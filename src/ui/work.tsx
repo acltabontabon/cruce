@@ -710,6 +710,7 @@ export function WorkspaceDetail({
 			.filter((e) => e.ids.includes(w.id))
 			.slice(-12)
 			.toReversed();
+	const observed = view.reconciliation?.observation.workspaces[w.id];
 	const run = (cmd: Parameters<Execute>[0]) => {
 		setError("");
 		void execute(cmd).catch((e) => setError((e as Error).message));
@@ -735,91 +736,79 @@ export function WorkspaceDetail({
 				</div>
 			</header>
 			<LaneStrip view={view} workspace={w} lane={laneIndex(view).get(w.id) ?? 1} />
-			<dl className="facts fact-grid">
+			{item && (
+				<div className="ws-next">
+					<p>
+						{blockerSummary(item)}. {nextStep(item)}.{item.group === "reconciliation" && ` ${RECONCILIATION_GUIDANCE}`}
+					</p>
+					{item.actions.includes("reconcile_with_git") && <UpdateHandoff w={w} canonical={canonicalTarget(item)} />}
+				</div>
+			)}
+			<dl className="facts fact-grid ws-facts">
 				<div>
 					<dt>Owner</dt>
 					<dd>
-						{ownerName(w.ownerId, who)} · accountable for this work · workspace ID <code>{w.id}</code>
+						{ownerName(w.ownerId, who)}
+						<small>
+							{attachmentText(w)}
+							{w.execution && ` · since ${ago(w.execution.attachedAt)}`}
+							{w.state === "disconnected" && " · not reporting"}
+						</small>
 					</dd>
-					<dt>Current attachment</dt>
+				</div>
+				<div data-fact="baseline">
+					<dt>Baseline</dt>
 					<dd>
-						{w.execution ? (
-							<>
-								{attachmentText(w)} · since {ago(w.execution.attachedAt)} · machine <code>{w.execution.machineId}</code>, checkout{" "}
-								<code>{w.execution.checkoutId}</code>
-							</>
-						) : (
-							attachmentText(w)
-						)}
-						{w.state === "disconnected" && " · not reporting; checkout remains attached"}
+						<code title={w.baseRevision}>{short(w.baseRevision)}</code>
+						<small>Fixed starting revision · {ago(w.startedAt)}</small>
 					</dd>
 				</div>
 				<div>
-					<dt>Baseline</dt>
-					<dd>
-						<code title={w.baseRevision}>{short(w.baseRevision)}</code> · {ago(w.startedAt)} · fixed starting revision
-					</dd>
 					<dt>Published</dt>
 					<dd>
 						{w.publishedRevision ? (
 							<>
 								<code title={w.publishedRevision}>{short(w.publishedRevision)}</code>
 								{w.integratedRevision && (
-									<>
-										{" "}
-										against review base <code title={w.integratedRevision}>{short(w.integratedRevision)}</code>
-									</>
+									<small>
+										On review base <code title={w.integratedRevision}>{short(w.integratedRevision)}</code>
+									</small>
 								)}
 							</>
 						) : (
-							"No published revision"
+							<span className="muted">Nothing published yet</span>
 						)}
 					</dd>
-					{item && (
-						<>
-							<dt>Decision state</dt>
-							<dd>
-								{blockerSummary(item)}. {nextStep(item)}.{item.group === "reconciliation" && ` ${RECONCILIATION_GUIDANCE}`}
-								{item.actions.includes("reconcile_with_git") && <UpdateHandoff w={w} canonical={canonicalTarget(item)} />}
-							</dd>
-						</>
-					)}
 				</div>
 				<div>
-					<dt>Observed pushed ref</dt>
+					<dt>Reported head</dt>
 					<dd>
-						{view.reconciliation?.observation.workspaces[w.id] ? (
-							<>
-								<code>{view.reconciliation.observation.workspaces[w.id].ref}</code> ·{" "}
-								<code>
-									{view.reconciliation.observation.workspaces[w.id].deleted
-										? "ref unavailable"
-										: short(view.reconciliation.observation.workspaces[w.id].revision)}
-								</code>{" "}
-								· checked {ago(view.reconciliation.observation.workspaces[w.id].checkedAt, view.asOf)} · observed, not published
-							</>
-						) : (
-							"Not yet observed"
-						)}
-					</dd>
-					<dt>Report freshness</dt>
-					<dd>
-						<ReportAge at={w.lastReportAt} now={view.asOf ?? Date.now()} />
-					</dd>
-					<dt>Latest reported head</dt>
-					<dd>
-						<code title={w.headRevision}>{short(w.headRevision)}</code> · {w.commits.length} {w.commits.length === 1 ? "commit" : "commits"}
-						, {w.changes.length} {w.changes.length === 1 ? "file" : "files"} reported
-						{view.reconciliation?.observation.workspaces[w.id] &&
-							!view.reconciliation.observation.workspaces[w.id].deleted &&
-							view.reconciliation.observation.workspaces[w.id].revision !== w.headRevision &&
-							" · differs from the observed pushed ref"}
+						<code title={w.headRevision}>{short(w.headRevision)}</code>
+						<small>
+							{w.commits.length} {w.commits.length === 1 ? "commit" : "commits"}, {w.changes.length}{" "}
+							{w.changes.length === 1 ? "file" : "files"} · <ReportAge at={w.lastReportAt} now={view.asOf ?? Date.now()} />
+							{observed && !observed.deleted && observed.revision !== w.headRevision && " · differs from the observed pushed ref"}
+						</small>
 					</dd>
 				</div>
 				<div>
 					<dt>Canonical</dt>
-					<dd>{relation.detail}</dd>
+					<dd>
+						<span className={`ws-relation ${relation.tone}`}>{relation.label}</span>
+						<small>{relation.detail}</small>
+					</dd>
 				</div>
+				{observed && (
+					<div>
+						<dt>Observed pushed ref</dt>
+						<dd>
+							<code>{observed.deleted ? "ref unavailable" : short(observed.revision)}</code>
+							<small>
+								<code>{observed.ref}</code> · checked {ago(observed.checkedAt, view.asOf)} · observed, not published
+							</small>
+						</dd>
+					</div>
+				)}
 				{overlaps.length > 0 && (
 					<div className="wide">
 						<dt>Overlap</dt>
@@ -838,6 +827,18 @@ export function WorkspaceDetail({
 						</dd>
 					</div>
 				)}
+				<details className="wide ws-ids">
+					<summary>Identifiers</summary>
+					<p>
+						Workspace <code>{w.id}</code>
+						{w.execution && (
+							<>
+								{" "}
+								· machine <code>{w.execution.machineId}</code> · checkout <code>{w.execution.checkoutId}</code>
+							</>
+						)}
+					</p>
+				</details>
 			</dl>
 			{!ended(w) && (relation.key === "behind" || relation.key === "diverged") && <WorkspaceUpdateInspection id={w.id} execute={execute} />}
 			<div className="overview">

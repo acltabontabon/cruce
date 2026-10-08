@@ -875,7 +875,8 @@ export function RepositoryPage({
 				</p>
 			)}
 			<CanonicalSetup view={view} execute={execute} />
-			<AttentionBar view={view} open={open} />
+			{/* A change page leads with its own next step; the repository-wide summary would only push the review down. */}
+			{!(tab === "changes" && id) && <AttentionBar view={view} open={open} />}
 			{tab === "changes" && id ? (
 				<ChangeDetail key={id} view={view} id={id} execute={execute} busy={busy} open={open} who={who} />
 			) : (

@@ -439,25 +439,28 @@ function StepDetail({
 					</p>
 					{decide && checks.open && reviewable && (
 						<div className="check-actions">
+							{/* An attested pass is done: recording it again would only repeat it. A later failure can still be recorded. */}
+							{!(e.trusted && !e.failed) && (
+								<NoteAction
+									label={e.failed ? `Record updated ${kind} pass` : reported ? `Attest ${kind} pass` : `Record checked ${kind} pass`}
+									immediate
+									placeholder="What did you check? (optional)"
+									fallback={`Attested ${kind} in the console`}
+									run={(note) =>
+										execute({
+											tool: "record_verification",
+											proposalId: p.id,
+											revision: p.revision,
+											kind,
+											outcome: "pass",
+											reason: note,
+											humanAttested: true,
+										}).then(close)
+									}
+								/>
+							)}
 							<NoteAction
-								label={e.failed ? `Record updated ${kind} pass` : reported ? `Attest ${kind} pass` : `Record checked ${kind} pass`}
-								immediate
-								placeholder="What did you check? (optional)"
-								fallback={`Attested ${kind} in the console`}
-								run={(note) =>
-									execute({
-										tool: "record_verification",
-										proposalId: p.id,
-										revision: p.revision,
-										kind,
-										outcome: "pass",
-										reason: note,
-										humanAttested: true,
-									})
-								}
-							/>
-							<NoteAction
-								label="Record failure"
+								label={e.trusted && !e.failed ? "Record a failure instead" : "Record failure"}
 								className="quiet"
 								placeholder="What failed?"
 								fallback={`${kind} failed`}
@@ -492,14 +495,16 @@ function StepDetail({
 							? `Approval covers ${short(p.revision)} only. A new revision needs a new review.`
 							: "Approval waits for the updated revision; this one can't be promoted."}
 				</p>
-				{decide && reviewable && checks.open && primary !== "approve" && (
+				{decide && reviewable && checks.open && !checks.approved && primary !== "approve" && (
 					<div className="check-actions">
 						<NoteAction
-							label={checks.approved ? "Approve again" : "Approve"}
+							label="Approve"
 							immediate
 							placeholder="Approval note (optional)"
 							fallback="Approved in the console"
-							run={(note) => execute({ tool: "review_proposal", proposalId: p.id, revision: p.revision, outcome: "approve", reason: note })}
+							run={(note) =>
+								execute({ tool: "review_proposal", proposalId: p.id, revision: p.revision, outcome: "approve", reason: note }).then(close)
+							}
 						/>
 					</div>
 				)}

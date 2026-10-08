@@ -154,7 +154,19 @@ test("review remains usable after approval and after a failed evidence result", 
 	// Approval is reachable from its step while evidence is the page's next step.
 	await openStep(/Approval/);
 	await stepDetail().getByRole("button", { name: "Approve", exact: true }).click();
-	await stepDetail().getByRole("button", { name: "Approve again", exact: true }).waitFor();
+	await reviewSteps()
+		.getByRole("button", { name: /Done: Approval/ })
+		.waitFor();
+	await openStep(/Approval/);
+	await stepDetail()
+		.getByText(/^Approved by Alex Morgan\./)
+		.waitFor();
+	assert.equal(
+		await stepDetail()
+			.getByRole("button", { name: /^Approve/ })
+			.count(),
+		0,
+	);
 	await page.getByRole("button", { name: "Add a note on the whole change", exact: true }).waitFor();
 	await page.getByRole("button", { name: "Record result", exact: true }).click();
 	await stepDetail().getByRole("button", { name: "Record failure", exact: true }).click();
@@ -166,7 +178,19 @@ test("review remains usable after approval and after a failed evidence result", 
 		.getByText(/^Tests failing on \w{8}\.$/)
 		.waitFor();
 	await stepDetail().getByRole("button", { name: "Record updated tests pass", exact: true }).click();
+	await reviewSteps()
+		.getByRole("button", { name: /Done: Tests/ })
+		.waitFor();
+	// An attested pass offers no second pass; a later failure can still be recorded.
+	await openStep(/Tests/);
 	await stepDetail().getByText("Tests attested", { exact: false }).waitFor();
+	assert.equal(
+		await stepDetail()
+			.getByRole("button", { name: /tests pass$/ })
+			.count(),
+		0,
+	);
+	await stepDetail().getByRole("button", { name: "Record a failure instead", exact: true }).waitFor();
 	await page.getByRole("button", { name: "Promote to main", exact: true }).waitFor();
 	await page.screenshot({ path: "dist/ui-checks/review-completed-checks.png", fullPage: true });
 });
@@ -733,7 +757,11 @@ async function openStep(name) {
 async function recordTestsPass() {
 	await page.getByRole("button", { name: "Record result", exact: true }).click();
 	await stepDetail().getByRole("button", { name: "Record checked tests pass", exact: true }).click();
-	await stepDetail().getByText("Tests attested", { exact: false }).waitFor();
+	// A recorded pass completes the step: its details close and the page moves on.
+	await reviewSteps()
+		.getByRole("button", { name: /Done: Tests/ })
+		.waitFor();
+	await stepDetail().waitFor({ state: "detached" });
 }
 const workspaceRow = (title) => page.locator(".workspace-row").filter({ has: page.getByText(title, { exact: true }) });
 async function openWorkspace(title) {
@@ -1326,7 +1354,7 @@ test("workspace detail explains who works on it, its baseline and overlap, and t
 	await continuation.getByText(/Only pushed commits travel/).waitFor();
 	await continuation.getByText(/cruce resume --server .* --workspace /).waitFor();
 	await continuation.getByText(/does not revoke the previous connection's Git access/).waitFor();
-	const start = await facts.locator("dd").nth(2).textContent();
+	const start = await facts.locator('[data-fact="baseline"] dd').textContent();
 	await page.getByRole("button", { name: "Release checkout", exact: true }).click();
 	await page
 		.getByText("Not attached to a checkout. Its owner can continue it from another checkout or machine.", { exact: true })
@@ -1334,7 +1362,13 @@ test("workspace detail explains who works on it, its baseline and overlap, and t
 	assert.equal(await page.getByRole("button", { name: "Release checkout", exact: true }).count(), 0);
 	await page.locator(".change-header").getByText("Detached", { exact: true }).waitFor();
 	await facts.getByText("No checkout attached", { exact: true }).waitFor();
-	assert.equal(await facts.locator("dd").nth(2).textContent(), start);
+	assert.equal(await facts.locator('[data-fact="baseline"] dd').textContent(), start);
+	// Machine and checkout identifiers stay available without crowding the facts.
+	await facts.getByText("Identifiers", { exact: true }).click();
+	await facts
+		.locator(".ws-ids")
+		.getByText(/^Workspace /)
+		.waitFor();
 });
 test("workspaces behind canonical say so and show canonical changes without moving their baseline", async () => {
 	await page.request.post(`${server.origin}/__fixture/upstream`);
@@ -1349,14 +1383,14 @@ test("workspaces behind canonical say so and show canonical changes without movi
 	await row.getByText("Behind canonical", { exact: true }).waitFor();
 	await row.getByText(/^Canonical moved to \w{8} since this baseline · Update from canonical$/).waitFor();
 	await row.click();
-	const start = await page.locator(".facts dd").nth(2).textContent();
+	const start = await page.locator('[data-fact="baseline"] dd').textContent();
 	await page
 		.getByText(/Canonical moved to/)
 		.first()
 		.waitFor();
 	await page.getByRole("button", { name: "See what changed on canonical", exact: true }).click();
 	await page.getByText("also changed in this workspace", { exact: false }).waitFor();
-	assert.equal(await page.locator(".facts dd").nth(2).textContent(), start);
+	assert.equal(await page.locator('[data-fact="baseline"] dd').textContent(), start);
 	// Back restores the filtered list.
 	await page.goBack();
 	await page.getByRole("heading", { name: "Matching workspaces", exact: true }).waitFor();
@@ -1390,7 +1424,7 @@ test("a change on a stale base waits for its updated revision before review, and
 	await page.getByRole("button", { name: "Implement retry policy", exact: true }).click();
 	await page.getByRole("heading", { name: "Implement retry policy", exact: true, level: 1 }).waitFor();
 	await page
-		.locator(".facts .update-handoff")
+		.locator(".ws-next .update-handoff")
 		.getByText(/^Continue Cruce workspace "Implement retry policy"/)
 		.waitFor();
 });
@@ -1425,6 +1459,8 @@ test("review leads with one next step: record evidence, approve the exact revisi
 	await openChange();
 	const promote = page.getByRole("button", { name: "Promote to main", exact: true });
 	assert.equal(await promote.count(), 0);
+	// The repository-wide attention summary stays on the tabs; the change leads with its own next step.
+	assert.equal(await page.getByRole("region", { name: "Needs attention", exact: true }).count(), 0);
 	await page
 		.getByRole("status")
 		.getByText(/^Tests not recorded for \w{8}\.$/)
@@ -1443,7 +1479,6 @@ test("review leads with one next step: record evidence, approve the exact revisi
 	await promote.click();
 	await page.locator(".change-header").getByText("Promoted", { exact: true }).waitFor();
 	await page.locator(".canonical-ref").getByText(/main/).waitFor();
-	await page.getByRole("button", { name: "1 workspace needs a Git update", exact: true }).waitFor();
 	// The promotion names the work it left behind, without asking anyone to update it now.
 	const behind = page.locator(".change-header .status-detail").filter({ hasText: "Now behind canonical" });
 	await behind.getByText(/It needs an update from canonical before its review\.$/).waitFor();
@@ -2353,7 +2388,9 @@ test("another owner's change leads with its owner and connection, and evidence w
 	await page.getByRole("button", { name: "Record result", exact: true }).click();
 	await stepDetail().getByText("Tests reported passing; human attestation required", { exact: false }).waitFor();
 	await stepDetail().getByRole("button", { name: "Attest tests pass", exact: true }).click();
-	await stepDetail().getByText("Tests attested", { exact: false }).waitFor();
+	await reviewSteps()
+		.getByRole("button", { name: /Done: Tests/ })
+		.waitFor();
 	await page.getByRole("button", { name: "Approve", exact: true }).waitFor();
 });
 test("workspaces filter by owner and Mine, lanes name owners, and only the owner is offered continuation", async () => {

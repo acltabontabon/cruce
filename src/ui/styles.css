@@ -2346,6 +2346,74 @@ details.group[open] > summary::before {
 .fact-grid dd code {
 	color: var(--accent);
 }
+.ws-next {
+	display: grid;
+	gap: 10px;
+	margin: 0 0 4px;
+	padding: 12px 16px;
+	border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--border));
+	border-radius: var(--r-lg);
+	background: color-mix(in oklab, var(--accent) 6%, var(--surface));
+}
+:where(.shell) .ws-next p {
+	margin: 0;
+	color: var(--text);
+	font-size: 13.5px;
+	font-weight: 500;
+}
+.ws-facts > div {
+	flex: 1 1 180px;
+}
+.ws-facts dd {
+	display: grid;
+	gap: 2px;
+	font-size: 14px;
+}
+.ws-facts dd > code {
+	justify-self: start;
+	font-size: 13px;
+}
+:where(.shell) .ws-facts dd small {
+	display: block;
+	margin: 0;
+	color: var(--text-faint);
+	font-size: 12px;
+	line-height: 1.5;
+}
+.ws-facts dd small code {
+	font-size: 11.5px;
+}
+.ws-relation.success {
+	color: var(--tone-success);
+}
+.ws-relation.warning {
+	color: var(--tone-warning);
+}
+.ws-relation.neutral {
+	color: var(--text-muted);
+}
+:where(.shell) .ws-ids {
+	margin: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	padding: 10px 0 12px;
+	border-bottom: 1px solid var(--border-subtle);
+	color: var(--text-faint);
+	font-size: 12px;
+}
+.ws-ids summary {
+	cursor: pointer;
+}
+:where(.shell) .ws-ids p {
+	margin: 6px 0 0;
+	overflow-wrap: anywhere;
+}
+.ws-ids code {
+	color: var(--text-muted);
+	font-size: 11.5px;
+}
 .overlap-line {
 	display: block;
 }
@@ -4820,7 +4888,8 @@ main[data-screen="settings"] > form {
 :where(.shell) .rv-add {
 	position: absolute;
 	top: 2px;
-	left: 4px;
+	/* Over the sign column, beside the line number it annotates. */
+	left: 96px;
 	display: grid;
 	place-items: center;
 	width: 18px;
@@ -4839,6 +4908,19 @@ main[data-screen="settings"] > form {
 .rv-ln:hover .rv-add,
 .rv-add:focus-visible {
 	opacity: 1;
+}
+.rv-ln.sp .rv-add.side-n {
+	left: calc(50% + 2px);
+}
+.rv-ln.sp .rv-add.side-o {
+	left: 4px;
+}
+/* The composer has no author line, so nothing in it is indented under one. */
+.rv-note.composer > :not(.rv-nhead) {
+	margin-left: 0;
+}
+.rv-note.composer textarea {
+	width: 100%;
 }
 .rv-pin {
 	position: absolute;
@@ -5159,6 +5241,9 @@ main[data-screen="settings"] > form {
 	}
 	.rv-ln {
 		grid-template-columns: 38px 38px 16px minmax(0, 1fr);
+	}
+	:where(.shell) .rv-add {
+		left: 76px;
 	}
 	.rv-hh,
 	:where(.shell) .rv-gap,

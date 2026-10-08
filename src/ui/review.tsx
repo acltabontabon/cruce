@@ -543,10 +543,18 @@ function FileBlock({
 			margin.style.minHeight = `${bottom}px`;
 		};
 		place();
-		const observer = new ResizeObserver(place);
+		// Positioning in the next frame keeps a resize from re-triggering within the same observation.
+		let frame = 0;
+		const observer = new ResizeObserver(() => {
+			cancelAnimationFrame(frame);
+			frame = requestAnimationFrame(place);
+		});
 		observer.observe(row);
 		for (const el of margin.querySelectorAll(":scope > .rv-note")) observer.observe(el);
-		return () => observer.disconnect();
+		return () => {
+			cancelAnimationFrame(frame);
+			observer.disconnect();
+		};
 	});
 	const highlightLine = (key: string | undefined, on: boolean) => {
 		if (!key) return;
@@ -556,7 +564,7 @@ function FileBlock({
 		canAdd && (
 			<button
 				type="button"
-				className="rv-add"
+				className={`rv-add side-${side}`}
 				aria-label={`Add a note on line ${side === "o" ? r.o : r.n}`}
 				onClick={() => setDraftKey(`${side}${side === "o" ? r.o : r.n}`)}
 			>
@@ -1146,29 +1154,37 @@ export function ReviewFiles({
 				<div className="rv-bar">
 					<i style={{ width: `${entries.length ? (viewedCount / entries.length) * 100 : 0}%` }} />
 				</div>
-				<input
-					type="search"
-					value={query}
-					onChange={(e) => setQuery(e.target.value)}
-					placeholder="Filter files"
-					aria-label="Filter files"
-				/>
+				{/* A short list reads faster than a filter. */}
+				{(entries.length > 8 || query) && (
+					<input
+						type="search"
+						value={query}
+						onChange={(e) => setQuery(e.target.value)}
+						placeholder="Filter files"
+						aria-label="Filter files"
+					/>
+				)}
 				<nav aria-label="Changed files list">
+					{/* Group headings only earn their place when both groups are present. */}
 					{main.length > 0 && (
 						<>
-							<p className="rv-group">
-								<span>Start here</span>
-								<span>{main.length}</span>
-							</p>
+							{supporting.length > 0 && (
+								<p className="rv-group">
+									<span>Start here</span>
+									<span>{main.length}</span>
+								</p>
+							)}
 							{main.map(treeItem)}
 						</>
 					)}
 					{supporting.length > 0 && (
 						<>
-							<p className="rv-group">
-								<span>Supporting</span>
-								<span>{supporting.length}</span>
-							</p>
+							{main.length > 0 && (
+								<p className="rv-group">
+									<span>Supporting</span>
+									<span>{supporting.length}</span>
+								</p>
+							)}
 							{supporting.map(treeItem)}
 						</>
 					)}
