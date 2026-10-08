@@ -15,7 +15,9 @@ What the tests cover:
 - **Bridge** ([coordination tests](../test/runner/coordination.test.ts)). The `Cruce:` sentence names only the caller's own open changes whose notes await the owner, including notes inherited from a superseded change; attached workspaces are asked to address them, others only when the user asks.
 - **Console** ([diff model tests](../test/ui/diff-model.test.ts), [browser journeys](../test/browser/console.browser.mjs)). Patches parse with numbers on both sides; changed words are marked; whitespace-only edits fold into context; supporting files are labelled by kind; notes sit on their exact line, carry forward only on identical text, and are otherwise listed with their line rather than moved. Browser journeys cover the one next step through evidence, approval and promotion; a line concern that blocks promotion until resolved with a reason; an agent's cited answer beside its line, resolved by the maintainer; the owner's hand-off; stale-base, reconciled, stored-diff, developer, phone and mode-only cases.
 
-Not yet verified: an agent session reading and answering notes through the hosted test environment, or a client running the `address_review_notes` prompt.
+On the hosted test environment (Worker `04eaa58a`), the agent loop passed through this commit's bridge with a re-authorized Codex connection: a line concern, the `Cruce:` lead and prompt hint naming it, the agent's fix, republish and cited reply, the concern carried to the superseding change as answered and still blocking, and server refusals of a wrong revision, an outside anchor and an unpublished citation ([test environment](test-environment.md#latest-test-deployment--2026-10-09)).
+
+Not yet verified: a maintainer resolving a note in the hosted console, signed-in use of the new review page, or a client running the `address_review_notes` prompt (hosted MCP lists it).
 
 ## Reconciling just before review
 
