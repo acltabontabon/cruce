@@ -860,7 +860,6 @@ test("a new repository opens on Workspaces with a way to start local work", asyn
 	await page.getByLabel("Repository name", { exact: true }).fill("local-tools");
 	await page.getByRole("button", { name: "Add repository", exact: true }).click();
 	await page.getByRole("heading", { name: "local-tools", exact: true }).waitFor();
-	await page.getByText("Nothing needs attention right now.", { exact: true }).waitFor();
 	await page.locator(".workspaces-screen").getByText("Use Clone next to the canonical revision to begin.", { exact: false }).waitFor();
 	assert.equal(await page.locator(".canonical-chip").count(), 1);
 	await page.locator(".canonical-chip").click();
@@ -1301,9 +1300,14 @@ test("repository pages lead with what needs attention and retired routes resolve
 		(await repoNav().getByRole("button").allTextContents()).map((text) => text.replace(/\d+$/, "").trim()),
 		["Workspaces", "History", "Settings"],
 	);
-	await page.getByRole("button", { name: "1 change needs preparation", exact: true }).waitFor();
-	await page.getByRole("button", { name: "1 path reported by more than one workspace", exact: true }).click();
-	assert.ok(page.url().endsWith("#/workspaces"));
+	// The list itself says what needs a person: no separate summary bar repeats it.
+	assert.equal(await page.getByRole("region", { name: "Needs attention", exact: true }).count(), 0);
+	await page.locator(".change-row").filter({ hasText: "Needs preparation" }).waitFor();
+	await page
+		.locator(".workspace-brief")
+		.getByText(/reported by/)
+		.first()
+		.waitFor();
 	await page.screenshot({ path: "dist/ui-checks/repository.png", fullPage: true });
 	await page.goto(`${root()}#/overview`);
 	await page.locator(".change-row").filter({ hasText: "Bounded retry policy" }).waitFor();
@@ -1373,11 +1377,12 @@ test("workspace detail explains who works on it, its baseline and overlap, and t
 test("workspaces behind canonical say so and show canonical changes without moving their baseline", async () => {
 	await page.request.post(`${server.origin}/__fixture/upstream`);
 	await openRepo();
-	// The stale change and the workspace behind canonical are both reconciliation work, counted separately.
-	await page.getByRole("button", { name: "1 change needs a Git update", exact: true }).waitFor();
-	await page.getByRole("button", { name: "1 workspace needs a Git update", exact: true }).click();
+	// The filter carries its count.
+	await page.getByRole("button", { name: "Needs Git update 1", exact: true }).click();
 	assert.equal(new URL(page.url()).searchParams.get("filter"), "reconcile");
-	await page.getByRole("heading", { name: "Matching workspaces", exact: true }).waitFor();
+	await page.getByRole("button", { name: "Needs Git update 1", exact: true, pressed: true }).waitFor();
+	// No heading or "showing" line restates the filter.
+	assert.equal(await page.getByRole("heading", { name: "Matching workspaces", exact: true }).count(), 0);
 	assert.equal(await page.locator(".workspace-row").count(), 1);
 	const row = workspaceRow("Inspect payment timeout");
 	await row.getByText("Behind canonical", { exact: true }).waitFor();
@@ -1393,7 +1398,7 @@ test("workspaces behind canonical say so and show canonical changes without movi
 	assert.equal(await page.locator('[data-fact="baseline"] dd').textContent(), start);
 	// Back restores the filtered list.
 	await page.goBack();
-	await page.getByRole("heading", { name: "Matching workspaces", exact: true }).waitFor();
+	await page.getByRole("button", { name: "Needs Git update 1", exact: true, pressed: true }).waitFor();
 });
 test("a change on a stale base waits for its updated revision before review, and its owner can hand the update over", async () => {
 	await page.request.post(`${server.origin}/__fixture/upstream`);
@@ -1901,7 +1906,6 @@ test("unknown canonical, quiet and detached workspaces stay distinct from accept
 	});
 	await openRepo();
 	await page.locator(".canonical-ref").getByText("unavailable", { exact: true }).waitFor();
-	await page.getByRole("button", { name: "1 workspace not reporting", exact: true }).click();
 	assert.equal(await page.locator(".detached-workspaces").evaluate((e) => e.open), false);
 	await page.locator(".detached-workspaces summary").click();
 	await workspaceRow("Paused elsewhere").getByText("Detached", { exact: true }).waitFor();
@@ -2090,7 +2094,9 @@ test("published work with no change says so, groups shared scaffold paths once a
 		return route.fulfill({ json: { id: body.artifactId } });
 	});
 	await openRepo();
-	await page.getByRole("button", { name: "5 workspaces published, not proposed" }).waitFor();
+	await page.locator(".workspace-brief").waitFor();
+	// Every workspace here is unproposed, so a "Not proposed" filter would only repeat the list: it is not offered.
+	assert.equal(await page.getByRole("button", { name: /^Not proposed/ }).count(), 0);
 	await repoNav()
 		.getByRole("button", { name: /^Workspaces/ })
 		.click();
@@ -2364,12 +2370,13 @@ test("Home separates decisions you can make from work waiting on others and says
 	await page.locator(".nested-changes .change-row").first().waitFor();
 	assert.equal(await page.locator(".change-row").filter({ hasText: "Session renewal" }).count(), 10);
 	// The Needs you filter lives in the URL and Back restores the full list.
-	await page.getByRole("button", { name: "Needs you", exact: true }).click();
+	await page.getByRole("button", { name: /^Needs you/ }).click();
 	assert.equal(new URL(page.url()).searchParams.get("filter"), "needs-you");
-	await page.getByText("Showing 3 of 11 open changes.", { exact: true }).waitFor();
+	await page.getByRole("button", { name: /^Needs you/, pressed: true }).waitFor();
 	assert.equal(await page.locator(".change-row").count(), 3);
 	await page.reload();
-	await page.getByText("Showing 3 of 11 open changes.", { exact: true }).waitFor();
+	await page.getByRole("button", { name: /^Needs you/, pressed: true }).waitFor();
+	assert.equal(await page.locator(".change-row").count(), 3);
 	await page.goBack();
 	await page.getByRole("button", { name: "All", exact: true, pressed: true }).waitFor();
 	assert.equal(await page.locator(".change-row").count(), 11);
@@ -2399,9 +2406,8 @@ test("workspaces filter by owner and Mine, lanes name owners, and only the owner
 	await page.locator(".lane-map").getByText("Owner: Alex Morgan (you)", { exact: false }).first().waitFor();
 	await page.locator(".owner-filter select").selectOption({ label: "Maya Reyes" });
 	assert.equal(new URL(page.url()).searchParams.get("filter"), "owner:maya");
-	await page.getByRole("heading", { name: "Matching workspaces", exact: true }).waitFor();
 	assert.equal(await page.locator(".workspace-row").count(), 10);
-	await page.getByRole("button", { name: "Mine", exact: true }).click();
+	await page.getByRole("button", { name: /^Mine/ }).click();
 	assert.equal(await page.locator(".workspace-row").count(), 2);
 	await page.goBack();
 	assert.equal(await page.locator(".workspace-row").count(), 10);

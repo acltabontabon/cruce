@@ -25,7 +25,7 @@ Open the loopback URL the server prints. Set `PORT` to choose a fixed port. Rest
 
 ## 2. Open the repository
 
-Click **payment-service**. The header breadcrumb names the repository, and the bar below it holds the tabs and canonical `main` at its exact revision, with **Clone**. Below that, the attention bar says in plain words what needs someone: **1 change needs preparation** and **1 path reported by more than one workspace**. Each item opens its filtered list. The **Workspaces** tab lists each workspace once with its open changes under it; **Bounded retry policy #1** hangs off **Implement retry policy**, marked **Needs preparation**, with its exact revision on its review base and "Required tests evidence missing · 1 more blocker". The lane map follows the list.
+Click **payment-service**. The header breadcrumb names the repository, and the bar below it holds the tabs and canonical `main` at its exact revision, with **Clone**. Below that, a short note says one path is reported by both workspaces, and the **Needs you** filter carries its count. The **Workspaces** tab lists each workspace once with its open changes under it; **Bounded retry policy #1** hangs off **Implement retry policy**, marked **Needs preparation**, with its exact revision on its review base and "Required tests evidence missing · 1 more blocker". The lane map follows the list.
 
 ![Repository Workspaces tab: the attention bar, two workspaces with Bounded retry policy #1 nested under Implement retry policy, and the lane map below](images/local-demo/repository.jpg)
 
@@ -39,7 +39,7 @@ Open **Bounded retry policy #1**. The review is a checklist for this exact revis
 
 When every item is checked, the change shows **Ready to promote** and **Promote to main** explains exactly what it does: move canonical `main` from `4906343f` to `9461bc8e` with a non-forced Git update. Raising a concern, recording a failure or closing the change asks for a reason. The files changed and the evidence (including Codex's stored test report) are below the checklist.
 
-Promote it. The change becomes **Promoted**, the header shows the new canonical revision, and the attention bar now reports **1 workspace needs a Git update**: the other concurrent workspace started from the old baseline and has canonical changes to merge with Git before it publishes.
+Promote it. The change becomes **Promoted**, the header shows the new canonical revision and names the workspace it left behind, and on Workspaces the **Needs Git update** filter counts it: the other concurrent workspace started from the old baseline and has canonical changes to merge with Git before it publishes.
 
 ![Review checklist with Promote to main, the diff and evidence](images/local-demo/review.jpg)
 

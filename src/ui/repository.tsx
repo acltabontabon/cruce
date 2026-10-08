@@ -8,7 +8,7 @@ import { laneIndex } from "./lanes.ts";
 import { START_PROMPT } from "./local-setup.tsx";
 import { ArchivedRecord, EarlierWork, RetainedActivity, RetainedRecordDetail, RetainedRecordRow } from "./records.tsx";
 import { type Execute, RevisionBrowser } from "./source.tsx";
-import { activityText, actorLabel, ago, attention, ended, ownerName, type People, short } from "./status.ts";
+import { activityText, actorLabel, ago, ended, ownerName, type People, short } from "./status.ts";
 import type { NamespaceView } from "./types.ts";
 import { WorkspaceDetail, WorkspaceList } from "./work.tsx";
 
@@ -58,51 +58,6 @@ function CanonicalSetup({ view, execute }: { view: RepositorySnapshot; execute: 
 			)}
 			{error && <p role="alert">{error}</p>}
 		</div>
-	);
-}
-
-/** One item per thing that needs attention; each count opens the filtered list behind it. Missing knowledge stays separate. */
-function AttentionBar({ view, open }: { view: RepositorySnapshot; open: Open }) {
-	const a = attention(view);
-	const items: { count?: number; label: string; tab: string; filter?: string; tone: string }[] = [];
-	const counted = (count: number, one: string, many: string, tab: string, tone: string, filter?: string) => {
-		if (count) items.push({ count, label: count === 1 ? one : many, tab, tone, filter });
-	};
-	counted(a.recovery, "operation needs attention", "operations need attention", "workspaces", "danger", "recovery");
-	counted(a.promote, "change ready to promote", "changes ready to promote", "workspaces", "success", "promote");
-	counted(a.review, "change needs human review", "changes need human review", "workspaces", "accent", "review");
-	counted(a.preparation, "change needs preparation", "changes need preparation", "workspaces", "warning", "preparation");
-	counted(a.reconcileChanges, "change needs a Git update", "changes need Git updates", "workspaces", "warning", "reconciliation");
-	counted(a.reconcileWorkspaces, "workspace needs a Git update", "workspaces need Git updates", "workspaces", "warning", "reconcile");
-	counted(a.unproposed, "workspace published, not proposed", "workspaces published, not proposed", "workspaces", "accent", "unproposed");
-	counted(a.overlaps, "path reported by more than one workspace", "paths reported by more than one workspace", "workspaces", "warning");
-	if (view.reconciliation?.observation.state === "degraded")
-		items.push({ label: "Observation degraded", tab: "workspaces", tone: "warning" });
-	counted(a.ancestryUnavailable, "workspace with ancestry unavailable", "workspaces with ancestry unavailable", "workspaces", "neutral");
-	if (
-		view.reconciliation &&
-		(view.reconciliation.workspaces.length || view.reconciliation.proposals.length) &&
-		!items.some((item) => item.tab === "workspaces")
-	)
-		items.push({ label: "Inspect reconciliation", tab: "workspaces", tone: "neutral" });
-	counted(a.quiet, "workspace not reporting", "workspaces not reporting", "workspaces", "neutral");
-	return (
-		<section className="attention" aria-label="Needs attention">
-			{items.length ? (
-				items.map((item) => (
-					<button
-						type="button"
-						key={item.label}
-						className={`attention-item ${item.tone}`}
-						onClick={() => open(item.tab, undefined, item.filter)}
-					>
-						{item.count !== undefined && <b>{item.count}</b>} {item.label}
-					</button>
-				))
-			) : (
-				<p className="attention-clear">Nothing needs attention right now.</p>
-			)}
-		</section>
 	);
 }
 
@@ -875,8 +830,6 @@ export function RepositoryPage({
 				</p>
 			)}
 			<CanonicalSetup view={view} execute={execute} />
-			{/* A change page leads with its own next step; the repository-wide summary would only push the review down. */}
-			{!(tab === "changes" && id) && <AttentionBar view={view} open={open} />}
 			{tab === "changes" && id ? (
 				<ChangeDetail key={id} view={view} id={id} execute={execute} busy={busy} open={open} who={who} />
 			) : (

@@ -14,6 +14,7 @@ import {
 	activityText,
 	actorLabel,
 	ago,
+	attention,
 	attentionItem,
 	blockerSummary,
 	blockerText,
@@ -187,11 +188,17 @@ function WorkspaceRow({
 			<span className="row-main">
 				<strong>{w.title}</strong>
 				<small className="row-meta">
-					<span className="owner">Owner: {ownerName(w.ownerId, who)}</span>
-					<span>{w.state === "disconnected" ? "Not reporting; checkout remains attached" : attachmentText(w)}</span>
-					<span>
-						<ReportAge at={w.lastReportAt} now={view.asOf ?? Date.now()} />
-					</span>
+					{/* The owner is named when it tells you something: someone else's work, or a repository with several owners. */}
+					{(w.ownerId !== who.viewerId || new Set(view.workspaces.map((x) => x.ownerId)).size > 1) && (
+						<span className="owner">Owner: {ownerName(w.ownerId, who)}</span>
+					)}
+					{/* "Not reporting" is already the row's pill. */}
+					{w.state !== "disconnected" && <span>{attachmentText(w)}</span>}
+					{w.lastReportAt !== undefined && (
+						<span>
+							<ReportAge at={w.lastReportAt} now={view.asOf ?? Date.now()} />
+						</span>
+					)}
 				</small>
 				{item && (
 					<small className="row-blocker">
@@ -461,54 +468,103 @@ export function WorkspaceList({
 			return !!w && matches(view, w, active, who.viewerId);
 		});
 	const degraded = view.reconciliation?.observation.state === "degraded";
-	const filterButton = (value: string, label: string) => (
-		<button type="button" aria-pressed={active === value} onClick={() => open("workspaces", undefined, value || undefined)}>
+	const summary = attention(view);
+	// Each filter carries its own count, so the list needs no separate summary bar above it.
+	const counts: Record<string, number> = {
+		"needs-you": summary.mine,
+		reconcile: view.workspaces.filter((w) => matches(view, w, "reconcile", who.viewerId)).length,
+		unproposed: summary.unproposed,
+	};
+	// A filter is offered only when it narrows the list to something: matching some workspaces but not all of them.
+	// The active one always stays, so it can be seen and cleared.
+	const liveAll = view.workspaces.filter((w) => !ended(w));
+	const needsYou = liveAll.filter(
+		(w) => attentionItem(view, w.id)?.mine || openItems.some((item) => item.mine && proposal(item.id)?.workspaceId === w.id),
+	).length;
+	const narrowing = (count: number) => count > 0 && count < liveAll.length;
+	const mine = owners.length > 1 ? liveAll.filter((w) => w.ownerId === who.viewerId).length : 0;
+	// [filter, label, workspaces it would show, count on its badge]
+	const offered = (
+		[
+			["needs-you", "Needs you", needsYou, counts["needs-you"]],
+			["mine", "Mine", mine, mine],
+			["reconcile", "Needs Git update", counts.reconcile, counts.reconcile],
+			["unproposed", "Not proposed", counts.unproposed, counts.unproposed],
+		] as const
+	).filter(([value, , matching]) => active === value || narrowing(matching));
+	const filterButton = (value: string, label: string, count = 0) => (
+		<button
+			key={value || "all"}
+			type="button"
+			aria-pressed={active === value}
+			onClick={() => open("workspaces", undefined, value || undefined)}
+		>
 			{label}
+			{count > 0 && <span className="filter-count">{count}</span>}
 		</button>
 	);
+	// Problems the rows cannot show: an interrupted operation, degraded observation and unknown ancestry.
+	const alerts = [
+		summary.recovery > 0 && (
+			<button key="recovery" type="button" className="danger" onClick={() => open("workspaces", undefined, "recovery")}>
+				{summary.recovery === 1 ? "1 operation needs attention" : `${summary.recovery} operations need attention`}
+			</button>
+		),
+		degraded && (
+			<button
+				key="observation"
+				type="button"
+				onClick={() => document.querySelector(".reconciliation-details")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+			>
+				Observation degraded
+			</button>
+		),
+		summary.ancestryUnavailable > 0 && (
+			<span key="ancestry">
+				{summary.ancestryUnavailable === 1
+					? "1 workspace with ancestry unavailable"
+					: `${summary.ancestryUnavailable} workspaces with ancestry unavailable`}
+			</span>
+		),
+	].filter(Boolean);
 	return (
 		<>
 			<section className="panel workspaces-screen">
-				<div className="panel-head">
-					<h2>{active ? "Matching workspaces" : "Active workspaces"}</h2>
-					<span className="panel-count">{live.length}</span>
-				</div>
 				{view.attention?.items.some((item) => item.group === "reconciliation") && <p className="panel-note">{RECONCILIATION_GUIDANCE}</p>}
-				<WorkspaceBrief view={view} who={who} execute={execute} />
-				<div className="list-filters">
-					<nav className="segmented filters" aria-label="Filter workspaces">
-						{filterButton("", "All")}
-						{filterButton("needs-you", "Needs you")}
-						{filterButton("mine", "Mine")}
-						{filterButton("reconcile", "Needs Git update")}
-						{filterButton("unproposed", "Not proposed")}
-						{group && (
-							<button type="button" aria-pressed="true" onClick={() => open("workspaces")}>
-								{GROUP_LABELS[group].label} · show all
-							</button>
-						)}
-					</nav>
-					{owners.length > 1 && (
-						<label className="owner-filter">
-							Owner
-							<select
-								value={active.startsWith("owner:") ? active : ""}
-								onChange={(e) => open("workspaces", undefined, e.target.value || undefined)}
-							>
-								<option value="">Everyone</option>
-								{owners.map((id) => (
-									<option key={id} value={`owner:${id}`}>
-										{ownerName(id, who)}
-									</option>
-								))}
-							</select>
-						</label>
-					)}
-				</div>
-				{(active === "needs-you" || group) && (
-					<p className="panel-note" role="status">
-						Showing {shownItems.length} of {openItems.length} open {openItems.length === 1 ? "change" : "changes"}.
+				{alerts.length > 0 && (
+					<p className="workspace-alerts" role="status">
+						{alerts}
 					</p>
+				)}
+				<WorkspaceBrief view={view} who={who} execute={execute} />
+				{(offered.length > 0 || group || owners.length > 1) && (
+					<div className="list-filters">
+						<nav className="segmented filters" aria-label="Filter workspaces">
+							{offered.length > 0 && filterButton("", "All")}
+							{offered.map(([value, label, , count]) => filterButton(value, label, count))}
+							{group && (
+								<button type="button" aria-pressed="true" onClick={() => open("workspaces")}>
+									{GROUP_LABELS[group].label} · show all
+								</button>
+							)}
+						</nav>
+						{owners.length > 1 && (
+							<label className="owner-filter">
+								Owner
+								<select
+									value={active.startsWith("owner:") ? active : ""}
+									onChange={(e) => open("workspaces", undefined, e.target.value || undefined)}
+								>
+									<option value="">Everyone</option>
+									{owners.map((id) => (
+										<option key={id} value={`owner:${id}`}>
+											{ownerName(id, who)}
+										</option>
+									))}
+								</select>
+							</label>
+						)}
+					</div>
 				)}
 				{attached.length ? (
 					<div className="rows">
@@ -532,6 +588,14 @@ export function WorkspaceList({
 							: active
 								? "No active workspaces match this filter."
 								: "No active workspaces. One appears when you or an agent starts work through Cruce. Use Clone next to the canonical revision to begin."}
+						{active && (
+							<>
+								{" "}
+								<button type="button" className="text-button" onClick={() => open("workspaces")}>
+									Show all workspaces
+								</button>
+							</>
+						)}
 					</p>
 				)}
 				{orphans.length > 0 && (
