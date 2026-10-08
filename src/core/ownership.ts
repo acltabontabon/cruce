@@ -3,6 +3,7 @@ import type {
 	Authority,
 	Invitation,
 	Namespace,
+	NamespaceLifecycle,
 	NamespaceRole,
 	NamespaceState,
 	Repository,
@@ -102,8 +103,13 @@ export class NamespaceController {
 		readonly now: number,
 	) {}
 	authority(actor: Actor, repositoryId?: string, scopes?: string[], approval?: RepositoryApproval): Authority {
+		const lifecycle = this.state.lifecycle;
+		if (lifecycle?.state === "deleted") throw new DomainError(410, "Namespace has been deleted");
 		const role = this.state.members[actor.userId];
 		if (!role || actor.kind === "system") throw new DomainError(403, "Namespace access denied");
+		// Once deletion is authorized only the console owner who can see it through remains; agents and members are refused.
+		if (lifecycle && (actor.kind !== "human" || actor.connectionId || role !== "owner"))
+			throw new DomainError(409, "Namespace is being deleted");
 		let access: RepositoryRole | undefined;
 		if (repositoryId) {
 			const repository = this.state.repositories.find((r) => r.id === repositoryId);
@@ -114,10 +120,22 @@ export class NamespaceController {
 			if (actor.kind === "agent" && (!approved || !scopes?.includes("cruce:read")))
 				throw new DomainError(403, "Repository not authorized for this agent connection");
 		}
-		return { actor, namespaceId: this.state.namespace.id, repositoryId, role, repositoryRole: access, scopes };
+		return {
+			actor,
+			namespaceId: this.state.namespace.id,
+			repositoryId,
+			role,
+			repositoryRole: access,
+			scopes,
+			...(lifecycle ? { namespaceDeleting: true as const } : {}),
+		};
+	}
+	private frozen() {
+		if (this.state.lifecycle) throw new DomainError(409, "Namespace is being deleted");
 	}
 	member(a: Authority, userId: string, role?: NamespaceRole) {
 		namespaceMaintain(a);
+		this.frozen();
 		if (this.state.namespace.kind === "personal")
 			throw new DomainError(409, "Personal namespaces have one owner; create a shared namespace to collaborate");
 		if (this.state.members[userId] === "owner" || role === "owner")
@@ -134,6 +152,7 @@ export class NamespaceController {
 	}
 	team(a: Authority, id: string, name: string, members: string[]) {
 		namespaceMaintain(a);
+		this.frozen();
 		if (this.state.namespace.kind !== "shared") throw new DomainError(409, "Teams belong to shared namespaces");
 		if (members.some((u) => !this.state.members[u])) throw new DomainError(400, "Team members must belong to the namespace");
 		const t = this.state.teams.find((t) => t.id === id);
@@ -143,12 +162,15 @@ export class NamespaceController {
 	}
 	invite(a: Authority, invitation: Invitation) {
 		namespaceMaintain(a);
+		this.frozen();
 		if (this.state.namespace.kind !== "shared" || (invitation.role === "maintainer" && a.role !== "owner"))
 			throw new DomainError(403, "Invitation not permitted");
 		this.state.invitations.push(invitation);
 		this.state.version++;
 	}
 	accept(user: User, tokenHash: string) {
+		if (this.state.lifecycle?.state === "deleted") throw new DomainError(410, "Namespace has been deleted");
+		this.frozen();
 		const i = this.state.invitations.find((i) => i.tokenHash === tokenHash);
 		if (!i || i.expiresAt <= this.now || i.email.toLowerCase() !== user.email.toLowerCase() || (i.acceptedBy && i.acceptedBy !== user.id))
 			throw new DomainError(403, "Invitation invalid or expired");
@@ -159,6 +181,7 @@ export class NamespaceController {
 	}
 	repository(a: Authority, repository: Repository) {
 		namespaceMaintain(a);
+		this.frozen();
 		if (repository.namespaceId !== this.state.namespace.id) throw new DomainError(403, "Namespace mismatch");
 		if (this.state.repositories.some((r) => r.id !== repository.id && r.lifecycle?.state !== "deleted" && r.name === repository.name))
 			throw new DomainError(409, "Repository name already used");
@@ -191,6 +214,28 @@ export class NamespaceController {
 		}
 		this.state.version++;
 	}
+	/**
+	 * Permanent deletion of a shared namespace and every repository in it. Deleting freezes the namespace; deleted leaves
+	 * a tombstone without members, teams or invitations so its stable ID is never resurrected.
+	 */
+	deletion(a: Authority, lifecycle: NamespaceLifecycle) {
+		if (a.actor.kind !== "human" || a.actor.connectionId || a.role !== "owner")
+			throw new DomainError(403, "Human namespace owner required");
+		if (this.state.namespace.kind !== "shared")
+			throw new DomainError(409, "A personal namespace belongs to its account; delete its repositories instead");
+		const old = this.state.lifecycle;
+		if (old && old.operationId !== lifecycle.operationId) throw new DomainError(409, "Resume the existing namespace deletion");
+		if (lifecycle.state === "deleted" && this.state.repositories.some((r) => r.lifecycle?.state !== "deleted"))
+			throw new DomainError(409, "Delete every repository before the namespace");
+		this.state.lifecycle = lifecycle;
+		if (lifecycle.state === "deleted") {
+			this.state.members = {};
+			this.state.teams = [];
+			this.state.invitations = [];
+		}
+		this.state.version++;
+	}
+	/** Stays open to the owner during deletion: a policy that blocks it must remain changeable. */
 	setPolicy(a: Authority, policy: ResourcePolicy) {
 		namespaceMaintain(a);
 		this.state.policy = policy;
@@ -199,6 +244,7 @@ export class NamespaceController {
 	reserve(a: Authority, id: string, fingerprint: string, action: ResourceAction, workspaceId?: string) {
 		if (action === "repository.delete" && (a.actor.kind !== "human" || a.actor.connectionId || a.role !== "owner"))
 			throw new DomainError(403, "Human namespace owner required");
+		if (action !== "repository.delete") this.frozen();
 		const repo = this.state.repositories.find((r) => r.id === a.repositoryId);
 		if (!repo || !a.repositoryRole || (a.repositoryRole === "read" && action !== "source.read"))
 			throw new DomainError(403, "Repository write permission required");

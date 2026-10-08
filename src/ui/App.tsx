@@ -442,6 +442,10 @@ export function App() {
 						open={(repositoryId, tab) => navigate(route.namespaceId, repositoryId, tab)}
 						newRepository={() => setOverlay("repository")}
 						renamed={(w) => setMe({ ...me, namespaces: me.namespaces.map((old) => (old.id === w.id ? w : old)) })}
+						deleted={() => {
+							setMe({ ...me, namespaces: me.namespaces.filter((old) => old.id !== route.namespaceId) });
+							navigateHome();
+						}}
 					/>
 				) : (
 					<Empty>{error ? "Namespace unavailable." : "Loading namespace…"}</Empty>

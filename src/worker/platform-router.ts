@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { namespaceMaintain, SCOPES, type Scope } from "../core/capabilities.ts";
 import { DomainError, publicError, requireValue } from "../core/errors.ts";
+import { namespaceDeletionView } from "../core/namespace-lifecycle.ts";
 import { repositorySummary } from "../shared/coordination.ts";
 import { parseGitRoute } from "../shared/git-access.ts";
 import { TRANSFER_LIMITS } from "../shared/limits.ts";
@@ -220,6 +221,7 @@ export async function platformRoute(
 				)) as import("../shared/platform.ts").RepositorySnapshot;
 				return {
 					summary: repositorySummary(snapshot),
+					lifecycle: snapshot.lifecycle,
 					activity: snapshot.activity
 						.slice(-20)
 						.map((event) => ({ ...event, repositoryId: repo.id, repositoryName: snapshot.repository.name })),
@@ -240,8 +242,24 @@ export async function platformRoute(
 				.flatMap((result) => result.activity)
 				.sort((a, b) => b.at - a.at)
 				.slice(0, 20);
+			const { deletion, lifecycle, ...rest } = current;
 			return json({
-				...current,
+				...rest,
+				...(current.permissions.owner
+					? {
+							deletion: namespaceDeletionView(
+								{ namespace: current.namespace, lifecycle, policy: current.policy },
+								a,
+								view.repositories.flatMap((repository, index) => {
+									const result = results[index];
+									return allowed.has(repository.id)
+										? [{ repository, lifecycle: result.status === "fulfilled" ? result.value.lifecycle : undefined }]
+										: [];
+								}),
+								deletion,
+							),
+						}
+					: {}),
 				namespace: await directory.namespace(namespaceId),
 				people: await directory.users(Object.keys(current.members)),
 				repositorySummaries,
@@ -251,11 +269,17 @@ export async function platformRoute(
 		}
 		if (request.method === "PATCH") {
 			namespaceMaintain(a);
+			if (a.namespaceDeleting) throw new DomainError(409, "Namespace is being deleted");
 			const body = z.object({ name: displayName, handle: name }).parse(await input(request));
 			const w = await directory.rename(namespaceId, body);
 			await namespace.metadata(w);
 			return json(w);
 		}
+	}
+	if (parts[3] === "deletion" && parts.length === 4 && request.method === "POST") {
+		// Console only: agents and terminals were refused above, and the namespace checks for its human owner.
+		const body = z.object({ confirmation: name, idempotencyKey: id }).parse(await input(request));
+		return json(await namespace.deleteNamespace(grant, body));
 	}
 	if (parts[3] === "members" && request.method === "POST") {
 		const body = z.object({ userId: id, role: role.optional() }).parse(await input(request));

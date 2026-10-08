@@ -101,7 +101,7 @@ export class Directory extends DurableObject {
 		if (legacy) return legacy.namespaces;
 		return this.store
 			.scan<string>(`access:${userId}:`, undefined, STATE_LIMITS.namespaceCandidates)
-			.map(({ value }) => this.namespace(value));
+			.flatMap(({ value }) => this.store.get<Namespace>(`namespace:${value}`) ?? []);
 	}
 	namespace(id: string) {
 		const namespace = this.store.get<Namespace>(`namespace:${id}`) ?? this.legacy()?.namespaces.find((n) => n.id === id);
@@ -122,6 +122,8 @@ export class Directory extends DurableObject {
 	}
 	create(user: User, input: { handle: string; name: string }, id: string) {
 		this.indexExisting();
+		// Reusing a creation key never resurrects a deleted namespace's stable ID.
+		if (this.store.get(`deleted-namespace:${id}`)) throw new DomainError(410, "Namespace has been deleted");
 		const old = this.store.get<Namespace>(`namespace:${id}`);
 		const handle = this.store.get<string>(`handle:${input.handle}`);
 		if (handle && handle !== id) throw new DomainError(409, "Namespace handle already used");
@@ -142,6 +144,26 @@ export class Directory extends DurableObject {
 			{ key: `access:${user.id}:${id}`, value: id },
 		]);
 		return result;
+	}
+	/**
+	 * A deleted namespace leaves discovery: its handle can be used again and its members stop seeing it. A small
+	 * tombstone keeps its stable ID from being created again. Access entries of former members simply no longer resolve.
+	 */
+	retire(id: string, members: string[]) {
+		this.indexExisting();
+		if (this.store.get(`deleted-namespace:${id}`)) return;
+		const namespace = this.namespace(id);
+		if (namespace.kind !== "shared")
+			throw new DomainError(409, "A personal namespace belongs to its account; delete its repositories instead");
+		if (members.length > 1000) throw new DomainError(413, "Directory lookup exceeds its entry limit");
+		this.store.batch(
+			[{ key: `deleted-namespace:${id}`, value: { id, handle: namespace.handle, deletedAt: Date.now() } }],
+			[
+				`namespace:${id}`,
+				...(this.store.get<string>(`handle:${namespace.handle}`) === id ? [`handle:${namespace.handle}`] : []),
+				...members.map((userId) => `access:${userId}:${id}`),
+			],
+		);
 	}
 	rename(id: string, input: { handle: string; name: string }) {
 		this.indexExisting();

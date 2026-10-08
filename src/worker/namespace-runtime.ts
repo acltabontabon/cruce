@@ -1,24 +1,32 @@
 import { DurableObject } from "cloudflare:workers";
 import { DEFAULT_RESOURCE_POLICY } from "../core/capabilities.ts";
 import { DomainError, stable } from "../core/errors.ts";
+import { namespaceDeletionView, type RepositoryRetirement } from "../core/namespace-lifecycle.ts";
 import { initialNamespace, NamespaceController } from "../core/ownership.ts";
 import { repositoryOwner } from "../core/repository-lifecycle.ts";
 import { assertNamespaceCapacity } from "../core/state-limits.ts";
 import { STATE_LIMITS } from "../shared/limits.ts";
-import type {
-	Actor,
-	Invitation,
-	Namespace,
-	NamespaceRole,
-	NamespaceState,
-	Repository,
-	RepositoryApproval,
-	ResourceAction,
-	ResourcePolicy,
-	ResourceReservation,
-	User,
+import {
+	type Actor,
+	CommandInput,
+	type Invitation,
+	type Namespace,
+	type NamespaceRole,
+	type NamespaceState,
+	type Repository,
+	type RepositoryApproval,
+	type RepositorySnapshot,
+	type ResourceAction,
+	type ResourcePolicy,
+	type ResourceReservation,
+	type User,
 } from "../shared/platform.ts";
 import { ResourceBoundary, type StorageEnv } from "./artifacts.ts";
+import type { ControlTower } from "./control-tower.ts";
+import type { Directory } from "./directory.ts";
+import { namespaceDirectory } from "./directory-access.ts";
+import { NamespaceDeletionRuntime } from "./namespace-deletion.ts";
+import { boundedMap } from "./platform-router.ts";
 import { hash, sqlStore } from "./store.ts";
 export type ContinuationAuthorization =
 	| { kind: "console" }
@@ -30,8 +38,69 @@ export interface ConnectionGrant {
 	repositories?: RepositoryApproval;
 	continuation?: ContinuationAuthorization;
 }
-export class NamespaceRuntime extends DurableObject<StorageEnv> {
+interface NamespaceEnv extends StorageEnv {
+	CONTROL_TOWER: DurableObjectNamespace<ControlTower>;
+	DIRECTORY: DurableObjectNamespace<Directory>;
+}
+export class NamespaceRuntime extends DurableObject<NamespaceEnv> {
 	private store = sqlStore(this.ctx.storage.sql, (run) => this.ctx.storage.transactionSync(run));
+	private deletion() {
+		return new NamespaceDeletionRuntime(
+			this.store,
+			{
+				load: () => this.controller(),
+				save: (c, entries) => this.save(c, entries),
+				deleteRepository: async (repository, idempotencyKey, grant) =>
+					(await this.env.CONTROL_TOWER.getByName(repository.id).command(
+						repository,
+						CommandInput.parse({
+							tool: "delete_repository",
+							namespaceId: repository.namespaceId,
+							repositoryId: repository.id,
+							idempotencyKey,
+							confirmation: repository.name,
+						}),
+						grant,
+					)) as { state: string; reason?: string; blocked?: boolean },
+				blockers: async (grant) => {
+					const c = this.controller();
+					return namespaceDeletionView(c.state, c.authority(grant.actor), await this.retirements(grant)).blockers;
+				},
+				retire: (namespace, members) => namespaceDirectory(this.env).retire(namespace.id, members),
+				schedule: async (at) => {
+					const current = await this.ctx.storage.getAlarm();
+					if (current === null || current > at) await this.ctx.storage.setAlarm(at);
+				},
+			},
+			Date.now,
+		);
+	}
+	/** Each live repository with its own lifecycle view, read as the given grant; unreadable ones have none. */
+	private async retirements(grant: ConnectionGrant): Promise<RepositoryRetirement[]> {
+		const repositories = this.controller().state.repositories.filter((r) => r.lifecycle?.state !== "deleted");
+		const results = await boundedMap(
+			repositories,
+			async (repository) =>
+				(
+					(await this.env.CONTROL_TOWER.getByName(repository.id).command(
+						repository,
+						{ tool: "get_repository", namespaceId: repository.namespaceId, repositoryId: repository.id },
+						grant,
+					)) as RepositorySnapshot
+				).lifecycle,
+		);
+		return repositories.map((repository, i) => ({
+			repository,
+			lifecycle: results[i].status === "fulfilled" ? results[i].value : undefined,
+		}));
+	}
+	async alarm() {
+		await this.deletion().recover();
+	}
+	/** The console owner's permanent deletion of this shared namespace and every repository in it. */
+	deleteNamespace(grant: ConnectionGrant, input: { confirmation: string; idempotencyKey: string }) {
+		return this.deletion().command(grant, input);
+	}
 	private controller(repositoryId?: string) {
 		const state = this.store.get<NamespaceState>("namespace");
 		if (!state) throw new DomainError(404, "Namespace unavailable");
@@ -52,10 +121,11 @@ export class NamespaceRuntime extends DurableObject<StorageEnv> {
 	metadata(namespace: Namespace) {
 		const c = this.controller();
 		if (c.state.namespace.id !== namespace.id) throw new DomainError(403, "Namespace mismatch");
+		if (c.state.lifecycle) throw new DomainError(409, "Namespace is being deleted");
 		c.state.namespace = namespace;
 		this.save(c);
 	}
-	private save(c: NamespaceController) {
+	private save(c: NamespaceController, extra: { key: string; value: unknown }[] = []) {
 		const repositories = c.state.repositories.filter((r) => r.lifecycle?.state !== "deleted");
 		assertNamespaceCapacity({ ...c.state, repositories, reservations: [] });
 		const entries: { key: string; value: unknown }[] = c.state.reservations.map((reservation) => ({
@@ -68,6 +138,7 @@ export class NamespaceRuntime extends DurableObject<StorageEnv> {
 				.filter((r) => r.lifecycle?.state === "deleted")
 				.map((value) => ({ key: `deleted-repository:${value.id}`, value })),
 			{ key: "namespace", value: { ...c.state, repositories, reservations: [] } },
+			...extra,
 		]);
 	}
 	private reservationKey(id: string) {
@@ -116,6 +187,8 @@ export class NamespaceRuntime extends DurableObject<StorageEnv> {
 			reservations: maintain ? this.reservations(grant).items : [],
 			capacity: { ...this.store.usage(), limits: STATE_LIMITS },
 			permissions: { maintain, owner: maintain && a.role === "owner" },
+			lifecycle: c.state.lifecycle,
+			deletion: maintain && a.role === "owner" ? this.deletion().view() : undefined,
 		};
 	}
 	repository(grant: ConnectionGrant, repositoryId: string) {

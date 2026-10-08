@@ -4,6 +4,7 @@ export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 		"Choose the operation to release",
 		"Unsupported repository lifecycle input",
 		"Type the repository name to confirm deletion",
+		"Type the namespace handle to confirm deletion",
 		"Observation enabled flag required",
 
 		"Invalid page limit",
@@ -132,6 +133,11 @@ export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 	409: [
 		"Repository is read-only",
 		"Repository retirement has blockers",
+		"Namespace deletion has blockers",
+		"Namespace is being deleted",
+		"Resume the existing namespace deletion",
+		"Delete every repository before the namespace",
+		"A personal namespace belongs to its account; delete its repositories instead",
 		"Repository deletion is already authorized",
 		"Resume the existing repository deletion",
 		"Resume the repository deletion instead",
@@ -266,7 +272,7 @@ export const PUBLIC_ERRORS: Readonly<Record<number, readonly string[]>> = {
 		"Cloudflare rejected storage access. Ask the installation administrator to check Artifacts permissions.",
 		"Invalid Artifacts Git remote",
 	],
-	410: ["Repository has been deleted"],
+	410: ["Repository has been deleted", "Namespace has been deleted"],
 	503: [
 		"Repository lifecycle unavailable",
 		"Observation installation is not configured",

@@ -33,7 +33,7 @@ async function fixture() {
 	const p = provider(),
 		{ store } = memory(),
 		namespaceStore = memory().store;
-	const namespace = new NamespaceRuntime({ storage: { sql: namespaceStore } } as unknown as DurableObjectState, p.env);
+	const namespace = new NamespaceRuntime({ storage: { sql: namespaceStore } } as unknown as DurableObjectState, p.env as never);
 	namespace.initialize({ id: "team", ownerId: "owner", name: "Team", handle: "team", kind: "personal", createdAt: 1000 });
 	namespace.saveRepository({ actor }, structuredClone(repository));
 	const git = new GitWorkspace(new MemoryFs() as never);

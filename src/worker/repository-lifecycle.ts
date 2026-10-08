@@ -134,6 +134,8 @@ export class RepositoryLifecycleRuntime {
 			return transition.lifecycle;
 		}
 		if (this.store.get(transitionKey)) throw new DomainError(409, "Retry the unfinished repository transition");
+		// Only the namespace deletion itself, or a retry of a transition it found unfinished, runs once it is authorized.
+		if (a.namespaceDeleting && command.tool !== "delete_repository") throw new DomainError(409, "Namespace is being deleted");
 		const view = await this.view(repository, grant, a);
 		if (view.state === "deleted" || view.state === "deleting") throw new DomainError(409, "Repository deletion is already authorized");
 		const blockers = command.tool === "delete_repository" ? view.deletionBlockers : view.blockers;
@@ -300,7 +302,7 @@ export class RepositoryLifecycleRuntime {
 			this.store.put(deletionKey, deletion);
 			if (deletion.reservationId && !["confirmed", "purging", "complete"].includes(deletion.phase))
 				await this.port.settle(deletion.reservationId, "uncertain");
-			return { state: "deleting", reason: deletion.reason };
+			return { state: "deleting", reason: deletion.reason, blocked: deletion.state === "blocked" };
 		}
 	}
 	private pending(deletion: Deletion) {

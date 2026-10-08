@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import type { Namespace, NamespaceRole, Team } from "../shared/platform.ts";
+import type { Namespace, NamespaceDeletionView, NamespaceRole, Team } from "../shared/platform.ts";
 import { Form, value } from "./controls.tsx";
-import { BackLink, CopyCommand, Icon, Initials, PageHeader, Section, SettingRow, Stats } from "./design.tsx";
+import { BackLink, CopyCommand, Dialog, Icon, Initials, PageHeader, Section, SettingRow, Stats } from "./design.tsx";
 import { plural, RepositoryRow, totals } from "./home.tsx";
 import type { Mutate } from "./repository.tsx";
 import { activityText, ago } from "./status.ts";
@@ -359,19 +359,140 @@ function Overview({
 	);
 }
 
+/** What deleting the namespace ends with its repositories, in plain words for its confirmation. */
+function deletedWork({ repositories, archived, unfinished }: NamespaceDeletionView) {
+	const work = [
+		unfinished.workspaces > 0 &&
+			`${plural(unfinished.workspaces, "unfinished workspace")}${unfinished.attached > 0 ? ` (${unfinished.attached} attached to ${unfinished.attached === 1 ? "a checkout" : "checkouts"})` : ""}`,
+		unfinished.changes > 0 && plural(unfinished.changes, "open change"),
+	].filter(Boolean);
+	return [
+		`${repositories === 0 ? "no repositories" : plural(repositories, "repository", "repositories")}${archived > 0 ? ` (${archived} archived)` : ""}.`,
+		work.length
+			? ` This also ends ${work.join(" and ")}. Agents and checkouts keep running; their next Cruce or Git request fails because the namespace is gone. Unpushed local commits stay on their machines.`
+			: "",
+	].join("");
+}
+
+function NamespaceDeletion({
+	namespace,
+	base,
+	mutate,
+	deleted,
+}: {
+	namespace: NamespaceView;
+	base: string;
+	mutate: Mutate;
+	deleted: () => void;
+}) {
+	const [confirming, setConfirming] = useState(false);
+	const [confirmation, setConfirmation] = useState("");
+	// One operation identity per confirmation, so a lost response is retried rather than refused.
+	const [key, setKey] = useState("");
+	const view = namespace.deletion,
+		ns = namespace.namespace;
+	if (ns.kind !== "shared") return null;
+	const submit = async (input: { confirmation: string; idempotencyKey: string }) => {
+		const result = await mutate<{ state: string }>(`${base}/deletion`, input);
+		setConfirming(false);
+		if (result.state === "deleted") deleted();
+	};
+	return (
+		<SettingRow
+			title="Delete namespace"
+			detail="Permanently deletes every repository in this namespace, including canonical Git, forks, published revisions, evidence and history, then the namespace itself."
+		>
+			{!view ? (
+				<p>Only the signed-in namespace owner can delete this namespace.</p>
+			) : view.state === "deleting" ? (
+				<>
+					<p role="status">
+						Deletion is in progress.{" "}
+						{view.deletion && view.deletion.remaining > 0
+							? `${plural(view.deletion.remaining, "repository", "repositories")} still being deleted.`
+							: "Removing the namespace."}{" "}
+						Members and agents can no longer use it.
+					</p>
+					{view.deletion?.reason && <p role="alert">{view.deletion.reason}</p>}
+					{view.owner && view.deletion && (
+						<Form label="Retry deletion" submit={() => submit({ confirmation: ns.handle, idempotencyKey: view.deletion!.idempotencyKey })}>
+							<span>Resumes the same authorized deletion.</span>
+						</Form>
+					)}
+				</>
+			) : (
+				<>
+					<p>{view.blockers.length ? "Deletion waits for the items below." : `Deletes the namespace with ${deletedWork(view)}`}</p>
+					{view.blockers.length > 0 && (
+						<ul>
+							{view.blockers.map((blocker) => (
+								<li key={blocker}>{blocker}</li>
+							))}
+						</ul>
+					)}
+					{view.owner ? (
+						<div className="lifecycle-actions">
+							<button
+								type="button"
+								className="danger-button"
+								disabled={view.blockers.length > 0}
+								onClick={() => {
+									setConfirmation("");
+									setKey(crypto.randomUUID());
+									setConfirming(true);
+								}}
+							>
+								Delete namespace…
+							</button>
+						</div>
+					) : (
+						<p>Only the signed-in namespace owner can delete this namespace.</p>
+					)}
+				</>
+			)}
+			{confirming && view && (
+				<Dialog title="Delete namespace permanently" close={() => setConfirming(false)}>
+					<p>
+						This permanently deletes <strong>{ns.name}</strong> with {deletedWork(view)} It cannot be undone.
+					</p>
+					<p>
+						Local checkouts and external upstream repositories remain. Members lose access and the handle can be used again. This uses
+						installation cloud resources under namespace policy.
+					</p>
+					<Form
+						label="Delete namespace permanently"
+						danger
+						primary
+						cancel={() => setConfirming(false)}
+						disabled={confirmation !== ns.handle}
+						submit={() => submit({ confirmation, idempotencyKey: key })}
+					>
+						<label>
+							Type {ns.handle} to confirm
+							<input autoComplete="off" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required />
+						</label>
+					</Form>
+				</Dialog>
+			)}
+		</SettingRow>
+	);
+}
+
 function Settings({
 	namespace,
 	base,
 	mutate,
 	renamed,
+	deleted,
 }: {
 	namespace: NamespaceView;
 	base: string;
 	mutate: Mutate;
 	renamed: (namespace: Namespace) => void;
+	deleted: () => void;
 }) {
 	const ns = namespace.namespace,
-		maintain = namespace.permissions.maintain;
+		maintain = namespace.permissions.maintain && !namespace.lifecycle;
 	return (
 		<div className="settings">
 			<SettingRow title="Namespace" detail="The name people see and the handle used in links and Git remotes.">
@@ -460,6 +581,7 @@ function Settings({
 						: namespace.storage.reason}
 				</p>
 			</SettingRow>
+			<NamespaceDeletion namespace={namespace} base={base} mutate={mutate} deleted={deleted} />
 		</div>
 	);
 }
@@ -472,6 +594,7 @@ export function NamespacePage({
 	open,
 	newRepository,
 	renamed,
+	deleted,
 }: {
 	namespace: NamespaceView;
 	tab: string;
@@ -480,6 +603,7 @@ export function NamespacePage({
 	open: (repositoryId: string, tab?: string) => void;
 	newRepository: () => void;
 	renamed: (namespace: Namespace) => void;
+	deleted: () => void;
 }) {
 	const ns = namespace.namespace,
 		settings = tab === "settings";
@@ -504,7 +628,7 @@ export function NamespacePage({
 							<Icon name="settings" />
 							Settings
 						</button>
-						{namespace.permissions.maintain && (
+						{namespace.permissions.maintain && !namespace.lifecycle && (
 							<button className="primary" type="button" onClick={newRepository}>
 								<Icon name="plus" />
 								New repository
@@ -513,8 +637,13 @@ export function NamespacePage({
 					</>
 				)}
 			</PageHeader>
+			{namespace.lifecycle?.state === "deleting" && (
+				<p className="lifecycle-banner" role="status">
+					Deletion in progress · Read-only. {settings ? "Progress is shown below." : "View progress in Settings."}
+				</p>
+			)}
 			{settings ? (
-				<Settings namespace={namespace} base={base} mutate={mutate} renamed={renamed} />
+				<Settings namespace={namespace} base={base} mutate={mutate} renamed={renamed} deleted={deleted} />
 			) : (
 				<Overview namespace={namespace} base={base} mutate={mutate} open={open} />
 			)}

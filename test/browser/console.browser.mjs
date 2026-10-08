@@ -2602,3 +2602,77 @@ test("partial repository deletion shows its reason and retries the original oper
 	assert.equal(commands[0].idempotencyKey, commands[1].idempotencyKey);
 	await page.getByRole("button").filter({ hasText: "retry-deletion" }).waitFor({ state: "detached" });
 });
+
+test("namespace deletion confirms the handle, then leaves the namespace and its repositories", async () => {
+	await page.goto(`${server.origin}/?namespace=fernloop`);
+	await page.getByRole("heading", { name: "Fernloop", exact: true }).waitFor();
+	await page.getByRole("button", { name: "Settings", exact: true }).click();
+	await page.getByRole("button", { name: "Delete namespace…", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "Delete namespace permanently", exact: true });
+	// Deletion ends unfinished work with every repository, and its confirmation says so.
+	assert.match(await dialog.innerText(), /with 1 repository\. This also ends \d+ unfinished workspaces? \(\d+ attached/);
+	const confirm = dialog.getByRole("button", { name: "Delete namespace permanently", exact: true });
+	assert.equal(await confirm.isDisabled(), true);
+	await dialog.getByLabel("Type fernloop to confirm", { exact: true }).fill("Fernloop");
+	assert.equal(await confirm.isDisabled(), true);
+	await dialog.getByLabel("Type fernloop to confirm", { exact: true }).fill("fernloop");
+	await page.screenshot({ path: "dist/ui-checks/delete-namespace.png", fullPage: true });
+	await confirm.click();
+	await page.waitForURL((url) => !url.search.includes("namespace=fernloop"));
+	const calls = await (await page.request.get(`${server.origin}/__fixture/calls`)).json();
+	assert.deepEqual(
+		calls.filter((call) => call.deleteNamespace).map((call) => call.deleteNamespace.confirmation),
+		["fernloop"],
+	);
+	const me = await (await page.request.get(`${server.origin}/api/me`)).json();
+	assert.equal(
+		me.namespaces.some((namespace) => namespace.id === "fernloop"),
+		false,
+	);
+});
+
+test("a namespace deletion in progress freezes the namespace and retries the original operation", async () => {
+	const posts = [];
+	await page.route("**/api/namespaces/fernloop", async (route) => {
+		if (route.request().method() !== "GET") return route.continue();
+		const response = await route.fetch();
+		const view = await response.json();
+		if (posts.length) {
+			view.lifecycle = { state: "deleting", at: 1, actorId: view.namespace.ownerId, operationId: posts[0].idempotencyKey };
+			view.deletion = {
+				...view.deletion,
+				state: "deleting",
+				deletion: {
+					idempotencyKey: posts[0].idempotencyKey,
+					reason: "payment-service: Cloudflare is rate limiting requests. Retry the same operation shortly.",
+					remaining: 1,
+				},
+			};
+		}
+		await route.fulfill({ response, json: view });
+	});
+	await page.route("**/api/namespaces/fernloop/deletion", async (route) => {
+		posts.push(route.request().postDataJSON());
+		if (posts.length === 1) return route.fulfill({ json: { state: "deleting" } });
+		return route.continue();
+	});
+	await page.goto(`${server.origin}/?namespace=fernloop`);
+	await page.getByRole("button", { name: "Settings", exact: true }).click();
+	await page.getByRole("button", { name: "Delete namespace…", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "Delete namespace permanently", exact: true });
+	await dialog.getByLabel("Type fernloop to confirm", { exact: true }).fill("fernloop");
+	await dialog.getByRole("button", { name: "Delete namespace permanently", exact: true }).click();
+	await page.getByRole("alert").filter({ hasText: "payment-service: Cloudflare is rate limiting requests" }).waitFor();
+	await page.getByText("1 repository still being deleted.", { exact: false }).waitFor();
+	assert.equal(await page.getByRole("button", { name: "Save namespace", exact: true }).count(), 0);
+	await page.screenshot({ path: "dist/ui-checks/delete-namespace-in-progress.png", fullPage: true });
+	await page.locator(".back-link").click();
+	await page.getByText("Deletion in progress · Read-only. View progress in Settings.", { exact: true }).waitFor();
+	assert.equal(await page.getByRole("button", { name: "New repository", exact: true }).count(), 0);
+	await page.getByRole("button", { name: "Settings", exact: true }).click();
+	await page.getByRole("button", { name: "Retry deletion", exact: true }).click();
+	await page.waitForURL((url) => !url.search.includes("namespace=fernloop"));
+	assert.equal(posts.length, 2);
+	assert.deepEqual(posts[1], posts[0]);
+	assert.equal(posts[0].confirmation, "fernloop");
+});

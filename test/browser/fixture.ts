@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { bundleIds, finishedWork, withoutBundles } from "../../src/core/archive.ts";
 import { attentionView } from "../../src/core/attention.ts";
 import { stable } from "../../src/core/errors.ts";
+import { namespaceDeletionView } from "../../src/core/namespace-lifecycle.ts";
 import { DirectoryController, initialNamespace, NamespaceController } from "../../src/core/ownership.ts";
 import { initialRepository, RepositoryController } from "../../src/core/platform.ts";
 import { repositoryLifecycleView, repositoryOwner } from "../../src/core/repository-lifecycle.ts";
@@ -394,9 +395,18 @@ export async function fixture() {
 					.flatMap((s) => s.activity.map((event) => ({ ...event, repositoryId: s.repository.id, repositoryName: s.repository.name })))
 					.sort((x, y) => y.at - x.at)
 					.slice(0, 20);
+				const live = w.state.repositories.filter((r) => r.lifecycle?.state !== "deleted");
 				return json(res, {
 					...w.state,
-					repositories: w.state.repositories.filter((r) => r.lifecycle?.state !== "deleted"),
+					deletion: namespaceDeletionView(
+						w.state,
+						a,
+						live.map((r) => ({
+							repository: r,
+							lifecycle: repositoryLifecycleView(runtimes.get(r.id)!.state, { ...a, repositoryId: r.id, repositoryRole: "maintain" }),
+						})),
+					),
+					repositories: live,
 					repositorySummaries,
 					activity,
 					role: a.role,
@@ -404,6 +414,21 @@ export async function fixture() {
 					permissions: { maintain: true, owner: true },
 					storage: { mode: "deployment", ready: true },
 				});
+			}
+			if (parts[3] === "deletion" && req.method === "POST") {
+				// Simulated namespace deletion: the real Namespace DO drives each repository's own deletion, then retires it.
+				calls.push({ deleteNamespace: body });
+				if (w.state.namespace.kind !== "shared")
+					return json(res, { error: "A personal namespace belongs to its account; delete its repositories instead" }, 409);
+				if (body.confirmation !== w.state.namespace.handle)
+					return json(res, { error: "Type the namespace handle to confirm deletion" }, 400);
+				const lifecycle = { at: FIXED_TIME, actorId: actor.id, operationId: body.idempotencyKey };
+				for (const r of w.state.repositories) r.lifecycle = { ...lifecycle, state: "deleted" };
+				w.state.repositories = [];
+				w.state.lifecycle = { ...lifecycle, state: "deleted" };
+				namespaces.delete(w.state.namespace.id);
+				directory.state.namespaces = directory.state.namespaces.filter((n) => n.id !== w.state.namespace.id);
+				return json(res, { state: "deleted" });
 			}
 			if (parts[3] === "teams") {
 				w.team(a, body.id, body.name, body.members);

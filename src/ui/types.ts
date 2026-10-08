@@ -1,5 +1,14 @@
 import type { RepositorySummary } from "../shared/coordination.ts";
-import type { Namespace, NamespaceRole, Repository, ResourcePolicy, ResourceStorage, Team } from "../shared/platform.ts";
+import type {
+	Namespace,
+	NamespaceDeletionView,
+	NamespaceLifecycle,
+	NamespaceRole,
+	Repository,
+	ResourcePolicy,
+	ResourceStorage,
+	Team,
+} from "../shared/platform.ts";
 export type NamespaceView = {
 	repositorySummaries?: RepositorySummary[];
 	repositoryFailures?: { repositoryId: string; message: string }[];
@@ -21,4 +30,7 @@ export type NamespaceView = {
 	policy: ResourcePolicy;
 	storage: ResourceStorage;
 	permissions: { maintain: boolean; owner: boolean };
+	lifecycle?: NamespaceLifecycle;
+	/** Owner only: what permanent deletion would end, what stops it, and its progress once authorized. */
+	deletion?: NamespaceDeletionView;
 };

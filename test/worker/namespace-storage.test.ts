@@ -32,7 +32,7 @@ function fixture() {
 		CRUCE_STORAGE_ACCOUNT_ID: "a".repeat(32),
 		CRUCE_ARTIFACTS_NAMESPACE: "cruce",
 	};
-	const runtime = new NamespaceRuntime({ storage: { sql: store } } as unknown as DurableObjectState, env);
+	const runtime = new NamespaceRuntime({ storage: { sql: store } } as unknown as DurableObjectState, env as never);
 	runtime.initialize({ id: "team", ownerId: "owner", name: "Team", handle: "team", kind: "shared", createdAt: 1 });
 	const repo: Repository = {
 		id: "repo",

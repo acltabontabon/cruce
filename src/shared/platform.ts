@@ -41,6 +41,8 @@ export interface Authority {
 	role: NamespaceRole;
 	repositoryRole?: RepositoryRole;
 	scopes?: string[];
+	/** The namespace owner authorized its permanent deletion; only that deletion may change anything. */
+	namespaceDeleting?: true;
 }
 export interface Namespace {
 	id: string;
@@ -82,6 +84,26 @@ export interface RepositoryLifecycleView {
 	operations?: { id: string; action: ResourceAction; state: "reserved" | "uncertain"; at: number; workspaceId?: string }[];
 	deletion?: { idempotencyKey: string; reason?: string };
 	transition?: { tool: "archive_repository" | "restore_repository"; idempotencyKey: string };
+}
+export interface NamespaceLifecycle {
+	state: "deleting" | "deleted";
+	at: number;
+	actorId: string;
+	operationId: string;
+}
+/** What the namespace owner sees before and during permanent namespace deletion. */
+export interface NamespaceDeletionView {
+	state: "active" | NamespaceLifecycle["state"];
+	/** Only shared namespaces can be deleted; a personal namespace belongs to its account. */
+	deletable: boolean;
+	owner: boolean;
+	repositories: number;
+	archived: number;
+	/** Work that deletion ends with the repositories, summed across them. */
+	unfinished: { workspaces: number; attached: number; changes: number };
+	/** What stops deletion, each naming its repository. */
+	blockers: string[];
+	deletion?: { idempotencyKey: string; reason?: string; remaining: number };
 }
 export interface Repository {
 	lifecycle?: RepositoryLifecycle;
@@ -130,6 +152,7 @@ export interface NamespaceState {
 	policy: ResourcePolicy;
 	reservations: ResourceReservation[];
 	version: number;
+	lifecycle?: NamespaceLifecycle;
 }
 /** Local materialization and ownership metadata; the Workspace remains the durable work identity. */
 export interface ExecutionContext {

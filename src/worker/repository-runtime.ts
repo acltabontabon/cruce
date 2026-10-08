@@ -521,6 +521,13 @@ export class RepositoryRuntime {
 			};
 		}
 		const op = cmd.idempotencyKey ? await hash(`${a.actor.id}:${cmd.idempotencyKey}`) : "read";
+		// Namespace deletion freezes repositories it has not reached yet; only a promotion already under way may recover.
+		if (
+			a.namespaceDeleting &&
+			lifecycleMutation &&
+			!(cmd.tool === "promote_proposal" && state.promotions.some((p) => p.operation?.id === op))
+		)
+			throw new DomainError(409, "Namespace is being deleted");
 		await correlate(commandContext(cmd, a.actor.id));
 		const proposal = state.proposals.find((p) => p.id === cmd.proposalId);
 		const artifact = state.artifacts.find((item) => item.id === (cmd.artifactId ?? proposal?.artifactId));
