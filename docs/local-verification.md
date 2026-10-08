@@ -17,7 +17,9 @@ What the tests cover:
 
 On the hosted test environment (Worker `04eaa58a`), the agent loop passed through this commit's bridge with a re-authorized Codex connection: a line concern, the `Cruce:` lead and prompt hint naming it, the agent's fix, republish and cited reply, the concern carried to the superseding change as answered and still blocking, and server refusals of a wrong revision, an outside anchor and an unpublished citation ([test environment](test-environment.md#latest-test-deployment--2026-10-09)).
 
-Not yet verified: a maintainer resolving a note in the hosted console, signed-in use of the new review page, or a client running the `address_review_notes` prompt (hosted MCP lists it).
+The owner then resolved that concern in the signed-in hosted console; the note read back as resolved by a human without a connection, and readiness no longer counted it.
+
+Not yet verified: a client running the `address_review_notes` prompt (hosted MCP lists it).
 
 ## Reconciling just before review
 
