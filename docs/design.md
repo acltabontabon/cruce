@@ -18,7 +18,7 @@ The Cloudflare Access sign-in uses the ink symbol, paper background and forest t
 
 ## Materials and hierarchy
 
-The console has two themes on one token set in [styles.css](../src/ui/styles.css). **Midnight** is the dark theme and **Daylight** the light one. With no saved preference the console matches the system; the avatar menu's Appearance control chooses System, Dark or Light per browser, applied before first paint. The public homepage and the session screen use the same tokens, type and inline Cruce mark, so a visitor sees the palette the console will use. The Access sign-in and the OAuth connection page still use the earlier paper palette.
+The console has two themes on one token set in [styles.css](../src/ui/styles.css). **Midnight** is the dark theme and **Daylight** the light one. With no saved preference the console matches the system; the avatar menu's Appearance control chooses System, Dark or Light per browser, applied before first paint. The public homepage and the session screen use the same tokens, type and inline Cruce mark, so a visitor sees the palette the console will use. The OAuth connection page uses the same tokens and mark; only the Cloudflare Access sign-in keeps the earlier paper palette.
 
 | Token | Midnight | Daylight | Use |
 | --- | --- | --- | --- |
@@ -89,7 +89,7 @@ Motion waits until visible, pauses while hidden or offscreen, and respects reduc
 
 ## Tool authorization
 
-The OAuth connection page uses the public paper palette, forest text and Cruce mark in a narrow, responsive column. It leads with the requesting tool and signed-in account, then **Repository access**: **All repositories you can access** (selected by default, including repositories created or shared later) or **Choose repositories**, which reveals a searchable picker. Namespace labels sit above repository names, and long names wrap. Selections survive filtering; choosing requires a selection, checked by the server too. With no repositories yet, choosing is unavailable and connecting with all stays possible.
+The OAuth connection page uses the console palette in the saved or system appearance, with the inline Cruce mark, in a narrow, responsive column. It leads with the requesting tool and signed-in account, then **Repository access**: **All repositories you can access** (selected by default, including repositories created or shared later) or **Choose repositories**, which reveals a searchable picker. Namespace labels sit above repository names, and long names wrap. Selections survive filtering; choosing requires a selection, checked by the server too. With no repositories yet, choosing is unavailable and connecting with all stays possible.
 
 Permissions use plain language in an expandable section, preserving the requested defaults and mandatory read scope. Technical scope identifiers, the client-supplied name disclosure, callback address and cloud resource policy appear in Connection details. Human promotion approval and connection revocation remain visible. Native forms, checkboxes and disclosure controls keep keyboard operation and submission working without JavaScript. Expired consent uses the same page styling with Start again and Cancel. This presentation does not change OAuth authority or repository-approval filtering.
 

@@ -14,7 +14,7 @@ export function readAppearance(): Appearance {
 	}
 }
 
-/** Resolves the preference onto <html data-theme>, which the stylesheet themes from. src/ui/splash.ts runs the same logic before first paint. */
+/** Resolves the preference onto <html data-theme>, which the stylesheet themes from. APPEARANCE_SCRIPT in src/shared/brand.ts runs the same logic before first paint. */
 export function applyAppearance(appearance: Appearance) {
 	const theme = appearance === "system" ? (dark() ? "dark" : "light") : appearance,
 		root = document.documentElement;

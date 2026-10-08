@@ -1,4 +1,4 @@
-import { MARK } from "./splash.ts";
+import { MARK } from "../shared/brand.ts";
 
 export const BRAND = {
 	name: "Cruce",

@@ -1,14 +1,8 @@
 /**
- * The Cruce mark and the cold-start splash. Plain strings so the Vite plugin in tools/boot-splash.ts can put the same splash into
+ * The cold-start splash. Plain strings so the Vite plugin in tools/boot-splash.ts can put the same splash into
  * the page before any script or stylesheet loads, and the console can show it again from React (see Splash in loading.tsx).
  */
-
-/** The interlaced junction on a 32-unit grid: an arch, and the line that weaves through it. */
-export const MARK = {
-	viewBox: "0 0 32 32",
-	arch: "M4 25 14.3 6.8Q16 3.8 17.7 6.8L28 25",
-	crossing: "M3 14h3m5 3 2.2 3.2q2.8 4 5.6 0L21 17m5-3h3",
-} as const;
+import { MARK } from "../shared/brand.ts";
 
 export const SPLASH_LABEL = "Loading Cruce";
 
@@ -32,6 +26,3 @@ html[data-theme="dark"] .boot{background:#0f111a;color:#82a6ff}
 @keyframes boot-in{to{opacity:1}}
 @keyframes boot-draw{0%{stroke-dashoffset:1}45%,70%{stroke-dashoffset:0}100%{stroke-dashoffset:-1}}
 @media (prefers-reduced-motion:reduce){.boot .boot-mark{animation:boot-in 1ms linear 300ms forwards!important}.boot .boot-mark path{animation:none!important;stroke-dashoffset:0}}`;
-
-/** Runs before first paint: the saved appearance (src/ui/theme.ts keeps it in sync afterwards). */
-export const SPLASH_SCRIPT = `try{var s=localStorage.getItem("cruce.appearance"),t=s==="dark"||s==="light"?s:matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light",r=document.documentElement;r.dataset.theme=t;r.style.colorScheme=t}catch(e){}`;

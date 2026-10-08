@@ -1,5 +1,6 @@
 import type { Plugin } from "vite";
-import { SPLASH_CSS, SPLASH_INNER, SPLASH_SCRIPT } from "../src/ui/splash.ts";
+import { APPEARANCE_SCRIPT } from "../src/shared/brand.ts";
+import { SPLASH_CSS, SPLASH_INNER } from "../src/ui/splash.ts";
 
 /** Puts the cold-start splash into every HTML entry, so the console page and the browser fixture start the same way. */
 export function bootSplashPlugin(): Plugin {
@@ -8,7 +9,7 @@ export function bootSplashPlugin(): Plugin {
 		transformIndexHtml: {
 			order: "pre",
 			handler: () => [
-				{ tag: "script", children: SPLASH_SCRIPT, injectTo: "head-prepend" },
+				{ tag: "script", children: APPEARANCE_SCRIPT, injectTo: "head-prepend" },
 				{ tag: "style", children: SPLASH_CSS, injectTo: "head" },
 				{ tag: "div", attrs: { id: "boot", class: "boot", role: "status" }, children: SPLASH_INNER, injectTo: "body-prepend" },
 			],

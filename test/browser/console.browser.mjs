@@ -2037,12 +2037,12 @@ test("screen families remain readable across desktop, tablet, mobile and 200 per
 	});
 	await page.goto(server.origin);
 	await page.setContent(
-		`<html><body style="margin:0;background:#f5f5ef"><img alt="Identity exploration" src="${server.origin}/brand/study.svg" width="900" height="790"></body></html>`,
+		`<html><body style="margin:0;background:#f5f6f9"><img alt="Identity exploration" src="${server.origin}/brand/study.svg" width="900" height="790"></body></html>`,
 	);
 	await page.locator("img").evaluate((img) => img.decode());
 	await page.screenshot({ path: "dist/ui-checks/brand-study.png", fullPage: true });
 	await page.setContent(
-		`<html><body style="margin:32px;background:#f5f5ef;font-family:Arial"><h1>Cruce / optical sizes</h1>${["symbol-ink", "symbol-white", "symbol"].map((name) => `<div style="display:flex;align-items:center;gap:48px;padding:32px;background:${name === "symbol-ink" ? "#f5f5ef" : "#17251f"}">${[16, 24, 32].map((size) => `<img alt="${name} ${size}px" src="${server.origin}/brand/${name}.svg" width="${size}" height="${size}">`).join("")}</div>`).join("")}</body></html>`,
+		`<html><body style="margin:32px;background:#f5f6f9;font-family:Arial"><h1>Cruce / optical sizes</h1>${["symbol-ink", "symbol-white", "symbol"].map((name) => `<div style="display:flex;align-items:center;gap:48px;padding:32px;background:${name === "symbol-ink" ? "#f5f6f9" : "#0f111a"}">${[16, 24, 32].map((size) => `<img alt="${name} ${size}px" src="${server.origin}/brand/${name}.svg" width="${size}" height="${size}">`).join("")}</div>`).join("")}</body></html>`,
 	);
 	await page.locator("img").evaluateAll((imgs) => Promise.all(imgs.map((img) => img.decode())));
 	await page.screenshot({ path: "dist/ui-checks/brand-sizes.png", fullPage: true });
