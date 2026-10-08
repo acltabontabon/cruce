@@ -4921,11 +4921,24 @@ main[data-screen="settings"] > form {
 }
 .rv-nhead {
 	display: flex;
-	flex-wrap: wrap;
+	flex-wrap: nowrap;
+	min-width: 0;
 	align-items: center;
-	gap: 7px;
+	gap: 4px 7px;
+	min-height: 20px;
 	color: var(--text-faint);
 	font-size: 12px;
+	line-height: 20px;
+}
+.rv-nhead > * {
+	flex: none;
+}
+.rv-nhead > .rv-faint {
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 .rv-nhead b {
 	color: var(--text);
@@ -4938,34 +4951,71 @@ main[data-screen="settings"] > form {
 	flex: none;
 	width: 20px;
 	height: 20px;
+	margin: 0;
 	border-radius: 50%;
-	background: var(--button);
+	background: var(--surface-2);
+	box-shadow: inset 0 0 0 1px var(--border);
 	color: var(--text);
 	font-size: 9px;
 	font-weight: 650;
+	line-height: 1;
 }
 .rv-av.agent {
+	box-shadow: none;
 	border-radius: 5px;
 	background: color-mix(in oklab, var(--accent) 16%, transparent);
 	color: var(--accent);
 }
-.rv-kind.concern {
+.rv-kind,
+.rv-tag {
+	display: inline-flex;
+	align-items: center;
+	height: 18px;
+	padding: 0 7px;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	color: var(--text-faint);
+	font-size: 11px;
+	font-weight: 500;
+	line-height: 1;
+}
+.rv-kind.is-concern {
+	border-color: color-mix(in oklab, var(--tone-warning) 45%, transparent);
+	background: color-mix(in oklab, var(--tone-warning) 10%, transparent);
 	color: var(--tone-warning);
 }
 .rv-tag {
-	padding: 0 6px;
-	border: 1px solid var(--border);
 	border-radius: 4px;
-	font-size: 11px;
 }
 .rv-when {
 	margin-left: auto;
 	white-space: nowrap;
 }
-.rv-where {
-	margin: 6px 0 0;
+/* Everything after the header lines up under the author's name, not under the avatar. */
+.rv-note > :not(.rv-nhead),
+.rv-reply > :not(.rv-nhead) {
+	margin-left: 27px;
+}
+:where(.shell) .rv-where {
+	display: inline-flex;
+	min-height: 0;
+	margin-top: 6px;
+	padding: 0;
+	border: 0;
+	background: transparent;
 	color: var(--text-faint);
+	font-family: var(--font-mono);
 	font-size: 11.5px;
+	font-weight: 450;
+}
+:where(.shell) .rv-where:hover:not(:disabled) {
+	background: transparent;
+	color: var(--link);
+}
+:where(.shell) .rv-where:disabled {
+	background: transparent;
+	color: var(--text-faint);
+	cursor: default;
 }
 .rv-body {
 	margin: 6px 0 0;
@@ -4979,7 +5029,7 @@ main[data-screen="settings"] > form {
 }
 :where(.shell) .rv-clamp {
 	display: -webkit-box;
-	width: 100%;
+	width: calc(100% - 27px);
 	min-height: 0;
 	margin-top: 6px;
 	padding: 0;
@@ -4997,15 +5047,19 @@ main[data-screen="settings"] > form {
 	color: var(--text);
 }
 .rv-reply {
-	margin-top: 9px;
-	padding-left: 10px;
-	border-left: 2px solid color-mix(in oklab, var(--accent) 45%, transparent);
+	margin-top: 10px;
+	padding-top: 10px;
+	border-top: 1px solid var(--border-subtle);
 }
 .rv-reply .rv-body {
 	margin-top: 4px;
 	color: var(--text-muted);
 }
 :where(.shell) .rv-cite {
+	display: inline-flex;
+	margin-top: 6px;
+	align-items: center;
+	height: 18px;
 	min-height: 0;
 	padding: 0 6px;
 	border: 0;
@@ -5013,8 +5067,9 @@ main[data-screen="settings"] > form {
 	background: color-mix(in oklab, var(--accent) 12%, transparent);
 	color: var(--accent);
 	font-family: var(--font-mono);
-	font-size: 11.5px;
+	font-size: 11px;
 	font-weight: 500;
+	line-height: 1;
 }
 .rv-resolved,
 .rv-state {

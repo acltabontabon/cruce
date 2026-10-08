@@ -181,17 +181,25 @@ export function NoteCard({
 			setBusy(false);
 		}
 	};
+	// A note whose line is not shown here names its exact place, and can switch the comparison to show it.
+	const anchorAt = note.anchor && (note.anchor.revision === note.revision ? `#${item.change}` : short(note.anchor.revision));
 	const where = note.anchor && (
-		<span className="rv-faint" title={`${note.anchor.path}:${note.anchor.line} at ${note.anchor.revision}`}>
-			line {note.anchor.line}
-		</span>
+		<button
+			type="button"
+			className="rv-where"
+			title={`${note.anchor.path}:${note.anchor.line} at ${note.anchor.revision}. Show the comparison that contains this line.`}
+			onClick={() => onCite?.(note.anchor!.revision)}
+			disabled={!onCite}
+		>
+			Line {note.anchor.line} in {anchorAt}
+		</button>
 	);
 	return (
 		<div className={`rv-note${quiet ? " quiet" : ""} ${state}`} data-note-id={note.id} data-anchor={anchorKey ?? ""}>
 			<div className="rv-nhead">
 				<Who actor={note.actor} who={who} />
 				<span
-					className={note.kind === "concern" ? "rv-kind concern" : "rv-kind"}
+					className={note.kind === "concern" ? "rv-kind is-concern" : "rv-kind"}
 					title={note.kind === "concern" ? "Blocks promotion until a maintainer resolves it" : "Never blocks"}
 				>
 					{note.kind}
@@ -206,7 +214,7 @@ export function NoteCard({
 					#{item.change} · {ago(note.at)}
 				</span>
 			</div>
-			{!placement?.key && where && <p className="rv-where">{where}</p>}
+			{!placement?.key && where}
 			{clamped ? (
 				<button type="button" className="rv-clamp" onClick={() => setOpen(true)} title="Show the whole note">
 					{note.body}
@@ -219,20 +227,20 @@ export function NoteCard({
 					<div key={r.id} className="rv-reply">
 						<div className="rv-nhead">
 							<Who actor={r.actor} who={who} />
-							{r.citedRevision && (
-								<button
-									type="button"
-									className="rv-cite"
-									title="Compare up to the cited revision"
-									onClick={() => onCite?.(r.citedRevision!)}
-									disabled={!onCite}
-								>
-									cites {short(r.citedRevision)}
-								</button>
-							)}
 							<span className="rv-when">{ago(r.at)}</span>
 						</div>
 						<p className="rv-body">{r.body}</p>
+						{r.citedRevision && (
+							<button
+								type="button"
+								className="rv-cite"
+								title="Compare up to the cited revision"
+								onClick={() => onCite?.(r.citedRevision!)}
+								disabled={!onCite}
+							>
+								cites {short(r.citedRevision)}
+							</button>
+						)}
 					</div>
 				))}
 			{state === "resolved" && note.resolution && (
@@ -807,7 +815,7 @@ export function ReviewFiles({
 			return value;
 		});
 	const wideEnough = useWide("(min-width: 1360px)");
-	const beside = prefs.beside && wideEnough;
+	const besideAllowed = prefs.beside && wideEnough;
 	const sideBySide = prefs.split && wideEnough;
 	const viewedKey = `cruce.review.viewed.${view.repository.id}.${p.workspaceId}`;
 	const [viewed, setViewed] = useState<Record<string, string>>(() => readJson(viewedKey, {}));
@@ -930,6 +938,8 @@ export function ReviewFiles({
 	const shown = entries.filter((e) => !query.trim() || e.file.path.toLowerCase().includes(query.trim().toLowerCase()));
 	const isViewed = (path: string) => viewed[path] === to;
 	const isClosed = (e: Entry) => collapsed[e.file.path] ?? (isViewed(e.file.path) || !!e.kind);
+	// The notes margin exists only while an open file has a note or a draft in it; otherwise the code takes the width.
+	const beside = besideAllowed && (!!draft || shown.some((e) => !isClosed(e) && e.notes.length > 0));
 	// Open files load their changes as soon as the list arrives, a few at a time; folded ones load when unfolded.
 	// A stored diff spends an operation per file, so only files the reviewer opens are requested.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: request each open file once per comparison.
