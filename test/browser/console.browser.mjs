@@ -1468,10 +1468,10 @@ test("review leads with one next step: record evidence, approve the exact revisi
 		.getByRole("status")
 		.getByText(/^Tests not recorded for \w{8}\.$/)
 		.waitFor();
-	await openStep(/Promote/);
-	await stepDetail().getByText("Finish the other steps to promote.", { exact: true }).waitFor();
 	await page.locator(".rv-ln.a").first().waitFor();
 	await page.screenshot({ path: "dist/ui-checks/review.png", fullPage: true });
+	await openStep(/Promote/);
+	await stepDetail().getByText("Finish the other steps to promote.", { exact: true }).waitFor();
 	await recordTestsPass();
 	await page
 		.getByRole("status")
@@ -1542,6 +1542,12 @@ test("review notes: the agent's answer sits beside its line, and the maintainer 
 	await answered.getByText("Answered. Check the code, then resolve or reply.", { exact: true }).waitFor();
 	// The note written on #1 sits on that line of the comparison.
 	await page.locator(".rv-ln").filter({ hasText: "export const retries = 3;" }).locator(".rv-pin").waitFor();
+	// Capture from the top with nothing focused, as the page first reads.
+	await page.evaluate(() => {
+		document.activeElement?.blur();
+		scrollTo(0, 0);
+	});
+	await page.waitForTimeout(300);
 	await page.screenshot({ path: "dist/ui-checks/review-notes.png", fullPage: true });
 	await answered.getByRole("button", { name: "Resolve", exact: true }).click();
 	await answered.getByLabel("Reason for resolving", { exact: true }).fill("Verified the backoff and its cap");

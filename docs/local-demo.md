@@ -27,21 +27,27 @@ Open the loopback URL the server prints. Set `PORT` to choose a fixed port. Rest
 
 Click **payment-service**. The header breadcrumb names the repository, and the bar below it holds the tabs and canonical `main` at its exact revision, with **Clone**. Below that, the **Needs you** filter carries its count, and each workspace row names the path it shares with the other: "Shares src/retry.ts with Inspect payment timeout". The **Workspaces** tab lists each workspace once with its open changes under it; **Bounded retry policy #1** hangs off **Implement retry policy**, marked **Needs preparation**, with its exact revision on its review base and "Required tests evidence missing · 1 more blocker". The lane map follows the list.
 
-![Repository Workspaces tab: the attention bar, two workspaces with Bounded retry policy #1 nested under Implement retry policy, and the lane map below](images/local-demo/repository.jpg)
+![Repository Workspaces tab: the Needs you filter with its count, two workspaces naming the path they share, Bounded retry policy #1 nested under Implement retry policy, and the lane map below](images/local-demo/repository.jpg)
 
 ## 3. Review and promote the exact revision
 
-Open **Bounded retry policy #1**. The review is a checklist for this exact revision:
+Open **Bounded retry policy #1**. The page leads with one next step and one button: "Tests not recorded for 9461bc8e." with **Record result**. Beside it, the review checklist runs as small steps from **On main** through **Tests** and **Approval** to **Promote**; click any step to read its details.
 
-1. **Built on the current canonical revision**: already checked.
-2. **Required tests evidence missing**: Codex stored a test report, but no tests result was recorded for this revision. Normally the owner's tools report one and a maintainer attests it; here, as a maintainer who checked the tests, click **Record checked tests pass**. The note is optional.
-3. **Approve this exact revision**: click **Approve**. Approval covers `9461bc8e` only; a new revision needs a new review.
+1. Click **Record result**. Codex stored a test report, but no tests result was recorded for this exact revision. Normally the owner's tools report one and a maintainer attests it; here, as a maintainer who checked the tests, click **Record checked tests pass**. The step closes and the page moves on.
+2. The next step reads "Ready for approval of 9461bc8e." Click **Approve**. Approval covers `9461bc8e` only; a new revision needs a new review.
+3. With every step done, the button becomes **Promote to main**. The **Promote** step explains what it does: move canonical `main` from `4906343f` to `9461bc8e` with a non-forced Git update.
 
-When every item is checked, the change shows **Ready to promote** and **Promote to main** explains exactly what it does: move canonical `main` from `4906343f` to `9461bc8e` with a non-forced Git update. Raising a concern, recording a failure or closing the change asks for a reason. The files changed and the evidence (including Codex's stored test report) are below the checklist.
+Below the steps, the changed files read as one page: line numbers, changed words highlighted, unchanged lines a click away, and supporting files such as tests and docs folded. Hover any line and press **+** to leave a concern or a comment on it. A concern blocks promotion until a maintainer resolves it with a reason. Recording a failure or closing the change also asks for a reason.
 
 Promote it. The change becomes **Promoted**, the header shows the new canonical revision and names the workspace it left behind, and on Workspaces the **Needs Git update** filter counts it: the other concurrent workspace started from the old baseline and has canonical changes to merge with Git before it publishes.
 
-![Review checklist with Promote to main, the diff and evidence](images/local-demo/review.jpg)
+![Change review leading with Record result, the checklist steps and the changed file](images/local-demo/review.jpg)
+
+### Review notes your agent answers
+
+Review notes follow a change across revisions. To see one answered, seed the example on a fresh fixture: `curl -X POST <fixture URL>/__fixture/scenario -H 'content-type: application/json' -d '{"name":"review"}'`, then open **Bounded retry policy with backoff #2**. Sam left a concern on `src/retry.ts` in #1; Alex's agent read it through Cruce, published #2 with backoff and replied citing that revision. The page leads with **Check the answers**, opens on what changed since #1 was reviewed, and shows each note beside its line. **Resolve** asks for a reason; an agent can reply but never resolve. A second concern on `src/backoff.ts` still waits for the owner, and the **Concerns** step offers **Hand to your agent** with the request to give your own agent.
+
+![Change #2 with the agent's cited answer beside its line, a second open concern and supporting files folded](images/local-demo/review-notes.jpg)
 
 ## 4. Follow concurrent workspaces
 
@@ -71,4 +77,4 @@ Cruce's coordination boundary ends at reviewed reconciliation into canonical Git
 
 ## Refresh these screenshots
 
-Keep this walkthrough and its images together when visible console behaviour changes. `PORT=5173 pnpm test:browser` writes fresh captures to the ignored `dist/ui-checks/`; the fixed port keeps the server URL in captured commands stable. Convert the matching captures (`home-1440`, `repository-1440`, `review`, `workspace-1440`, `revision-1440`, `setup-1440`, `account`) into the JPEG files under `docs/images/local-demo/` (`home`, `repository`, `review`, `workspace`, `history`, `connect`, `account`), for example with `sips -s format jpeg`. Use only sample identities, never capture credentials or a live account, and check every image and relative link.
+Keep this walkthrough and its images together when visible console behaviour changes. `PORT=5173 pnpm test:browser` writes fresh captures to the ignored `dist/ui-checks/`; the fixed port keeps the server URL in captured commands stable. Convert the matching captures (`home-1440`, `repository-1440`, `review`, `review-notes`, `workspace-1440`, `revision-1440`, `setup-1440`, `account`) into the JPEG files under `docs/images/local-demo/` (`home`, `repository`, `review`, `review-notes`, `workspace`, `history`, `connect`, `account`), for example with `sips -s format jpeg`. Use only sample identities, never capture credentials or a live account, and check every image and relative link.
