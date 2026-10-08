@@ -1335,7 +1335,8 @@ body {
 .panel {
 	min-width: 0;
 }
-.workspaces-screen + .panel {
+.workspaces-screen + .panel,
+.workspaces-screen + .lane-map {
 	margin-top: 48px;
 }
 .panel-head {
