@@ -1,0 +1,23 @@
+{
+	"github_oauth_app": {
+		"application_name": "Cruce",
+		"homepage_url": "https://cruce.acltabontabon.com",
+		"application_description": "Git coordination for parallel agentic development. Signing in shares only your verified email with this Cruce installation.",
+		"authorization_callback_url": "https://dawn-night-ff47.cloudflareaccess.com/cdn-cgi/access/callback",
+		"enable_device_flow": false,
+		"logo": "tools/github-sign-in-logo.png",
+		"badge_background_color": "0F111A"
+	},
+	"access_identity_provider": {
+		"name": "Cruce GitHub sign-in",
+		"type": "github"
+	},
+	"access_application": {
+		"name": "Cruce",
+		"allowed_idps": ["<GitHub identity provider ID>"],
+		"auto_redirect_to_identity": true
+	},
+	"login_design": {
+		"footer_text": "Sign in with the GitHub account this installation admits."
+	}
+}

@@ -4,7 +4,7 @@
 		"background_color": "#F5F6F9",
 		"text_color": "#151925",
 		"header_text": "Sign in to Cruce",
-		"footer_text": "Use your email to receive a one-time sign-in code.",
+		"footer_text": "Sign in with the GitHub account this installation admits.",
 		"logo_path": "https://cruce.acltabontabon.com/brand/symbol.svg"
 	}
 }

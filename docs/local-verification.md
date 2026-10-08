@@ -31,6 +31,8 @@ The most recent recorded full local run for the retention fix on 2026-10-09 pass
 
 Documentation audit on **2026-10-09**, based on `caeb4a6`: **381 local links/anchors**, typecheck, **429 unit/integration tests**, **98 browser journeys**, scenario verification, the offline build and tracked-file Biome checks passed. Initial sandboxed runs were denied local socket/IPC access; reruns with that access passed. Full `pnpm lint` remains blocked by formatting in the pre-existing untracked `.bridge-lib.ts`, which was preserved and excluded from the commit. No provider operation or deployment was performed.
 
+Hosted sign-in on **2026-10-09** moved to GitHub through Access: the browser application admits only the GitHub provider with Instant Auth, its audience and single-email admission policy read back unchanged, and a signed-out `/auth/login` redirected to GitHub's authorization page with the updated login footer. One-time PIN stays configured but unselected. No Worker deployment was involved, and a completed GitHub sign-in into an existing account was not exercised by this check.
+
 Browser captures are written to ignored `dist/ui-checks/`. See the [walkthrough](local-demo.md#refresh-these-screenshots) for publishing refreshed sample images. Browser replay-history coverage remains incomplete; long-gap lane spacing has unit coverage.
 
 ## Current evidence at a glance

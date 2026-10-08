@@ -15,6 +15,7 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 - **Continue this workspace** on workspace pages: what travels to another machine or tool (only pushed commits) and the detach and `cruce resume` steps.
 - **Help for agents to stay current.** Every bridge response starts with a `Cruce:` sentence naming the owner's workspaces behind canonical and notes waiting for them, and `cruce connect --client claude` adds a prompt hook (`cruce hint`) that says the same. Agents merge canonical into their attached workspace just before publishing and proposing. `cruce preview` checks locally whether merging canonical would conflict, and a reconciliation view and `get_reconciliation` read show exact Git ancestry and blockers.
 - **Coordination for integrations**: a subscribable MCP coordination resource, a read-only `cruce watch --coordination` feed, an attention projection on repository snapshots and `get_repository`, and opt-in pushed-ref observation. None of them publish, approve or wake agents.
+- A [GitHub sign-in guide](docs/cloudflare-setup.md#github-sign-in): with GitHub as the Access application's only provider and Instant Auth, **Sign in** goes from the homepage straight to GitHub's authorization page, the Access policy still decides who is admitted, and existing users keep their identity.
 - An [operator runbook](docs/operations.md) and [interface compatibility](docs/releases.md#interface-compatibility) notes.
 
 ### Changed
