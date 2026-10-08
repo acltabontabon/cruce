@@ -1794,7 +1794,7 @@ test("screen families remain readable across desktop, tablet, mobile and 200 per
 	const data = await (await page.request.get(`${server.origin}/api/namespaces/fernloop/repositories/payments`)).json();
 	const routes = [
 		["home", server.origin, "Your repositories"],
-		["changes", root(), "payment-service"],
+		["repository", root(), "payment-service"],
 		["review", `${root()}#/changes/${data.proposals[0].id}`, /Bounded retry policy/],
 		["workspaces", `${root()}#/workspaces`, "payment-service"],
 		["workspace", `${root()}#/workspaces/${data.workspaces[0].id}`, data.workspaces[0].title],

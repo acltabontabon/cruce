@@ -19,13 +19,13 @@ Open the loopback URL the server prints. Set `PORT` to choose a fixed port. Rest
 
 ## 1. See what needs you
 
-**Home** lists your repositories across namespaces, most urgent first. The sample **payment-service** in the shared **Fernloop** namespace shows **1 for you** and **1 to prepare**: its one change lacks required tests evidence, and you own it. **Needs you** names that change with its owner (you), exact revision, review base and primary blocker. Below are your namespaces: your personal **Alex Morgan** namespace has no Cloudflare account connected, and Home says so. Type in **Find repository** in the header, or press Cmd/Ctrl K, to jump anywhere.
+**Home** lists your repositories across namespaces, most urgent first. The sample **payment-service** in the shared **Fernloop** namespace shows **1 for you** and **1 to prepare**: its one change lacks required tests evidence, and you own it. **Needs you** names that change with its owner (you), exact revision, review base and primary blocker. **Heads-up** lists the shared path, which needs no decision. Beside them are your namespaces: your personal **Alex Morgan** namespace has no repositories yet. Type in **Find repository** in the header, or press Cmd/Ctrl K, to jump anywhere.
 
 ![Home listing payment-service with one change to review, and the two namespaces](images/local-demo/home.jpg)
 
 ## 2. Open the repository
 
-Click **payment-service**. The header shows canonical `main` and its exact revision. Below it, the attention bar says in plain words what needs someone: **1 change needs preparation** and **1 path reported by more than one workspace**. Each item opens its filtered list. The **Workspaces** tab lists each workspace once with its open changes under it; **Bounded retry policy #1** hangs off **Implement retry policy**, marked **Needs preparation**, with its exact revision on its review base and "Required tests evidence missing · 1 more blocker". The lane map follows the list.
+Click **payment-service**. The header breadcrumb names the repository, and the bar below it holds the tabs and canonical `main` at its exact revision, with **Clone**. Below that, the attention bar says in plain words what needs someone: **1 change needs preparation** and **1 path reported by more than one workspace**. Each item opens its filtered list. The **Workspaces** tab lists each workspace once with its open changes under it; **Bounded retry policy #1** hangs off **Implement retry policy**, marked **Needs preparation**, with its exact revision on its review base and "Required tests evidence missing · 1 more blocker". The lane map follows the list.
 
 ![Repository Workspaces tab: the attention bar, two workspaces with Bounded retry policy #1 nested under Implement retry policy, and the lane map below](images/local-demo/repository.jpg)
 
@@ -39,7 +39,7 @@ Open **Bounded retry policy #1**. The review is a checklist for this exact revis
 
 When every item is checked, the change shows **Ready to promote** and **Promote to main** explains exactly what it does: move canonical `main` from `4906343f` to `9461bc8e` with a non-forced Git update. Raising a concern, recording a failure or closing the change asks for a reason. The files changed and the evidence (including Codex's stored test report) are below the checklist.
 
-Promote it. The change becomes **Promoted**, the header shows the new canonical revision, and the attention bar now reports **1 workspace needs reconciliation**: the other concurrent workspace started from the old baseline and has canonical changes to merge with Git before it publishes.
+Promote it. The change becomes **Promoted**, the header shows the new canonical revision, and the attention bar now reports **1 workspace needs a Git update**: the other concurrent workspace started from the old baseline and has canonical changes to merge with Git before it publishes.
 
 ![Review checklist with Promote to main, the diff and evidence](images/local-demo/review.jpg)
 
@@ -63,7 +63,7 @@ The **History** tab shows canonical promotions as a timeline, published revision
 
 ## 7. Account and access
 
-Click the avatar for a compact card with your name, email and **Sign out**; the current page stays put. Sign-in identity and namespace or repository permissions are separate. **Members** and **Teams** are in shared-namespace navigation; repository access is in the repository's **Settings**.
+Click the avatar for a compact card with your name and email, the **Appearance** control, **Local setup** and **Sign out**; the current page stays put. Sign-in identity and namespace or repository permissions are separate. **Members** and **Teams** are in shared-namespace navigation; repository access is in the repository's **Settings**.
 
 ![Account card with sign-out](images/local-demo/account.jpg)
 
@@ -71,4 +71,4 @@ Cruce's coordination boundary ends at reviewed reconciliation into canonical Git
 
 ## Refresh these screenshots
 
-Keep this walkthrough and its images together when visible console behaviour changes. `pnpm test:browser` writes fresh captures to the ignored `dist/ui-checks/`. Convert the matching captures (`home-1440`, `changes-1440`, `review`, `workspace-1440`, `revision-1440`, `connect-agent`, `account`) into the JPEG files under `docs/images/local-demo/`, for example with `sips -s format jpeg`. Use only sample identities, never capture credentials or a live account, and check every image and relative link.
+Keep this walkthrough and its images together when visible console behaviour changes. `pnpm test:browser` writes fresh captures to the ignored `dist/ui-checks/`. Convert the matching captures (`home-1440`, `repository-1440`, `review`, `workspace-1440`, `revision-1440`, `setup-1440`, `account`) into the JPEG files under `docs/images/local-demo/` (`home`, `repository`, `review`, `workspace`, `history`, `connect`, `account`), for example with `sips -s format jpeg`. Use only sample identities, never capture credentials or a live account, and check every image and relative link.
