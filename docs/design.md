@@ -14,11 +14,11 @@ The [vector study](../public/brand/study.svg) records four directions: a direct 
 
 Brand display name and application asset references live in `src/ui/brand.tsx`. When renaming, update that module and the editable SVG titles/wordmark text together with document titles. Standalone wordmarks embed the locally bundled Inter font, with its license retained in `public/brand/OFL.txt`; they require no third-party font request. The wordmark uses normal lettering while the symbol carries the topology.
 
-The Cloudflare Access sign-in uses the ink symbol, paper background and forest text, with a **Sign in to Cruce** header and brief email-code guidance. Cloudflare owns the form layout and OTP flow. Account-level branding values live in [the Access payload](../tools/access-login-branding.json); [setup](cloudflare-setup.md#access-login-branding) explains their team-wide scope and preservation of authentication settings. Include this payload when renaming the product.
+The Cloudflare Access sign-in uses the console's accent symbol, Daylight background and text (Access offers no dark variant), with a **Sign in to Cruce** header and brief email-code guidance. Cloudflare owns the form layout and OTP flow. Account-level branding values live in [the Access payload](../tools/access-login-branding.json); [setup](cloudflare-setup.md#access-login-branding) explains their team-wide scope and preservation of authentication settings. Include this payload when renaming the product.
 
 ## Materials and hierarchy
 
-The console has two themes on one token set in [styles.css](../src/ui/styles.css). **Midnight** is the dark theme and **Daylight** the light one. With no saved preference the console matches the system; the avatar menu's Appearance control chooses System, Dark or Light per browser, applied before first paint. The public homepage and the session screen use the same tokens, type and inline Cruce mark, so a visitor sees the palette the console will use. The OAuth connection page uses the same tokens and mark; only the Cloudflare Access sign-in keeps the earlier paper palette.
+The console has two themes on one token set in [styles.css](../src/ui/styles.css). **Midnight** is the dark theme and **Daylight** the light one. With no saved preference the console matches the system; the avatar menu's Appearance control chooses System, Dark or Light per browser, applied before first paint. The public homepage and the session screen use the same tokens, type and inline Cruce mark, so a visitor sees the palette the console will use. The OAuth connection page uses the same tokens and mark, and the Cloudflare Access sign-in uses the Daylight colours.
 
 | Token | Midnight | Daylight | Use |
 | --- | --- | --- | --- |
