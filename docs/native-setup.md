@@ -1,8 +1,8 @@
 # Git and bridge setup
 
-[Documentation map](../README.md#documentation-map) · [MCP participation](mcp.md) · [Cloudflare setup](cloudflare-setup.md)
+[Documentation map](README.md) · [MCP participation](mcp.md) · [Cloudflare setup](cloudflare-setup.md)
 
-This is the workflow supported by the current implementation. Real-provider convergence and some deployed setup/authentication boundaries have evidence, but authenticated deployed publication/promotion and multi-tool, multi-session participation remain pending; check [verification status](local-verification.md). The [architecture audit](architecture.md#architecture-contradictions-and-correctness-gaps) records the remaining gaps. For a no-cloud tour, use the [local fixture](../CONTRIBUTING.md#set-up-and-explore).
+This guide covers installation, isolated Git work, review and continuation. Check [verification status](local-verification.md) for the tested revision and storage model: earlier authenticated promotion and two-tool participation passed, and current binding publication and retained-source recovery have evidence. Current binding promotion recovery and physical cross-machine continuation remain unverified. See [current limitations](architecture.md#current-limitations). For a no-cloud tour, use the [local fixture](../CONTRIBUTING.md#set-up-and-explore).
 
 Use Git and Node 22.18+ (including npm). Install the local Cruce client from the same website you use for the console; no Cruce source checkout is needed. Once the administrator has configured installation storage, sign in through Access and create a repository. No developer Cloudflare account or API token is required. Cruce initializes its configured default branch. Repository creation and writer attachment consume Artifacts resources. CI, releases and deployments remain external.
 
@@ -133,7 +133,7 @@ If `cruce` is not found, check that npm’s global executable directory is on yo
 | Publication rejects a revision | Push the exact branch head first; preserve base/previous-publication ancestry and satisfy protected-path policy |
 | Checkout or cleanup is refused | Inspect persistent ownership, dirty/unpublished files and unretained remote refs; a stale heartbeat is not permission to delete |
 | Transfer exceeds bounds | Git request/response bodies are capped at 32 MiB, including chunked transfers; the gateway returns 413 rather than forwarding a partial pack. See [supported bounds](architecture.md#bounded-coordination-state-and-retention-recovery) |
-| Fork deletion is pending or blocked | The workspace console lists the refs that stopped it; agents can use `get_retention` or `inspect_retention`. Authorized pending cleanup recovers automatically; blocked cleanup needs the original actor to retry its recorded operation after restoring authority, policy, provider identity or retention. Expiry never authorizes deletion |
+| Fork deletion is pending or blocked | The workspace console lists the refs that stopped it; agents can use `get_retention` or `inspect_retention`. Authorized pending cleanup recovers automatically; blocked cleanup can be resumed by anyone currently eligible to start it, using its recorded operation after restoring authority, policy, provider identity or retention. Expiry never authorizes deletion |
 | Coordination capacity is reached | Inspect Repository Settings and the supported state/record envelope. Ending finished workspaces and cleaning up their forks moves them to Earlier work and frees live capacity; nothing is deleted. See [operations](operations.md) |
 
 Early-development state from retired models is not migrated. Missing live verification remains visible in [verification status](local-verification.md), separate from these operating instructions.

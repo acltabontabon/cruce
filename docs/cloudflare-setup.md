@@ -1,6 +1,6 @@
 # Cloudflare setup
 
-[Documentation map](../README.md#documentation-map) · [Architecture](architecture.md) · [Test environment](test-environment.md)
+[Documentation map](README.md) · [Architecture](architecture.md) · [Test environment](test-environment.md)
 
 Cruce uses Cloudflare Workers, Durable Objects and Artifacts for durable Git coordination. Configure infrastructure once per installation. Namespace users and agents authenticate to Cruce; they do not need Cloudflare accounts or provider API tokens. Execution stays in their existing environments.
 
@@ -58,7 +58,7 @@ Artifacts documents limits of 1 GB per repository, 32 MB per file/blob and 1 TB 
 
 ## Source inspection, observation and import
 
-Cache-only coordination inspection uses the bounded derived Git cache in the Repository DO. Explicit `inspect_source` uses identity-checked binding commit/tree/file/history APIs for equivalent views; `recover_source` restores retained exact Git source after cache loss. Both pass the namespace `source.read` policy gate. Provider history is labelled first-parent and never substitutes for complete ancestry. Cache generations are bounded and evictable without deleting remote retention or metadata; see [limits and recovery](architecture.md#bounded-source-inspection-and-recovery) and [F4 local evidence](local-verification.md#bounded-source-inspection-and-cache-recovery-f4). Hosted binding recovery and peak-memory acceptance remain unverified.
+Cache-only coordination inspection uses the bounded derived Git cache in the Repository DO. Explicit `inspect_source` uses identity-checked binding commit/tree/file/history APIs for equivalent views; `recover_source` restores retained exact Git source after cache loss. Both pass the namespace `source.read` policy gate. Provider history is labelled first-parent and never substitutes for complete ancestry. Cache generations are bounded and evictable without deleting remote retention or metadata; see [limits and recovery](architecture.md#bounded-source-inspection-and-recovery) and [F4 local evidence](local-verification.md#bounded-source-inspection-and-cache-recovery-f4). Hosted recovery after fork deletion passed; broader fault recovery and peak-memory acceptance remain unverified.
 
 [Artifacts events](https://developers.cloudflare.com/artifacts/guides/event-subscriptions/) deliver repository push subscriptions to installation-owned Queues. `cloudflare.config.ts` configures `<worker>-artifact-events` and its `-dead` queue, with bounded consumer retries. `CRUCE_OBSERVATION_QUEUE` can explicitly select an existing installation queue; set `CRUCE_OBSERVATION_QUEUE_ID` to that queue's exact ID. Configure `CF_EVENTS_API_TOKEN` as a Worker secret with Queues Write in this installation account, exclusively for subscription management. It is never an Artifacts credential fallback. Use `cf` resource commands and configuration, not Wrangler project commands.
 
@@ -68,7 +68,7 @@ Disabling stops ingestion immediately and schedules bounded subscription removal
 
 Creating a Cruce repository initializes new source; checkout attachment is not import. [Native import](https://developers.cloudflare.com/artifacts/guides/import-repositories/) documents public HTTPS sources. Private import and upstream publication remain roadmap work; no silent synchronization or second canonical authority is introduced.
 
-Coordination records have separate [byte/count and cardinality bounds](architecture.md#bounded-coordination-state-and-retention-recovery). Indexed receipts/activity/reservations remain retained, with reserved recovery headroom. `pnpm verify:limits` measures local SQLite and the 32 MiB buffered gateway; it does not establish Worker peak memory. DO alarms recover explicitly authorized fork cleanup and enabled observation with resumable reservations and current authority/policy. Queues carry observation signals; no scheduled expiry cleanup or Workflow binding is configured. Hosted alarm delivery, OAuth KV revocation propagation and provider deletion/Worker memory acceptance remain unverified.
+Coordination records have separate [byte/count and cardinality bounds](architecture.md#bounded-coordination-state-and-retention-recovery). Indexed receipts/activity/reservations remain retained, with reserved recovery headroom. `pnpm verify:limits` measures local SQLite and the 32 MiB buffered gateway; it does not establish Worker peak memory. DO alarms recover explicitly authorized fork cleanup and enabled observation with resumable reservations and current authority/policy. Queues carry observation signals; no scheduled expiry cleanup or Workflow binding is configured. Hosted cleanup and repository-deletion continuation have recorded results; authority-change fault cases, KV propagation and Worker memory acceptance remain unverified.
 
 ## Platform references
 

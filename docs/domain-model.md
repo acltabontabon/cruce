@@ -1,6 +1,6 @@
 # Domain model
 
-[Documentation map](../README.md#documentation-map) · [Product](product.md) · [Principles](principles.md) · [Architecture](architecture.md)
+[Documentation map](README.md) · [Product](product.md) · [Principles](principles.md) · [Architecture](architecture.md)
 
 This document defines Cruce's durable concepts and how they relate. It is normative: code, APIs, MCP tools and the console use these terms. Exact schemas live in [src/shared/platform.ts](../src/shared/platform.ts). The [architecture](architecture.md) explains how the current implementation realizes the model and records where it still falls short.
 
@@ -8,7 +8,7 @@ This document defines Cruce's durable concepts and how they relate. It is normat
 
 ```mermaid
 flowchart TD
-    N[Namespace: membership, access, resource account, policy] --> R[Repository: canonical Git, policy]
+    N[Namespace: membership, access, resource policy] --> R[Repository: canonical Git, policy]
     R --> C[Canonical repository in Cloudflare Artifacts]
     R --> W[Workspace: durable stream of isolated work]
     W --> F[Workspace fork: direct fork of canonical]
@@ -51,7 +51,7 @@ Terms deliberately **not** used as durable domain objects: *session*, *run*, *mi
 
 Repositories are active, archived, deleting or deleted. Only the authenticated console namespace Owner can archive, restore or permanently delete a repository. Archive preserves source and history and disables writes; restore enables work again. Archived repositories remain listed with an explicit label.
 
-Archive and deletion require ended workspaces, closed changes, settled promotions/resource operations and completed push-observation subscription cleanup. A disconnected workspace still blocks retirement. Deletion requires typing the current repository name, freezes the repository before cloud effects, and cannot be cancelled after durable authorization. Cleanup confirms the recorded provider identities and absence, removes canonical last, then purges coordination history and the derived source cache. Interrupted effects reuse the same operation and namespace reservation; current authority/policy/identity remain mandatory.
+Archive requires ended workspaces and closed changes; a disconnected workspace still blocks archive. Permanent deletion ends live workspaces and closes open changes as part of the operation. Both wait for unsettled promotions/resource operations and require push observation to be disabled with subscription cleanup finished. Deletion requires typing the current repository name, freezes the repository before cloud effects, and cannot be cancelled after durable authorization. Cleanup confirms the recorded provider identities and absence, removes canonical last, then purges coordination history and the derived source cache. Interrupted effects reuse the same operation and namespace reservation; current authority/policy/identity remain mandatory.
 
 Permanent deletion is the explicit exception to source and provenance retention. It leaves local checkouts and external upstream repositories untouched, retains a minimal tombstone/receipt and the namespace resource ledger, and frees the repository name and live namespace capacity for a new stable ID. Old IDs and creation keys cannot resurrect deleted work. [ADR 0010](decisions/0010-repository-archive-and-permanent-deletion.md) owns this exception and its recovery ordering.
 

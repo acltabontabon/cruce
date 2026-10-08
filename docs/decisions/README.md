@@ -1,6 +1,6 @@
 # Decision records
 
-[Documentation map](../../README.md#documentation-map) · [Product](../product.md) · [Principles](../principles.md)
+[Documentation map](../README.md) · [Product](../product.md) · [Principles](../principles.md)
 
 Focused records of consequential decisions whose rationale is larger than its owning document can reasonably hold. Each record states context, decision, consequences and what it supersedes. Owning documents ([product](../product.md), [domain model](../domain-model.md), [architecture](../architecture.md)) describe the current state; these records explain why it changed. Git history preserves implementation history. These are not progress logs.
 
@@ -15,7 +15,6 @@ Focused records of consequential decisions whose rationale is larger than its ow
 | [0007 — Observed refs and repository reconciliation](0007-observed-refs-and-reconciliation.md) | Accepted 2026-10-07 | Opt-in event observation, bounded recovery and pure published-ancestry projections; observations never establish acceptance |
 | [0008 — Remove the namespace daily operation budget](0008-remove-daily-operation-budget.md) | Accepted 2026-10-08 | Drop the daily operation count and limit; keep reservations for retry identity and per-action resource policy. Supersedes the budget parts of 0003 and 0004 |
 | [0009 — Replaceable observations and archived finished work](0009-replaceable-observations-and-archived-finished-work.md) | Accepted 2026-10-08 | Presence and reports keep one replaceable record per workspace; change reports are coalesced; finished work moves to immutable archive bundles so limits bound live work. Amends 0005 |
-
 | [0010 — Repository archive and permanent deletion](0010-repository-archive-and-permanent-deletion.md) | Accepted 2026-10-08 | Owner-only reversible archive and explicit permanent deletion, with durable cleanup, namespace-gated retries and minimal tombstones. Amends retention in 0005 and 0009 |
 | [0011 — Account-level connections and local setup](0011-account-level-connections-and-local-setup.md) | Accepted 2026-10-08 | Connections approve all accessible repositories (default) or a chosen list; install, Git sign-in and tool connection happen once per machine; a checkout's canonical remote is an address, never authority |
 | [0012 — Namespace permanent deletion](0012-namespace-permanent-deletion.md) | Accepted 2026-10-08 | Owner-only deletion of a shared namespace and every repository in it, driven through each repository's own deletion, with an immediate freeze, directory retirement and a minimal tombstone. Extends 0010 |

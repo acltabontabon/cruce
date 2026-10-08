@@ -1,51 +1,24 @@
 # Product
 
-[Documentation map](../README.md#documentation-map) · [Domain model](domain-model.md) · [Principles](principles.md) · [Roadmap](../ROADMAP.md)
+[Documentation map](README.md) · [Domain model](domain-model.md) · [Principles](principles.md) · [Roadmap](../ROADMAP.md)
 
 This is the authoritative statement of what Cruce is, why it exists and what it deliberately does not do. The [domain model](domain-model.md) defines the concepts; the [principles](principles.md) turn this boundary into review rules; the [architecture](architecture.md) describes the current implementation. [ADR 0001](decisions/0001-product-boundary-reset.md) records the reset that established this direction and what it superseded.
 
 ## Thesis
 
-**Cruce is Git coordination for parallel agentic development.**
-
-It is the durable coordination plane for Git work produced by many independent actors: Claude Code, Codex, Cursor, other coding agents, scripts, orchestration frameworks and human developers. Cruce does not run that work. It gives the work a durable identity, an exact starting point, an observable relationship to other concurrent work, and a reviewed, human-approved path into canonical Git.
-
-> Cruce coordinates durable concurrent Git work; other systems execute the work.
-
-Put differently: Cruce lets agents work in parallel without Git itself becoming the coordination problem.
+**Cruce is Git coordination for parallel agentic development.** It gives independent Git work a durable identity, exact starting revision, visibility into concurrent work and a reviewed, human-approved path into canonical Git. Other systems execute the work.
 
 ## Vision
 
-Agents, agent sessions, terminals, local worktrees and machines are transient. Agent vendors are interchangeable. The work they produce is not transient. It needs an identity that outlives any session, a known starting revision, retained history and a way to converge with everything else being changed at the same time.
-
-When Cruce succeeds, developers can let many independent humans and agents work concurrently without keeping the repository's reconciliation state in their heads. They still use Git, their preferred agents, their editors and their CI/CD systems. Cruce gives all of that concurrent work one durable coordination layer.
+Work should outlive the session, tool, checkout or machine that produced it. Developers keep Git, their agents, editors and CI/CD; Cruce retains the coordination state needed to continue and reconcile concurrent work.
 
 ## The problem
 
-One developer running a few agents on one machine is already well served. Git branches, Git worktrees, Claude Code, Codex and Cursor worktree modes, local multi-agent frameworks, relay tools and shell scripts all isolate and run local work. **Cruce does not claim that local multi-agent execution is a problem only it can solve, and it does not try to solve it.**
-
-The difficulty grows along a different axis:
-
-```text
-agents × developers × machines × concurrent workstreams × duration
-```
-
-As that product grows, the developer becomes the coordination system. They track which terminal started from which commit, which branches overlap, which work is stale because canonical moved, which revision a reviewer actually inspected, whether the approved revision is the one that landed, and whether yesterday's work on another machine can be continued. None of that state is durable. It sits in terminals, local paths, branch names and memory, and it disappears when a session ends or a laptop closes.
-
-Git records what happened. It does not record that a stream of work exists, where it started, who or what is advancing it, how it relates to other in-flight work, or which exact revision a human approved for canonical. Those are Cruce's concerns.
+As work spans developers, tools, machines and days, people must track baselines, overlap, stale revisions, reviewed commits and what actually landed. Local worktrees isolate files; they do not provide Cruce's shared durable workspace identity, revision-bound decisions and retained provenance.
 
 ## Who it is for
 
-A single developer, one agent and one task may get little from Cruce. That is acceptable; the product is not distorted to capture that case.
-
-Cruce becomes more valuable when:
-
-- several agents or developers work on the same repository at the same time;
-- work lives for hours or days, across sessions and machines;
-- different tools perform different parts of the work;
-- canonical moves while other work continues;
-- review happens asynchronously and must refer to exact revisions;
-- many independent revisions must eventually converge safely.
+Teams or individuals with several concurrent workstreams, asynchronous review, changing canonical history, or work continued across sessions and tools. A single short-lived task may gain little; the product does not need to serve every local execution case.
 
 ## What Cruce owns
 
@@ -99,7 +72,8 @@ Agent Relay / agent framework / IDE agent
         ↓  coordinates execution, communication, delegation
 Cruce
         ↓  coordinates durable Git work, reconciliation and promotion
-Canonical Git (Cloudflare Artifacts) ⇄ upstream forge (GitHub, GitLab, …)
+Canonical Git (Cloudflare Artifacts)
+        ··· optional forge import / upstream publication: roadmap
 ```
 
 ### Integration philosophy
@@ -144,13 +118,6 @@ Every Cruce repository has a canonical Git repository in Cloudflare Artifacts, a
 
 ## Alternatives and risks
 
-Primary documentation was checked on **2026-10-06**. These are documented capabilities, not hands-on comparisons.
+Local Git worktrees and agent orchestrators already provide execution isolation. Forges provide review and merge queues. Cruce must earn its additional remote and setup cost through durable coordination across tools, developers and machines.
 
-| Alternative | What it already provides | Implication for Cruce |
-| --- | --- | --- |
-| [Git worktrees](https://git-scm.com/docs/git-worktree), [Codex](https://learn.chatgpt.com/docs/environments/git-worktrees), [Cursor](https://cursor.com/docs/configuration/worktrees) | Local isolation for parallel agents | Complements, not competitors. Cruce must not re-implement local isolation as its value |
-| [Claude Code agent teams](https://code.claude.com/docs/en/agent-teams), Agent Relay, [MCP Agent Mail](https://github.com/Dicklesworthstone/mcp_agent_mail) | Agent messaging, shared tasks, delegation, advisory file leases | A different layer. Cruce should be usable underneath them, not compete as an inbox or scheduler |
-| [Conductor](https://www.conductor.build/docs), [GitButler](https://docs.gitbutler.com/ai-agents/parallel-agents) | Local multi-agent workspaces with review flows | Strong for one developer on one machine; Cruce's ground is durable, cross-machine, cross-developer and cross-vendor coordination |
-| [GitHub agents](https://docs.github.com/en/copilot/concepts/agents/about-third-party-coding-agents), [merge queues](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/managing-a-merge-queue), [Graphite](https://graphite.com/docs/graphite-merge-queue) | Forge-hosted agents, review and integration validation | Cruce coordinates concurrent work before it becomes forge history; it does not duplicate merge queues |
-
-The largest risks are adoption friction (installation setup and an extra remote), sparse or noisy observations, agents that ignore coordination context, and incumbents bundling enough of this. The product must show reduced reconciliation effort and rework at the scale it targets. See [how the roadmap validates value](../ROADMAP.md#how-value-is-validated).
+The main risks are adoption friction, sparse/noisy observations, clients ignoring context and existing tools supplying enough coordination. Validate reduced reconciliation effort and rework at the intended scale; see [value validation](../ROADMAP.md#how-value-is-validated).

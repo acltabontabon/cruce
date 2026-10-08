@@ -1,6 +1,6 @@
 # Principles and guardrails
 
-[Documentation map](../README.md#documentation-map) · [Product](product.md) · [Domain model](domain-model.md) · [Architecture](architecture.md)
+[Documentation map](README.md) · [Product](product.md) · [Domain model](domain-model.md) · [Architecture](architecture.md)
 
 These are normative constraints for changes to Cruce. The [product document](product.md) states the boundary. The [domain model](domain-model.md) defines the concepts. The architecture describes the implementation, and tests provide evidence. If implementation and these rules disagree, record the gap and resolve it explicitly. Do not silently redefine the product from whichever behavior happens to exist.
 

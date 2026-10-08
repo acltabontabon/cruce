@@ -1,6 +1,6 @@
 # Operations
 
-[Documentation map](../README.md#documentation-map) · [Cloudflare setup](cloudflare-setup.md) · [Architecture](architecture.md) · [Verification](local-verification.md)
+[Documentation map](README.md) · [Cloudflare setup](cloudflare-setup.md) · [Architecture](architecture.md) · [Verification](local-verification.md)
 
 This page is for the installation administrator. Each procedure gives the symptom, how to inspect it with existing reads, the action and what not to do. Every recovery path keeps the original operation identity and reservation. Nothing here deletes retained source, approvals or provenance.
 
@@ -8,7 +8,7 @@ This page is for the installation administrator. Each procedure gives the sympto
 
 ## Before an incident
 
-- Keep the recorded storage configuration: installation account ID, physical Artifacts namespace (`CRUCE_ARTIFACTS_NAMESPACE`), Worker name and `CRUCE_SECRET`. Changing any of these later fails closed by design.
+- Preserve the installation account, physical Artifacts namespace (`CRUCE_ARTIFACTS_NAMESPACE`), Worker name and `CRUCE_SECRET`. Account/namespace mismatches fail closed; changing the sealing secret can make credentials and continuation proofs unreadable.
 - Keep the deployed Worker version and release tag ([test environment](test-environment.md) records them for the test installation).
 - Note the time of any risky change. Durable Object point-in-time recovery addresses storage by time, so the time is the restore target.
 
@@ -22,12 +22,12 @@ This page is for the installation administrator. Each procedure gives the sympto
 - `get_retention` with a `workspaceId` shows cleanup phase, attempts, next attempt and blocker.
 
 **Act.**
-- Retry with the original idempotency key and exactly the same input. The console offers the original command only to the actor who submitted it.
+- Retry with the original idempotency key and exactly the same input. Promotion recovery remains tied to its original actor. Fork cleanup exposes its recorded command to anyone currently eligible to start it: the owner through any authorized connection, or a maintainer for ended work ([ADR 0015](decisions/0015-resuming-a-recorded-fork-deletion.md)).
 - Interrupted repository setup: a human maintainer uses the console's setup retry. It replays the recorded provisioning intent under its original reservation.
-- Cleanup and enabled observation resume through bounded Durable Object alarms under current authority. If a blocker names authority, policy, scope or approval, restore that authority or have the original actor retry with renewed approval.
+- Cleanup and enabled observation resume through bounded Durable Object alarms under current authority. If a blocker names authority, policy, scope or approval, restore it and retry the recorded operation with current approval. An eligible actor may take over recorded fork cleanup; other operations retain their own actor rules.
 
 **Do not.**
-- Release a charged reservation by hand.
+- Edit reservation records by hand. For an abandoned operation listed in repository Settings, the console namespace Owner may use **Release** after ensuring no agent will retry it. Release runs/deletes nothing and refuses later retries of that operation; it does not prove what happened in the provider.
 - Start a replacement operation with a new key while the original is uncertain.
 - Treat elapsed time as resolution.
 

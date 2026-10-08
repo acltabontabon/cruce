@@ -1,6 +1,6 @@
 # Local console walkthrough
 
-[Documentation map](../README.md#documentation-map) · [Contributor setup](../CONTRIBUTING.md#set-up-and-explore) · [Verification status](local-verification.md)
+[Documentation map](README.md) · [Contributor setup](../CONTRIBUTING.md#set-up-and-explore) · [Verification status](local-verification.md)
 
 Use this walkthrough to explore Cruce while it is in development. The screenshots come from the local browser fixture. They illustrate the current console, not a stable UI contract or evidence of a live deployment.
 
@@ -77,4 +77,4 @@ Cruce's coordination boundary ends at reviewed reconciliation into canonical Git
 
 ## Refresh these screenshots
 
-Keep this walkthrough and its images together when visible console behaviour changes. `PORT=5173 pnpm test:browser` writes fresh captures to the ignored `dist/ui-checks/`; the fixed port keeps the server URL in captured commands stable. Convert the matching captures (`home-1440`, `repository-1440`, `review`, `review-notes`, `workspace-1440`, `revision-1440`, `setup-1440`, `account`) into the JPEG files under `docs/images/local-demo/` (`home`, `repository`, `review`, `review-notes`, `workspace`, `history`, `connect`, `account`), for example with `sips -s format jpeg`. Use only sample identities, never capture credentials or a live account, and check every image and relative link.
+Keep this walkthrough and its images together when visible console behaviour changes. `PORT=5173 pnpm test:browser` writes fresh captures to the ignored `dist/ui-checks/`; the fixed port keeps the server URL in captured commands stable. Convert the matching captures (`home-1440`, `repository-1440`, `review`, `review-notes`, `workspace-1440`, `revision-1440`, `setup-1440`, `account`) into the JPEG files under `docs/images/local-demo/` (`home`, `repository`, `review`, `review-notes`, `workspace`, `history`, `connect`, `account`), for example with `sips -s format jpeg`. Use only sample identities, never capture credentials or a live account, and check every image and relative link. The README's hero, story, lane map and review-notes media come from the same fixture: `node tools/capture-readme.mjs` (needs `ffmpeg`) rewrites them under `docs/images/readme/`.
