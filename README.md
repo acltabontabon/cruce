@@ -54,22 +54,17 @@ In that picture, the human job moves from writing every line to understanding, r
   <br><sub>The console's lane map, replaying a promotion</sub>
 </p>
 
-The repository's **Workspaces** tab lists each workspace once, with its open changes nested under it, and draws them as lanes off `main`:
-
-- **Where each piece of work began.** Baselines are immutable, so "3 behind canonical" means something exact.
-- **Who is attached, and where.** A workspace belongs to its owner, not to the session that started it. Close the laptop, switch from Claude Code to Codex, pick it up tomorrow on another machine: the baseline, pushed revisions and history are still there. Presence comes from 30-second heartbeats, and disconnecting never releases or cleans anything up.
-- **Where paths cross.** Two workspaces touching `src/retry.ts` are flagged on both rows as a heads-up, not a blocker.
-- **What already landed.** Promoted work rejoins main, and **Replay history** plays the recorded events back.
+- **See where work began.** Every workspace starts from a fixed baseline, so "3 behind" means exactly that.
+- **Pick up anywhere.** Close the laptop, switch tools, continue on another machine. The work stays.
+- **Spot overlap early.** Shared paths show as a heads-up, never a blocker.
+- **Replay history.** Watch work branch, land and rejoin `main`.
 
 ### A whole team, each with their own agents
 
-Cruce is built for more than one person's agents. In a shared namespace, teammates join as Owner, Maintainer, Developer or Viewer, and repository grants (Read, Write, Maintain) narrow what each can do. Everyone works in the same repository at the same time, each with whichever agents they prefer:
-
-- **Every workspace has one human owner.** Alex's Codex and Sam's Claude Code push only to their own person's workspaces. No agent writes into someone else's work, and nobody pushes to canonical directly.
-- **Agents act as their person, never more.** A connection can do only what its user's role, repository grants and approved repositories allow, rechecked on every request.
-- **Everyone sees the same picture.** The lane map names each workspace's owner, and a path that Alex's and Sam's work both touch shows on both rows long before review.
-- **Review crosses people and agents.** Sam leaves a concern on Alex's change, Alex's agent answers it, and a human with Maintain resolves it and approves the exact revision. That is the loop below.
-- **The record says who did what.** Every revision, note, approval and promotion names its human and the connection it came through.
+- **One owner per workspace.** Your agents write only to your work.
+- **Agents never exceed their person.** Roles and grants are rechecked on every request.
+- **One shared picture.** Everyone sees who owns what and where work crosses.
+- **A clear record.** Every revision, note and approval names its human.
 
 ### Review with your agent, on the exact revision
 
@@ -78,19 +73,16 @@ Cruce is built for more than one person's agents. In a shared namespace, teammat
   <br><sub>Sam's concern, answered by Alex's agent, resolved by a human</sub>
 </p>
 
-Review is a loop between the people who decide and the agents that write, held in one durable place instead of a chat transcript:
+1. **Leave a note on a line.** Concerns block promotion; comments don't.
+2. **Your agent picks it up** the next time it checks in. Cruce never pings it.
+3. **It fixes the code and replies,** pointing at the new revision.
+4. **You resolve it.** Only humans can.
 
-1. **You or a teammate leave a note on a line.** A *concern* blocks promotion; a *comment* never does. Each note names the exact revision under review.
-2. **Your agent picks it up.** The next time it checks in, it learns a note is waiting and reads exactly what was asked, on which line and revision. Cruce never messages, wakes or schedules the agent; it only keeps the note where the agent will find it.
-3. **The agent fixes and answers.** It changes the code with Git, proposes the new revision and replies on the note, pointing at the revision that addresses it.
-4. **You check, then resolve.** Only an authenticated human can resolve a concern, and they give a reason. Agents can add notes and reply, but never resolve.
-5. **Nothing slips through a republish.** Unresolved concerns follow the change to its newest revision until a human resolves them.
-
-Every change opens with one next step and a compact checklist (on main, concerns, tests, approval, promote). Its files read as one page: likely review targets first, tests and docs folded, notes beside their lines.
+Unresolved concerns follow the change until someone resolves them, so republishing can't drop one.
 
 ### What you approve is what lands
 
-Review, evidence, approval and promotion each name **one exact revision**. Canonical advances only after an authenticated human approves that revision, every concern is resolved and a non-forced Git update validates against the approved base. If `main` moved first, the workspace merges it with plain Git, verifies and gets fresh review. Fetching or acknowledging proves nothing. Publication proves which source was retained for review, not that it is correct.
+Approval names one exact revision, never a moving branch. `main` advances only to that revision, with a non-forced Git update. If `main` moved first, the work is merged with plain Git and reviewed again.
 
 ## What Cruce is not
 
