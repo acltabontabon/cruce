@@ -1499,6 +1499,43 @@ body {
 .namespace-link :is(.initials, .row-arrow) {
 	margin-top: 2px;
 }
+/* A section's create action is one glyph; its word slides out on hover or keyboard focus. */
+:where(.shell) .panel-action .glyph-add {
+	display: inline-flex;
+	align-items: center;
+	gap: 0;
+	min-height: 28px;
+	padding: 0 7px;
+	border: 1px dashed var(--border-strong);
+	border-radius: 8px;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: 12.5px;
+	transition:
+		gap var(--fast) var(--ease),
+		color var(--fast) var(--ease),
+		border-color var(--fast) var(--ease),
+		background var(--fast) var(--ease);
+}
+.glyph-add > span {
+	max-width: 0;
+	overflow: hidden;
+	opacity: 0;
+	transition:
+		max-width var(--fast) var(--ease),
+		opacity var(--fast) var(--ease);
+}
+:where(.shell) .panel-action .glyph-add:is(:hover, :focus-visible) {
+	gap: 5px;
+	border-style: solid;
+	border-color: var(--accent);
+	background: var(--surface-2);
+	color: var(--text);
+}
+.glyph-add:is(:hover, :focus-visible) > span {
+	max-width: 4em;
+	opacity: 1;
+}
 .row-meta code {
 	color: var(--accent);
 	font-size: 11.5px;

@@ -402,9 +402,9 @@ export function NamespaceHome({
 						title="Namespaces"
 						count={me.namespaces.length}
 						action={
-							<button type="button" className="ghost" onClick={create}>
+							<button type="button" className="glyph-add" aria-label="Create namespace" onClick={create}>
 								<Icon name="plus" />
-								Create namespace
+								<span aria-hidden="true">New</span>
 							</button>
 						}
 					>
