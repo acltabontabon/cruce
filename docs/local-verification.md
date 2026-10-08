@@ -58,7 +58,7 @@ On **2026-10-08**, namespace deletion passed typecheck, lint, **406 unit/integra
 
 The browser journeys check the typed-handle confirmation and its summary of ended work, return to Home without the namespace, and an in-progress deletion that freezes the namespace page, shows the repository-named reason and retries the original operation. Both dialogs were visually inspected in the generated Chromium screenshots. [ADR 0012](decisions/0012-namespace-permanent-deletion.md) records the decision.
 
-These checks use simulated provider effects, an in-memory Durable Object store and fixture authentication; the browser fixture simulates the whole deletion in one step. Namespace-to-Control-Tower RPC under the Workers runtime, hosted Artifacts deletion and the signed-in deployed console have not been verified, and this change has not been deployed. The offline build completed with the existing unavailable-Docker notice; lint retains its Biome deprecation notice.
+These checks use simulated provider effects, an in-memory Durable Object store and fixture authentication; the browser fixture simulates the whole deletion in one step. It is deployed to the [test environment](test-environment.md#latest-test-deployment--2026-10-08) (Worker `a4587056`); Namespace-to-Control-Tower deletion under the Workers runtime, hosted Artifacts deletion and signed-in use of the deployed console have not been verified. The offline build completed with the existing unavailable-Docker notice; lint retains its Biome deprecation notice.
 
 ## Repository archive and permanent deletion
 
