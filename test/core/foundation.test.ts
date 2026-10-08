@@ -405,6 +405,16 @@ describe("actor-neutral workspaces", () => {
 		s.fork = { name: "fork", id: "fork-id", remote: "remote", state: "ready" };
 		expect(c.snapshot(other).workspaceDeletion[s.id].ready).toBe(true);
 		expect(c.forkCleanup(s).ready).toBe(true);
+		// A deletion an agent started and that was blocked is resumable by anyone who could start it now (ADR 0015).
+		const command = cmd("cleanup_workspace", { workspaceId: s.id, idempotencyKey: "agent-cleanup" });
+		s.cleanup = { operationId: "op", actorId: agent.id, command, state: "blocked", phase: "authorized", attempts: 1 };
+		const developer = { ...authority({ ...human, id: "dev", userId: "dev" }), repositoryRole: "write" as const };
+		const recorded = (a: Authority) => c.snapshot(a).workspaces.find((w) => w.id === s.id)?.cleanup?.command;
+		for (const a of [authority(), other, authority(agent)]) expect(recorded(a)).toEqual(command);
+		expect(recorded(developer)).toBeUndefined();
+		expect(c.snapshot(authority()).workspaceDeletion[s.id]).toEqual({ ready: true, reasons: [] });
+		expect(c.snapshot(other).workspaceDeletion[s.id].ready).toBe(true);
+		s.cleanup = undefined;
 		s.fork.state = "deleted";
 		expect(c.snapshot(authority()).workspaceDeletion[s.id].reasons).toEqual(["Workspace is already deleted"]);
 	});

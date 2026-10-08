@@ -12,7 +12,7 @@ The fix names retained branches the way Artifacts source reads resolve them in b
 
 On the hosted test environment (Worker `afb692eb`, from `5f8a7fe`; the repository Durable Object served the previous version for about six minutes after the deploy), `inspect_retention` for workspace `3ec1f6d4…-0` then proved all four fork refs retained with no blockers. The blocked cleanup, resumed through this commit's bridge under its recorded operation identity, moved to `deleting`, and recovery confirmed deletion on its third attempt (`fork_deleting`, then `fork_deleted`). The Artifacts API then reported the fork repository not found, and `recover_source` for both the workspace head `e3e597ee` and canonical `a7f2b36c` recovered from retained storage with no fork. This closes the hosted cold-cache retained-source recovery gap below.
 
-Not yet verified: resuming an agent-started deletion from the console. The stored operation identity includes the starting actor, so another actor's retry is refused.
+Resuming an agent-started deletion from the console followed under [ADR 0015](decisions/0015-resuming-a-recorded-fork-deletion.md): a [runtime test](../test/worker/repository-runtime.test.ts) blocks an agent's deletion, refuses a developer who neither owns the workspace nor maintains the repository, and refuses a new key; then the console owner resumes the recorded command, the agent's later retry replays the deleted result, and both reservations settle complete. A [controller test](../test/core/foundation.test.ts) shows the recorded command to the owner's actors and a maintainer but not a developer. Both failed before the change. Not yet verified on the hosted test environment.
 
 ## Standard loading states
 

@@ -36,6 +36,8 @@ interface CleanupOperation {
 	grant: ConnectionGrant;
 	fingerprint: string;
 	reservationId?: string;
+	/** Earlier actors who drove this same deletion: their reservations settle and their retries replay with it. */
+	priorDrivers?: { actorId: string; reservationId?: string }[];
 	phase: "authorized" | "deleting" | "confirmed";
 	state: "pending" | "blocked" | "complete";
 	attempts: number;
@@ -836,7 +838,7 @@ export class RepositoryRuntime {
 			const workspace = c.workspace(cmd.workspaceId);
 			const operation = workspace.cleanup && {
 				...workspace.cleanup,
-				command: workspace.cleanup.actorId === a.actor.id ? workspace.cleanup.command : undefined,
+				command: c.mayResumeCleanup(workspace, a) ? workspace.cleanup.command : undefined,
 			};
 			return { lifecycle: c.forkCleanup(workspace), inspection: workspace.retention, operation };
 		} else if (cmd.tool === "inspect_retention") {
@@ -1212,9 +1214,17 @@ export class RepositoryRuntime {
 		assertStateBytes(cmd, 8192);
 		const key = `cleanup:${workspace.id}`;
 		let operation = this.store.get<CleanupOperation>(key);
+		// The recorded deletion is the identity, not the actor who started it: anyone authorized above may resume it.
+		const operationId = (operation && workspace.cleanup?.operationId) || op;
 		if (operation) {
-			if (workspace.cleanup?.operationId !== op || (operation.fingerprint !== fingerprint && operation.fingerprint !== stable(cmd)))
+			if (
+				operation.command.idempotencyKey !== cmd.idempotencyKey ||
+				(operation.fingerprint !== fingerprint && operation.fingerprint !== stable(cmd))
+			)
 				throw new DomainError(409, "Resume the existing authorized cleanup operation");
+			const previous = operation.grant.actor.id;
+			if (previous !== grant.actor.id && !operation.priorDrivers?.some((d) => d.actorId === previous))
+				operation.priorDrivers = [...(operation.priorDrivers ?? []), { actorId: previous, reservationId: operation.reservationId }];
 			// A current authenticated retry can renew a connection's continuation proof.
 			operation.grant = grant;
 		} else {
@@ -1237,7 +1247,7 @@ export class RepositoryRuntime {
 		// Arm the wakeup before accepting the durable intent. A crash after this save
 		// has a wakeup; a crash before it has neither deletion authority nor effects.
 		await this.scheduleCleanup(operation.nextAttempt);
-		workspace.cleanup = this.cleanupView(op, operation);
+		workspace.cleanup = this.cleanupView(operationId, operation);
 		this.save(c, [{ key, value: operation }]);
 		let reservation: Awaited<ReturnType<NamespacePort["reserve"]>> | undefined;
 		try {
@@ -1262,7 +1272,7 @@ export class RepositoryRuntime {
 					await this.namespace.reserve(grant, c.state.repository.id, cmd.idempotencyKey!, stable(cmd), "workspace.cleanup", workspace.id);
 					operation.phase = "deleting";
 					workspace.fork!.state = "deleting";
-					workspace.cleanup = this.cleanupView(op, operation);
+					workspace.cleanup = this.cleanupView(operationId, operation);
 					c.event(grant.actor, "fork_deleting", `Fork deletion authorized for ${workspace.title}`, [workspace.id]);
 					this.save(c, [{ key, value: operation }]);
 				}
@@ -1283,15 +1293,20 @@ export class RepositoryRuntime {
 				operation.phase = "confirmed";
 				workspace.fork!.state = "deleted";
 				c.event(grant.actor, "fork_deleted", `Removed fork for ${workspace.title}`, [workspace.id]);
-				workspace.cleanup = this.cleanupView(op, operation);
-				c.state.receipts[op] = { fingerprint, result: { workspaceId: workspace.id, state: "deleted" } };
+				workspace.cleanup = this.cleanupView(operationId, operation);
+				for (const driver of [
+					op,
+					...(await Promise.all((operation.priorDrivers ?? []).map((d) => hash(`${d.actorId}:${cmd.idempotencyKey}`)))),
+				])
+					c.state.receipts[driver] = { fingerprint, result: { workspaceId: workspace.id, state: "deleted" } };
 				this.save(c, [{ key, value: operation }]);
 			}
-			await this.namespace.settle(reservation.id, "complete");
+			for (const id of [...(operation.priorDrivers ?? []).flatMap((d) => (d.reservationId ? [d.reservationId] : [])), reservation.id])
+				await this.namespace.settle(id, "complete");
 			diagnose("resource_settled", { action: "workspace.cleanup", phase: "complete" });
 			operation.state = "complete";
 			operation.nextAttempt = undefined;
-			workspace.cleanup = this.cleanupView(op, operation);
+			workspace.cleanup = this.cleanupView(operationId, operation);
 			this.save(c, [{ key, value: operation }]);
 			return { workspaceId: workspace.id, state: "deleted" };
 		} catch (error) {
@@ -1301,12 +1316,14 @@ export class RepositoryRuntime {
 				saved = this.store.get<CleanupOperation>(key)!;
 			const current = durable.workspaces.find((w) => w.id === workspace.id)!;
 			const blocked = error instanceof DomainError && [400, 401, 403, 409, 413].includes(error.status);
+			// Keep the reservation this attempt took, so whoever resumes the deletion settles it.
+			if (reservation) saved.reservationId = reservation.id;
 			saved.state = blocked ? "blocked" : "pending";
 			saved.reason = blocked
 				? "Cleanup blocked; inspect retention, authority and storage identity before retrying"
 				: "Cleanup interrupted; recovery will retry the authorized operation";
 			if (blocked) saved.nextAttempt = undefined;
-			current.cleanup = this.cleanupView(op, saved);
+			current.cleanup = this.cleanupView(operationId, saved);
 			this.save(new RepositoryController(durable, this.now(), () => "cleanup-recovery"), [{ key, value: saved }]);
 			if (reservation) await this.namespace.settle(reservation.id, saved.phase === "confirmed" ? "complete" : "uncertain");
 			throw error;

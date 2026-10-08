@@ -1701,6 +1701,42 @@ describe("authorized retention recovery (F6)", () => {
 		expect(f.host.remove).not.toHaveBeenCalled();
 		expect(f.runtime.state().workspaces[0].cleanup?.state).toBe("blocked");
 	});
+	it("lets the console resume an agent's blocked cleanup under current authority, settling every reservation", async () => {
+		const f = await fixture(true);
+		f.w.member(f.w.authority(owner), "dev", "developer");
+		f.w.state.repositories[0].grants = [{ subject: "user", id: "dev", role: "write" }];
+		await f.call("end_workspace", { workspaceId: f.workspace.id });
+		const refs = vi.spyOn(f.git, "remoteRefs").mockResolvedValue([{ ref: "refs/heads/stray", oid: "f".repeat(40) }]);
+		await expect(f.call("cleanup_workspace", { workspaceId: f.workspace.id, idempotencyKey: "agent-cleanup" })).rejects.toThrow(
+			"Retention proof unavailable",
+		);
+		const recorded = f.runtime.state().workspaces[0].cleanup!;
+		expect(recorded).toMatchObject({ state: "blocked", actorId: agent.id });
+		refs.mockResolvedValue([{ ref: "refs/heads/trunk", oid: f.base }]);
+		const console = { actor: owner, continuation: { kind: "console" as const } };
+		const dev = { actor: { ...owner, id: "dev-human", userId: "dev", name: "Dev" }, continuation: { kind: "console" as const } };
+		expect(await f.call("get_retention", { workspaceId: f.workspace.id }, console)).toMatchObject({
+			operation: { command: recorded.command },
+		});
+		expect(
+			((await f.call("get_retention", { workspaceId: f.workspace.id }, dev)) as { operation: Workspace["cleanup"] }).operation?.command,
+		).toBeUndefined();
+		await expect(f.call("cleanup_workspace", { ...recorded.command }, dev)).rejects.toThrow("maintainer required");
+		await expect(f.call("cleanup_workspace", { workspaceId: f.workspace.id, idempotencyKey: "fresh" }, console)).rejects.toThrow(
+			"Resume the existing authorized cleanup operation",
+		);
+		expect(f.host.remove).not.toHaveBeenCalled();
+		expect(await f.call("cleanup_workspace", { ...recorded.command }, console)).toMatchObject({ state: "deleted" });
+		expect(f.host.remove).toHaveBeenCalledTimes(1);
+		expect(await f.call("cleanup_workspace", { workspaceId: f.workspace.id, idempotencyKey: "agent-cleanup" })).toMatchObject({
+			state: "deleted",
+		});
+		const reservations = f.w.state.reservations.filter((r) => r.action === "workspace.cleanup");
+		expect(reservations.map((r) => [r.actorId, r.state])).toEqual([
+			[agent.id, "complete"],
+			[owner.id, "complete"],
+		]);
+	});
 	it("refuses a second cleanup operation and backs off retries of the first within an hour", async () => {
 		const f = await fixture();
 		await f.call("end_workspace", { workspaceId: f.workspace.id });

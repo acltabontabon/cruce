@@ -131,10 +131,13 @@ export class RepositoryController {
 		if (this.state.proposals.some((p) => p.workspaceId === s.id && p.state === "promoting"))
 			reasons.push("A change from this workspace is being promoted");
 		if (s.cleanup?.state === "pending") reasons.push("Deletion is already in progress");
-		else if (s.cleanup && s.cleanup.state !== "complete" && s.cleanup.actorId !== a.actor.id)
-			reasons.push("Only the person who started this deletion can retry it");
 		if (ended && (!s.fork || s.fork.state === "deleted")) reasons.push("Workspace is already deleted");
 		return { ready: reasons.length === 0, reasons };
+	}
+	/** Anyone who could start a workspace's fork deletion may resume the recorded one (ADR 0015). */
+	mayResumeCleanup(s: Workspace, a: Authority) {
+		if (a.repositoryRole !== "write" && a.repositoryRole !== "maintain") return false;
+		return a.actor.userId === s.ownerId || (a.actor.kind === "human" && !a.actor.connectionId && a.repositoryRole === "maintain");
 	}
 	forkCleanup(s: Workspace) {
 		const reasons: string[] = [];
@@ -220,7 +223,7 @@ export class RepositoryController {
 		state.activity = state.activity.slice(-STATE_LIMITS.recentActivity);
 		state.workspaces = state.workspaces.map((s) => ({
 			...s,
-			cleanup: s.cleanup ? { ...s.cleanup, command: s.cleanup.actorId === a.actor.id ? s.cleanup.command : undefined } : undefined,
+			cleanup: s.cleanup ? { ...s.cleanup, command: this.mayResumeCleanup(s, a) ? s.cleanup.command : undefined } : undefined,
 			state: s.state === "active" && !this.live(s) ? "disconnected" : s.state,
 		}));
 		const snapshot: RepositorySnapshot = {

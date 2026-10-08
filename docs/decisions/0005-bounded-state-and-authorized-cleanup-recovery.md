@@ -4,6 +4,8 @@ Status: Accepted 2026-10-06
 
 Amended by [0009](0009-replaceable-observations-and-archived-finished-work.md): presence and reports keep replaceable records instead of per-call receipts, and finished work moves to archive bundles.
 
+Amended by [0015](0015-resuming-a-recorded-fork-deletion.md): anyone who could start a fork deletion may resume the recorded one, not only its original actor.
+
 ## Context
 
 Global Directory enumeration and growing whole-state JSON made costs depend on installation history. Heartbeat receipts and activity accumulated inside every repository read/write; namespace reservations accumulated inside every authority check. SQLite's [row limit](https://developers.cloudflare.com/durable-objects/platform/limits/) is finite. The Git gateway buffers packs and has a separate 32 MiB ceiling. Pending fork deletion depended on a caller remaining connected and repeating the request.
