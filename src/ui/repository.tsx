@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { gitRemotePath } from "../shared/git-access.ts";
-import type { AttentionGroup, Promotion, Proposal, RepositorySnapshot } from "../shared/platform.ts";
+import type { AttentionGroup, Promotion, Proposal, RepositoryLifecycleView, RepositorySnapshot } from "../shared/platform.ts";
 import { ChangeDetail } from "./change.tsx";
 import { Form, value } from "./controls.tsx";
 import { BackLink, CopyCommand, Dialog, Icon, Initials, PageHeader, Pill, Section, SettingRow } from "./design.tsx";
@@ -696,7 +696,11 @@ function RepositoryLifecycleSettings({ view, execute, leave }: { view: Repositor
 					<p>
 						{archived
 							? "Archived. Source and history remain available; writes are disabled."
-							: "Finish all work before archiving or deleting this repository."}
+							: lifecycle.deletionBlockers.length
+								? "Finish all work before archiving. Deletion waits for the items below."
+								: lifecycle.blockers.length
+									? "Finish all work before archiving. Deleting ends unfinished work with the repository."
+									: "Archive makes this repository read-only. Deletion removes it permanently."}
 					</p>
 					{lifecycle.blockers.length > 0 && (
 						<ul>
@@ -717,7 +721,7 @@ function RepositoryLifecycleSettings({ view, execute, leave }: { view: Repositor
 							<button
 								type="button"
 								className="danger-button"
-								disabled={lifecycle.blockers.length > 0}
+								disabled={lifecycle.deletionBlockers.length > 0}
 								onClick={() => {
 									setConfirmation("");
 									setConfirming(true);
@@ -737,6 +741,9 @@ function RepositoryLifecycleSettings({ view, execute, leave }: { view: Repositor
 						This permanently deletes <strong>{view.repository.name}</strong>, including canonical Git, workspace forks, published revisions,
 						evidence and coordination history. It cannot be undone.
 					</p>
+					{(lifecycle.unfinished.workspaces > 0 || lifecycle.unfinished.changes > 0) && (
+						<p role="alert">{unfinishedWork(lifecycle.unfinished)}</p>
+					)}
 					<p>Local checkouts and external upstream repositories remain. This uses installation cloud resources under namespace policy.</p>
 					<Form
 						label="Delete repository permanently"
@@ -759,6 +766,16 @@ function RepositoryLifecycleSettings({ view, execute, leave }: { view: Repositor
 			)}
 		</SettingRow>
 	);
+}
+
+/** What permanent deletion ends with the repository, in plain words for its confirmation. */
+function unfinishedWork({ workspaces, attached, changes }: RepositoryLifecycleView["unfinished"]) {
+	const parts = [
+		workspaces > 0 &&
+			`${plural(workspaces, "unfinished workspace")}${attached > 0 ? `, ${attached === workspaces ? (workspaces === 1 ? "attached to a checkout" : "all attached to checkouts") : `${attached} attached to ${attached === 1 ? "a checkout" : "checkouts"}`}` : ""}`,
+		changes > 0 && plural(changes, "open change"),
+	].filter(Boolean);
+	return `This also ends ${parts.join(" and ")}. Agents and checkouts keep running; their next Cruce or Git request fails because the repository is gone. Unpushed local commits stay on their machines.`;
 }
 
 function RepositorySettings({

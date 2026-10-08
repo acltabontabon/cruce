@@ -62,7 +62,7 @@ export class RepositoryLifecycleRuntime {
 				(target) => !target.removed || Boolean(target.operation),
 			)
 		)
-			view.blockers.push("Disable push observation and finish subscription cleanup.");
+			for (const list of [view.blockers, view.deletionBlockers]) list.push("Disable push observation and finish subscription cleanup.");
 		if (transition && view.owner)
 			view.transition = {
 				tool: transition.lifecycle.state === "archived" ? "archive_repository" : "restore_repository",
@@ -115,7 +115,8 @@ export class RepositoryLifecycleRuntime {
 		if (this.store.get(transitionKey)) throw new DomainError(409, "Retry the unfinished repository transition");
 		const view = await this.view(repository, grant, a);
 		if (view.state === "deleted" || view.state === "deleting") throw new DomainError(409, "Repository deletion is already authorized");
-		if (command.tool !== "restore_repository" && view.blockers.length) throw new DomainError(409, "Repository retirement has blockers");
+		const blockers = command.tool === "delete_repository" ? view.deletionBlockers : view.blockers;
+		if (command.tool !== "restore_repository" && blockers.length) throw new DomainError(409, "Repository retirement has blockers");
 		if (command.tool === "delete_repository") {
 			if (command.confirmation !== repository.name) throw new DomainError(400, "Type the repository name to confirm deletion");
 			// Inventory includes source/evidence stores and identities preserved when finished work was archived.

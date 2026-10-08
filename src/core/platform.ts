@@ -438,6 +438,11 @@ export class RepositoryController {
 					reviews: [],
 					at: this.now,
 				};
+				// A workspace's newer change replaces its older open ones; reviews name exact revisions, so none carry over.
+				for (const older of this.state.proposals.filter((o) => o.workspaceId === s.id && o.state === "open")) {
+					older.state = "rejected";
+					this.event(a.actor, "change_rejected", `Superseded by #${p.number}`, [older.id]);
+				}
 				this.state.proposals.push(p);
 				this.event(a.actor, "change_proposed", p.title, [p.id, s.id, artifact.id, p.revision]);
 				return p;

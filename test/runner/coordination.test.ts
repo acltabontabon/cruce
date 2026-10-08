@@ -164,3 +164,37 @@ it("delivers owned-workspace overlap warnings with report freshness and excludes
 	// Fresh repeated heartbeats/reports don't create a new warning unless the projected facts change.
 	expect(coordinationContext({ ...snapshot, asOf: 100010 })).toEqual(result);
 });
+
+it("names every owned workspace behind canonical in one plain sentence, published or not", () => {
+	const row = (workspaceId: string, relation: string, basis: "published" | "baseline") =>
+		({ workspaceId, relation, basis, revision: `${workspaceId}-rev`, canonicalRevision: "66be05f0000" }) as never;
+	const workspaces = [
+		{ id: "juniper", title: "Juniper: HelloController", ownerId: "user", state: "active" },
+		{ id: "orion", title: "Orion: PingController", ownerId: "user", state: "detached" },
+		{ id: "zephyr", title: "Zephyr: RandomController", ownerId: "user", state: "active" },
+		{ id: "done", title: "Ended", ownerId: "user", state: "completed" },
+		{ id: "theirs", title: "Someone else", ownerId: "other", state: "active" },
+	] as Workspace[];
+	const result = coordinationContext({
+		sourceHead: "66be05f0000",
+		attention: { asOf: 0, viewerId: "user", items: [], ancestryUnavailable: 0 },
+		workspaces,
+		reconciliation: {
+			workspaces: [
+				row("juniper", "behind", "baseline"),
+				row("orion", "diverged", "published"),
+				// Canonical already contains Zephyr's promoted revision: finished, not behind.
+				row("zephyr", "behind", "published"),
+				row("done", "behind", "baseline"),
+				row("theirs", "behind", "baseline"),
+			],
+		} as never,
+	});
+	if (!result.available) throw new Error("Missing context");
+	expect(result.behind.map((b) => b.workspaceId)).toEqual(["juniper", "orion"]);
+	expect(result.summary).toMatch(
+		/^Canonical moved to 66be05f\. 2 of your workspaces are behind it: Juniper: HelloController \(juniper\), Orion/,
+	);
+	const quiet = context();
+	expect(quiet.available && "summary" in quiet).toBe(false);
+});

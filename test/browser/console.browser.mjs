@@ -2420,8 +2420,13 @@ test("repository retirement shows blockers and requires exact confirmation after
 	await openRepo();
 	await page.getByRole("button", { name: "Settings", exact: true }).click();
 	assert.equal(await page.getByRole("button", { name: "Archive repository", exact: true }).isDisabled(), true);
-	assert.equal(await page.getByRole("button", { name: "Delete repository…", exact: true }).isDisabled(), true);
 	await page.getByText("End all workspaces, including disconnected work.", { exact: true }).waitFor();
+	// Deletion ends unfinished work with the repository, and its confirmation says so.
+	await page.getByRole("button", { name: "Delete repository…", exact: true }).click();
+	const live = page.getByRole("dialog", { name: "Delete repository permanently", exact: true });
+	assert.match(await live.getByRole("alert").innerText(), /This also ends \d+ unfinished workspaces?.*attached/);
+	await page.screenshot({ path: "dist/ui-checks/delete-repository-live-work.png", fullPage: true });
+	await live.getByRole("button", { name: "Cancel", exact: true }).click();
 	await page.goto(`${server.origin}/?namespace=fernloop`);
 	await page.getByRole("button", { name: "New repository", exact: true }).click();
 	await page.getByLabel("Repository name", { exact: true }).fill("retirement-test");
@@ -2461,6 +2466,8 @@ test("partial repository deletion shows its reason and retries the original oper
 				state: "deleting",
 				owner: true,
 				blockers: [],
+				deletionBlockers: [],
+				unfinished: { workspaces: 0, attached: 0, changes: 0 },
 				deletion: {
 					idempotencyKey: commands[0].idempotencyKey,
 					reason: "Cloudflare is rate limiting requests. Retry the same operation shortly.",

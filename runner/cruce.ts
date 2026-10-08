@@ -57,7 +57,7 @@ async function main() {
 	const operation = args[0] ?? "help";
 	if (operation === "help" || args.includes("--help")) {
 		process.stdout.write(
-			"Cruce — Git coordination for parallel agentic development\n\ncruce auth --server URL --namespace ID --repository ID   authorize Git\ncruce connect --namespace ID --repository ID --server URL [--client codex|claude|cursor]\ncruce human --namespace ID --repository ID --server URL\ncruce start --title TEXT\ncruce mcp [--client TOOL]\ncruce watch [--coordination]   emit changed coordination state for an external host\ncruce preview [--workspace ID]  check an exact-commit Git merge locally\ncruce publish [--title TEXT]\ncruce detach                   release this checkout; the workspace continues elsewhere\ncruce resume [--workspace ID]  reattach, or continue a workspace here from its pushed head\ncruce end [--cleanup]\n",
+			"Cruce — Git coordination for parallel agentic development\n\ncruce auth --server URL --namespace ID --repository ID   authorize Git\ncruce connect --namespace ID --repository ID --server URL [--client codex|claude|cursor]\ncruce human --namespace ID --repository ID --server URL\ncruce start --title TEXT\ncruce mcp [--client TOOL]\ncruce watch [--coordination]   emit changed coordination state for an external host\ncruce hint                     print workspaces behind canonical, for a client prompt hook\ncruce preview [--workspace ID]  check an exact-commit Git merge locally\ncruce publish [--title TEXT]\ncruce detach                   release this checkout; the workspace continues elsewhere\ncruce resume [--workspace ID]  reattach, or continue a workspace here from its pushed head\ncruce end [--cleanup]\n",
 		);
 		return;
 	}
@@ -454,6 +454,18 @@ async function main() {
 		return next;
 	};
 	try {
+		if (operation === "hint") {
+			// A client prompt hook: print needed reconciliation, or nothing. Never writes local state.
+			const context = coordinationContext(
+				(await call({
+					tool: "get_repository",
+					namespaceId: connection.namespaceId,
+					repositoryId: connection.repositoryId,
+				})) as RepositorySnapshot,
+			);
+			if (context.available && context.summary) process.stdout.write(`Cruce: ${context.summary}\n`);
+			return;
+		}
 		if (operation === "connect") {
 			await call({ tool: "get_repository", namespaceId: connection.namespaceId, repositoryId: connection.repositoryId });
 			await save();
@@ -543,23 +555,24 @@ async function main() {
 						inputSchema: shape,
 					},
 					async (values) => {
+						// Needed reconciliation leads the response, so a coordinating agent sees it before the result.
+						const current = async () => {
+							const context = await coordination.refresh();
+							return {
+								lead: context.available && context.summary ? [{ type: "text" as const, text: `Action needed: ${context.summary}` }] : [],
+								detail: { type: "text" as const, text: `Current coordination: ${JSON.stringify(context)}` },
+							};
+						};
 						try {
 							const result = await execute({ ...values, tool: tool.name });
+							const { lead, detail } = await current();
 							return {
-								content: [
-									{ type: "text" as const, text: JSON.stringify(result) },
-									{ type: "text" as const, text: `Current coordination: ${JSON.stringify(await coordination.refresh())}` },
-								],
+								content: [...lead, { type: "text" as const, text: JSON.stringify(result) }, detail],
 								structuredContent: result,
 							};
 						} catch (e) {
-							return {
-								isError: true,
-								content: [
-									{ type: "text" as const, text: (e as Error).message },
-									{ type: "text" as const, text: `Current coordination: ${JSON.stringify(await coordination.refresh())}` },
-								],
-							};
+							const { lead, detail } = await current();
+							return { isError: true, content: [...lead, { type: "text" as const, text: (e as Error).message }, detail] };
 						}
 					},
 				);
@@ -656,5 +669,6 @@ async function main() {
 }
 main().catch((error) => {
 	process.stderr.write(`${(error as Error).message}\n`);
-	process.exitCode = 1;
+	// A hint never blocks or fails the prompt it decorates.
+	process.exitCode = args[0] === "hint" ? 0 : 1;
 });

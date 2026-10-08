@@ -67,7 +67,12 @@ export interface RepositoryLifecycle {
 export interface RepositoryLifecycleView {
 	state: RepositoryLifecycle["state"];
 	owner: boolean;
+	/** What stops archive: unfinished work and anything deletion also waits for. */
 	blockers: string[];
+	/** What stops permanent deletion: in-flight promotions, provider operations and observation cleanup. */
+	deletionBlockers: string[];
+	/** Work that permanent deletion ends with the repository. */
+	unfinished: { workspaces: number; attached: number; changes: number };
 	deletion?: { idempotencyKey: string; reason?: string };
 	transition?: { tool: "archive_repository" | "restore_repository"; idempotencyKey: string };
 }

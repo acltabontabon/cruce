@@ -1304,7 +1304,11 @@ describe("exact approved-base promotion", () => {
 	it("serializes concurrent promotions and rejects reused operation inputs", async () => {
 		const f = await prepared();
 		try {
-			const competing = (await f.call("create_proposal", { artifactId: f.proposal.artifactId, title: "Competing promotion" })) as Proposal;
+			// A second approved change for the same candidate; a newer proposal would supersede the first, so record it directly.
+			const state = f.runtime.state();
+			const competing: Proposal = { ...structuredClone(f.proposal), id: "competing", number: ++state.proposalCount, reviews: [] };
+			state.proposals.push(competing);
+			f.store.put("repository", state);
 			await f.call(
 				"review_proposal",
 				{ proposalId: competing.id, revision: f.candidate, outcome: "approve", reason: "Exact source inspected" },

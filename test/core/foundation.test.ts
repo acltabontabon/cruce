@@ -446,6 +446,28 @@ describe("revision-bound review", () => {
 		const p = c.command(cmd("create_proposal", { artifactId: "source" }), authority(agent)) as { id: string };
 		return { c, s, p: c.proposal(p.id) };
 	}
+	it("closes a workspace's older open change when it proposes a newer revision", () => {
+		const { c, s, p } = proposed();
+		c.addArtifact({
+			id: "merged",
+			namespaceId: "namespace",
+			repositoryId: "repo",
+			workspaceId: s.id,
+			actor: agent,
+			revision: "c".repeat(40),
+			baseRevision: head,
+			kind: "source",
+			title: "Merged with canonical",
+			contentHash: "hash",
+			trust: "reported",
+			storage: { repository: "source", providerId: "source", revision: "c".repeat(40) },
+			at: 200,
+		});
+		const next = c.command(cmd("create_proposal", { artifactId: "merged" }), authority(agent)) as { id: string; number: number };
+		expect(p.state).toBe("rejected");
+		expect(c.proposal(next.id).state).toBe("open");
+		expect(c.state.activity.at(-2)).toMatchObject({ kind: "change_rejected", summary: `Superseded by #${next.number}`, ids: [p.id] });
+	});
 	it("requires exact revision approval and reasoned resolution", () => {
 		const { c, p } = proposed();
 		expect(() =>

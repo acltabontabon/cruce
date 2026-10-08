@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { CRUCE_INSTRUCTIONS } from "../src/shared/tools.ts";
+import { shellQuote } from "./git-remotes.ts";
 
 async function read(path: string) {
 	return readFile(path, "utf8").catch((e: NodeJS.ErrnoException) => {
@@ -39,5 +40,25 @@ export async function configureClient(cwd: string, client: "codex" | "claude" | 
 		instructionPath,
 		client === "cursor" && !original ? `---\ndescription: Cruce coordination\nalwaysApply: true\n---\n${next}` : next,
 	);
-	return { client, capabilities: ["git_observation", "coordination_mcp"], adaptiveVerified: false, hooksInstalled: false };
+	const hooksInstalled = client === "claude" && (await installPromptHook(cwd, bridge, node));
+	return { client, capabilities: ["git_observation", "coordination_mcp"], adaptiveVerified: false, hooksInstalled };
+}
+/**
+ * Claude Code runs this before each prompt and adds its output to the session, so workspaces left behind by a
+ * promotion in the console reach the coordinating agent at its next turn. Cruce still wakes and messages no one.
+ * Machine-local paths belong in the local settings file, beside the user's other hooks, which stay untouched.
+ */
+async function installPromptHook(cwd: string, bridge: string, node: string) {
+	const path = join(cwd, ".claude/settings.local.json"),
+		original = await read(path),
+		settings = original ? JSON.parse(original) : {},
+		command = `${shellQuote(node)} ${shellQuote(bridge)} hint --cwd ${shellQuote(cwd)}`;
+	type Entry = { hooks?: { command?: string }[] };
+	const others = ((settings.hooks?.UserPromptSubmit ?? []) as Entry[]).filter(
+		(entry) => !entry.hooks?.some((hook) => hook.command?.includes(" hint --cwd ") && hook.command.includes(shellQuote(bridge))),
+	);
+	settings.hooks = { ...settings.hooks, UserPromptSubmit: [...others, { hooks: [{ type: "command", command, timeout: 15 }] }] };
+	await mkdir(dirname(path), { recursive: true });
+	await writeFile(path, `${JSON.stringify(settings, null, 2)}\n`);
+	return true;
 }

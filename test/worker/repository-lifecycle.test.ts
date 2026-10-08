@@ -87,7 +87,28 @@ describe("repository lifecycle", () => {
 		state.workspaces = [{ state: "disconnected", execution: {} }] as never;
 		state.proposals = [{ state: "promoting" }] as never;
 		state.promotions = [{ state: "uncertain" }] as never;
-		expect(repositoryLifecycleView(state, f.namespace.authority(owner, repo.id), true).blockers).toHaveLength(4);
+		const view = repositoryLifecycleView(state, f.namespace.authority(owner, repo.id), true);
+		expect(view.blockers).toHaveLength(4);
+		// Deletion ends unfinished work; only in-flight promotions and provider operations hold it.
+		expect(view.deletionBlockers).toEqual(["Recover unfinished promotions.", "Recover unfinished resource operations."]);
+	});
+	it("deletes a repository with attached and detached workspaces and an open change, removing their forks", async () => {
+		const f = fixture();
+		const state = f.store.get<RepositoryState>("repository")!;
+		state.workspaces = [
+			{ id: "attached", state: "active", execution: { id: "x" }, fork: { name: "fork-attached", id: "attached-id" } },
+			{ id: "detached", state: "detached", fork: { name: "fork-detached", id: "detached-id" } },
+		] as never;
+		state.proposals = [{ id: "change", state: "open" }] as never;
+		f.store.put("repository", state);
+		const view = repositoryLifecycleView(state, f.namespace.authority(owner, repo.id));
+		expect(view.unfinished).toEqual({ workspaces: 2, attached: 1, changes: 1 });
+		await expect(f.call("archive_repository")).rejects.toThrow("Repository retirement has blockers");
+		// Five provider repositories: one bounded attempt, then a retry of the same operation finishes.
+		expect(await f.call("delete_repository")).toEqual({ state: "deleting" });
+		expect(await f.call("delete_repository")).toEqual({ state: "deleted" });
+		expect(f.remove.mock.calls.map(([name]) => name)).toEqual(expect.arrayContaining(["fork-attached", "fork-detached", "repo-repo"]));
+		expect(f.remove.mock.calls.at(-1)?.[0]).toBe("repo-repo");
 	});
 	it("requires the console namespace owner, never an agent, terminal or maintainer", async () => {
 		for (const actor of [

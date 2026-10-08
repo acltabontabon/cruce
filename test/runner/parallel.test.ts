@@ -49,6 +49,15 @@ it("targets independent workspaces through one running bridge and sees CLI state
 					workspaces: [...workspaces.values()].map((w) => ({ ...w, ownerId: "user" })),
 					permissions: { write: previewAllowed },
 					...(observedDiscrepancy ? { observedCanonical: { deleted: true } } : {}),
+					...(canonical === "initial"
+						? {}
+						: {
+								reconciliation: {
+									workspaces: [
+										{ workspaceId: "workspace-2", relation: "diverged", basis: "published", revision: "x", canonicalRevision: canonical },
+									],
+								},
+							}),
 					attention: {
 						viewerId: "user",
 						items:
@@ -185,6 +194,11 @@ it("targets independent workspaces through one running bridge and sees CLI state
 			arguments: { workspaceId: second.id, artifactId: "artifact-second", title: "Second change" },
 		});
 		expect(proposal.isError).not.toBe(true);
+		// A human promotion that left this workspace behind leads the response, before the result itself.
+		expect(proposal.content![0]).toMatchObject({
+			type: "text",
+			text: expect.stringMatching(/^Action needed: Canonical moved to accepte\. 1 of your workspaces is behind it/),
+		});
 		const notice = proposal.content!.find((part) => part.type === "text" && part.text.startsWith("Current coordination:"));
 		expect(notice).toMatchObject({ type: "text", text: expect.stringContaining('"canonicalRevision":"accepted-new-head"') });
 		expect(notice).toMatchObject({ type: "text", text: expect.stringContaining('"workspaceId":"workspace-2"') });

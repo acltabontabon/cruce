@@ -1,6 +1,6 @@
 # 0010 — Repository archive and permanent deletion
 
-**Status:** Accepted 2026-10-08
+**Status:** Accepted 2026-10-08; amended 2026-10-08 (deletion ends unfinished work)
 
 ## Context
 
@@ -12,7 +12,9 @@ Add three authenticated console decisions: **Archive repository**, **Restore rep
 
 Archive makes the repository read-only and preserves canonical Git, forks, published revisions, evidence and history. Restore permits new work again. Both decisions use durable operation identities and freeze writes while an interrupted Namespace/Repository transition awaits authenticated retry. Archived repositories remain discoverable and labelled for reading and restoration.
 
-Archive and deletion require all workspaces to have ended, all changes to be closed, promotions and resource reservations to be settled, and push observation/subscription cleanup to have finished. Disconnected or detached workspaces remain unfinished work. Historical execution metadata on an ended workspace is not an active checkout reservation. Retirement never ends somebody else's work or releases local writer locks.
+Archive requires all workspaces to have ended, all changes to be closed, promotions and resource reservations to be settled, and push observation/subscription cleanup to have finished. Disconnected or detached workspaces remain unfinished work. Historical execution metadata on an ended workspace is not an active checkout reservation. Archive never ends somebody else's work or releases local writer locks.
+
+Permanent deletion is the owner's decision to end everything with the repository, so unfinished work does not block it: live workspaces, whether attached, disconnected or detached, and open changes end with the repository, and their forks are part of the deletion inventory. The confirmation states how many workspaces (and how many are attached) and open changes it ends. Deletion still waits for in-flight promotions, unsettled resource reservations and push observation/subscription cleanup, because those are uncertain provider effects rather than work. Deletion releases no local writer lock and stops no agent or checkout; their next Cruce or Git request fails because the repository is gone, and unpushed local commits stay on their machines.
 
 Permanent deletion additionally requires the exact repository name as confirmation. This is an explicit exception to indefinite source/provenance retention: it authorizes removal of this repository's canonical Git, forks, retained source/evidence stores, coordination records and derived Git cache. It does not remove local checkouts, external upstream repositories, namespace membership, or another repository's resources. Ordinary completion, archival, cache eviction, capacity limits and elapsed time continue to confer no deletion authority.
 

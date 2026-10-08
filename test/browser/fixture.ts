@@ -414,7 +414,11 @@ export async function fixture() {
 			calls.push(cmd);
 			if (["archive_repository", "restore_repository", "delete_repository"].includes(cmd.tool)) {
 				repositoryOwner(authority);
-				if (cmd.tool !== "restore_repository" && repositoryLifecycleView(runtime.state, authority).blockers.length)
+				const retirement = repositoryLifecycleView(runtime.state, authority);
+				if (
+					cmd.tool !== "restore_repository" &&
+					(cmd.tool === "delete_repository" ? retirement.deletionBlockers : retirement.blockers).length
+				)
 					return json(res, { error: "Repository retirement has blockers" }, 409);
 				if (cmd.tool === "delete_repository" && cmd.confirmation !== runtime.state.repository.name)
 					return json(res, { error: "Type the repository name to confirm deletion" }, 400);

@@ -66,3 +66,29 @@ it("keeps Git credentials scoped to the selected canonical repository and preser
 		await rm(directory, { recursive: true, force: true });
 	}
 });
+
+it("installs one Claude Code prompt hint beside the user's own hooks and replaces it on reconnect", async () => {
+	const { configureClient } = await import("../../runner/client-config.ts");
+	const directory = await mkdtemp(join(tmpdir(), "cruce-client-"));
+	try {
+		const path = join(directory, ".claude/settings.local.json");
+		await configureClient(directory, "codex", "/opt/cruce/runner/cruce.mjs", "/usr/bin/node");
+		await expect(readFile(path, "utf8")).rejects.toThrow();
+		execFileSync("mkdir", ["-p", join(directory, ".claude")]);
+		const own = { hooks: [{ type: "command", command: "echo mine" }] };
+		await writeFile(path, JSON.stringify({ permissions: { allow: ["Bash(ls)"] }, hooks: { UserPromptSubmit: [own] } }));
+		for (let i = 0; i < 2; i++)
+			expect(await configureClient(directory, "claude", "/opt/cruce/runner/cruce.mjs", "/usr/bin/node")).toMatchObject({
+				hooksInstalled: true,
+			});
+		const settings = JSON.parse(await readFile(path, "utf8"));
+		expect(settings.permissions).toEqual({ allow: ["Bash(ls)"] });
+		expect(settings.hooks.UserPromptSubmit).toHaveLength(2);
+		expect(settings.hooks.UserPromptSubmit[0]).toEqual(own);
+		expect(settings.hooks.UserPromptSubmit[1].hooks[0].command).toBe(
+			`'/usr/bin/node' '/opt/cruce/runner/cruce.mjs' hint --cwd '${directory}'`,
+		);
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
+});

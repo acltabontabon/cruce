@@ -6,6 +6,7 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Added
 
+- Coordinating agents now see workspaces left behind by a promotion. Every bridge tool response starts with an **Action needed** sentence naming each of the owner's unended workspaces behind canonical, published or not, with the Git reconciliation to do, and `cruce connect --client claude` installs a Claude Code prompt hook (`cruce hint`) that adds the same sentence to the user's next prompt. Agent instructions say to reconcile every named workspace, including ones whose agents have finished.
 - Add **Delete workspace** to workspace pages: one confirmed action for the owner that ends the workspace, withdraws its open changes, releases its checkout and deletes its cloud fork, after which it moves to Earlier work in History with its published revisions and history. It replaces the separate Inspect retention and Delete fork steps. Deletion still stops when the fork holds commits that were never published, and the page lists those refs. Human owners no longer need Maintain to delete their own workspace's fork, and a maintainer can finish deleting someone else's ended workspace.
 
 - Add owner-only Archive, Restore and permanent Delete in repository Settings, with unfinished-work blockers, exact-name confirmation, read-only archives, recoverable identity-checked cloud cleanup and original-operation retries. Deletion removes Cruce source/history while preserving local checkouts and external upstream repositories.
@@ -32,6 +33,8 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ### Changed
 
+- **Delete repository** no longer requires ending work first. Live workspaces, attached, disconnected or detached, and open changes end with the repository, and the confirmation says how many. Deletion still waits for in-flight promotions, unsettled resource operations and push-observation cleanup. Archive still requires finished work ([ADR 0010](docs/decisions/0010-repository-archive-and-permanent-deletion.md), amended).
+- Proposing a newer revision from a workspace closes its older open change ("Superseded by #N"), so stale changes no longer wait for review or block archive.
 - Cancelling a workspace (`end_workspace` with `cancelled`) withdraws its open changes, and ending any workspace releases its checkout reservation. `cruce end` and `cruce detach` release the local checkout when the workspace was already ended elsewhere.
 - Say "Not compared yet" instead of "Canonical unavailable" when there is no accepted canonical revision to compare against, and "Already in canonical" instead of "Behind canonical" for work whose published revision canonical already contains.
 - Label stale work as **Needs Git update**, distinguish agent-capable reconciliation from human approval, and guide agents to reconcile within their authorized task before proposing or requesting promotion. Divergence is not presented as proof of merge conflicts.

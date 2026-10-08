@@ -5,17 +5,39 @@ import type { RepositorySnapshot } from "../src/shared/platform.ts";
 /** Current controller state, not an assignment, acknowledgement or agent conversation. */
 export function coordinationContext(
 	snapshot: Pick<RepositorySnapshot, "attention" | "sourceHead"> &
-		Partial<Pick<RepositorySnapshot, "workspaces" | "overlaps" | "asOf" | "workspaceUpdates">>,
+		Partial<Pick<RepositorySnapshot, "workspaces" | "overlaps" | "asOf" | "workspaceUpdates" | "reconciliation">>,
 ) {
 	if (!snapshot.attention) return { available: false as const, instruction: "Read get_repository to inspect current coordination state." };
 	const workspaces = snapshot.workspaces ?? [];
 	const owned = new Set(workspaces.filter((w) => w.ownerId === snapshot.attention!.viewerId).map((w) => w.id));
+	// Unended work whose baseline or published revision canonical has moved past. A published revision canonical
+	// already contains is finished, not behind.
+	const behind = (snapshot.reconciliation?.workspaces ?? [])
+		.filter((row) => row.relation === "diverged" || (row.relation === "behind" && row.basis === "baseline"))
+		.flatMap((row) => {
+			const w = workspaces.find((w) => w.id === row.workspaceId);
+			return w && owned.has(w.id) && !["completed", "cancelled"].includes(w.state)
+				? [{ workspaceId: w.id, title: w.title, revision: row.revision, basis: row.basis, canonicalRevision: row.canonicalRevision }]
+				: [];
+		});
+	const canonical = (behind[0]?.canonicalRevision ?? snapshot.sourceHead ?? "").slice(0, 7);
+	// One plain sentence an agent cannot miss, ahead of the structured detail.
+	const summary = behind.length
+		? `Canonical moved to ${canonical}. ${behind.length === 1 ? "1 of your workspaces is" : `${behind.length} of your workspaces are`} behind it: ${behind
+				.slice(0, 8)
+				.map((b) => `${b.title} (${b.workspaceId})`)
+				.join(
+					", ",
+				)}${behind.length > 8 ? ` and ${behind.length - 8} more` : ""}. Reconcile each now, within your task: in its directory merge canonical with Git, verify, push, publish and propose the new revision. Ask the user only for conflicts or failing checks.`
+		: undefined;
 	const overlaps = (snapshot.overlaps ?? [])
 		.filter((o) => o.workspaces.some((id) => owned.has(id)))
 		.toSorted((a, b) => a.surface.localeCompare(b.surface) || a.id.localeCompare(b.id));
 	return {
 		available: true as const,
+		...(summary ? { summary } : {}),
 		canonicalRevision: snapshot.sourceHead,
+		behind,
 		ancestryUnavailable: snapshot.attention.ancestryUnavailable,
 		overlapCount: overlaps.length,
 		overlapsTruncated: overlaps.length > 16,
