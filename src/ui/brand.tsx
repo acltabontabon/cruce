@@ -5,8 +5,9 @@ export const BRAND = {
 	symbol: "/brand/symbol.svg",
 	wordmark: "/brand/wordmark-white.svg",
 	wordmarkInk: "/brand/wordmark.svg",
-	sourceUrl: undefined as string | undefined,
+	sourceUrl: "https://github.com/acltabontabon/cruce" as string | undefined,
 	docsUrl: undefined as string | undefined,
+	supportUrl: "https://ko-fi.com/aclt_attic" as string | undefined,
 };
 /** The interlaced junction drawn inline so it takes the theme's accent; the name is set in the console's own type. */
 export function Brand() {

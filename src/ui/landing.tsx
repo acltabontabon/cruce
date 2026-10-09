@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Backdrop } from "./backdrop.tsx";
 import { BRAND, Brand } from "./brand.tsx";
 import {
 	auth,
@@ -699,6 +700,19 @@ function Generations() {
 	);
 }
 
+/** Drawn in the mark's own round 3-unit stroke so the support link reads as part of the brand, not a badge. */
+function CoffeeCup() {
+	return (
+		<svg className="coffee-cup" viewBox="0 0 32 32" aria-hidden="true">
+			<g fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+				<path d="M6 13h17v6a8 8 0 0 1-8 8h-1a8 8 0 0 1-8-8z" />
+				<path d="M23 15h2a3.5 3.5 0 0 1 0 7h-2.4" />
+				<path className="coffee-steam" d="M12 9q-1.5-2 0-4m5 4q-1.5-2 0-4" />
+			</g>
+		</svg>
+	);
+}
+
 function Era({ name, children }: { name: string; children: React.ReactNode }) {
 	return (
 		<div className="era">
@@ -716,6 +730,7 @@ export function Landing() {
 	}, []);
 	return (
 		<div className="landing">
+			<Backdrop />
 			<a className="landing-skip" href="#landing-content">
 				Skip to content
 			</a>
@@ -725,7 +740,6 @@ export function Landing() {
 				</a>
 				<nav aria-label="Homepage navigation">
 					{BRAND.docsUrl && <a href={BRAND.docsUrl}>Docs</a>}
-					{BRAND.sourceUrl && <a href={BRAND.sourceUrl}>GitHub</a>}
 					<a className="landing-signin" href="/auth/login" onClick={rememberSignInDestination}>
 						Sign in
 					</a>
@@ -880,7 +894,16 @@ export function Landing() {
 						<span className="footer-dot" aria-hidden="true" />
 						{BRAND.name} is in early development.
 					</p>
-					<p>Built toward open source.</p>
+					<p className="footer-links">
+						Built toward open source.
+						{BRAND.sourceUrl && <a href={BRAND.sourceUrl}>Source</a>}
+						{BRAND.supportUrl && (
+							<a className="footer-support" href={BRAND.supportUrl}>
+								<CoffeeCup />
+								Buy me a coffee
+							</a>
+						)}
+					</p>
 				</div>
 			</footer>
 		</div>

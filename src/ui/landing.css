@@ -139,6 +139,8 @@ body:not(:has(.shell, .welcome)) {
 
 .landing {
 	font-size: 16px;
+	/* Its own stacking context keeps the console's backdrop above this background and below every section, as in the shell. */
+	isolation: isolate;
 	background: var(--paper);
 	color: var(--ink);
 	overflow: clip;
@@ -957,6 +959,46 @@ body:not(:has(.shell, .welcome)) {
 }
 .footer-status {
 	display: contents;
+}
+.landing-footer .footer-links {
+	flex-wrap: wrap;
+	gap: 6px 18px;
+}
+.footer-links a {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 32px;
+	color: var(--ink);
+	font-weight: 500;
+	text-underline-offset: 4px;
+}
+.footer-links a:hover {
+	text-decoration: underline;
+}
+.coffee-cup {
+	width: 15px;
+	height: 15px;
+	color: var(--accent);
+	overflow: visible;
+}
+.coffee-steam {
+	opacity: 0.55;
+	transition:
+		opacity 300ms ease,
+		transform 300ms ease;
+}
+.footer-support:hover .coffee-steam {
+	opacity: 1;
+	transform: translateY(-1.5px);
+}
+@media (prefers-reduced-motion: reduce) {
+	.coffee-steam {
+		transition: none;
+	}
+	.footer-support:hover .coffee-steam {
+		transform: none;
+	}
 }
 .footer-dot {
 	width: 8px;

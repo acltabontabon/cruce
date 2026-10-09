@@ -306,7 +306,11 @@ test("public homepage leads with context, then shows how it works, without reque
 	});
 	await openHomepage();
 	assert.equal(await page.getByRole("navigation", { name: "Repository navigation" }).count(), 0);
-	assert.equal(await page.getByRole("link", { name: /GitHub|Docs/ }).count(), 0);
+	const source = "https://github.com/acltabontabon/cruce";
+	assert.equal(await page.getByRole("link", { name: "GitHub" }).count(), 0);
+	assert.equal(await page.getByRole("link", { name: "Source", exact: true }).getAttribute("href"), source);
+	assert.equal(await page.getByRole("link", { name: "Buy me a coffee" }).getAttribute("href"), "https://ko-fi.com/aclt_attic");
+	assert.equal(await page.getByRole("link", { name: "Docs" }).count(), 0);
 	const signIn = page.getByRole("link", { name: "Sign in", exact: true });
 	assert.equal(await signIn.count(), 1);
 	assert.equal(await signIn.getAttribute("href"), "/auth/login");
