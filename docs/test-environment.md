@@ -10,7 +10,7 @@ As recorded on **2026-10-09**, the latest direct test deployment was Worker **`c
 
 The build passed typecheck, lint, **429 unit/integration tests**, **98 browser journeys**, scenario verification and the offline build. Anonymous HTTPS returned the homepage and `/auth/session` 200, with the splash on the Daylight background, and served the recoloured `/brand/symbol.svg`, `/brand/symbol-ink.svg`, `/brand/wordmark.svg` and `/favicon.svg`. The signed-in console and the tool connection page were not exercised on the hosted Worker.
 
-The latest recorded tagged deployment was [0.1.0-alpha.3](https://github.com/acltabontabon/cruce/releases/tag/v0.1.0-alpha.3), Worker **`ddd14ac5-b249-4bb0-9b54-f74e669a2888`**, from **`823a3d62f66c39928fdffbd70113c89f9b9b25a6`**, on 2026-10-07 at 18:23 Philippine time. Later direct test deployments did not change that release tag or package version.
+The latest recorded tagged deployment was [0.1.0-alpha.4](https://github.com/acltabontabon/cruce/releases/tag/v0.1.0-alpha.4), Worker **`ea52dbc4-94f3-4e15-96d6-151e8bc54f94`**, from **`839141536fded7fbb21a5da3c490fa43b78dd2a8`**, on 2026-10-09 at 08:23 Philippine time through the [release workflow](https://github.com/acltabontabon/cruce/actions/runs/37864098478). Later direct test deployments did not change that release tag or package version.
 
 Behavioral acceptance is summarized in [verification](local-verification.md#current-evidence-at-a-glance). Important hosted results include:
 

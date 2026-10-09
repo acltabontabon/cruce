@@ -2,7 +2,7 @@
 
 [Documentation map](README.md) · [Changelog](../CHANGELOG.md) · [Verification](local-verification.md)
 
-Cruce's current alpha is **[0.1.0-alpha.3](https://github.com/acltabontabon/cruce/releases/tag/v0.1.0-alpha.3)**, released on 2026-10-07. Its [checked deployment](https://github.com/acltabontabon/cruce/actions/runs/37606862011) passed; [test environment](test-environment.md) records the Worker version and [verification](local-verification.md) records acceptance limits. This is experimental software; alpha interfaces may change.
+Cruce's current alpha is **[0.1.0-alpha.4](https://github.com/acltabontabon/cruce/releases/tag/v0.1.0-alpha.4)**, released on 2026-10-09. Its [checked deployment](https://github.com/acltabontabon/cruce/actions/runs/37864098478) passed; [test environment](test-environment.md) records the Worker version and [verification](local-verification.md) records acceptance limits. This is experimental software; alpha interfaces may change.
 
 ## Versioning and changelog
 
