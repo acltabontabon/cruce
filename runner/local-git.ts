@@ -18,7 +18,10 @@ export async function pipeGit(cwd: string, args: string[], input: Buffer): Promi
 			} else chunks.push(b);
 		});
 		child.on("error", reject);
-		child.stdin.on("error", reject);
+		// Git may exit before reading stdin (e.g. `diff` with no input); its exit code decides the outcome.
+		child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+			if (error.code !== "EPIPE") reject(error);
+		});
 		child.on("close", (code) => (code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error("Native Git object transfer failed"))));
 		child.stderr.resume();
 		child.stdin.end(input);
