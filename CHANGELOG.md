@@ -4,51 +4,51 @@ Notable user-facing changes are recorded here using [Keep a Changelog](https://k
 
 ## [Unreleased]
 
+## [0.1.0-alpha.4] - 2026-10-09
+
 ### Added
 
-- **Review notes.** Leave a concern or a comment on any line of a change, or on the whole change. Concerns block promotion until a maintainer resolves them with a reason, and they carry over when the workspace proposes a fixed revision, so republishing can't drop one. The owner's agent reads the notes, fixes the code, proposes the new revision and replies citing it; agents can add notes and reply, but never resolve. New MCP tools `get_review_notes`, `add_review_note` and `reply_review_note`, and the `address_review_notes` prompt ([ADR 0014](docs/decisions/0014-review-notes-on-exact-revisions.md)).
-- **Lane map** on the Workspaces tab. Each workspace is drawn from its fixed baseline along recorded time, with its reported revisions, published revisions and open change, and a breathing tip while a checkout is connected. Shared paths are marked as advisory, promoted work rejoins main, work already in main folds into one "N merged" pill, and **Replay history** plays back the recorded events. Lanes are labelled by owner, large maps stay bounded, and **Pause motion** and reduced motion are respected.
-- **Midnight**, a dark theme alongside the light Daylight theme. The console follows the system by default; the avatar menu offers System, Dark or Light.
-- **Set up a machine once.** The client installs from the Cruce website. The **Local setup** page in the avatar menu gives the one-time commands, `cruce login` to authorize Git for every repository you can access and `cruce connect --client claude|codex|cursor` to register Cruce in that tool, and lists your **Agent connections**, what each can reach and do, with Revoke. Connected tools find their repository from the checkout they start in, and one bridge can coordinate several isolated workspaces ([ADR 0011](docs/decisions/0011-account-level-connections-and-local-setup.md)).
-- **Archive and deletion.** Namespace Owners can archive, restore or permanently delete a repository from Settings, confirmed by its exact name. Deletion removes Cruce's source and history but never local checkouts or external upstreams ([ADR 0010](docs/decisions/0010-repository-archive-and-permanent-deletion.md)). Shared namespaces get owner-only **Delete namespace**, confirmed by its handle ([ADR 0012](docs/decisions/0012-namespace-permanent-deletion.md)), and repositories or namespaces on legacy storage that Cruce can no longer reach can be deleted by forgetting that storage ([ADR 0013](docs/decisions/0013-forgetting-unreachable-legacy-storage.md)). Workspace pages get **Delete workspace**: one confirmed action that ends the workspace, withdraws its open changes, releases its checkout and deletes its fork, and stops while the fork holds unpublished commits.
-- **Earlier work** in History and the `get_archive` MCP read. Ended, cleaned-up workspaces stay readable with their changes, publications, evidence and promotions, and old links open a read-only record instead of "unavailable".
-- **Continue this workspace** on workspace pages: what travels to another machine or tool (only pushed commits) and the detach and `cruce resume` steps.
-- **Help for agents to stay current.** Every bridge response starts with a `Cruce:` sentence naming the owner's workspaces behind canonical and notes waiting for them, and `cruce connect --client claude` adds a prompt hook (`cruce hint`) that says the same. Agents merge canonical into their attached workspace just before publishing and proposing. `cruce preview` checks locally whether merging canonical would conflict, and a reconciliation view and `get_reconciliation` read show exact Git ancestry and blockers.
-- **Coordination for integrations**: a subscribable MCP coordination resource, a read-only `cruce watch --coordination` feed, an attention projection on repository snapshots and `get_repository`, and opt-in pushed-ref observation. None of them publish, approve or wake agents.
-- A [GitHub sign-in guide](docs/cloudflare-setup.md#github-sign-in): with GitHub as the Access application's only provider and Instant Auth, **Sign in** goes from the homepage straight to GitHub's authorization page, the Access policy still decides who is admitted, and existing users keep their identity.
-- An [operator runbook](docs/operations.md) and [interface compatibility](docs/releases.md#interface-compatibility) notes.
+- **Review notes.** Comment or raise a concern on any line of a change. Concerns block promotion until a human resolves them and carry over to the next revision. The owner's agent reads them, fixes the code and replies; only humans resolve. New MCP tools `get_review_notes`, `add_review_note` and `reply_review_note`, and the `address_review_notes` prompt ([ADR 0014](docs/decisions/0014-review-notes-on-exact-revisions.md)).
+- **Lane map.** The Workspaces tab draws each workspace from its baseline, with its revisions, open change, presence and shared paths. Promoted work rejoins `main`, and **Replay history** plays it all back.
+- **Midnight**, a dark theme. The console follows the system, or choose Light or Dark from the avatar menu.
+- **Set up a machine once.** `cruce login` authorizes Git for every repository you can access, and `cruce connect --client claude|codex|cursor` registers Cruce in your tool. **Local setup** lists your agent connections, with Revoke ([ADR 0011](docs/decisions/0011-account-level-connections-and-local-setup.md)).
+- **Archive and deletion** for repositories, shared namespaces and workspaces, each confirmed by name, with blockers listed first ([ADR 0010](docs/decisions/0010-repository-archive-and-permanent-deletion.md), [0012](docs/decisions/0012-namespace-permanent-deletion.md), [0013](docs/decisions/0013-forgetting-unreachable-legacy-storage.md)).
+- **Earlier work** in History keeps ended workspaces readable, with their changes, evidence and promotions.
+- **Continue this workspace** shows what travels to another machine or tool, and how.
+- **Agents stay current.** Bridge responses name the owner's work behind `main` and notes waiting for them. Agents merge `main` just before proposing, and `cruce preview` checks a merge locally first.
+- **Integration feeds**: an MCP coordination resource, `cruce watch --coordination` and opt-in pushed-ref observation. None of them publish, approve or wake agents.
+- **GitHub sign-in** through Access, with a [setup guide](docs/cloudflare-setup.md#github-sign-in).
 
 ### Changed
 
-- Documentation now has a task-based entry point, a focused current architecture and one verification summary with explicit local, hosted and historical evidence limits. Setup, storage and deletion descriptions match the current implementation.
-- **Workspaces is the repository's main view.** A repository's changes now sit under the workspaces that made them, so the Changes tab and the attention bar are gone. Workspaces lists each workspace once, with its open changes nested under it, decisions for you first and the lane map below. Filters (All, Needs you, Mine, Needs Git update, Not proposed) show their counts and appear only when they narrow the list, and a shared path is named once, on the row it concerns. Saved `#/changes` links still work. The header bar holds the tabs and a **main · revision · Clone** control with the clone and existing-checkout commands.
-- **Change review leads with one next step**: one button (for example **Check the answers**), a compact checklist ending in Promote, and the files on one page with likely review targets first and tests, docs, generated files and lockfiles folded under **Supporting**. Notes sit beside their lines, any two revisions can be compared starting from what changed since the last review, and a finished step is not offered again. Keyboard: `n`/`p` files, `j`/`k` changes, `]`/`[` notes, `v` viewed, `x` fold.
-- **Home leads with Needs you**: only the decisions you can make now, each with its owner, exact revision, blocker and your action. Work waiting on its owner or a maintainer is under **Waiting on others**, and the namespace overview counts Needs you too.
-- **A redesigned console** on one visual system: Geist and JetBrains Mono, open lists between hairlines, frames only around the lane map, diffs and source, a quiet branded backdrop, and each workspace's lane colour on its rows, page and checklist. Rows lead with the accountable owner, and tools appear as provenance ("Worktree attached through Codex"). Workspace pages lead with the next step and fold identifiers away.
-- **The public homepage, session screen, tool connection page, logo and favicon use the console palette** in either appearance, and the Access sign-in branding payload uses its Daylight colours. A cold start shows one splash, the Cruce mark drawing itself, until the first page. Inside the console, work you asked for shows a progress line under the header and placeholders instead of "Loading…". Sign in goes straight to Cloudflare Access. The README now shows the lane map and the review loop in motion.
-- **Reconcile just before review.** A change on a stale base holds back Approve and evidence until the updated revision exists, and its owner gets a copyable handoff for their agent. A re-proposed change opens on **Since reviewed #N** with files that only came from canonical set apart, and a promotion names the workspaces it left behind. Stale work is labelled **Needs Git update**, divergence is never presented as proof of a conflict, and states read "Not compared yet" and "Already in canonical" where they apply.
-- **Changes tidy themselves.** Proposing a newer revision supersedes the older open change ("Superseded by #N"). Cancelling a workspace withdraws its open changes, and ending one releases its checkout. Published revisions nobody has proposed are marked **Not proposed**, with **Propose for review** for the owner.
-- **Evidence and history read plainly.** Evidence is worded by how far it is trusted ("Tests reported passing; human attestation required", **Attest tests pass**). Each History promotion names the approving and promoting humans, the source workspace and its owner, the previous canonical revision and the passing evidence.
-- The tool consent page defaults to **All repositories you can access**, following your current roles and grants, including repositories added later. **Choose repositories** still narrows a connection.
-- **Delete repository** no longer requires ending work first: live workspaces and open changes end with it, and the confirmation counts them. Archive still requires finished work.
-- **Repository storage stays bounded.** Each workspace keeps only its latest heartbeat and report, "changed files" activity is recorded at most once every 15 minutes, and the limits of 256 workspaces, 512 changes and 512 promotions count only live work ([ADR 0009](docs/decisions/0009-replaceable-observations-and-archived-finished-work.md)).
-- Bridge coordination context states each instruction once and replaces unchanged state with a one-line notice, so a busy repository's context dropped from about 22 KB to 15 KB.
-- **Upgrade:** installed clients need `cruce login` and `cruce connect` once per machine; earlier per-repository credentials are no longer read. Revoke old per-repository connections from Local setup, and remove project-level `cruce` entries from `.mcp.json`, `.cursor/mcp.json` or `.codex/config.toml` and Cruce blocks from `CLAUDE.md`, `AGENTS.md` or `.cursor/rules/cruce.mdc`. Participation guidance now travels as MCP server instructions.
+- **Workspaces is the main repository view.** Changes sit under the workspace that made them, so the Changes tab and attention bar are gone. Filters show counts and appear only when they help.
+- **Review leads with one next step**, a short checklist ending in Promote, and files ordered by what likely matters, with notes beside their lines.
+- **Home leads with Needs you**: only decisions you can make now.
+- **A redesigned console** in Geist and JetBrains Mono, with lane colours, owners first and quieter pages.
+- **One palette everywhere.** The homepage, sign-in, tool connection page, logo and favicon match the console, and the homepage shares its backdrop. A single splash covers cold starts.
+- The homepage footer links the source and a Ko-fi page, which is also the repository's Sponsor button.
+- **Reconcile just before review.** Stale changes hold back approval until updated, re-review shows only what's new, and stale work reads **Needs Git update**.
+- **Changes tidy themselves.** A newer proposal supersedes the older one, and ending a workspace withdraws its changes and releases its checkout.
+- Tool consent defaults to **All repositories you can access**.
+- **Delete repository** no longer requires ending work first.
+- **Storage stays bounded**: limits count only live work ([ADR 0009](docs/decisions/0009-replaceable-observations-and-archived-finished-work.md)).
+- The README, contributor guide, roadmap and docs are shorter and match current behavior.
+- **Upgrade:** run `cruce login` and `cruce connect` once per machine; per-repository credentials are no longer read. Revoke old connections from Local setup, and remove project-level `cruce` entries from `.mcp.json`, `.cursor/mcp.json` or `.codex/config.toml` and Cruce blocks from `CLAUDE.md`, `AGENTS.md` or `.cursor/rules/cruce.mdc`.
 
 ### Removed
 
-- `cruce auth`, the `--namespace` and `--repository` options of `cruce connect`, and per-repository consent. Use Local setup instead.
-- The namespace daily operation budget ([ADR 0008](docs/decisions/0008-remove-daily-operation-budget.md)). Nothing stops at midnight UTC any more; per-operation resource policy stays under **Storage operations**, and retries still reuse their original reservation.
+- `cruce auth`, the `--namespace` and `--repository` options of `cruce connect`, and per-repository consent.
+- The namespace daily operation budget ([ADR 0008](docs/decisions/0008-remove-daily-operation-budget.md)).
 
 ### Fixed
 
-- Deleting an ended workspace's fork works on Cloudflare Artifacts again, instead of every ref showing its retention proof as unavailable. A blocked fork deletion can be finished by anyone who could start it, from the console or the bridge ([ADR 0015](docs/decisions/0015-resuming-a-recorded-fork-deletion.md)).
-- Git pushes no longer fail with "Invalid refresh token" when several agents push at once. When Git authentication fails, the credential helper prints the exact `cruce login` or `cruce connect` command to run.
-- Publishing from a workspace whose baseline is ahead of canonical now reviews against that baseline instead of failing.
-- An operation Cruce refused no longer leaves a reservation that blocks repository deletion. Settings lists any cloud operation that never settled, and the Owner can **Release** it.
-- An interrupted promotion whose update already reached canonical now completes even if evidence or policy changed afterwards, and evidence is recorded only for open changes.
-- Agent connections and paired terminals keep working after the browser session that approved them expires. Membership, grants, approved repositories and scopes are still checked on every request.
-- Malformed or oversized Git packs, and evidence reads after cache loss, return actionable errors, and a failed cache recovery never leaves a partial pack.
+- Fork deletion works on Cloudflare Artifacts again, and anyone who could start a blocked deletion can finish it ([ADR 0015](docs/decisions/0015-resuming-a-recorded-fork-deletion.md)).
+- Pushes from several agents at once no longer fail with "Invalid refresh token".
+- Publishing from a baseline ahead of `main` no longer fails.
+- A refused operation no longer blocks repository deletion; Owners can release unsettled ones from Settings.
+- Interrupted promotions that already reached `main` complete.
+- Agent connections outlive the browser session that approved them, with access still rechecked on every request.
+- Bad Git packs and lost caches return clear errors, never partial state.
 
 ## [0.1.0-alpha.3] - 2026-10-07
 
@@ -108,7 +108,8 @@ First alpha release.
 - Project console with Access sign-in, MCP OAuth and an offline demo.
 - Checked release-tag deployments; package and MCP versions aligned at `0.1.0-alpha.1`.
 
-[Unreleased]: https://github.com/acltabontabon/cruce/compare/v0.1.0-alpha.3...HEAD
+[Unreleased]: https://github.com/acltabontabon/cruce/compare/v0.1.0-alpha.4...HEAD
+[0.1.0-alpha.4]: https://github.com/acltabontabon/cruce/compare/v0.1.0-alpha.3...v0.1.0-alpha.4
 [0.1.0-alpha.3]: https://github.com/acltabontabon/cruce/compare/v0.1.0-alpha.2...v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/acltabontabon/cruce/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/acltabontabon/cruce/releases/tag/v0.1.0-alpha.1
